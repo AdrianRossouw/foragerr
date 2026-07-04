@@ -1,0 +1,21 @@
+schema: spec-driven
+
+context: |
+  foragerr: private Sonarr-style comic manager (Mylar replacement).
+  Tech stack: Python (FastAPI) backend, React + TypeScript frontend, SQLite.
+  Regulated development: every requirement carries a stable ID FRG-<AREA>-<NNN>,
+  allocated in docs/traceability/requirements-registry.md at proposal time
+  (see openspec/specs/dev-process/spec.md, FRG-PROC-001..006).
+  Requirement headings take the form:
+    ### Requirement: FRG-<AREA>-<NNN> — <name>
+  Commits use Conventional Commits plus a mandatory 'Refs: FRG-...' trailer.
+
+rules:
+  proposal:
+    - Always include a "Non-goals" section
+    - New attack surface requires a matching docs/security/ update in the same change
+  specs:
+    - Every requirement heading must embed its registered FRG ID
+    - Every requirement needs at least one testable scenario
+  tasks:
+    - Each task cites the FRG IDs it implements so commits can carry them as Refs

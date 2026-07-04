@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "obsidian": {
+      "type": "http",
+      "url": "http://host.docker.internal:27123/mcp/",
+      "headers": {
+        "Authorization": "Bearer 80312a8069cd673e52ff4e6d76b2f99e0eca6e8ea9580330c408c0a99f1de3c1"
+      }
+    }
+  }
+}

@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# commit-msg hook — enforces the foragerr commit standard.
+# See docs/process/commit-standard.md (FRG-PROC-001, FRG-PROC-002).
+set -euo pipefail
+
+MSG_FILE="$1"
+REGISTRY="docs/traceability/requirements-registry.md"
+
+# Merge and revert commits are exempt.
+first_line="$(head -n1 "$MSG_FILE")"
+case "$first_line" in
+  Merge\ *|Revert\ *) exit 0 ;;
+esac
+
+fail() {
+  echo "COMMIT REJECTED: $1" >&2
+  echo "" >&2
+  echo "Required format (docs/process/commit-standard.md):" >&2
+  echo "  <type>(<scope>): <subject>" >&2
+  echo "" >&2
+  echo "  <body>" >&2
+  echo "" >&2
+  echo "  Refs: FRG-<AREA>-<NNN>[, ...]" >&2
+  exit 1
+}
+
+# 1. Conventional Commits subject line.
+if ! echo "$first_line" | grep -qE '^(feat|fix|refactor|perf|test|docs|spec|chore|build|ci)(\([a-z0-9-]+\))?!?: .{1,72}$'; then
+  fail "subject line must be Conventional Commits: '$first_line'"
+fi
+
+# 2. A Refs: trailer with at least one requirement ID.
+refs_line="$(grep -E '^Refs: ' "$MSG_FILE" | tail -n1 || true)"
+if [ -z "$refs_line" ]; then
+  fail "missing 'Refs: FRG-...' trailer — every commit must reference the requirement(s) it implements"
+fi
+
+ids="$(echo "$refs_line" | grep -oE 'FRG-[A-Z]{2,5}-[0-9]{3}' || true)"
+if [ -z "$ids" ]; then
+  fail "Refs: trailer contains no valid requirement IDs (expected FRG-<AREA>-<NNN>)"
+fi
+
+# 3. Every referenced ID must exist in the requirements registry.
+if [ ! -f "$REGISTRY" ]; then
+  fail "requirements registry not found at $REGISTRY"
+fi
+for id in $ids; do
+  if ! grep -q "$id" "$REGISTRY"; then
+    fail "unknown requirement ID '$id' — not present in $REGISTRY"
+  fi
+done
+
+exit 0
