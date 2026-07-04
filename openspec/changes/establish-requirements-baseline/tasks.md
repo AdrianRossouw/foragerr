@@ -24,5 +24,5 @@
 - [x] 4.1 Completeness-critic pass; fixed findings: defined QUAL area (BLOCKER — format
       profile had no home), repaired two dangling risk citations, completed the AREA table,
       recorded implicit exclusions, added OPDS W7 escaping note
-- [ ] 4.2 Owner approval recorded; registry rows `proposed` → `approved`; archive change;
-      merge to main
+- [x] 4.2 Owner approval recorded (Adrian, 2026-07-04); 280 registry rows `proposed` →
+      `approved`; change archived; branch merged to main

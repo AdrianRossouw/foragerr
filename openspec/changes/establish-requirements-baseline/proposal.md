@@ -50,5 +50,11 @@ system (including deferred capabilities) rather than a slice.
 
 ## Approval
 
-_Pending owner review (FRG-PROC-009). This change is not archived and the registry
-rows stay `proposed` until approval is recorded here._
+- **Approver:** Adrian
+- **Date:** 2026-07-04
+- **Decision:** Approved. Reviewed the baseline packet (285 requirements across 22
+  capability specs + QUAL, 39-row risk register, M1 = 166 requirements forming a runnable
+  Usenet+DDL vertical slice) after the completeness-critic pass resolved the format-profile
+  BLOCKER and the dangling risk citations. Approval recorded verbatim: "you have my
+  approval." On approval the baseline rows flip `proposed → approved`, the change is
+  archived, and the branch merges to `main`.
