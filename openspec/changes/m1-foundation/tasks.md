@@ -29,10 +29,10 @@
 
 ## 4. Outbound HTTP factory (worktree area: http)
 
-- [ ] 4.1 Client factory: mandatory timeouts, TLS verify always on, streaming byte cap, manual redirect walk (max 5) (FRG-NFR-006)
-- [ ] 4.2 Egress validation: scheme check, DNS resolution refusing loopback/link-local/private/ULA, per-hop re-validation, `external` vs `local-service` profiles, no cross-integration credential forwarding (FRG-SEC-001)
-- [ ] 4.3 Hostile-fixture test corpus: IP-literal loopback, decimal/hex IP encodings, redirect-to-private, oversize body, slow-drip, hung server, 6-hop redirect chain (FRG-NFR-006, FRG-SEC-001)
-- [ ] 4.4 Static guard test: no `httpx`/`requests` call sites outside the factory; no `print(` in `backend/src/` (FRG-NFR-006, FRG-NFR-008)
+- [x] 4.1 Client factory: mandatory timeouts, TLS verify always on, streaming byte cap, manual redirect walk (max 5) (FRG-NFR-006)
+- [x] 4.2 Egress validation: scheme check, DNS resolution refusing loopback/link-local/private/ULA, per-hop re-validation, `external` vs `local-service` profiles, no cross-integration credential forwarding (FRG-SEC-001)
+- [x] 4.3 Hostile-fixture test corpus: IP-literal loopback, decimal/hex IP encodings, redirect-to-private, oversize body, slow-drip, hung server, 6-hop redirect chain (FRG-NFR-006, FRG-SEC-001)
+- [x] 4.4 Static guard test: no `httpx`/`requests` call sites outside the factory; no `print(` in `backend/src/` (FRG-NFR-006, FRG-NFR-008)
 
 ## 5. API skeleton, health, version (worktree area: api)
 

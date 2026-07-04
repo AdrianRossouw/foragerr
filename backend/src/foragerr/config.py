@@ -99,6 +99,44 @@ class Settings(BaseSettings):
             "range 5..60 with a warning if set outside it."
         ),
     )
+    http_connect_timeout_seconds: float = Field(
+        default=10.0,
+        gt=0,
+        description=(
+            "Outbound HTTP connect timeout in seconds. Applied to every "
+            "client built by the shared HTTP factory; never unlimited."
+        ),
+    )
+    http_read_timeout_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        description=(
+            "Outbound HTTP read timeout in seconds (a hung server aborts "
+            "the request at this bound)."
+        ),
+    )
+    http_write_timeout_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        description="Outbound HTTP write timeout in seconds.",
+    )
+    http_pool_timeout_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        description=(
+            "Maximum seconds to wait for a free connection from the "
+            "outbound HTTP connection pool."
+        ),
+    )
+    http_max_response_bytes: int = Field(
+        default=26_214_400,
+        ge=1024,
+        description=(
+            "Byte cap on outbound HTTP response bodies (default 25 MiB). "
+            "Responses are streamed and aborted at this cap; callers may "
+            "lower it per request but never raise it."
+        ),
+    )
     comicvine_api_key: SecretStr = Field(
         default=SecretStr(""),
         description="ComicVine API key (secret; empty by default, supply at runtime).",
