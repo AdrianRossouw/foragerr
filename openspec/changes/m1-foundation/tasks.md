@@ -4,7 +4,7 @@
 
 - [x] 1.1 Create `backend/pyproject.toml` (uv, Python 3.12, src layout) with FastAPI, Pydantic v2, SQLAlchemy 2.x, Alembic, aiosqlite, httpx, pytest, pytest-asyncio; register the `req` pytest marker (FRG-API-001, FRG-PROC-004)
 - [ ] 1.2 App factory `foragerr.app:create_app` with lifespan hooks, `/api/v1` router mount, uvicorn entrypoint on port 8789 (FRG-API-001)
-- [ ] 1.3 Config: pydantic-settings models, `/config` dir resolution, `config.yaml` first-run generation with commented defaults, `FORAGERR_*` env precedence, secret fields registry, fail-fast validation with interval clamping (FRG-DEP-002, FRG-DEP-003, FRG-DEP-005, FRG-NFR-009)
+- [x] 1.3 Config: pydantic-settings models, `/config` dir resolution, `config.yaml` first-run generation with commented defaults, `FORAGERR_*` env precedence, secret fields registry, fail-fast validation with interval clamping (FRG-DEP-002, FRG-DEP-003, FRG-DEP-005, FRG-NFR-009)
 - [x] 1.4 Structured logging: key-value formatter, stdout + size-rotated `/config/logs/foragerr.log`, configurable level, redaction filter masking registered secrets and api_key-shaped params in messages/args/tracebacks (FRG-DEP-006, FRG-NFR-008)
 
 ## 2. Persistence (worktree area: db)
