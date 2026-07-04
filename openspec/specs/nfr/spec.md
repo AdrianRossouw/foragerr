@@ -178,3 +178,16 @@ The system SHALL operate within a steady-state memory budget of 512 MB RSS on th
 - **WHEN** this requirement is verified against the implementation
 - **THEN** A 24-hour soak (scheduled jobs cycling, several downloads) stays under the RSS budget with no monotonic growth trend.
 
+
+### Requirement: FRG-NFR-014 — Listener request resource limits
+
+The HTTP/WebSocket listener SHALL enforce configurable limits on inbound requests — maximum request body size, maximum header size, request timeout, and a basic per-client request rate/concurrency cap — rejecting over-limit requests with an appropriate 4xx (413/429) rather than consuming unbounded memory or wedging workers, and SHALL bound and sanitize any request value written into structured logs (no CR/LF log-forging).
+
+- **Milestone**: M2
+- **Source**: STRIDE analysis (no listener-level body/rate cap in the domain drafts; log-forging residual of FRG-NFR-012). Gap G-1; RISK-021, RISK-014.
+- **Notes**: Reliability-shaped (availability + log integrity), hence NFR not SEC. Complements FRG-DEP structured logging and FRG-NFR secret redaction.
+
+#### Scenario: Baseline acceptance
+
+- **WHEN** this requirement is verified against the implementation
+- **THEN** A multi-gigabyte body upload is rejected at the limit without memory exhaustion; a burst of requests is rate-limited with 429s; a request field containing newline metacharacters appears in logs as a single escaped field, not forged log lines.

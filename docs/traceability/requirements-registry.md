@@ -295,3 +295,9 @@ Milestones: `M1` vertical slice · `M2` torrents + streaming/quality clusters ·
 | FRG-NFR-011 | observable component health | nfr | proposed | M2 |
 | FRG-NFR-012 | untrusted external content handling | nfr | proposed | M1 |
 | FRG-NFR-013 | resource footprint | nfr | proposed | B |
+| FRG-SEC-001 | SSRF egress controls for server-side fetches | sec | proposed | M1 |
+| FRG-SEC-002 | Hardened XML parsing (XXE / entity-expansion) | sec | proposed | M1 |
+| FRG-SEC-003 | Archive-processing safety (bomb / zip-slip limits) | sec | proposed | M1 |
+| FRG-SEC-004 | Filesystem path confinement (safe-join) | sec | proposed | M1 |
+| FRG-SEC-005 | CSRF stance and WebSocket Origin validation | sec | proposed | M3 |
+| FRG-NFR-014 | Listener request resource limits | nfr | proposed | M2 |
