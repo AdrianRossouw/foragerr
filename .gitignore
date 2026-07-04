@@ -26,6 +26,10 @@ config/
 data/
 logs/
 
+# The user's real comic library — test fixture, never committed
+sample-comics/
+.DS_Store
+
 # Secrets — API keys live in env/.env, never in the repo
 .env
 .env.*

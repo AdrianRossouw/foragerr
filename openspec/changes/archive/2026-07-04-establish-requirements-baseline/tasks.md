@@ -1,0 +1,28 @@
+# Tasks
+
+## 1. Baseline synthesis (FRG-PROC-002, FRG-PROC-003)
+
+- [x] 1.1 Five domain drafting passes over the Phase 1 research (read-only agents)
+- [x] 1.2 Allocate FRG IDs in draft order; generate 20 capability specs
+- [x] 1.3 Dedup pass: single owners for wanted-derivation (SER), blocklist loop (DL);
+      withdraw FRG-PP-015 as duplicate
+- [x] 1.4 Regenerate registry with Status + Milestone columns
+- [x] 1.5 `openspec validate --all` green
+
+## 2. Traceability tooling (FRG-PROC-005)
+
+- [x] 2.1 `tools/trace.py` + generated `docs/traceability/matrix.md`, zero gaps
+
+## 3. Security analysis (FRG-PROC-006)
+
+- [x] 3.1 STRIDE threat model over all components → `docs/security/threat-model.md`
+- [x] 3.2 Risk register with every research security flag → `docs/security/risk-register.md`
+- [x] 3.3 SEC-area requirements for uncovered gaps; register + spec them (FRG-SEC-001..005, FRG-NFR-014)
+
+## 4. Review and approval (FRG-PROC-009)
+
+- [x] 4.1 Completeness-critic pass; fixed findings: defined QUAL area (BLOCKER — format
+      profile had no home), repaired two dangling risk citations, completed the AREA table,
+      recorded implicit exclusions, added OPDS W7 escaping note
+- [x] 4.2 Owner approval recorded (Adrian, 2026-07-04); 280 registry rows `proposed` →
+      `approved`; change archived; branch merged to main

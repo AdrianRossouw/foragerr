@@ -49,6 +49,14 @@ written into an OpenSpec change proposal.
 | DL   | Download clients (SABnzbd; later qBittorrent) |
 | DDL  | Built-in direct-download engine |
 | IMP  | Import, filename parsing, renaming |
+| QUAL | Format & quality profiles |
+| SRCH | Search & wanted scheduling |
+| PP   | Post-processing (import execution, tagging, dupes) |
+| PULL | Weekly pull / release calendar |
+| ARC  | Story arcs |
+| TOR  | Torrents (deferred) |
+| NOTIF| Notifications |
+| SCHED| Scheduling & queues |
 | OPDS | OPDS server |
 | UI   | Web frontend |
 | API  | Backend HTTP API |
