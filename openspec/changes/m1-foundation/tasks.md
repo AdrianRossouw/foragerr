@@ -24,8 +24,8 @@
 - [x] 3.4 Interval scheduler: `scheduled_tasks` table, ≤60s tick loop, min-interval clamping, persisted last_run, force-run resetting the timer (FRG-SCHED-006, FRG-SCHED-007)
 - [x] 3.5 `job_history` rows per execution (trigger, timings, outcome, verbatim error) + housekeeping retention pruning (FRG-SCHED-008)
 - [x] 3.6 Event bus: typed subscribe/publish, per-handler isolation, post-commit publication wired to `write_session()` (FRG-SCHED-009)
-- [ ] 3.7 Graceful drain on shutdown: stop claims, bounded grace, persist final states; wire into lifespan SIGTERM path (FRG-SCHED-011, FRG-DEP-008)
-- [ ] 3.8 Tagged tests: lifecycle, failure capture, dedup, priority, exclusivity, pool caps, starvation isolation, orphan recovery, scheduler due/not-due/clamp/restart, history, bus isolation, post-commit events, drain (FRG-SCHED-001..009, FRG-SCHED-011)
+- [x] 3.7 Graceful drain on shutdown: stop claims, bounded grace, persist final states; wire into lifespan SIGTERM path (FRG-SCHED-011, FRG-DEP-008)
+- [x] 3.8 Tagged tests: lifecycle, failure capture, dedup, priority, exclusivity, pool caps, starvation isolation, orphan recovery, scheduler due/not-due/clamp/restart, history, bus isolation, post-commit events, drain (FRG-SCHED-001..009, FRG-SCHED-011)
 
 ## 4. Outbound HTTP factory (worktree area: http)
 

@@ -30,7 +30,9 @@ from typing import AsyncIterator
 import uvicorn
 from fastapi import APIRouter, FastAPI
 
+from foragerr.commands import register_scheduler
 from foragerr.config import ConfigError, Settings, load_settings
+from foragerr.db import register_database
 from foragerr.logging import setup_logging
 
 logger = logging.getLogger("foragerr.app")
@@ -83,11 +85,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.startup_hooks = []  # async (app) -> None, run in order at startup
     app.state.shutdown_hooks = []  # async (app) -> None, run reversed at shutdown
 
-    # --- db area (tasks 2.x): append engine/migration startup + WAL-checkpoint
-    #     shutdown hooks here, e.g. register_database(app) ---
+    # --- db area (tasks 2.x): engine/migration startup + WAL-checkpoint
+    #     shutdown (registered BEFORE sched so shutdown runs after drain) ---
+    register_database(app)
 
-    # --- sched area (tasks 3.x): append worker-pool/scheduler startup + graceful
-    #     drain shutdown hooks here, e.g. register_scheduler(app) ---
+    # --- sched area (tasks 3.x): worker pools + scheduler startup, graceful
+    #     drain shutdown (FRG-SCHED-011) ---
+    register_scheduler(app)
 
     api_router = APIRouter()
     # --- api area (tasks 5.x): mount health/version/command routers here ---

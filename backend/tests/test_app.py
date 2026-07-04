@@ -26,8 +26,9 @@ def test_two_create_app_calls_yield_independent_apps(tmp_path):
 
     assert app_a is not app_b
     assert app_a.state.settings is not app_b.state.settings
+    baseline = list(app_b.state.startup_hooks)
     app_a.state.startup_hooks.append(object())
-    assert app_b.state.startup_hooks == []  # no shared mutable state
+    assert app_b.state.startup_hooks == baseline  # no shared mutable state
 
 
 def test_openapi_served_under_api_v1(tmp_path):
