@@ -43,6 +43,7 @@ _LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 #: Out-of-range supplied values are clamped with a warning (FRG-NFR-009).
 INTERVAL_RANGES: dict[str, tuple[int, int]] = {
     "scheduler_tick_seconds": (5, 60),
+    "shutdown_grace_seconds": (1, 29),
 }
 
 
@@ -136,6 +137,59 @@ class Settings(BaseSettings):
             "Responses are streamed and aborted at this cap; callers may "
             "lower it per request but never raise it."
         ),
+    )
+    db_busy_timeout_ms: int = Field(
+        default=5000,
+        ge=100,
+        le=60_000,
+        description=(
+            "SQLite busy_timeout in milliseconds, applied to every database "
+            "connection (FRG-DB-005)."
+        ),
+    )
+    db_backup_retention: int = Field(
+        default=3,
+        ge=1,
+        description=(
+            "Number of pre-migration database backups retained under "
+            "backups/; the oldest beyond this count are pruned (FRG-DB-003)."
+        ),
+    )
+    workers_search: int = Field(
+        default=1,
+        ge=1,
+        le=4,
+        description="Worker count for the 'search' workload class (indexer politeness: keep at 1).",
+    )
+    workers_download: int = Field(
+        default=1,
+        ge=1,
+        le=4,
+        description="Worker count for the 'download' workload class (SAB tracking + DDL).",
+    )
+    workers_pp: int = Field(
+        default=1,
+        ge=1,
+        le=4,
+        description="Worker count for the 'pp' (post-processing) workload class.",
+    )
+    workers_default: int = Field(
+        default=2,
+        ge=1,
+        le=8,
+        description="Worker count for the 'default' workload class (everything unclassified).",
+    )
+    shutdown_grace_seconds: int = Field(
+        default=25,
+        description=(
+            "Grace period in seconds for in-flight commands to finish on "
+            "shutdown. Clamped to the safe range 1..29 (must stay under 30s)."
+        ),
+    )
+    job_history_retention_days: int = Field(
+        default=30,
+        ge=1,
+        description="Days of job_history rows kept; older rows are pruned by housekeeping.",
     )
     comicvine_api_key: SecretStr = Field(
         default=SecretStr(""),

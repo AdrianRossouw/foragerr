@@ -9,23 +9,23 @@
 
 ## 2. Persistence (worktree area: db)
 
-- [ ] 2.1 Async engine + session factories with per-connection PRAGMAs (WAL, busy_timeout, foreign_keys, synchronous=NORMAL) (FRG-DB-001, FRG-DB-005)
-- [ ] 2.2 `write_session()` single-writer context manager with bounded busy retry + post-commit event hook (FRG-DB-006, FRG-DB-007)
-- [ ] 2.3 Alembic setup, programmatic startup upgrade, revision guard refusing newer-schema DBs with clear error (FRG-DB-002, FRG-DB-004)
-- [ ] 2.4 Pre-migration WAL-checkpointed backup to `/config/backups/pre-migration-<version>-<ts>/` with retention pruning (FRG-DB-003)
-- [ ] 2.5 Base model conventions: typed columns, TEXT issue numbers, sentinel rejection validators (FRG-DB-008)
-- [ ] 2.6 Tagged tests: PRAGMA assertions, migration up/no-op/failure/newer-schema cases, backup+retention, concurrent-writer stress (zero locked errors), transaction rollback, sentinel round-trips (FRG-DB-001..008)
+- [x] 2.1 Async engine + session factories with per-connection PRAGMAs (WAL, busy_timeout, foreign_keys, synchronous=NORMAL) (FRG-DB-001, FRG-DB-005)
+- [x] 2.2 `write_session()` single-writer context manager with bounded busy retry + post-commit event hook (FRG-DB-006, FRG-DB-007)
+- [x] 2.3 Alembic setup, programmatic startup upgrade, revision guard refusing newer-schema DBs with clear error (FRG-DB-002, FRG-DB-004)
+- [x] 2.4 Pre-migration WAL-checkpointed backup to `/config/backups/pre-migration-<version>-<ts>/` with retention pruning (FRG-DB-003)
+- [x] 2.5 Base model conventions: typed columns, TEXT issue numbers, sentinel rejection validators (FRG-DB-008)
+- [x] 2.6 Tagged tests: PRAGMA assertions, migration up/no-op/failure/newer-schema cases, backup+retention, concurrent-writer stress (zero locked errors), transaction rollback, sentinel round-trips (FRG-DB-001..008)
 
 ## 3. Command backbone (worktree area: sched)
 
-- [ ] 3.1 Pydantic command models (discriminated union), `commands` table, enqueue API with payload validation and (name, payload-hash) dedup among queued/started (FRG-SCHED-001, FRG-SCHED-003)
-- [ ] 3.2 Worker pools per workload class (search=1, download=1, pp=1, default=2), priority claim order, exclusivity-group locks, `asyncio.to_thread` offload helper (FRG-SCHED-004, FRG-SCHED-005)
-- [ ] 3.3 Startup orphan recovery re-queuing `started` rows; queued rows survive unclean restart (FRG-SCHED-002)
-- [ ] 3.4 Interval scheduler: `scheduled_tasks` table, ≤60s tick loop, min-interval clamping, persisted last_run, force-run resetting the timer (FRG-SCHED-006, FRG-SCHED-007)
-- [ ] 3.5 `job_history` rows per execution (trigger, timings, outcome, verbatim error) + housekeeping retention pruning (FRG-SCHED-008)
-- [ ] 3.6 Event bus: typed subscribe/publish, per-handler isolation, post-commit publication wired to `write_session()` (FRG-SCHED-009)
-- [ ] 3.7 Graceful drain on shutdown: stop claims, bounded grace, persist final states; wire into lifespan SIGTERM path (FRG-SCHED-011, FRG-DEP-008)
-- [ ] 3.8 Tagged tests: lifecycle, failure capture, dedup, priority, exclusivity, pool caps, starvation isolation, orphan recovery, scheduler due/not-due/clamp/restart, history, bus isolation, post-commit events, drain (FRG-SCHED-001..009, FRG-SCHED-011)
+- [x] 3.1 Pydantic command models (discriminated union), `commands` table, enqueue API with payload validation and (name, payload-hash) dedup among queued/started (FRG-SCHED-001, FRG-SCHED-003)
+- [x] 3.2 Worker pools per workload class (search=1, download=1, pp=1, default=2), priority claim order, exclusivity-group locks, `asyncio.to_thread` offload helper (FRG-SCHED-004, FRG-SCHED-005)
+- [x] 3.3 Startup orphan recovery re-queuing `started` rows; queued rows survive unclean restart (FRG-SCHED-002)
+- [x] 3.4 Interval scheduler: `scheduled_tasks` table, ≤60s tick loop, min-interval clamping, persisted last_run, force-run resetting the timer (FRG-SCHED-006, FRG-SCHED-007)
+- [x] 3.5 `job_history` rows per execution (trigger, timings, outcome, verbatim error) + housekeeping retention pruning (FRG-SCHED-008)
+- [x] 3.6 Event bus: typed subscribe/publish, per-handler isolation, post-commit publication wired to `write_session()` (FRG-SCHED-009)
+- [x] 3.7 Graceful drain on shutdown: stop claims, bounded grace, persist final states; wire into lifespan SIGTERM path (FRG-SCHED-011, FRG-DEP-008)
+- [x] 3.8 Tagged tests: lifecycle, failure capture, dedup, priority, exclusivity, pool caps, starvation isolation, orphan recovery, scheduler due/not-due/clamp/restart, history, bus isolation, post-commit events, drain (FRG-SCHED-001..009, FRG-SCHED-011)
 
 ## 4. Outbound HTTP factory (worktree area: http)
 
