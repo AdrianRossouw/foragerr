@@ -41,7 +41,10 @@ def _load_settings_or_exit() -> Settings:
     try:
         return load_settings()
     except ConfigError as exc:
-        print(f"foragerr: fatal configuration error\n{exc}", file=sys.stderr)
+        # sys.stderr.write, not a print call: backend/src is print-free by
+        # convention (FRG-NFR-008 static guard — stdout writes that bypass
+        # the redaction filter are banned).
+        sys.stderr.write(f"foragerr: fatal configuration error\n{exc}\n")
         raise SystemExit(2) from exc
 
 
