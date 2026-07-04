@@ -32,6 +32,13 @@ This project is developed under the `dev-process` spec
 6. **Security is spec'd** (FRG-PROC-006). New attack surface (listener, parser of
    untrusted input, credentials, outbound integration) requires updating
    `docs/security/` (STRIDE analysis + risk register) in the same change.
+7. **Branches only, main stays green** (FRG-PROC-007). Never commit on `main`
+   (pre-commit hook enforces this). Work on `change/<id>` / `research/<topic>` /
+   `process/<name>` branches; land via `git merge --no-ff` only while the full test
+   suite passes; delete merged branches.
+8. **Spec approval gate** (FRG-PROC-009). Adrian approves every OpenSpec proposal
+   before implementation begins — record it in an `## Approval` section of the
+   proposal. Phases start only after a plan-mode gate he has approved.
 
 ## Orchestration
 
@@ -39,6 +46,12 @@ The main session acts as orchestrator. Fan implementation and research work out 
 sub-agents scoped to specific requirement IDs (one worker per requirement or small
 cluster), and have them report back against those IDs. Keep expensive exploration in
 sub-agents, synthesis and decisions in the orchestrator.
+
+Worktree discipline (FRG-PROC-008): any sub-agent that mutates repo files runs in its
+own git worktree on its own branch (Agent tool `isolation: worktree`), one writer per
+file area; the orchestrator owns merges, conflict resolution, and worktree cleanup.
+Research/analysis agents are read-only and return findings as text — only the
+orchestrator writes repository files.
 
 ## Layout
 

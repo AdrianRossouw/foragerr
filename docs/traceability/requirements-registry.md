@@ -18,3 +18,6 @@ Status: `proposed` (in an open change) → `active` (change archived into specs/
 | FRG-PROC-004 | Every requirement verified by tagged automated tests | dev-process | active |
 | FRG-PROC-005 | Maintained traceability matrix | dev-process | active |
 | FRG-PROC-006 | Threat analysis and living risk register | dev-process | active |
+| FRG-PROC-007 | Branch-based integration, green main | dev-process | active |
+| FRG-PROC-008 | Worktree isolation for concurrent agents | dev-process | active |
+| FRG-PROC-009 | Spec approval gate | dev-process | active |
