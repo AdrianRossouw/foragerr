@@ -18,9 +18,9 @@
 
 ## 3. Command backbone (worktree area: sched)
 
-- [ ] 3.1 Pydantic command models (discriminated union), `commands` table, enqueue API with payload validation and (name, payload-hash) dedup among queued/started (FRG-SCHED-001, FRG-SCHED-003)
-- [ ] 3.2 Worker pools per workload class (search=1, download=1, pp=1, default=2), priority claim order, exclusivity-group locks, `asyncio.to_thread` offload helper (FRG-SCHED-004, FRG-SCHED-005)
-- [ ] 3.3 Startup orphan recovery re-queuing `started` rows; queued rows survive unclean restart (FRG-SCHED-002)
+- [x] 3.1 Pydantic command models (discriminated union), `commands` table, enqueue API with payload validation and (name, payload-hash) dedup among queued/started (FRG-SCHED-001, FRG-SCHED-003)
+- [x] 3.2 Worker pools per workload class (search=1, download=1, pp=1, default=2), priority claim order, exclusivity-group locks, `asyncio.to_thread` offload helper (FRG-SCHED-004, FRG-SCHED-005)
+- [x] 3.3 Startup orphan recovery re-queuing `started` rows; queued rows survive unclean restart (FRG-SCHED-002)
 - [ ] 3.4 Interval scheduler: `scheduled_tasks` table, ≤60s tick loop, min-interval clamping, persisted last_run, force-run resetting the timer (FRG-SCHED-006, FRG-SCHED-007)
 - [ ] 3.5 `job_history` rows per execution (trigger, timings, outcome, verbatim error) + housekeeping retention pruning (FRG-SCHED-008)
 - [x] 3.6 Event bus: typed subscribe/publish, per-handler isolation, post-commit publication wired to `write_session()` (FRG-SCHED-009)
