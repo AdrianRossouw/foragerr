@@ -1,17 +1,7 @@
-# OPDS — OPDS Catalog Server Specification
+# opds Spec Delta
 
-## Purpose
+## ADDED Requirements
 
-Baseline requirements for opds catalog server, mined from the
-Phase 1 reference research (`docs/research/`). Baseline depth per the Phase 2 scope
-decision: SHALL + coarse acceptance; scenario-level elaboration happens in the
-milestone change that implements each requirement (FRG-PROC-003, FRG-PROC-009).
-
-This capability serves Atom/XML feeds built from untrusted metadata (series titles,
-ids); all such values MUST be XML-escaped on output under FRG-NFR-012 (untrusted external
-content handling) to prevent feed injection (threat W7).
-
-## Requirements
 
 ### Requirement: FRG-OPDS-001 — OPDS 1.2 Atom catalog with navigation root
 
@@ -207,4 +197,3 @@ The catalog SHALL target OPDS 1.2 only; OPDS 2.0 (JSON) support SHALL NOT be imp
 
 - **WHEN** this requirement is verified against the implementation
 - **THEN** No `application/opds+json` routes exist; the decision record links the client-verification outcome.
-

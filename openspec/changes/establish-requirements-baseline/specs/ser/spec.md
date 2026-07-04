@@ -1,13 +1,7 @@
-# SER — Series & Library Management Specification
+# ser Spec Delta
 
-## Purpose
+## ADDED Requirements
 
-Baseline requirements for series & library management, mined from the
-Phase 1 reference research (`docs/research/`). Baseline depth per the Phase 2 scope
-decision: SHALL + coarse acceptance; scenario-level elaboration happens in the
-milestone change that implements each requirement (FRG-PROC-003, FRG-PROC-009).
-
-## Requirements
 
 ### Requirement: FRG-SER-001 — Series entity from ComicVine volume
 
@@ -203,4 +197,3 @@ The system SHALL support bulk operations over a selected set of series: set moni
 
 - **WHEN** this requirement is verified against the implementation
 - **THEN** Selecting three series and applying "unmonitor" updates all three in one API call.
-

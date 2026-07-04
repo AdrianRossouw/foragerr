@@ -54,7 +54,7 @@ allocated yet).
   - **T-API-5 (DoS)**: unbounded request bodies / expensive endpoints; no request-size or
     rate limit on the listener. Coverage: PF `NFR — UI responsiveness at library scale`
     (pagination, no unbounded arrays). **Gap G-1**: no explicit request-body-size cap / listener
-    rate limit → SEC-new `Request resource limits`. RISK-021.
+    rate limit → FRG-NFR-014 (listener request resource limits). RISK-021.
   - **T-API-6 (Elevation/CSRF)**: state-changing endpoints reachable via forged cross-site
     requests once cookie-session auth exists. Coverage: PF `AUTH — session management` (SameSite,
     HttpOnly). **Gap G-5**: CSRF posture not consolidated; API-key header requests are
@@ -143,7 +143,7 @@ allocated yet).
   - **T-SAB-1 (Elevation — reduced attack surface, by design)**: Mylar's add-by-URL made SAB
     pull the NZB from Mylar's own API with a one-time key (extra callback auth surface). Coverage:
     ACQ `DL — SABnzbd add via file upload` (deliberate exclusion of add-by-URL) + ACQ
-    `DL — Exclusion: blackhole and external completion scripts`. RISK-028.
+    FRG-DL-003 (server-side upload) + FRG-DL-009 (CDH-only intake). RISK-028.
   - **T-SAB-2 (Tampering — path)**: SAB reports a completed path the process then reads/moves;
     remote/foreign path confusion. Coverage: ACQ `DL — Remote path mapping`, FD `PP — Remote path
     mapping`. Residual: attacker-controlled path *content* handled by import validation. RISK-029.

@@ -56,3 +56,26 @@
 - Milestone: B
 - Notes: Recommend permanent exclusion: shell-script harvesters with SSH credentials are a large STRIDE surface (remote command execution, credential storage) serving a deployment (remote seedbox) explicitly outside foragerr's single-home-server target. Watch-dir clients lose the download-id join key, degrading tracking to name matching.
 
+
+---
+
+# Additional recorded exclusions (from completeness-critic audit)
+
+These were implicitly dropped by the drafting pass; recorded here so a future change can
+cite the decision rather than treat them as gaps.
+
+## One-off issue downloads _(SER/SRCH)_
+- Grabbing an issue without watching its series (Mylar `oneoffhistory`, "weekly one-off
+  downloads"): **excluded**. FRG-SRCH-003 rejects releases for untracked series ("unknown
+  series"). Rationale: the derived-wanted model (FRG-SER-004) has no home for issues outside
+  a monitored series; the substitute is "add the series with monitor-none, monitor the one
+  issue." Review trigger: user demand for true series-less grabs.
+
+## Legacy metadata scrapers _(META)_
+- GCD, ComicBookDB, publisher solicitations: **excluded**. ComicVine (FRG-META-*) is the sole
+  metadata source. Rationale: single well-supported source over three rotting HTML scrapers.
+
+## READ area — reader / device sync / reading lists
+- In-browser reader, tablet SFTP sync, read/unread reading lists: **permanently out of scope**
+  (CLAUDE.md). foragerr reads via OPDS clients only (FRG-OPDS-*). Recorded so a future reader
+  proposal must reopen the decision explicitly.

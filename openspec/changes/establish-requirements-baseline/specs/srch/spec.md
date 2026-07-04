@@ -1,13 +1,7 @@
-# SRCH — Search & Wanted Scheduling Specification
+# srch Spec Delta
 
-## Purpose
+## ADDED Requirements
 
-Baseline requirements for search & wanted scheduling, mined from the
-Phase 1 reference research (`docs/research/`). Baseline depth per the Phase 2 scope
-decision: SHALL + coarse acceptance; scenario-level elaboration happens in the
-milestone change that implements each requirement (FRG-PROC-003, FRG-PROC-009).
-
-## Requirements
 
 ### Requirement: FRG-SRCH-001 — Unified decision engine with explainable rejections
 
@@ -190,4 +184,3 @@ The system SHALL provide an interactive search endpoint that runs a live search 
 
 - **WHEN** this requirement is verified against the implementation
 - **THEN** The UI shows a wanted issue's full candidate list with per-release rejection reasons; grabbing a listed release succeeds without re-searching; grabbing after cache expiry returns the defined error.
-

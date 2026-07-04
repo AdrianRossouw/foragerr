@@ -301,3 +301,8 @@ Milestones: `M1` vertical slice · `M2` torrents + streaming/quality clusters ·
 | FRG-SEC-004 | Filesystem path confinement (safe-join) | sec | proposed | M1 |
 | FRG-SEC-005 | CSRF stance and WebSocket Origin validation | sec | proposed | M3 |
 | FRG-NFR-014 | Listener request resource limits | nfr | proposed | M2 |
+| FRG-QUAL-001 | Format profile entity | qual | proposed | M1 |
+| FRG-QUAL-002 | Default profile seeded on first run | qual | proposed | M1 |
+| FRG-QUAL-003 | Release preferred-term scoring | qual | proposed | M2 |
+| FRG-QUAL-004 | Per-profile size bounds | qual | proposed | M2 |
+| FRG-QUAL-005 | Profile management UI and API | qual | proposed | M2 |

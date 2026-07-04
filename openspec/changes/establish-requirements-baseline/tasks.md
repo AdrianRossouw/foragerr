@@ -15,13 +15,14 @@
 
 ## 3. Security analysis (FRG-PROC-006)
 
-- [ ] 3.1 STRIDE threat model over all components → `docs/security/threat-model.md`
-- [ ] 3.2 Risk register with every research security flag → `docs/security/risk-register.md`
-- [ ] 3.3 SEC-area requirements for uncovered gaps; register + spec them
+- [x] 3.1 STRIDE threat model over all components → `docs/security/threat-model.md`
+- [x] 3.2 Risk register with every research security flag → `docs/security/risk-register.md`
+- [x] 3.3 SEC-area requirements for uncovered gaps; register + spec them (FRG-SEC-001..005, FRG-NFR-014)
 
 ## 4. Review and approval (FRG-PROC-009)
 
-- [ ] 4.1 Completeness-critic pass (capability-map coverage, risk coverage, duplicates,
-      registry↔spec consistency); fix findings
+- [x] 4.1 Completeness-critic pass; fixed findings: defined QUAL area (BLOCKER — format
+      profile had no home), repaired two dangling risk citations, completed the AREA table,
+      recorded implicit exclusions, added OPDS W7 escaping note
 - [ ] 4.2 Owner approval recorded; registry rows `proposed` → `approved`; archive change;
       merge to main
