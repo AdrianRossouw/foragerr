@@ -89,5 +89,7 @@ requirement; FRG-PROC-003/009 defer elaboration to milestone changes):
 
 ## Approval
 
-- **Status:** Pending owner decision (FRG-PROC-009) — implementation does not start
-  until Adrian records approval here.
+- **Approver:** Adrian
+- **Date:** 2026-07-04
+- **Decision:** Approved (paired change-1/change-2 gate per the approved Phase 3
+  plan). Implementation may begin, scoped to the 33 requirements listed above.
