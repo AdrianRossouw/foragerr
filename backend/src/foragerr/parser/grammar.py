@@ -69,6 +69,19 @@ def plausible_year(value: int, reference_year: int, *, lower: int = 1900) -> boo
     return lower <= value <= reference_year + 1
 
 
+def _is_valid_calendar_date(year: int, month: int, day: int) -> bool:
+    """Pure Gregorian calendar validity (leap-year aware).
+
+    Avoids ``datetime`` entirely so the parser keeps zero clock/stdlib-date
+    imports (FRG-IMP-002 purity guard); the arithmetic is deterministic.
+    """
+    if not 1 <= month <= 12:
+        return False
+    leap = year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
+    days_in_month = (31, 29 if leap else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+    return 1 <= day <= days_in_month[month - 1]
+
+
 def match_date(text: str, reference_year: int, *, lower: int = 1900) -> int | None:
     """Extract a year from bare-year / ISO / month-name date text.
 
@@ -83,7 +96,11 @@ def match_date(text: str, reference_year: int, *, lower: int = 1900) -> int | No
     if m:
         year, month = int(m.group(1)), int(m.group(2))
         day = int(m.group(3)) if m.group(3) else 1
-        if 1 <= month <= 12 and 1 <= day <= 31 and plausible_year(year, reference_year, lower=lower):
+        # Calendar-invalid ISO dates (Feb 30, month 13) are not dates: the
+        # token falls through to other classifications (FRG-IMP-013).
+        if _is_valid_calendar_date(year, month, day) and plausible_year(
+            year, reference_year, lower=lower
+        ):
             return year
     parts = text.replace(",", " ").split()
     if len(parts) == 2:
@@ -120,8 +137,15 @@ def _suffix_lookup(alpha: str, options: ParseOptions, *, glued: bool) -> str | N
     return None
 
 
-def numeric_candidate(token: Token, options: ParseOptions) -> Candidate | None:
-    """Build a candidate from a single WORD token, if it is issue-shaped."""
+def numeric_candidate(
+    token: Token, options: ParseOptions, reference_year: int
+) -> Candidate | None:
+    """Build a candidate from a single WORD token, if it is issue-shaped.
+
+    ``reference_year`` gives the parser a single notion of a plausible year so
+    that dash-joined tokens (``2013-05``) are disambiguated date-vs-range with
+    the same cutoff the rest of the pipeline uses (FRG-IMP-010/-013).
+    """
     text = token.inner
     idx = token.index
     anchored = False
@@ -186,7 +210,7 @@ def numeric_candidate(token: Token, options: ParseOptions) -> Candidate | None:
         return None
 
     m = RE_RANGE.match(text)
-    if m and match_date(text, reference_year=9999) is None:
+    if m and match_date(text, reference_year=reference_year) is None:
         start = to_fraction(m.group(2))
         end = to_fraction(m.group(3))
         if start is not None and end is not None:

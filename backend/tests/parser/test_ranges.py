@@ -54,3 +54,18 @@ def test_dates_are_not_ranges():
     r = parse("Saga 55 2018-05.cbz", reference_year=2026)
     assert r.issue_range is None
     assert r.year == 2018
+
+
+@pytest.mark.req("FRG-IMP-010")
+@pytest.mark.req("FRG-IMP-013")
+def test_dash_token_disambiguation_uses_the_real_reference_year():
+    # A single notion of a plausible year: with reference_year=2020, 2030 is
+    # implausible, so '2030-05' is NOT a date and falls through to a range.
+    r = parse("Some Title 2030-05.cbz", reference_year=2020)
+    assert r.year is None
+    assert r.issue_range is not None
+    assert (r.issue_range.start, r.issue_range.end) == (2030, 5)
+    # Raise the reference so 2030 becomes plausible: the same token is now a
+    # date (consistent with plausible_year), never silently a range.
+    r = parse("Some Title 2030-05.cbz", reference_year=2040)
+    assert r.issue_range is None

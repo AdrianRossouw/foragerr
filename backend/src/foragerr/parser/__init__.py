@@ -470,7 +470,7 @@ class _State:
                 continue
             if t.kind is not TokenKind.WORD or self.consumed[t.index]:
                 continue
-            cand = grammar.numeric_candidate(t, self.options)
+            cand = grammar.numeric_candidate(t, self.options, self.ref)
             if cand is None:
                 hash_pending = False
                 continue
@@ -608,8 +608,12 @@ class _State:
                 self.volume_ordinal = int(c.value)
                 self.roles[c.index] = "volume"
                 self.selected = None  # issue_pos kept: still the title boundary
-            else:
-                self.volume_ordinal = 1  # the only fabricated v1 (corpus row 47)
+            elif not self.cands:
+                # No numeric evidence at all: fabricate v1 (FRG-IMP-016,
+                # corpus row 47 East of West TPB). A disqualified candidate
+                # (suffix / range / name / infinity / negative / non-integer)
+                # is NOT volume evidence and leaves volume_ordinal None.
+                self.volume_ordinal = 1
 
     # -- assembly -------------------------------------------------------------
 

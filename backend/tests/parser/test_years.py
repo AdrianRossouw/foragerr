@@ -48,3 +48,15 @@ def test_rightmost_plausible_date_wins():
     r = parse("Batman 1989 404 (1987).cbz", reference_year=2026)
     assert r.year == 1987
     assert r.issue.value == 404
+
+
+@pytest.mark.req("FRG-IMP-013")
+def test_calendar_invalid_iso_dates_are_not_dates():
+    # Feb 30 never existed: the ISO branch must not validate it as a date.
+    r = parse("Batman 404 (2019-02-30).cbz", reference_year=2026)
+    assert r.year is None
+    assert r.issue.value == 404
+    # A real leap day still validates (datetime handles leap years).
+    assert parse("Batman 404 (2020-02-29).cbz", reference_year=2026).year == 2020
+    # A calendar-valid ISO date is unaffected.
+    assert parse("Batman 404 (2019-05-22).cbz", reference_year=2026).year == 2019
