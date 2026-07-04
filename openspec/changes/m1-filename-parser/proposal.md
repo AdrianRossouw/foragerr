@@ -74,5 +74,7 @@ None — all requirements exist in the approved baseline specs.
 
 ## Approval
 
-- **Status:** Pending owner decision (FRG-PROC-009) — implementation does not start
-  until Adrian records approval here.
+- **Approver:** Adrian
+- **Date:** 2026-07-04
+- **Decision:** Approved (paired change-1/change-2 gate per the approved Phase 3
+  plan). Implementation may begin, scoped to FRG-IMP-001..021.
