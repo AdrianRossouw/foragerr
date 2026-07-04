@@ -1,7 +1,19 @@
 # foragerr Commit Standard
 
-Governed by **FRG-PROC-001** and **FRG-PROC-002**. Enforced by `.githooks/commit-msg`
-(installed via `git config core.hooksPath .githooks`).
+Governed by **FRG-PROC-001** and **FRG-PROC-002** (message format) and
+**FRG-PROC-007** (branching). Enforced by `.githooks/commit-msg` and
+`.githooks/pre-commit` (installed via `git config core.hooksPath .githooks`).
+
+## Branching and merge policy (FRG-PROC-007)
+
+- Never commit directly on `main` — the pre-commit hook rejects it.
+- Branch names: `change/<openspec-change-id>` for spec'd work,
+  `research/<topic>` for research artifacts, `process/<name>` for governance.
+- Land on `main` only via `git merge --no-ff <branch>` (preserves each commit's
+  `Refs:` trailer in history), only while the full test suite passes, and delete
+  the branch afterwards.
+- Concurrent file-mutating agents each get their own worktree + branch
+  (FRG-PROC-008); the orchestrator performs all merges.
 
 ## Format
 

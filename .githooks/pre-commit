@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# pre-commit hook — blocks direct commits on main (FRG-PROC-007).
+# Merge commits are allowed (that is how branches land on main).
+set -euo pipefail
+
+branch="$(git symbolic-ref --quiet --short HEAD || echo detached)"
+
+if [ "$branch" = "main" ] && [ ! -e "$(git rev-parse --git-dir)/MERGE_HEAD" ]; then
+  echo "COMMIT REJECTED: direct commits on main are not allowed (FRG-PROC-007)." >&2
+  echo "Create a branch: change/<openspec-change-id>, research/<topic>, or process/<name>." >&2
+  exit 1
+fi
+
+exit 0
