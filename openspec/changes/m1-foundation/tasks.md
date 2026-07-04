@@ -9,12 +9,12 @@
 
 ## 2. Persistence (worktree area: db)
 
-- [ ] 2.1 Async engine + session factories with per-connection PRAGMAs (WAL, busy_timeout, foreign_keys, synchronous=NORMAL) (FRG-DB-001, FRG-DB-005)
-- [ ] 2.2 `write_session()` single-writer context manager with bounded busy retry + post-commit event hook (FRG-DB-006, FRG-DB-007)
-- [ ] 2.3 Alembic setup, programmatic startup upgrade, revision guard refusing newer-schema DBs with clear error (FRG-DB-002, FRG-DB-004)
-- [ ] 2.4 Pre-migration WAL-checkpointed backup to `/config/backups/pre-migration-<version>-<ts>/` with retention pruning (FRG-DB-003)
-- [ ] 2.5 Base model conventions: typed columns, TEXT issue numbers, sentinel rejection validators (FRG-DB-008)
-- [ ] 2.6 Tagged tests: PRAGMA assertions, migration up/no-op/failure/newer-schema cases, backup+retention, concurrent-writer stress (zero locked errors), transaction rollback, sentinel round-trips (FRG-DB-001..008)
+- [x] 2.1 Async engine + session factories with per-connection PRAGMAs (WAL, busy_timeout, foreign_keys, synchronous=NORMAL) (FRG-DB-001, FRG-DB-005)
+- [x] 2.2 `write_session()` single-writer context manager with bounded busy retry + post-commit event hook (FRG-DB-006, FRG-DB-007)
+- [x] 2.3 Alembic setup, programmatic startup upgrade, revision guard refusing newer-schema DBs with clear error (FRG-DB-002, FRG-DB-004)
+- [x] 2.4 Pre-migration WAL-checkpointed backup to `/config/backups/pre-migration-<version>-<ts>/` with retention pruning (FRG-DB-003)
+- [x] 2.5 Base model conventions: typed columns, TEXT issue numbers, sentinel rejection validators (FRG-DB-008)
+- [x] 2.6 Tagged tests: PRAGMA assertions, migration up/no-op/failure/newer-schema cases, backup+retention, concurrent-writer stress (zero locked errors), transaction rollback, sentinel round-trips (FRG-DB-001..008)
 
 ## 3. Command backbone (worktree area: sched)
 
