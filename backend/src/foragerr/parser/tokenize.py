@@ -50,21 +50,42 @@ def is_dot_dominant(name: str) -> bool:
     return dots > others
 
 
-def _is_separator(ch: str, dot_dominant: bool) -> bool:
-    if ch.isspace() or ch in _HARD_SEPARATORS:
-        return True
-    return dot_dominant and ch == "."
+def extra_separators(name: str) -> frozenset[str]:
+    """Dominant-separator detection beyond the always-on set.
+
+    * dots split when dot-dominant (NZB names);
+    * ``+`` splits when the name has no base separators and 2+ pluses
+      (URL-encoding artifacts: ``Swamp+Thing+003+(2012)``);
+    * ``-`` splits when the name has no base separators, is not
+      dot-dominant, and has 2+ hyphens (fully hyphen-mangled names:
+      ``Justice-League-Beyond-005--2012---digital-Empire-``). Names with
+      normal separators keep their hyphens (X-23, Spider-Man).
+    """
+    extras = set()
+    if is_dot_dominant(name):
+        extras.add(".")
+    base = sum(1 for ch in name if ch.isspace() or ch in _HARD_SEPARATORS)
+    if base == 0:
+        if name.count("+") >= 2:
+            extras.add("+")
+        if "." not in extras and name.count("-") >= 2:
+            extras.add("-")
+    return frozenset(extras)
+
+
+def _is_separator(ch: str, extras: frozenset[str]) -> bool:
+    return ch.isspace() or ch in _HARD_SEPARATORS or ch in extras
 
 
 def tokenize(name: str) -> list[Token]:
     """Tokenize ``name`` into an index-stable token stream. Never raises."""
-    dot_dominant = is_dot_dominant(name)
+    extras = extra_separators(name)
     raw: list[tuple[str, str, int, TokenKind]] = []  # text, inner, start, kind
     i = 0
     n = len(name)
     while i < n:
         ch = name[i]
-        if _is_separator(ch, dot_dominant):
+        if _is_separator(ch, extras):
             i += 1
             continue
         if ch in _OPENERS:
@@ -88,7 +109,7 @@ def tokenize(name: str) -> list[Token]:
         start = i
         while i < n:
             ch = name[i]
-            if _is_separator(ch, dot_dominant) or ch in _OPENERS or ch in (")", "]"):
+            if _is_separator(ch, extras) or ch in _OPENERS or ch in (")", "]"):
                 break
             i += 1
         word = name[start:i]
