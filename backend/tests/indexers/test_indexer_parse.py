@@ -53,6 +53,23 @@ def test_duplicate_guid_from_one_indexer_collapses():
     assert guids == ["dupe", "other"]
 
 
+@pytest.mark.req("FRG-IDX-005")
+@pytest.mark.req("FRG-IDX-007")
+def test_guid_duplicates_are_counted_for_pagination():
+    # A guid-duplicate is dropped from candidates but the indexer DID return it,
+    # so it is counted separately — pagination reconstructs the true page size
+    # from candidates + skipped + duplicates and does not fake a short page.
+    feed = newznab_feed(
+        feed_item(guid="dupe", title="A"),
+        feed_item(guid="dupe", title="A (again)"),
+        feed_item(guid="other", title="B"),
+    )
+    result = parse_newznab_feed(feed, CTX)
+    assert result.duplicates == 1
+    assert result.skipped == 0
+    assert len(result.candidates) + result.skipped + result.duplicates == 3
+
+
 @pytest.mark.req("FRG-IDX-006")
 def test_malformed_items_skipped_and_counted_batch_survives():
     feed = newznab_feed(

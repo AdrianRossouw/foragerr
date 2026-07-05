@@ -25,7 +25,12 @@ import logging
 from dataclasses import dataclass, field
 
 from foragerr.http import HttpClientFactory
-from foragerr.indexers.caps import CONSERVATIVE_CAPS, Capabilities, CapsCache
+from foragerr.indexers.caps import (
+    CONSERVATIVE_CAPS,
+    DEGRADED_CAPS_TTL_SECONDS,
+    Capabilities,
+    CapsCache,
+)
 from foragerr.indexers.errors import IndexerFailure
 from foragerr.indexers.models import IndexerRow
 from foragerr.indexers.newznab import NewznabClient
@@ -78,7 +83,12 @@ async def _resolve_caps(
             "caps probe failed; using conservative defaults",
             extra={"indexer_id": indexer_id, "error": str(exc)},
         )
-        caps = CONSERVATIVE_CAPS
+        # Pin the conservative fallback only briefly so a transient probe
+        # failure re-probes soon rather than being cached for 7 days.
+        caps_cache.put(
+            indexer_id, CONSERVATIVE_CAPS, ttl_seconds=DEGRADED_CAPS_TTL_SECONDS
+        )
+        return CONSERVATIVE_CAPS
     caps_cache.put(indexer_id, caps)
     return caps
 
@@ -249,7 +259,11 @@ async def _run_query(
         outcome.candidates.extend(result.candidates)
         outcome.skipped_items += result.skipped
         tier_count += len(result.candidates)
-        returned = len(result.candidates) + result.skipped
+        # Reconstruct what the indexer actually returned on this page: kept
+        # candidates + malformed-skips + guid-duplicates. Omitting duplicates
+        # would make cross-page dedup fake a short page and stop early, and
+        # would under-advance the offset (FRG-IDX-005).
+        returned = len(result.candidates) + result.skipped + result.duplicates
         if returned == 0 or returned < limit:
             return  # last page for this tier
         offset += returned

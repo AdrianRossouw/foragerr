@@ -21,8 +21,13 @@ from typing import Callable
 from foragerr.indexers.settings import COMICS_CATEGORY
 from foragerr.indexers.xml import parse_indexer_xml
 
-#: Caps cache lifetime — ~7 days (FRG-IDX-004).
+#: Caps cache lifetime for a successful probe — ~7 days (FRG-IDX-004).
 CAPS_TTL_SECONDS = 7 * 24 * 60 * 60
+
+#: Short lifetime for a DEGRADED (conservative-fallback) caps entry — a
+#: transient probe failure must be re-probed soon rather than pinned for a week
+#: (FRG-IDX-004). Distinct from the 7-day success TTL.
+DEGRADED_CAPS_TTL_SECONDS = 15 * 60
 
 #: Conservative page-size default when caps is silent/unavailable.
 DEFAULT_PAGE_SIZE = 100
@@ -81,14 +86,14 @@ def parse_caps(data: bytes | str) -> Capabilities:
     for node in root.iter():
         name = _localname(node.tag)
         if name == "limits":
-            page_max = _int(node.get("max"), page_max)
-            page_default = _int(node.get("default"), page_default)
+            page_max = _int(node.get("max")) or page_max
+            page_default = _int(node.get("default")) or page_default
         elif name == "search":
             search_available = node.get("available", "yes") == "yes"
         elif name == "book-search":
             book_search_available = node.get("available", "no") == "yes"
         elif name in ("category", "subcat"):
-            cid = _int(node.get("id"), 0)
+            cid = _int(node.get("id")) or 0
             label = node.get("name")
             if cid and label:
                 categories[cid] = label
@@ -103,10 +108,18 @@ def parse_caps(data: bytes | str) -> Capabilities:
     )
 
 
-def _int(value: str | None, default: int) -> int:
-    if value and value.strip().lstrip("-").isdigit():
-        return int(value)
-    return default
+def _int(value: str | None) -> int | None:
+    """Parse an int attribute, or ``None`` when absent/non-numeric.
+
+    Mirrors the ComicVine coercion (change 3): a hostile value like
+    ``max="--5"`` — which slips past a lstrip-``-``/isdigit guard yet raises
+    inside ``int()`` — yields ``None`` (typed handling) rather than a 500."""
+    if value is None:
+        return None
+    try:
+        return int(value.strip())
+    except ValueError:
+        return None
 
 
 class CapsCache:
@@ -123,21 +136,28 @@ class CapsCache:
     ) -> None:
         self._ttl = ttl_seconds
         self._clock = clock
-        self._entries: dict[int, tuple[float, Capabilities]] = {}
+        self._entries: dict[int, tuple[float, float, Capabilities]] = {}
 
     def get(self, indexer_id: int) -> Capabilities | None:
         """The cached caps for an indexer if still within its TTL, else None."""
         entry = self._entries.get(indexer_id)
         if entry is None:
             return None
-        stored_at, caps = entry
-        if self._clock() - stored_at > self._ttl:
+        stored_at, ttl, caps = entry
+        if self._clock() - stored_at > ttl:
             del self._entries[indexer_id]
             return None
         return caps
 
-    def put(self, indexer_id: int, caps: Capabilities) -> None:
-        self._entries[indexer_id] = (self._clock(), caps)
+    def put(
+        self, indexer_id: int, caps: Capabilities, *, ttl_seconds: float | None = None
+    ) -> None:
+        """Cache ``caps`` for an indexer. A degraded (conservative-fallback)
+        entry is pinned only for a short ``ttl_seconds`` so a transient probe
+        failure re-probes soon; a live probe uses the default 7-day TTL
+        (FRG-IDX-004)."""
+        effective = self._ttl if ttl_seconds is None else ttl_seconds
+        self._entries[indexer_id] = (self._clock(), effective, caps)
 
     def clear(self) -> None:
         self._entries.clear()

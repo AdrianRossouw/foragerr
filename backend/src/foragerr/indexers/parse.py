@@ -43,10 +43,18 @@ class IndexerContext:
 
 @dataclass(frozen=True, slots=True)
 class ParseResult:
-    """Normalized releases plus the count of items skipped as malformed."""
+    """Normalized releases plus the counts of items dropped from this page.
+
+    ``skipped`` = items dropped as malformed; ``duplicates`` = items dropped as
+    guid-duplicates of ones already seen. Both are dropped from ``candidates``
+    but the indexer *did* return them, so pagination must count them when
+    reconstructing the page size (FRG-IDX-005) — otherwise dedup fakes a short
+    page and search stops early.
+    """
 
     candidates: list[ReleaseCandidate]
     skipped: int
+    duplicates: int = 0
 
 
 def _localname(tag: str) -> str:
@@ -173,6 +181,7 @@ def parse_newznab_feed(
     seen = seen_guids if seen_guids is not None else set()
     candidates: list[ReleaseCandidate] = []
     skipped = 0
+    duplicates = 0
     for item in root.iter():
         if _localname(item.tag) != "item":
             continue
@@ -182,7 +191,8 @@ def parse_newznab_feed(
             skipped += 1  # one bad item never fails the batch (FRG-IDX-006)
             continue
         if candidate.guid in seen:
-            continue  # per-indexer guid de-dup (FRG-IDX-007)
+            duplicates += 1  # per-indexer guid de-dup, but the item WAS returned
+            continue  # (FRG-IDX-007) — counted for pagination (FRG-IDX-005)
         seen.add(candidate.guid)
         candidates.append(candidate)
-    return ParseResult(candidates=candidates, skipped=skipped)
+    return ParseResult(candidates=candidates, skipped=skipped, duplicates=duplicates)

@@ -194,3 +194,48 @@ async def test_caps_probe_failure_degrades_but_search_continues(db):
     assert outcome.degraded_caps
     assert outcome.candidates
     assert outcome.failure is None
+
+
+@pytest.mark.req("FRG-IDX-005")
+async def test_guid_dupes_on_a_full_page_do_not_stop_pagination(db):
+    # A full first page whose last item duplicates an earlier guid must still be
+    # treated as a full page (candidates + duplicates == limit) so paging
+    # CONTINUES to the next page rather than faking a short page and stopping.
+    # caps_doc's default page size is 75.
+    page_size = 75
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        params = request.url.params
+        if params.get("t") == "caps":
+            return httpx.Response(200, content=caps_doc())
+        offset = int(params.get("offset", "0"))
+        if offset == 0:
+            # 74 unique + 1 duplicate of g0 == a full page of `page_size` items.
+            items = [feed_item(guid=f"g{i}", title=f"T{i}") for i in range(page_size - 1)]
+            items.append(feed_item(guid="g0", title="dup of g0"))
+            return httpx.Response(200, content=newznab_feed(*items))
+        if offset >= page_size:
+            # The next page carries a fresh release only reachable if paging
+            # continued past the duplicate-padded first page.
+            return httpx.Response(
+                200, content=newznab_feed(feed_item(guid="page2", title="Page2"))
+            )
+        return httpx.Response(200, content=newznab_feed())
+
+    factory, transport = make_factory(_tmp(db), handler)
+    outcome = await search_indexer(
+        make_indexer_row(id=1),
+        SearchTarget(series_title="Saga"),  # bare title -> a single query tier
+        factory=factory,
+        backoff=ProviderBackoff(db),
+        caps_cache=CapsCache(),
+        min_interval=FAST,
+    )
+    guids = {c.guid for c in outcome.candidates}
+    assert "page2" in guids, "pagination must continue past a dupe-filled full page"
+    search_offsets = [
+        int(r.url.params.get("offset", "0"))
+        for r in transport.requests
+        if r.url.params.get("t") == "search"
+    ]
+    assert any(o >= page_size for o in search_offsets)

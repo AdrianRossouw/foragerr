@@ -50,6 +50,54 @@ def test_caps_cache_reuses_within_ttl_and_expires():
 
 
 @pytest.mark.req("FRG-IDX-004")
+def test_parse_caps_tolerates_hostile_int_attribute():
+    # "--5" slips past a naive lstrip('-')/isdigit guard yet raises inside
+    # int(); the parser must degrade to the default rather than raise (an
+    # unhandled parse would surface as a 500 from /indexer/test, not a 400).
+    xml = (
+        b"<caps>"
+        b'<limits max="--5" default="oops"/>'
+        b'<category id="7030" name="Comics"/>'
+        b'<category id="--9" name="Bad"/>'
+        b"</caps>"
+    )
+    caps = parse_caps(xml)  # must not raise
+    assert caps.page_size_max == 100  # DEFAULT_PAGE_SIZE fallback
+    assert caps.page_size_default == 100
+    assert caps.categories == {7030: "Comics"}  # the hostile id is dropped
+
+
+@pytest.mark.req("FRG-IDX-004")
+async def test_degraded_caps_pinned_only_briefly():
+    # A failed probe caches the conservative fallback under the SHORT degraded
+    # TTL, so a transient failure re-probes soon rather than being pinned for
+    # the 7-day success lifetime.
+    from foragerr.indexers.caps import DEGRADED_CAPS_TTL_SECONDS
+    from foragerr.indexers.errors import IndexerUnavailable
+    from foragerr.indexers.service import _resolve_caps
+
+    now = {"t": 0.0}
+    cache = CapsCache(clock=lambda: now["t"])  # default 7-day success TTL
+
+    class _FailingClient:
+        async def caps(self):
+            raise IndexerUnavailable("probe boom")
+
+    caps = await _resolve_caps(_FailingClient(), 5, cache)
+    assert caps.degraded
+    assert cache.get(5) is not None  # cached right after the failure
+
+    now["t"] = DEGRADED_CAPS_TTL_SECONDS + 1
+    assert cache.get(5) is None  # expired at the short TTL -> will re-probe
+
+    # A live probe of a different indexer at the same instant is still valid,
+    # proving the short TTL is specific to the degraded entry.
+    cache.put(6, Capabilities(categories={7030: "Comics"}))
+    now["t"] += DEGRADED_CAPS_TTL_SECONDS + 1
+    assert cache.get(6) is not None
+
+
+@pytest.mark.req("FRG-IDX-004")
 def test_conservative_defaults_are_marked_degraded():
     assert CONSERVATIVE_CAPS.degraded
     assert CONSERVATIVE_CAPS.resolve_categories([7030]) == [7030]

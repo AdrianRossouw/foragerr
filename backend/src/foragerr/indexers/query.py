@@ -61,7 +61,10 @@ def _issue_variants(issue_number: str) -> list[str]:
     Non-integer issue numbers (``1.5``, ``1.MU``) yield a single verbatim
     variant — padding a decimal/suffix would corrupt it."""
     issue = issue_number.strip()
-    if not issue.isdigit():
+    # ``isdecimal`` (not ``isdigit``) so Unicode superscript/circled digits
+    # ("²", "⑦") — which are ``isdigit`` yet raise inside ``int()`` — take the
+    # verbatim path instead of crashing (FRG-IDX-005).
+    if not issue.isdecimal():
         return [issue]
     number = int(issue)
     variants = [f"{number:03d}", f"{number:02d}", str(number)]

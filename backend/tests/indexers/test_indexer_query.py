@@ -58,3 +58,12 @@ def test_non_integer_issue_kept_verbatim():
 def test_title_only_target_yields_single_broad_query():
     specs = build_queries(SearchTarget(series_title="Saga"))
     assert [(s.tier, s.text) for s in specs] == [(3, "Saga")]
+
+
+@pytest.mark.req("FRG-IDX-005")
+@pytest.mark.parametrize("weird", ["²", "⑧"])  # "²" superscript, "⑦" circled
+def test_unicode_digit_issue_number_does_not_crash(weird):
+    # These are ``str.isdigit()`` True but raise inside ``int()``; the variant
+    # generator uses ``isdecimal`` so they take the verbatim path instead.
+    specs = build_queries(SearchTarget(series_title="Saga", issue_number=weird))
+    assert any(s.text == f"Saga {weird}" for s in specs)
