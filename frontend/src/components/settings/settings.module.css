@@ -1,0 +1,332 @@
+/* Sonarr settings-page skin (FRG-UI-008/009): underlined section headings,
+ * P11 provider cards, P6 modal shell. Tokens only — no brand literals. */
+
+.page {
+  padding: var(--spacing-lg);
+  max-width: var(--layout-content-max-width);
+}
+
+.sectionHeading {
+  font-size: var(--font-size-heading);
+  font-weight: var(--font-weight-normal);
+  padding-bottom: var(--spacing-sm);
+  margin: 0 0 var(--spacing-md);
+  border-bottom: 1px solid var(--surface-border);
+}
+
+.stateText {
+  color: var(--text-secondary);
+}
+
+/* --- Card grid (P11) --- */
+
+.cardGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: var(--spacing-md);
+}
+
+.card {
+  background: var(--surface-card);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+  padding: var(--spacing-md);
+  min-height: 100px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  cursor: pointer;
+}
+
+.card:hover,
+.card:focus-visible {
+  background: var(--surface-card-hover);
+  outline: none;
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+}
+
+.cardName {
+  font-size: var(--font-size-lg);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-xs);
+  margin-top: auto;
+}
+
+.chipBase {
+  padding: 2px var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+}
+
+.chipSuccess {
+  background: var(--color-success);
+}
+
+.chipDanger {
+  background: var(--color-danger);
+}
+
+.chipWarning {
+  background: var(--color-warning);
+}
+
+.chipMuted {
+  background: var(--surface-border);
+  color: var(--text-secondary);
+}
+
+.addCard {
+  background: var(--surface-card);
+  border: 1px dashed var(--surface-border);
+  border-radius: var(--radius-md);
+  min-height: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.addCard:hover,
+.addCard:focus-visible {
+  background: var(--surface-card-hover);
+  color: var(--text-primary);
+  outline: none;
+}
+
+/* --- Enable switch (button, role="switch") --- */
+
+.switch {
+  flex-shrink: 0;
+  width: 36px;
+  height: 20px;
+  padding: 2px;
+  border: 1px solid var(--surface-border);
+  border-radius: 10px;
+  background: var(--surface-page);
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.switchKnob {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.switchOn {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.switchOn .switchKnob {
+  transform: translateX(16px);
+  background: var(--color-accent-contrast);
+}
+
+/* --- Toolbar buttons --- */
+
+.toolbarButton {
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--surface-card);
+  color: var(--text-primary);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-base);
+  cursor: pointer;
+}
+
+.toolbarButton[aria-pressed='true'] {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.toolbarButton:disabled {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+/* --- Modal shell (P6) --- */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--surface-overlay);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 6vh var(--spacing-md);
+  z-index: 100;
+}
+
+.modal {
+  background: var(--surface-chrome);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-overlay);
+  width: min(720px, 100%);
+  max-height: 84vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.modalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--layout-header-height);
+  padding: 0 var(--spacing-lg);
+  border-bottom: 1px solid var(--surface-border);
+  flex-shrink: 0;
+}
+
+.modalTitle {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-medium);
+}
+
+.modalBody {
+  padding: var(--spacing-lg);
+  overflow-y: auto;
+}
+
+.modalFooter {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-md) var(--spacing-lg);
+  border-top: 1px solid var(--surface-border);
+  flex-shrink: 0;
+}
+
+.footerSpacer {
+  flex: 1;
+}
+
+.iconButton {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: var(--icon-size-lg);
+  line-height: 1;
+  cursor: pointer;
+  padding: var(--spacing-xs);
+}
+
+.iconButton:hover {
+  color: var(--text-primary);
+}
+
+/* --- Buttons --- */
+
+.button {
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--surface-card);
+  color: var(--text-primary);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-base);
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--surface-card-hover);
+}
+
+.button:disabled {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.buttonPrimary {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-accent-contrast);
+}
+
+.buttonPrimary:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+}
+
+.buttonDanger {
+  background: var(--color-danger);
+  border-color: var(--color-danger);
+  color: var(--text-primary);
+}
+
+/* --- Modal feedback --- */
+
+.formError {
+  margin-top: var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-sm);
+  color: var(--color-danger);
+  font-size: var(--font-size-base);
+}
+
+.testSuccess {
+  margin-top: var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid var(--color-success);
+  border-radius: var(--radius-sm);
+  color: var(--color-success);
+  font-size: var(--font-size-base);
+}
+
+.testWarning {
+  color: var(--color-warning);
+}
+
+/* --- Implementation picker --- */
+
+.pickerGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--spacing-md);
+}
+
+.pickerCard {
+  background: var(--surface-card);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  align-items: flex-start;
+  cursor: pointer;
+  text-align: left;
+}
+
+.pickerCard:hover,
+.pickerCard:focus-visible {
+  background: var(--surface-card-hover);
+  border-color: var(--color-accent);
+  outline: none;
+}
+
+.pickerProtocol {
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}

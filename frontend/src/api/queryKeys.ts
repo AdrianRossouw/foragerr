@@ -6,6 +6,9 @@
  *   ['series', id]          <-> GET /api/v1/series/{id}
  *   ['queue', page]         <-> GET /api/v1/queue?page={page}
  *   ['release', issueId]    <-> GET /api/v1/release?issueId={issueId}
+ *   [kind]                  <-> GET /api/v1/{kind}         (provider rows)
+ *   [kind, 'schema']        <-> GET /api/v1/{kind}/schema  (kind = 'indexer'
+ *                                                          | 'downloadclient')
  *
  * The WebSocketBridge and every screen invalidate/patch through these helpers —
  * no raw array literals in components.
@@ -20,6 +23,10 @@ export const queryKeys = {
   },
   release: {
     forIssue: (issueId: number) => ['release', issueId] as const,
+  },
+  provider: {
+    all: (kind: string) => [kind] as const,
+    schema: (kind: string) => [kind, 'schema'] as const,
   },
 } as const;
 
