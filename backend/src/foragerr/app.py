@@ -57,8 +57,25 @@ def _load_settings_or_exit() -> Settings:
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
-    for hook in app.state.startup_hooks:
-        await hook(app)
+    completed = 0
+    try:
+        for hook in app.state.startup_hooks:
+            await hook(app)
+            completed += 1
+    except Exception:
+        # A later startup hook failed. The earlier ones already acquired
+        # resources (DB engine open, WAL unchecked) — run the shutdown hooks
+        # best-effort so nothing is left dangling before the failure surfaces.
+        logger.exception(
+            "foragerr startup failed after %d hook(s); running shutdown cleanup",
+            completed,
+        )
+        for hook in reversed(app.state.shutdown_hooks):
+            try:
+                await hook(app)
+            except Exception:  # never mask the original startup failure
+                logger.exception("foragerr: shutdown hook failed during cleanup")
+        raise
     logger.info("foragerr application started")
     yield
     logger.info("foragerr application shutting down")

@@ -71,3 +71,27 @@ def test_startup_log_line_matches_the_api_reported_values(app, caplog, monkeypat
     assert body["version"] in line
     assert body["commit"] in line
     assert body["build_date"] in line
+
+
+@pytest.mark.req("FRG-DEP-010")
+def test_version_line_is_logged_before_any_area_startup(app, caplog):
+    """The version line is a startup contract: it must appear BEFORE the db /
+    commands areas log their own startup, not last (FRG-DEP-010)."""
+    with caplog.at_level(logging.INFO):
+        with TestClient(app):
+            pass
+
+    records = [(r.name, r.getMessage()) for r in caplog.records]
+    version_idx = next(
+        i for i, (_name, msg) in enumerate(records) if "foragerr starting" in msg
+    )
+    area_idx = next(
+        (
+            i
+            for i, (name, _msg) in enumerate(records)
+            if name.startswith("foragerr.db") or name.startswith("foragerr.commands")
+        ),
+        None,
+    )
+    assert area_idx is not None, "expected a db/commands startup record"
+    assert version_idx < area_idx  # version emitted before any area startup

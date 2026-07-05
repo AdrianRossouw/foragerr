@@ -4,13 +4,14 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from pathlib import Path
 
 import pytest
 from sqlalchemy import func, select, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 
-from foragerr.db import CommandRow, Database, JobHistoryRow, utcnow
+from foragerr.db import CommandRow, Database, DatabaseBusyError, JobHistoryRow, utcnow
 
 
 def _command_row(**overrides) -> CommandRow:
@@ -116,3 +117,39 @@ async def test_state_survives_instance_recreate_on_same_config_dir(migrated_dir)
         assert [r.payload_hash for r in rows] == ["persisted"]
     finally:
         await second.close()
+
+
+class _AlwaysLockedSession:
+    """Session stand-in whose commit always raises SQLITE_BUSY."""
+
+    def __init__(self) -> None:
+        self.rolled_back = False
+
+    async def commit(self) -> None:
+        raise OperationalError("INSERT", {}, Exception("database is locked"))
+
+    async def rollback(self) -> None:
+        self.rolled_back = True
+
+
+@pytest.mark.req("FRG-DB-006")
+async def test_commit_retry_does_not_sleep_after_the_final_attempt(migrated_dir):
+    """The bounded busy-retry must not waste a backoff sleep after the LAST
+    failed attempt before raising DatabaseBusyError (FRG-DB-006)."""
+    db = Database(
+        db_path=migrated_dir / "foragerr.db",
+        commit_retry_attempts=3,
+        commit_retry_base_delay=0.1,
+    )
+    try:
+        session = _AlwaysLockedSession()
+        start = time.monotonic()
+        with pytest.raises(DatabaseBusyError):
+            await db._commit_with_retry(session)  # type: ignore[arg-type]
+        elapsed = time.monotonic() - start
+        # Only the 0.1s + 0.2s inter-attempt sleeps happen; the 0.4s that would
+        # follow the final attempt is never slept (would be ~0.7s otherwise).
+        assert elapsed < 0.55, elapsed
+        assert session.rolled_back is True
+    finally:
+        await db.close()

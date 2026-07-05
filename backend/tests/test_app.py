@@ -60,6 +60,36 @@ def test_lifespan_runs_startup_hooks_in_order_and_shutdown_reversed(tmp_path):
     assert calls == ["up:db", "up:sched", "down:sched", "down:db"]
 
 
+@pytest.mark.req("FRG-DEP-008")
+@pytest.mark.req("FRG-DB-001")
+def test_startup_hook_failure_runs_shutdown_hooks(tmp_path):
+    """If a later startup hook raises, the earlier areas' shutdown hooks must
+    still run so the DB engine is closed / WAL checkpointed, not left dangling."""
+    app = create_app(make_settings(tmp_path, "cfg"))
+    closed = {"db": False}
+
+    async def _install_db_close_spy(app_):
+        real_close = app_.state.db.close
+
+        async def _spy():
+            closed["db"] = True
+            await real_close()
+
+        app_.state.db.close = _spy
+
+    async def _boom(app_):
+        raise RuntimeError("startup hook failure")
+
+    app.state.startup_hooks.append(_install_db_close_spy)
+    app.state.startup_hooks.append(_boom)
+
+    with pytest.raises(RuntimeError, match="startup hook failure"):
+        with TestClient(app):
+            pass
+
+    assert closed["db"] is True  # db shutdown ran despite the startup failure
+
+
 @pytest.mark.req("FRG-NFR-009")
 def test_startup_with_invalid_config_exits_non_zero(config_dir, capsys):
     (config_dir / CONFIG_FILENAME).write_text('port: "nope"\n', encoding="utf-8")

@@ -19,6 +19,7 @@ from fastapi import APIRouter, FastAPI
 
 from foragerr.api.command import router as command_router
 from foragerr.api.errors import ApiError, register_error_handlers
+from foragerr.api.health import cache_migration_head
 from foragerr.api.health import router as health_router
 from foragerr.api.system import log_startup_version
 from foragerr.api.system import router as system_router
@@ -39,4 +40,11 @@ def register_api(app: FastAPI) -> None:
     async def _log_version(_app: FastAPI) -> None:
         log_startup_version()
 
-    app.state.startup_hooks.append(_log_version)
+    # The version line is a spec contract (FRG-DEP-010): emit it FIRST, before
+    # any other startup hook runs — it reads only env/package metadata and has
+    # no dependency on the db/scheduler that register earlier.
+    app.state.startup_hooks.insert(0, _log_version)
+
+    # Resolve the immutable migration head once at startup so /health never
+    # parses Alembic on the event loop per probe (FRG-DEP-007).
+    app.state.startup_hooks.append(cache_migration_head)
