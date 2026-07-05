@@ -36,5 +36,5 @@
 
 ## 6. Traceability and merge gate
 
-- [ ] 6.1 Verify every FRG-IMP-001..021 has ≥1 passing tagged test; flip the 21 registry rows to `implemented`; regenerate matrix via `tools/trace.py` (exit 0) (FRG-PROC-004, FRG-PROC-005)
-- [ ] 6.2 Full suite green; `--no-ff` merge to main (coordinating the shared `backend/pyproject.toml` with m1-foundation, whichever merges second rebases); archive change; delete branch (FRG-PROC-007)
+- [x] 6.1 Verify every FRG-IMP-001..021 has ≥1 passing tagged test; flip the 21 registry rows to `implemented`; regenerate matrix via `tools/trace.py` (exit 0) (FRG-PROC-004, FRG-PROC-005)
+- [x] 6.2 Full suite green; `--no-ff` merge to main (coordinating the shared `backend/pyproject.toml` with m1-foundation, whichever merges second rebases); archive change; delete branch (FRG-PROC-007)
