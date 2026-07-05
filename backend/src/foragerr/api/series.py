@@ -21,15 +21,18 @@ import datetime as dt
 from dataclasses import asdict
 from pathlib import Path
 
+from typing import Annotated
+
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from foragerr.api.errors import ApiError
 from foragerr.api.paging import paginate
 from foragerr.library import repo
 from foragerr.library.flows import (
+    MAX_ALIAS_LENGTH,
     DeleteFilesNotSupportedError,
     SeriesNotFoundError,
     SeriesValidationError,
@@ -99,7 +102,7 @@ def _series_fields(row: SeriesRow, stats: SeriesStatistics) -> dict:
         "added_at": row.added_at,
         "refreshed_at": row.refreshed_at,
         "description_sanitized": row.description_sanitized,
-        "aliases": list(decode_aliases(row.aliases)),
+        "aliases": list(decode_aliases(row.aliases, series_id=row.id)),
         "statistics": SeriesStatisticsResource.from_stats(stats),
     }
 
@@ -182,7 +185,9 @@ class SeriesEdit(BaseModel):
     path: str | None = None
     #: When supplied, REPLACES the stored alternate search names wholesale
     #: (FRG-SRCH-003); pass ``[]`` to clear. ``None`` leaves them unchanged.
-    aliases: list[str] | None = None
+    #: Each alias is capped at ``MAX_ALIAS_LENGTH`` chars (422 otherwise), the
+    #: pydantic mirror of the flow-level ``validate_aliases`` bound.
+    aliases: list[Annotated[str, Field(max_length=MAX_ALIAS_LENGTH)]] | None = None
 
 
 class LookupCandidateResource(BaseModel):

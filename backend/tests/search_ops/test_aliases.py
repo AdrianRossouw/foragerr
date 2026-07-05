@@ -14,7 +14,12 @@ import pytest
 
 from foragerr.indexers.caps import CapsCache
 from foragerr.library import repo
-from foragerr.library.flows import decode_aliases, edit_series
+from foragerr.library.flows import (
+    MAX_ALIAS_LENGTH,
+    SeriesValidationError,
+    decode_aliases,
+    edit_series,
+)
 from foragerr.providers.backoff import ProviderBackoff
 from foragerr.search_ops import run_search
 from http_support import make_settings
@@ -104,6 +109,73 @@ async def test_edit_series_replaces_aliases(
         row = await repo.get_series(session, series_id)
         assert decode_aliases(row.aliases) == ()
         assert row.aliases is None  # empty clears to NULL
+
+
+@pytest.mark.req("FRG-SRCH-003")
+async def test_over_long_alias_is_rejected(
+    db, format_profile_id, root_folder_id
+):
+    # An alias longer than the per-alias cap is a bad edit, not a search name.
+    series_id = await make_series(
+        db, format_profile_id=format_profile_id, root_folder_id=root_folder_id
+    )
+    with pytest.raises(SeriesValidationError):
+        await edit_series(db, series_id, aliases=["x" * (MAX_ALIAS_LENGTH + 1)])
+
+
+@pytest.mark.req("FRG-SRCH-003")
+async def test_corrupt_aliases_json_degrades_to_empty(
+    db, format_profile_id, root_folder_id
+):
+    # A row whose aliases column holds invalid JSON must not wedge reads: it
+    # degrades to no aliases (the same path a non-list value takes) so the
+    # series list / a search that reads aliases still renders.
+    series_id = await make_series(
+        db, format_profile_id=format_profile_id, root_folder_id=root_folder_id
+    )
+    async with db.write_session() as session:
+        row = await repo.get_series(session, series_id)
+        row.aliases = "{not valid json"  # corrupt
+    assert decode_aliases("{not valid json", series_id=series_id) == ()
+
+    async with db.read_session() as session:
+        row = await repo.get_series(session, series_id)
+        assert decode_aliases(row.aliases, series_id=series_id) == ()
+
+
+@pytest.mark.req("FRG-SRCH-003")
+def test_over_long_alias_is_rejected_by_the_api(tmp_path):
+    """The PUT endpoint rejects an over-long alias (400/422 uniform error)."""
+    from functools import partial
+    from pathlib import Path
+
+    from fastapi.testclient import TestClient
+
+    from foragerr.app import create_app
+    from foragerr.library import repo as library_repo
+    from .support import profile_id
+
+    cfg = tmp_path / "cfg"
+    cfg.mkdir()
+    app = create_app(make_settings(cfg))
+    with TestClient(app) as client:
+        db = app.state.db
+
+        async def _seed(db):
+            pid = await profile_id(db)
+            root = Path(db.db_path.parent) / "root"
+            root.mkdir(exist_ok=True)
+            async with db.write_session() as session:
+                rf = await library_repo.create_root_folder(session, str(root))
+                rid = rf.id
+            return await make_series(db, format_profile_id=pid, root_folder_id=rid)
+
+        series_id = client.portal.call(partial(_seed, db))
+        resp = client.put(
+            f"/api/v1/series/{series_id}",
+            json={"aliases": ["x" * (MAX_ALIAS_LENGTH + 1)]},
+        )
+        assert resp.status_code in (400, 422)
 
 
 @pytest.mark.req("FRG-SRCH-003")

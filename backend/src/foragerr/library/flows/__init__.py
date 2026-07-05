@@ -19,6 +19,7 @@ from __future__ import annotations
 from foragerr.library.flows._common import (
     AddOptions,
     DeleteFilesNotSupportedError,
+    MAX_ALIAS_LENGTH,
     MONITOR_STRATEGIES,
     RefreshSeriesCommand,
     ScanSeriesCommand,
@@ -44,6 +45,7 @@ __all__ = [
     "AddOptions",
     "AddSeriesResult",
     "DeleteFilesNotSupportedError",
+    "MAX_ALIAS_LENGTH",
     "MONITOR_STRATEGIES",
     "RefreshSeriesCommand",
     "ScanSeriesCommand",
