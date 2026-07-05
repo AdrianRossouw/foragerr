@@ -102,6 +102,37 @@ async def test_category_filter_excludes_other_categories(tmp_path, db):
 
 
 @pytest.mark.req("FRG-DL-004")
+async def test_star_item_category_is_not_hijacked_when_configured_for_comics(tmp_path, db):
+    # SAB's default/uncategorized items report cat="*". A foragerr configured for
+    # "comics" must NOT claim them (they belong to whatever queued them); the
+    # wildcard is on the CONFIGURED side only.
+    fixture = SabFixture()
+    fixture.queue_slots = [
+        queue_slot(nzo_id="mine", cat="comics"),
+        queue_slot(nzo_id="uncategorized", cat="*"),
+    ]
+    client = make_sab_client(tmp_path, fixture, db)
+    ids = {item.download_id for item in await client.get_items()}
+    assert ids == {"mine"}  # the "*" item is not hijacked
+
+
+@pytest.mark.req("FRG-DL-004")
+async def test_configured_star_claims_every_category(tmp_path, db):
+    from downloads_support import sab_settings
+
+    fixture = SabFixture()
+    fixture.queue_slots = [
+        queue_slot(nzo_id="a", cat="comics"),
+        queue_slot(nzo_id="b", cat="movies"),
+    ]
+    client = make_sab_client(
+        tmp_path, fixture, db, settings_model=sab_settings(category="*")
+    )
+    ids = {item.download_id for item in await client.get_items()}
+    assert ids == {"a", "b"}  # configured "*" claims all
+
+
+@pytest.mark.req("FRG-DL-004")
 async def test_sizes_normalized_to_bytes_and_time_parsed(tmp_path, db):
     fixture = SabFixture()
     fixture.queue_slots = [
