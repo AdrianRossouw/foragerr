@@ -19,6 +19,7 @@ from foragerr.http.factory import (
     FetchResult,
     HttpClientFactory,
     OutboundClient,
+    StreamedResponse,
 )
 from foragerr.http.headers import parse_retry_after
 
@@ -34,6 +35,7 @@ __all__ = [
     "OutboundHttpError",
     "Resolver",
     "ResponseTooLargeError",
+    "StreamedResponse",
     "TooManyRedirectsError",
     "parse_retry_after",
 ]

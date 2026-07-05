@@ -45,8 +45,9 @@ Residual risk — DNS-rebinding TOCTOU: see :mod:`foragerr.http.egress`
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Iterable, Mapping
+from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Iterable, Mapping
 
 import httpx
 
@@ -89,6 +90,26 @@ class FetchResult:
     headers: httpx.Headers
     content: bytes
     url: str  # final URL after any redirects
+
+
+class StreamedResponse:
+    """A streamed response handed to :meth:`OutboundClient.stream` callers.
+
+    Exposes the final response's status, headers, and URL, and streams the body
+    in chunks without buffering it. The factory does NOT cap the body here — the
+    caller iterates :meth:`aiter_bytes` and enforces its own size bound
+    (FRG-DDL-008 accounts bytes against the expected download size)."""
+
+    def __init__(self, response: httpx.Response, url: httpx.URL) -> None:
+        self._response = response
+        self.status_code = response.status_code
+        self.headers = response.headers
+        self.url = str(url)
+
+    async def aiter_bytes(self, chunk_size: int) -> AsyncIterator[bytes]:
+        """Yield the response body in ``chunk_size`` byte chunks."""
+        async for chunk in self._response.aiter_bytes(chunk_size):
+            yield chunk
 
 
 class OutboundClient:
@@ -146,6 +167,63 @@ class OutboundClient:
         cap = self._max_response_bytes
         if max_bytes is not None:
             cap = min(cap, max_bytes)
+        response, final_url = await self._open_final(
+            method, url, headers=headers, params=params, content=content
+        )
+        try:
+            return await self._read_bounded(response, cap, final_url)
+        finally:
+            await response.aclose()
+
+    @asynccontextmanager
+    async def stream(
+        self,
+        method: str,
+        url: str | httpx.URL,
+        *,
+        headers: Mapping[str, str] | None = None,
+        params: Mapping[str, Any] | None = None,
+        content: bytes | str | None = None,
+        hop_check: "Callable[[httpx.URL], None] | None" = None,
+    ) -> AsyncIterator["StreamedResponse"]:
+        """Open a streamed response after the validated redirect walk.
+
+        Unlike :meth:`request`, the body is NOT buffered or capped by the
+        factory — the caller iterates :meth:`StreamedResponse.aiter_bytes` and
+        enforces its own size bound (e.g. against an expected download size).
+        Every guarantee of :meth:`request` still holds: each hop (including
+        redirects) is egress-validated before connecting, TLS verification is
+        always on, credentials are stripped when a hop leaves the original
+        host, and the redirect chain is capped at :data:`MAX_REDIRECTS`.
+
+        ``hop_check`` is an OPTIONAL per-hop validator (raising to refuse) run
+        on every hop's URL in addition to the SSRF egress policy — the DDL
+        downloader passes its per-provider scheme+host allowlist here so a
+        scraped link's whole redirect chain is confined to allowed hosts
+        (FRG-DDL-012).
+        """
+        response, final_url = await self._open_final(
+            method, url, headers=headers, params=params, content=content,
+            hop_check=hop_check,
+        )
+        try:
+            yield StreamedResponse(response, final_url)
+        finally:
+            await response.aclose()
+
+    async def _open_final(
+        self,
+        method: str,
+        url: str | httpx.URL,
+        *,
+        headers: Mapping[str, str] | None,
+        params: Mapping[str, Any] | None,
+        content: bytes | str | None,
+        hop_check: "Callable[[httpx.URL], None] | None" = None,
+    ) -> tuple[httpx.Response, httpx.URL]:
+        """Walk redirects (validating every hop) and return the OPEN final
+        response plus its URL. Intermediate redirect responses are closed; the
+        caller MUST close the returned response."""
         current = httpx.URL(url)
         if params:
             current = current.copy_merge_params(dict(params))
@@ -158,31 +236,31 @@ class OutboundClient:
             await self._validator.validate(
                 current, profile=self._profile, local_base=self._local_base
             )
+            if hop_check is not None:
+                hop_check(current)  # per-provider allowlist (FRG-DDL-012)
             hop_headers = self._hop_headers(headers, current, original_host)
             request = self._client.build_request(
                 send_method, current, headers=hop_headers, content=body
             )
             response = await self._client.send(request, stream=True)
-            try:
-                location = response.headers.get("location")
-                if response.status_code in _REDIRECT_STATUSES and location:
-                    if redirects_followed == MAX_REDIRECTS:
-                        message = (
-                            f"stopped after {MAX_REDIRECTS} redirect hops "
-                            f"(next would be {redact(str(current.join(location)))})"
-                        )
-                        logger.error(message)
-                        raise TooManyRedirectsError(message)
-                    if response.status_code in (301, 302, 303) and send_method not in (
-                        "GET",
-                        "HEAD",
-                    ):
-                        send_method, body = "GET", None
-                    current = current.join(location)
-                    continue  # redirect body is discarded by aclose()
-                return await self._read_bounded(response, cap, current)
-            finally:
-                await response.aclose()
+            location = response.headers.get("location")
+            if response.status_code in _REDIRECT_STATUSES and location:
+                await response.aclose()  # redirect body discarded
+                if redirects_followed == MAX_REDIRECTS:
+                    message = (
+                        f"stopped after {MAX_REDIRECTS} redirect hops "
+                        f"(next would be {redact(str(current.join(location)))})"
+                    )
+                    logger.error(message)
+                    raise TooManyRedirectsError(message)
+                if response.status_code in (301, 302, 303) and send_method not in (
+                    "GET",
+                    "HEAD",
+                ):
+                    send_method, body = "GET", None
+                current = current.join(location)
+                continue
+            return response, current
         raise AssertionError("unreachable")  # pragma: no cover
 
     async def get(self, url: str | httpx.URL, **kwargs: Any) -> FetchResult:
