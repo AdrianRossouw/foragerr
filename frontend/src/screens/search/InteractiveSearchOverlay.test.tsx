@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../../test/renderWithProviders';
 import { fakeFetcher } from '../../test/fakeFetcher';
 import { mockReleases } from '../../test/mockData';
-import { ApiRequestError, type Fetcher } from '../../api/fetcher';
+import { ApiRequestError, type Fetcher, type FetcherInit } from '../../api/fetcher';
 import { InteractiveSearchOverlay } from './InteractiveSearchOverlay';
 
 const EXPIRED_MESSAGE =
@@ -95,7 +95,7 @@ describe('FRG-UI-007: interactive search overlay', () => {
         '/api/v1/release',
         expect.objectContaining({
           method: 'POST',
-          body: JSON.stringify({ indexer_id: 3, guid: 'guid-approved-best' }),
+          body: { indexer_id: 3, guid: 'guid-approved-best' },
         }),
       ),
     );
@@ -105,9 +105,9 @@ describe('FRG-UI-007: interactive search overlay', () => {
   });
 
   it('FRG-UI-007 — an expired-cache grab surfaces the deterministic search-again error distinctly', async () => {
-    const fetcher = vi.fn(async (_path: string, init?: RequestInit) => {
+    const fetcher = vi.fn(async (_path: string, init?: FetcherInit) => {
       if (init?.method === 'POST') {
-        throw new ApiRequestError(404, EXPIRED_MESSAGE);
+        throw new ApiRequestError(404, { message: EXPIRED_MESSAGE, errors: [] }, '/api/v1/release');
       }
       return mockReleases;
     }) as unknown as Fetcher;
@@ -134,9 +134,9 @@ describe('FRG-UI-007: interactive search overlay', () => {
   });
 
   it('FRG-UI-007 — a non-404 grab failure renders as a generic error, not the expired banner', async () => {
-    const fetcher = vi.fn(async (_path: string, init?: RequestInit) => {
+    const fetcher = vi.fn(async (_path: string, init?: FetcherInit) => {
       if (init?.method === 'POST') {
-        throw new ApiRequestError(500, 'boom');
+        throw new ApiRequestError(500, { message: 'boom', errors: [] }, '/api/v1/release');
       }
       return mockReleases;
     }) as unknown as Fetcher;

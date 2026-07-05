@@ -3,57 +3,70 @@ import { createContext, useContext, type ReactNode } from 'react';
 /*
  * Injected fetcher (FRG-UI-001).
  *
- * A Fetcher takes an API path and resolves the parsed JSON body. The default
- * implementation wraps window.fetch; tests inject a FAKE fetcher (a spy returning
- * typed mock data) so no live backend is ever contacted in this scaffold pass.
- * Every data-access hook reads its fetcher from context, so there is a single
- * seam for both production wiring and test doubles.
+ * A Fetcher takes an API path (plus an optional method/body init for mutations)
+ * and resolves the parsed JSON body. The default implementation wraps
+ * window.fetch; tests inject a FAKE fetcher (a spy returning typed mock data) so
+ * no live backend is ever contacted. Every data-access hook reads its fetcher
+ * from context, so there is a single seam for both production wiring and test
+ * doubles.
  */
-export type Fetcher = <T>(path: string, init?: RequestInit) => Promise<T>;
+
+/** Optional init for mutating requests; omitted entirely for plain GETs. */
+export interface FetcherInit {
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  body?: unknown;
+}
+
+/** The backend's uniform 4xx error shape (FRG-API-002). */
+export interface ApiErrorBody {
+  message: string;
+  errors: { field: string | null; message: string }[];
+}
 
 /**
- * A non-2xx API response. `message` carries the backend's uniform 4xx body
- * message verbatim (`{"message": ..., "errors": [...]}`, FRG-API-002) so
- * deterministic errors — e.g. the expired-release-cache "search again" message
- * (FRG-UI-007) — can be surfaced to the user unaltered.
+ * A non-2xx response, carrying the parsed uniform error body when the backend
+ * supplied one. `message` is the backend's message verbatim, so deterministic
+ * errors — e.g. the expired-release-cache "search again" message (FRG-UI-007) —
+ * surface to the user unaltered, and screens can render `body.errors[]` against
+ * specific form fields (FRG-UI-008).
  */
 export class ApiRequestError extends Error {
   readonly status: number;
+  readonly body: ApiErrorBody | null;
 
-  constructor(status: number, message: string) {
-    super(message);
+  constructor(status: number, body: ApiErrorBody | null, path: string) {
+    super(body?.message ?? `Request failed: ${status} ${path}`);
     this.name = 'ApiRequestError';
     this.status = status;
+    this.body = body;
   }
 }
 
+export type Fetcher = <T>(path: string, init?: FetcherInit) => Promise<T>;
+
 export const defaultFetcher: Fetcher = async <T,>(
   path: string,
-  init?: RequestInit,
+  init?: FetcherInit,
 ): Promise<T> => {
   const res = await fetch(path, {
-    ...init,
+    method: init?.method ?? 'GET',
     headers: {
       Accept: 'application/json',
-      ...(init?.body != null ? { 'Content-Type': 'application/json' } : {}),
-      ...init?.headers,
+      ...(init?.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
     },
+    ...(init?.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
   });
   if (!res.ok) {
-    let message = `Request failed: ${res.status} ${path}`;
+    let body: ApiErrorBody | null = null;
     try {
-      const body: unknown = await res.json();
-      if (
-        typeof body === 'object' &&
-        body !== null &&
-        typeof (body as { message?: unknown }).message === 'string'
-      ) {
-        message = (body as { message: string }).message;
-      }
+      body = (await res.json()) as ApiErrorBody;
     } catch {
-      // Non-JSON error body — keep the generic message.
+      body = null;
     }
-    throw new ApiRequestError(res.status, message);
+    throw new ApiRequestError(res.status, body, path);
+  }
+  if (res.status === 204) {
+    return undefined as T;
   }
   return (await res.json()) as T;
 };

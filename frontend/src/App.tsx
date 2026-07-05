@@ -4,9 +4,10 @@ import {
   LibraryIndexPlaceholder,
   SeriesDetailPlaceholder,
   AddSeriesPlaceholder,
-  SettingsPlaceholder,
 } from './routes/placeholders';
 import { QueueScreen } from './screens/queue/QueueScreen';
+import { IndexerSettings } from './routes/settings/IndexerSettings';
+import { DownloadClientSettings } from './routes/settings/DownloadClientSettings';
 
 /**
  * Routing skeleton (FRG-UI-001). Placeholder route components mount inside the
@@ -20,13 +21,10 @@ export function App() {
         <Route path="series/:id" element={<SeriesDetailPlaceholder />} />
         <Route path="add" element={<AddSeriesPlaceholder />} />
         <Route path="queue" element={<QueueScreen />} />
-        <Route
-          path="settings/indexers"
-          element={<SettingsPlaceholder area="Indexers" />}
-        />
+        <Route path="settings/indexers" element={<IndexerSettings />} />
         <Route
           path="settings/download-clients"
-          element={<SettingsPlaceholder area="Download Clients" />}
+          element={<DownloadClientSettings />}
         />
       </Route>
     </Routes>

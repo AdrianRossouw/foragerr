@@ -109,7 +109,7 @@ export function useGrabRelease(): UseMutationResult<unknown, Error, GrabReleaseI
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (key: GrabReleaseInput) =>
-      fetcher('/api/v1/release', { method: 'POST', body: JSON.stringify(key) }),
+      fetcher('/api/v1/release', { method: 'POST', body: key }),
     onSuccess: () =>
       // The grab enqueues a tracked download; the queue view is now stale.
       queryClient.invalidateQueries({ queryKey: queryKeys.queue.all() }),
