@@ -1,0 +1,36 @@
+# Build context hygiene: keep secrets, VCS, caches, and build junk out of the
+# image and out of what `docker build` uploads. The build script's secret scan
+# (tools/build-image.sh) is the enforcing check; this file is the first line.
+
+# Secrets — never send .env into the build context (defence in depth; the scan
+# fails the build if one is present regardless).
+.env
+.env.*
+!.env.example
+
+# VCS / tooling
+.git
+.githooks
+.claude
+.mcp.json
+
+# Reference clones (gitignored study material — never in the image)
+.reference
+
+# Python caches / local venvs / build artifacts
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.venv
+**/venv
+**/.ruff_cache
+**/.mypy_cache
+
+# Node / frontend build artifacts (the image builds these itself in stage 1)
+**/node_modules
+frontend/dist
+
+# Tests and process material are not part of the runtime image
+backend/tests
+openspec
+docs

@@ -240,6 +240,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     register_opds(app)
 
+    # --- spa area (m1-ui-opds-deploy, area: deploy): serve the built React SPA
+    #     statically at "/" (FRG-DEP-001). Mounted LAST so the API / OPDS / health
+    #     routers above always win; only unclaimed paths reach the SPA. No-op when
+    #     the dist bundle is absent (running from source / tests) so create_app
+    #     stays importable without a frontend build. ---
+    from foragerr.spa import register_spa
+
+    register_spa(app)
+
     return app
 
 
