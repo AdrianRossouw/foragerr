@@ -148,7 +148,9 @@ async def build_evaluation_context(
     :class:`SearchTarget` on cheaply with ``dataclasses.replace`` — that is how
     the search-command loops reuse one context across a series' wanted issues.
     ``issue_id`` set here attaches the target directly (the single-issue path).
-    The change-5 dynamic-store seams keep their inert defaults."""
+    The change-5 live queue + blocklist stores (FRG-DL-012/013) are loaded from
+    this same read session and injected, so the already-queued and blocklist
+    specifications evaluate live on every automatic and interactive search."""
     series_ctx = await build_series_context(session, series)
     if series_ctx is None:
         return None
@@ -157,9 +159,18 @@ async def build_evaluation_context(
         if issue_id is not None
         else None
     )
+    # Imported lazily: the store loaders live in the downloads area, and keeping
+    # the import at call time avoids any import-time coupling between the search
+    # pipeline module graph and the downloads package.
+    from foragerr.downloads.stores import load_blocklist_store, load_queue_store
+
+    queue = await load_queue_store(session)
+    blocklist = await load_blocklist_store(session)
     return EvaluationContext(
         library=LibrarySnapshot(series=(series_ctx,)),
         target=target,
         config=config,
         now=now or utcnow(),
+        queue=queue,
+        blocklist=blocklist,
     )

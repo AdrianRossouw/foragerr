@@ -109,33 +109,33 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-SRCH-012 | Delay profile | srch | approved | B |
 | FRG-SRCH-013 | Pending release queue | srch | approved | B |
 | FRG-SRCH-014 | Interactive search | srch | implemented | M1 |
-| FRG-DL-001 | Download client abstraction | dl | approved | M1 |
-| FRG-DL-002 | Client configuration and selection | dl | approved | M1 |
-| FRG-DL-003 | SABnzbd add via file upload | dl | approved | M1 |
-| FRG-DL-004 | SABnzbd queue and history polling | dl | approved | M1 |
-| FRG-DL-005 | Remote path mapping | dl | approved | M1 |
-| FRG-DL-006 | Grab history with download-id join key | dl | approved | M1 |
-| FRG-DL-007 | Tracked-download state machine | dl | approved | M1 |
-| FRG-DL-008 | Queue view from tracked downloads | dl | approved | M1 |
+| FRG-DL-001 | Download client abstraction | dl | implemented | M1 |
+| FRG-DL-002 | Client configuration and selection | dl | implemented | M1 |
+| FRG-DL-003 | SABnzbd add via file upload | dl | implemented | M1 |
+| FRG-DL-004 | SABnzbd queue and history polling | dl | implemented | M1 |
+| FRG-DL-005 | Remote path mapping | dl | implemented | M1 |
+| FRG-DL-006 | Grab history with download-id join key | dl | implemented | M1 |
+| FRG-DL-007 | Tracked-download state machine | dl | implemented | M1 |
+| FRG-DL-008 | Queue view from tracked downloads | dl | implemented | M1 |
 | FRG-DL-009 | Completed download handling | dl | approved | M1 |
 | FRG-DL-010 | Post-import client cleanup | dl | approved | M1 |
-| FRG-DL-011 | Failed download handling | dl | approved | M1 |
-| FRG-DL-012 | Blocklist | dl | approved | M1 |
-| FRG-DL-013 | Automatic re-search after failure | dl | approved | M1 |
+| FRG-DL-011 | Failed download handling | dl | implemented | M1 |
+| FRG-DL-012 | Blocklist | dl | implemented | M1 |
+| FRG-DL-013 | Automatic re-search after failure | dl | implemented | M1 |
 | FRG-DL-014 | SABnzbd retry passthrough | dl | approved | B |
-| FRG-DDL-001 | DDL client behind the common abstraction | ddl | approved | M1 |
-| FRG-DDL-002 | GetComics search provider | ddl | approved | M1 |
-| FRG-DDL-003 | Versioned page adapter with fixtures | ddl | approved | M1 |
-| FRG-DDL-004 | Link enumeration and host/quality selection | ddl | approved | M1 |
-| FRG-DDL-005 | Per-host failover | ddl | approved | M1 |
-| FRG-DDL-006 | Politeness and provider self-protection | ddl | approved | M1 |
-| FRG-DDL-007 | Persistent serialized download queue | ddl | approved | M1 |
-| FRG-DDL-008 | Download execution and size accounting | ddl | approved | M1 |
-| FRG-DDL-009 | Safe resume by Range | ddl | approved | M1 |
-| FRG-DDL-010 | Content verification before import | ddl | approved | M1 |
-| FRG-DDL-011 | Safe filename generation | ddl | approved | M1 |
-| FRG-DDL-012 | Outbound URL security | ddl | approved | M1 |
-| FRG-DDL-013 | Import handoff with provenance | ddl | approved | M1 |
+| FRG-DDL-001 | DDL client behind the common abstraction | ddl | implemented | M1 |
+| FRG-DDL-002 | GetComics search provider | ddl | implemented | M1 |
+| FRG-DDL-003 | Versioned page adapter with fixtures | ddl | implemented | M1 |
+| FRG-DDL-004 | Link enumeration and host/quality selection | ddl | implemented | M1 |
+| FRG-DDL-005 | Per-host failover | ddl | implemented | M1 |
+| FRG-DDL-006 | Politeness and provider self-protection | ddl | implemented | M1 |
+| FRG-DDL-007 | Persistent serialized download queue | ddl | implemented | M1 |
+| FRG-DDL-008 | Download execution and size accounting | ddl | implemented | M1 |
+| FRG-DDL-009 | Safe resume by Range | ddl | implemented | M1 |
+| FRG-DDL-010 | Content verification before import | ddl | implemented | M1 |
+| FRG-DDL-011 | Safe filename generation | ddl | implemented | M1 |
+| FRG-DDL-012 | Outbound URL security | ddl | implemented | M1 |
+| FRG-DDL-013 | Import handoff with provenance | ddl | implemented | M1 |
 | FRG-DDL-014 | Pack and booktype recognition | ddl | approved | B |
 | FRG-DDL-015 | Safe archive extraction | ddl | approved | B |
 | FRG-DDL-016 | Cloudflare session handling | ddl | approved | B |
@@ -196,7 +196,7 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-API-004 | Issue resources with monitored toggle | api | implemented | M1 |
 | FRG-API-005 | Command endpoint for background actions | api | implemented | M1 |
 | FRG-API-006 | Paging envelope for list endpoints | api | implemented | M1 |
-| FRG-API-007 | Queue endpoint backed by tracked downloads | api | approved | M1 |
+| FRG-API-007 | Queue endpoint backed by tracked downloads | api | implemented | M1 |
 | FRG-API-008 | Release endpoint: interactive search with cached grab | api | implemented | M1 |
 | FRG-API-009 | Provider schema and test endpoints | api | implemented | M1 |
 | FRG-API-010 | WebSocket resource-change push | api | approved | M1 |
