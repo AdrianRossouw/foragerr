@@ -12,7 +12,7 @@ development (see https://formicary.ai context).
 ## Non-negotiable process rules
 
 This project is developed under the `dev-process` spec
-(`openspec/specs/dev-process/spec.md`, FRG-PROC-001..006). In practice:
+(`openspec/specs/dev-process/spec.md`, FRG-PROC-001..012). In practice:
 
 1. **Spec before code** (FRG-PROC-003). Never write production code without an OpenSpec
    change proposal containing the governing requirements. Use the `opsx` commands/skills
@@ -39,6 +39,13 @@ This project is developed under the `dev-process` spec
 8. **Spec approval gate** (FRG-PROC-009). Adrian approves every OpenSpec proposal
    before implementation begins — record it in an `## Approval` section of the
    proposal. Phases start only after a plan-mode gate he has approved.
+9. **Docs stay in sync** (FRG-PROC-011, FRG-PROC-012). Every proposal declares its
+   manual impact (sections touched, or "none" with rationale); a change that alters
+   user/admin-facing behavior updates `docs/manual/` (and `README.md` labelling) in
+   the same change. Any dependency add/remove/upgrade updates
+   `docs/security/soup-register.md` in the same change; `tools/soup_check.py` must
+   exit 0 at every merge gate (full checklist:
+   `docs/process/commit-standard.md` §Merge-gate checklist).
 
 ## Orchestration
 
@@ -56,6 +63,7 @@ orchestrator writes repository files.
 ## Layout
 
 - `openspec/` — specs (source of truth) and change proposals
+- `docs/manual/` — user + admin manual, kept in sync per FRG-PROC-011
 - `docs/process/` — commit standard and process docs
 - `docs/traceability/` — requirements registry, traceability matrix
 - `docs/security/` — threat analysis, risk register
