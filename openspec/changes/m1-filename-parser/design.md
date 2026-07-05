@@ -90,3 +90,19 @@ Greenfield package; no consumers yet. Rollback = don't merge the branch.
 ## Open Questions
 
 None blocking.
+
+## Known limitations
+
+Accepted M1 behaviors, documented rather than fixed:
+
+- **Fully hyphen-glued names lose genuine title hyphens.** A name with no other
+  separators and 2+ hyphens (e.g. `X-23-005-2020.cbr`) is hyphen-tokenized, so a
+  genuinely hyphenated title has its hyphen split away and `series_name` degrades
+  to `X 23`. This does not affect series matching: the `matching_key` folds
+  punctuation, so `X-23` and `X 23` collapse to the same key. Accepted for M1.
+- **`matching_key` folds `and`/`&` together by design.** The conjunction is folded
+  so `Foo & Bar` and `Foo and Bar` release-name variants match the same series.
+  A side effect is that two genuinely distinct titles differing *only* by the
+  conjunction collide on `matching_key`. Accepted: library identity is the
+  ComicVine volume id, not the matching key, and CV-mapping ties break on
+  year/volume — the key is only a coarse candidate filter.
