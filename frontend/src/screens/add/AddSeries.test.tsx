@@ -6,7 +6,9 @@ import { renderWithProviders } from '../../test/renderWithProviders';
 import { fakeFetcher } from '../../test/fakeFetcher';
 import {
   makeCommand,
+  mockFormatProfiles,
   mockLookupCandidates,
+  mockRootFolders,
   mockSeriesCreated,
   pageOf,
 } from '../../test/mockData';
@@ -32,6 +34,10 @@ function addFetcher() {
     }
     if (method === 'GET' && path.startsWith('/api/v1/series/lookup?term=')) {
       return [];
+    }
+    if (method === 'GET' && path === '/api/v1/rootfolder') return mockRootFolders;
+    if (method === 'GET' && path === '/api/v1/formatprofile') {
+      return mockFormatProfiles;
     }
     if (method === 'POST' && path === '/api/v1/series') return mockSeriesCreated;
     // Routes the detail screen needs after the add navigates to it:
@@ -79,16 +85,19 @@ describe('FRG-UI-005: add series', () => {
     expect(within(strong).getByText('Saga')).toBeInTheDocument();
     expect(within(strong).getByText('(2012)')).toBeInTheDocument();
     expect(within(strong).getByText('Image')).toBeInTheDocument();
+    expect(within(strong).getByText('63 issues')).toBeInTheDocument();
     expect(within(strong).getByText('Name match 100%')).toBeInTheDocument();
     expect(within(strong).getByText('Year match')).toBeInTheDocument();
     expect(within(strong).getByText('Target issue plausible')).toBeInTheDocument();
 
     // Weak candidate: annotations rendered honestly, plus library membership.
+    // Its count_of_issues is null -> the issue-count annotation is OMITTED.
     const weak = screen.getByTestId('candidate-40509999');
     expect(within(weak).getByText('Name match 42%')).toBeInTheDocument();
     expect(within(weak).getByText('Year ±30')).toBeInTheDocument();
     expect(within(weak).getByText('Target issue unlikely')).toBeInTheDocument();
     expect(within(weak).getByText('In library')).toBeInTheDocument();
+    expect(within(weak).queryByText(/\d+ issues?/)).not.toBeInTheDocument();
   });
 
   it('FRG-UI-005 — selecting a candidate exposes root folder, format profile, monitor strategy and search-on-add controls', async () => {
@@ -101,8 +110,32 @@ describe('FRG-UI-005: add series', () => {
     await user.click(screen.getByRole('button', { name: 'Select Saga' }));
 
     const panel = screen.getByTestId('add-options-panel');
-    expect(within(panel).getByRole('spinbutton', { name: 'Root folder' })).toBeInTheDocument();
-    expect(within(panel).getByRole('spinbutton', { name: 'Format profile' })).toBeInTheDocument();
+
+    // Root folders from GET /api/v1/rootfolder: path + formatted free space
+    // (omitted when free_space is null), defaulting to the first entry.
+    const rootFolder = within(panel).getByRole('combobox', { name: 'Root folder' });
+    await waitFor(() =>
+      expect(within(rootFolder).getAllByRole('option')).toHaveLength(2),
+    );
+    expect(
+      within(rootFolder).getByRole('option', { name: '/comics — 232.8 GB free' }),
+    ).toBeInTheDocument();
+    expect(
+      within(rootFolder).getByRole('option', { name: '/mnt/archive/comics' }),
+    ).toBeInTheDocument();
+    expect(rootFolder).toHaveValue('1');
+
+    // Format profiles from GET /api/v1/formatprofile: name per option,
+    // defaulting to the first (seeded) profile.
+    const profile = within(panel).getByRole('combobox', { name: 'Format profile' });
+    expect(
+      within(profile).getByRole('option', { name: 'Standard' }),
+    ).toBeInTheDocument();
+    expect(
+      within(profile).getByRole('option', { name: 'CBZ Only' }),
+    ).toBeInTheDocument();
+    expect(profile).toHaveValue('1');
+
     expect(within(panel).getByRole('combobox', { name: 'Monitor strategy' })).toBeInTheDocument();
     expect(
       within(panel).getByRole('checkbox', { name: 'Start search for missing issues' }),
@@ -119,6 +152,16 @@ describe('FRG-UI-005: add series', () => {
     await user.click(screen.getByRole('button', { name: 'Select Saga' }));
 
     const panel = screen.getByTestId('add-options-panel');
+    const rootFolder = within(panel).getByRole('combobox', { name: 'Root folder' });
+    await waitFor(() =>
+      expect(within(rootFolder).getAllByRole('option')).toHaveLength(2),
+    );
+    // Pick NON-default entries so the POST proves the chosen ids travel.
+    await user.selectOptions(rootFolder, '2');
+    await user.selectOptions(
+      within(panel).getByRole('combobox', { name: 'Format profile' }),
+      '2',
+    );
     await user.selectOptions(
       within(panel).getByRole('combobox', { name: 'Monitor strategy' }),
       'missing',
@@ -133,8 +176,8 @@ describe('FRG-UI-005: add series', () => {
         method: 'POST',
         body: {
           cv_volume_id: 40501234,
-          root_folder_id: 1,
-          format_profile_id: null,
+          root_folder_id: 2,
+          format_profile_id: 2,
           monitor_strategy: 'missing',
           monitor_new_items: 'all',
           search_on_add: true,

@@ -2,9 +2,15 @@ import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Toolbar } from '../../components/Toolbar';
 import { SearchIcon, CloseIcon } from '../../components/icons';
-import { useAddSeries, useLookup } from '../../api/hooks';
+import {
+  useAddSeries,
+  useFormatProfiles,
+  useLookup,
+  useRootFolders,
+} from '../../api/hooks';
 import type { LookupCandidate } from '../../api/types';
 import { MONITOR_STRATEGIES } from '../../api/types';
+import { formatBytes } from '../../lib/format';
 import styles from './AddSeries.module.css';
 
 /**
@@ -37,6 +43,12 @@ const STRATEGY_LABELS: Record<string, string> = {
 function PlausibilityChips({ candidate }: { candidate: LookupCandidate }) {
   return (
     <span className={styles.chipRow}>
+      {candidate.count_of_issues !== null && (
+        <span className={styles.chip}>
+          {candidate.count_of_issues} issue
+          {candidate.count_of_issues === 1 ? '' : 's'}
+        </span>
+      )}
       <span className={styles.chip}>
         Name match {Math.round(candidate.name_similarity * 100)}%
       </span>
@@ -80,35 +92,49 @@ function AddOptionsPanel({
     searchOnAdd: boolean;
   }) => void;
 }) {
-  // No root-folder / format-profile list endpoints exist in the M1 API
-  // surface, so these are plain id inputs for now (see change report).
-  const [rootFolderId, setRootFolderId] = useState('1');
-  const [formatProfileId, setFormatProfileId] = useState('');
+  const rootFolders = useRootFolders();
+  const formatProfiles = useFormatProfiles();
+  // null = not chosen yet -> default to the first entry once the list loads.
+  const [rootFolderId, setRootFolderId] = useState<number | null>(null);
+  const [formatProfileId, setFormatProfileId] = useState<number | null>(null);
   const [monitorStrategy, setMonitorStrategy] = useState('all');
   const [searchOnAdd, setSearchOnAdd] = useState(false);
+
+  const selectedRootFolderId = rootFolderId ?? rootFolders.data?.[0]?.id ?? null;
+  const selectedProfileId =
+    formatProfileId ?? formatProfiles.data?.[0]?.id ?? null;
 
   return (
     <div className={styles.addPanel} data-testid="add-options-panel">
       <label className={styles.formRow}>
         <span>Root Folder</span>
-        <input
-          type="number"
-          min={1}
+        <select
           aria-label="Root folder"
-          value={rootFolderId}
-          onChange={(e) => setRootFolderId(e.target.value)}
-        />
+          value={selectedRootFolderId ?? ''}
+          onChange={(e) => setRootFolderId(Number(e.target.value))}
+        >
+          {rootFolders.data?.map((folder) => (
+            <option key={folder.id} value={folder.id}>
+              {folder.path}
+              {folder.free_space !== null &&
+                ` — ${formatBytes(folder.free_space)} free`}
+            </option>
+          ))}
+        </select>
       </label>
       <label className={styles.formRow}>
         <span>Format Profile</span>
-        <input
-          type="number"
-          min={1}
+        <select
           aria-label="Format profile"
-          placeholder="Default"
-          value={formatProfileId}
-          onChange={(e) => setFormatProfileId(e.target.value)}
-        />
+          value={selectedProfileId ?? ''}
+          onChange={(e) => setFormatProfileId(Number(e.target.value))}
+        >
+          {formatProfiles.data?.map((profile) => (
+            <option key={profile.id} value={profile.id}>
+              {profile.name}
+            </option>
+          ))}
+        </select>
       </label>
       <label className={styles.formRow}>
         <span>Monitor</span>
@@ -136,15 +162,16 @@ function AddOptionsPanel({
       <button
         type="button"
         className={styles.addButton}
-        disabled={busy}
-        onClick={() =>
+        disabled={busy || selectedRootFolderId === null}
+        onClick={() => {
+          if (selectedRootFolderId === null) return;
           onAdd({
-            rootFolderId: Number(rootFolderId) || 1,
-            formatProfileId: formatProfileId === '' ? null : Number(formatProfileId),
+            rootFolderId: selectedRootFolderId,
+            formatProfileId: selectedProfileId,
             monitorStrategy,
             searchOnAdd,
-          })
-        }
+          });
+        }}
       >
         Add {candidate.name ?? 'series'}
       </button>

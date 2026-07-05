@@ -4,14 +4,14 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { createQueryClient } from '../queryClient';
 import { FetcherProvider } from '../api/fetcher';
-import { useSeriesList, useQueuePage } from '../api/hooks';
+import { useCommandStatus, useSeriesList, useQueuePage } from '../api/hooks';
 import { queryKeys } from '../api/queryKeys';
 import type { QueueItem } from '../api/types';
 import { WebSocketBridge } from './WebSocketBridge';
 import { useConnectionStore } from './connectionStore';
 import { makeFakeSocketFactory } from '../test/fakeSocket';
 import { fakeFetcher } from '../test/fakeFetcher';
-import { mockSeriesList, mockQueuePage1 } from '../test/mockData';
+import { makeCommand, mockSeriesList, mockQueuePage1 } from '../test/mockData';
 
 beforeEach(() => {
   // Reset the shared connection store between cases (module singleton).
@@ -88,6 +88,76 @@ describe('FRG-UI-001: WebSocketBridge maps messages to cache operations', () => 
     expect(patched?.find((i) => i.id === 901)?.progress).toBe(25);
     // No refetch was triggered by the patch.
     expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('FRG-UI-001 — a queue updated message invalidates ["queue"] and the queue query refetches', async () => {
+    const client = createQueryClient();
+    const { spy, fetcher } = fakeFetcher(() => mockQueuePage1);
+    const { factory, last } = makeFakeSocketFactory();
+
+    function Harness() {
+      useQueuePage(1); // active observer of ['queue', 1]
+      return <WebSocketBridge socketFactory={factory} />;
+    }
+
+    render(
+      <QueryClientProvider client={client}>
+        <FetcherProvider fetcher={fetcher}>
+          <Harness />
+        </FetcherProvider>
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+
+    act(() => last().emitOpen());
+    // The backend's invalidation signal (backend/src/foragerr/ws/messages.py):
+    // NOT a progress patch — no page/progress fields on the resource.
+    act(() =>
+      last().emitMessage({
+        name: 'queue',
+        action: 'updated',
+        resource: { downloadId: 'SABnzbd_nzo_900', status: 'imported', health: 'ok' },
+      }),
+    );
+
+    // Refetch observed — invalidation, not an in-place patch.
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
+    expect(spy).toHaveBeenLastCalledWith('/api/v1/queue?page=1');
+  });
+
+  it('FRG-UI-001 — a command updated message invalidates ["command", id] and the status query refetches', async () => {
+    const client = createQueryClient();
+    const { spy, fetcher } = fakeFetcher(() =>
+      makeCommand({ id: 55, status: 'completed' }),
+    );
+    const { factory, last } = makeFakeSocketFactory();
+
+    function Harness() {
+      useCommandStatus(55); // active observer of ['command', 55]
+      return <WebSocketBridge socketFactory={factory} />;
+    }
+
+    render(
+      <QueryClientProvider client={client}>
+        <FetcherProvider fetcher={fetcher}>
+          <Harness />
+        </FetcherProvider>
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+
+    act(() => last().emitOpen());
+    act(() =>
+      last().emitMessage({
+        name: 'command',
+        action: 'updated',
+        resource: { id: 55, name: 'refresh-series', status: 'completed' },
+      }),
+    );
+
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
   });
 
   it('FRG-UI-001 — reconnect uses increasing backoff and the sidebar footer reflects connection state', async () => {

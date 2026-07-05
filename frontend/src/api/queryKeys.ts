@@ -9,6 +9,8 @@
  *   [kind]                  <-> GET /api/v1/{kind}         (provider rows)
  *   [kind, 'schema']        <-> GET /api/v1/{kind}/schema  (kind = 'indexer'
  *                                                          | 'downloadclient')
+ *   ['rootfolder']          <-> GET /api/v1/rootfolder
+ *   ['formatprofile']       <-> GET /api/v1/formatprofile
  *
  * The WebSocketBridge and every screen invalidate/patch through these helpers —
  * no raw array literals in components.
@@ -33,7 +35,14 @@ export const queryKeys = {
     forSeries: (seriesId: number) => ['issues', seriesId] as const,
   },
   command: {
+    all: () => ['command'] as const,
     detail: (id: number) => ['command', id] as const,
+  },
+  rootFolder: {
+    all: () => ['rootfolder'] as const,
+  },
+  formatProfile: {
+    all: () => ['formatprofile'] as const,
   },
   // ComicVine lookup deliberately does NOT live under the ['series'] prefix
   // (its path is /api/v1/series/lookup): the WebSocketBridge invalidates
