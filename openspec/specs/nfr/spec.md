@@ -7,6 +7,7 @@ Phase 1 reference research (`docs/research/`). Baseline depth per the Phase 2 sc
 decision: SHALL + coarse acceptance; scenario-level elaboration happens in the
 milestone change that implements each requirement (FRG-PROC-003, FRG-PROC-009).
 ## Requirements
+
 ### Requirement: FRG-NFR-001 — startup time
 
 The system SHALL be ready to serve (health endpoint 200, scheduler running) within 15 seconds of container start on the reference home server with a library of up to 5,000 issues, excluding one-time schema migrations.
@@ -54,10 +55,25 @@ The system SHALL enforce a client-side ComicVine rate limit shared across ALL co
 - **Source**: mylar-comicvine.md §1.3 and §3.1 (fixed sleep, unlocked concurrency, no Retry-After handling — weaknesses to fix), §5 (candidate requirement).
 - **Notes**: Divergence from Mylar: a real shared limiter (async token/lock), not a per-call sleep. CV client behavior (endpoints, pagination) is META's; NFR owns the politeness budget.
 
-#### Scenario: Baseline acceptance
+#### Scenario: Limiter is process-global across all call sites
 
-- **WHEN** this requirement is verified against the implementation
-- **THEN** A test driving concurrent refresh+search operations records inter-request spacing ≥ the limit at the HTTP layer; a simulated ban response flips CV health to degraded and suppresses further calls for the cool-down.
+- **WHEN** concurrent ComicVine operations spanning search, volume, issue, and cover call sites are driven simultaneously
+- **THEN** observed inter-request wire times at the HTTP layer are serialized to at least the configured minimum interval across all call sites combined, never per-call-site independent spacing
+
+#### Scenario: 429 with Retry-After is honored
+
+- **WHEN** ComicVine returns a 429 response carrying a `Retry-After` header
+- **THEN** the limiter suppresses further ComicVine requests until at least the Retry-After delay has elapsed and does not retry in a tight loop
+
+#### Scenario: Ban/degraded state is observable via health
+
+- **WHEN** a simulated ComicVine ban/rate-limit signal is received
+- **THEN** the ComicVine backend is marked degraded in the exposed component health, and further calls are suppressed for the cool-down window rather than reissued immediately
+
+#### Scenario: Configured interval below the floor is clamped
+
+- **WHEN** the limiter interval is configured below the documented floor
+- **THEN** the effective interval is clamped to the floor (with a warning) and enforced spacing never drops below that documented minimum
 
 ### Requirement: FRG-NFR-005 — indexer and DDL politeness with failure backoff
 
@@ -193,10 +209,25 @@ All strings originating from external services (ComicVine wiki fields, scraped D
 - **Source**: mylar-comicvine.md §4 (user-editable wiki HTML → UI/search); mylar-ddl.md §4 (redirect-derived filenames, hostile archives, scraped text into logs/DB/UI).
 - **Notes**: Cross-cutting security NFR feeding docs/security/ STRIDE (FRG-PROC-006). Archive-bomb /extraction limits belong to the DDL/PP AREAs; this requirement owns the string-handling discipline everywhere.
 
-#### Scenario: Baseline acceptance
+#### Scenario: HTML is stripped and length-capped at ingest
 
-- **WHEN** this requirement is verified against the implementation
-- **THEN** Tests feed hostile fixtures (script tags in CV descriptions, path-traversal filenames in redirect URLs, format-string metacharacters in titles) through ingest paths and assert sanitized persistence, encoded rendering, and system-generated download filenames.
+- **WHEN** a ComicVine description containing `<script>` and other HTML tags exceeding the length cap is ingested
+- **THEN** the value persisted to the database has HTML removed and is truncated to the documented length cap, and that same sanitized text is what appears in API responses and logs
+
+#### Scenario: Path traversal in a title cannot escape the target directory
+
+- **WHEN** a series or issue title contains path-traversal and separator sequences (e.g. `../`, embedded `/` or `\`, a reserved device name)
+- **THEN** filesystem path segments are built only from sanitized safe components with separators and reserved names stripped, so the resulting path stays within the intended library directory
+
+#### Scenario: Control/ANSI characters do not reach logs unescaped
+
+- **WHEN** an externally sourced string containing ANSI escape and control characters (including CR/LF) is written toward the logs
+- **THEN** the logged form is sanitized so no raw control sequences or forged log lines appear
+
+#### Scenario: Hostile fixture round-trips harmlessly end to end
+
+- **WHEN** a hostile fixture combining script tags, path traversal in the title, and ANSI/control characters is fed through the ingest paths
+- **THEN** it persists sanitized, renders/serializes encoded, produces a system-generated (not remote-derived) download filename, and causes no injection, traversal, or log-forging side effects
 
 ### Requirement: FRG-NFR-013 — resource footprint
 
@@ -223,4 +254,3 @@ The HTTP/WebSocket listener SHALL enforce configurable limits on inbound request
 
 - **WHEN** this requirement is verified against the implementation
 - **THEN** A multi-gigabyte body upload is rejected at the limit without memory exhaustion; a burst of requests is rate-limited with 429s; a request field containing newline metacharacters appears in logs as a single escaped field, not forged log lines.
-
