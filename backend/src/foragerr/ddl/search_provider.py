@@ -24,6 +24,7 @@ attribute for the shared comparator/explanation only.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 from urllib.parse import quote_plus
@@ -218,7 +219,7 @@ async def search_getcomics(
     backoff: ProviderBackoff,
     config_dir: Path | None = None,
     sleep: Callable[[float], Awaitable[None]] | None = None,
-    clock=utcnow,
+    clock: Callable[[], datetime] = utcnow,
     rand: Callable[[], float] | None = None,
     **_ignored: Any,
 ) -> IndexerSearchOutcome:

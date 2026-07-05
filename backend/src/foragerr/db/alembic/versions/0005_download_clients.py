@@ -181,13 +181,12 @@ def upgrade() -> None:
         sa.Column("title", sa.Text(), nullable=True),
         sa.Column("expected_size", sa.Integer(), nullable=True),
         sa.Column("bytes_received", sa.Integer(), nullable=False, server_default="0"),
-        # ordered candidate link list + failover bookkeeping (FRG-DDL-004/005).
-        sa.Column("links_json", sa.Text(), nullable=True),
+        # per-host failover bookkeeping (FRG-DDL-005): the post page is re-fetched
+        # each attempt, so no link list is persisted; the staging path is derived.
         sa.Column("current_host", sa.Text(), nullable=True),
         sa.Column("current_link", sa.Text(), nullable=True),
         sa.Column("selected_link_type", sa.Text(), nullable=True),
         sa.Column("failed_hosts_json", sa.Text(), nullable=True),
-        sa.Column("staging_path", sa.Text(), nullable=True),
         sa.Column("output_path", sa.Text(), nullable=True),
         sa.Column("attempts", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("last_error", sa.Text(), nullable=True),

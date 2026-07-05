@@ -55,12 +55,12 @@ from foragerr.indexers.models import IndexerRow
 
 logger = logging.getLogger("foragerr.ddl.queue")
 
-# ddl_queue.status values.
+# ddl_queue.status values. (No "paused": FRG-DDL-007 has no pause action — retry
+# / resume / abort / remove only — so a row never enters a paused state.)
 STATUS_QUEUED = "queued"
 STATUS_DOWNLOADING = "downloading"
 STATUS_COMPLETED = "completed"
 STATUS_FAILED = "failed"
-STATUS_PAUSED = "paused"
 STATUS_ABORTED = "aborted"
 
 #: Post-page byte cap (an article page is small; guards a runaway/lying host).
@@ -358,30 +358,40 @@ class DdlQueueEngine:
     # -- manual queue actions (FRG-DDL-007) ----------------------------------
 
     async def retry(self, download_id: str) -> bool:
-        """Re-queue a failed/aborted item for a fresh attempt (clears failures)."""
+        """Re-queue a FAILED or ABORTED item for a fresh attempt, CLEARING its
+        failed-host history + last error (accepts ``failed``/``aborted``).
+
+        The counterpart of :meth:`resume`: retry wipes the failover bookkeeping so
+        every host is tried again from scratch, whereas resume keeps it."""
         return await self._transition(
             download_id,
             STATUS_QUEUED,
             reset_failures=True,
-            from_states=(STATUS_FAILED, STATUS_ABORTED, STATUS_PAUSED),
+            from_states=(STATUS_FAILED, STATUS_ABORTED),
         )
 
     async def resume(self, download_id: str) -> bool:
-        """Re-queue a paused item, keeping its partial + failed-host history."""
+        """Re-queue a FAILED item, KEEPING its partial + failed-host history
+        (accepts ``failed`` only).
+
+        The counterpart of :meth:`retry`: resume preserves the failover
+        bookkeeping so it continues past the already-tried hosts / on-disk
+        partial, whereas retry clears it and starts over."""
         return await self._transition(
             download_id,
             STATUS_QUEUED,
             reset_failures=False,
-            from_states=(STATUS_PAUSED, STATUS_FAILED),
+            from_states=(STATUS_FAILED,),
         )
 
     async def abort(self, download_id: str) -> bool:
-        """Stop an item; it stays visible as aborted until removed."""
+        """Stop a queued/in-flight item; it stays visible as aborted until removed
+        (accepts ``queued``/``downloading``)."""
         return await self._transition(
             download_id,
             STATUS_ABORTED,
             reset_failures=False,
-            from_states=(STATUS_QUEUED, STATUS_DOWNLOADING, STATUS_PAUSED),
+            from_states=(STATUS_QUEUED, STATUS_DOWNLOADING),
         )
 
     async def remove(self, download_id: str, *, delete_data: bool = False) -> bool:
@@ -561,7 +571,6 @@ __all__ = [
     "STATUS_COMPLETED",
     "STATUS_DOWNLOADING",
     "STATUS_FAILED",
-    "STATUS_PAUSED",
     "STATUS_QUEUED",
     "DdlQueueEngine",
     "EnqueueRequest",

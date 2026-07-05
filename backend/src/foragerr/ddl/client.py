@@ -20,14 +20,12 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 
-from foragerr.config import Settings
 from foragerr.ddl.links import parse_host_priority
 from foragerr.ddl.queue import (
     STATUS_ABORTED,
     STATUS_COMPLETED,
     STATUS_DOWNLOADING,
     STATUS_FAILED,
-    STATUS_PAUSED,
     STATUS_QUEUED,
     DdlQueueEngine,
     EnqueueRequest,
@@ -54,15 +52,8 @@ _STATUS_MAP: dict[str, ClientItemStatus] = {
     STATUS_DOWNLOADING: ClientItemStatus.DOWNLOADING,
     STATUS_COMPLETED: ClientItemStatus.COMPLETED,
     STATUS_FAILED: ClientItemStatus.FAILED,
-    STATUS_PAUSED: ClientItemStatus.PAUSED,
     STATUS_ABORTED: ClientItemStatus.FAILED,
 }
-
-
-def make_ddl_factory(settings: Settings) -> HttpClientFactory:
-    """Build the outbound factory for DDL traffic (tests monkeypatch this to
-    route at an injected transport, mirroring the indexer factory indirection)."""
-    return HttpClientFactory(settings)
 
 
 def staging_dir_for(config_dir: Path) -> Path:
@@ -199,4 +190,4 @@ class DdlClient:
         await self._engine().remove(item.download_id, delete_data=True)
 
 
-__all__ = ["DdlClient", "make_ddl_factory", "staging_dir_for"]
+__all__ = ["DdlClient", "staging_dir_for"]
