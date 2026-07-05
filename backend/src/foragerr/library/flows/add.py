@@ -127,6 +127,14 @@ async def add_series(
         else:
             path = str(build_series_path(root.path, title, record.start_year))
 
+        path_taken = await session.scalar(
+            select(SeriesRow.id).where(SeriesRow.path == path)
+        )
+        if path_taken is not None:
+            raise SeriesValidationError(
+                f"path {path!r} is already used by another series"
+            )
+
         series = await repo.create_series(
             session,
             cv_volume_id=cv_volume_id,

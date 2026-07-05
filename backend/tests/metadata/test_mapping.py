@@ -107,6 +107,18 @@ def test_hostile_title_sanitized_but_number_untouched():
     assert "Chapter" in rec.title and "One" in rec.title
 
 
+@pytest.mark.req("FRG-META-005")
+def test_malformed_numeric_string_maps_to_none_not_a_crash():
+    """A multi-sign numeric-looking string ("--5") must not raise ValueError
+    out of the client's typed-exceptions-only contract."""
+    rec = map_volume(
+        volume_payload(id="--5", count_of_issues="--5", start_year="--5", issues=None)
+    )
+    assert rec.cv_volume_id == 0  # `_int(...) or 0` fallback, never a crash
+    assert rec.start_year is None
+    assert rec.count_of_issues is None
+
+
 def vars_of(record) -> list[object]:
     """All scalar field values of a slotted dataclass, flattening tuples."""
     out: list[object] = []

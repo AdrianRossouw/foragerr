@@ -310,6 +310,31 @@ async def test_cover_refetched_only_when_url_changes(
     assert image_hits() == 2
 
 
+@pytest.mark.req("FRG-META-013")
+async def test_cover_cached_at_set_even_if_sidecar_write_fails(
+    db, settings, commands, monkeypatch, root_folder_id, root_folder_path, format_profile_id
+):
+    """cover_cached_at must be recorded before the (best-effort, non-atomic)
+    sidecar write — not after — so a crash/failure between the two never
+    leaves cover_cached_at permanently stuck at its old value even though
+    the cover file itself was cached successfully."""
+    img = "https://comicvine.gamespot.com/a/uploads/original/cover1.jpg"
+    series_id = await _make_series(db, root_folder_path, format_profile_id)
+    fake = FakeCV().volume(1, image_url=img).issues(1, [issue(100, "1")])
+    factory = build_factory(settings, fake.handler())
+
+    def _boom(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(Path, "write_text", _boom)
+
+    await refresh_series(db, settings, series_id, commands=commands, factory=factory)
+
+    async with db.read_session() as session:
+        series = await repo.get_series(session, series_id)
+    assert series.cover_cached_at is not None
+
+
 # --- chained commands + restart-safety (FRG-SER-005) ------------------------
 
 

@@ -15,7 +15,6 @@ from __future__ import annotations
 import datetime as dt
 import logging
 from dataclasses import dataclass
-from pathlib import Path
 
 from sqlalchemy import func, select
 
@@ -42,6 +41,7 @@ from foragerr.library.flows._common import (
     RefreshSeriesCommand,
     SeriesRefreshed,
     comicvine_factory,
+    cover_paths,
     decode_add_options,
     iso_to_date,
     monitored_for_new_items,
@@ -271,10 +271,6 @@ def _strategy_monitored(
 # --- cover cache (FRG-META-013) ---------------------------------------------
 
 
-def _covers_dir(settings: Settings) -> Path:
-    return Path(settings.config_dir) / "covers"
-
-
 async def _cache_cover_best_effort(
     db: Database,
     settings: Settings,
@@ -291,12 +287,20 @@ async def _cache_cover_best_effort(
     change" behaviour (FRG-META-013) with no migration. Any cover failure is
     logged and swallowed — a cover is a nicety, never a reason to fail the
     whole refresh.
+
+    Ordering note: the DB's ``cover_cached_at`` is updated BEFORE the sidecar
+    is written (not after). If the process dies between the JPEG write and
+    the DB commit, the next refresh sees the JPEG but no sidecar and simply
+    re-fetches (harmless extra work). If it dies between the DB commit and
+    the sidecar write, the next refresh also re-fetches (the "already
+    cached" skip check requires both files) rather than silently leaving
+    ``cover_cached_at`` stuck at a stale value — the DB is the durable source
+    of truth, the sidecar only helps that following refresh detect the
+    cover has already been recorded.
     """
     if not image_url:
         return
-    covers_dir = _covers_dir(settings)
-    cover_path = covers_dir / f"{series_id}.jpg"
-    url_path = covers_dir / f"{series_id}.url"
+    cover_path, url_path = cover_paths(settings, series_id)
 
     if cover_path.exists() and url_path.exists():
         try:
@@ -311,16 +315,16 @@ async def _cache_cover_best_effort(
         logger.warning("cover cache for series %d failed: %s", series_id, exc)
         return
 
-    try:
-        covers_dir.mkdir(parents=True, exist_ok=True)
-        url_path.write_text(image_url, encoding="utf-8")
-    except OSError as exc:  # pragma: no cover - sidecar write failure
-        logger.warning("cover sidecar for series %d failed: %s", series_id, exc)
-
     async with db.write_session() as session:
         series = await session.get(SeriesRow, series_id)
         if series is not None:
             series.cover_cached_at = utcnow()
+
+    try:
+        cover_path.parent.mkdir(parents=True, exist_ok=True)
+        url_path.write_text(image_url, encoding="utf-8")
+    except OSError as exc:  # pragma: no cover - sidecar write failure
+        logger.warning("cover sidecar for series %d failed: %s", series_id, exc)
 
 
 # --- command handler --------------------------------------------------------

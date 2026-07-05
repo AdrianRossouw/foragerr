@@ -103,6 +103,74 @@ async def test_rename_failure_rolls_back_row(
     assert Path(series.path) == old_dir  # row rolled back to the original path
 
 
+@pytest.mark.req("FRG-SER-008")
+async def test_root_folder_change_without_path_requires_current_path_under_new_root(
+    db, root_folder_id, root_folder_path, format_profile_id, tmp_path
+):
+    """root_folder_id alone (no path) must not silently desync the row: if
+    the series' current path isn't under the new root, reject it."""
+    series_id = await _make(db, root_folder_id, format_profile_id, root_folder_path / "Saga")
+
+    other_root = tmp_path / "other-root"
+    other_root.mkdir()
+    async with db.write_session() as session:
+        other = await repo.create_root_folder(session, str(other_root))
+        other_root_id = other.id
+
+    with pytest.raises(SeriesValidationError):
+        await edit_series(db, series_id, root_folder_id=other_root_id)
+
+    async with db.read_session() as session:
+        series = await repo.get_series(session, series_id)
+    # unchanged: root_folder_id must not diverge from path's actual root
+    assert series.root_folder_id == root_folder_id
+    assert Path(series.path) == (root_folder_path / "Saga")
+
+
+@pytest.mark.req("FRG-SER-008")
+async def test_edit_path_rejects_collision_with_another_series(
+    db, root_folder_id, root_folder_path, format_profile_id
+):
+    """A PUT path change that would collide with another series' stored path
+    must reject before renaming anything on disk."""
+    taken_dir = root_folder_path / "Already Taken"
+    taken_dir.mkdir(parents=True)
+    await _make(db, root_folder_id, format_profile_id, taken_dir, cv=1)
+
+    old_dir = root_folder_path / "Saga (2012)"
+    old_dir.mkdir(parents=True)
+    series_id = await _make(db, root_folder_id, format_profile_id, old_dir, cv=2)
+
+    with pytest.raises(SeriesValidationError):
+        await edit_series(db, series_id, path=str(taken_dir))
+
+    async with db.read_session() as session:
+        series = await repo.get_series(session, series_id)
+    assert Path(series.path) == old_dir  # unchanged
+    assert old_dir.exists()  # never renamed away
+
+
+@pytest.mark.req("FRG-SER-014")
+async def test_delete_removes_cached_cover_files(
+    db, root_folder_id, root_folder_path, format_profile_id
+):
+    from foragerr.library.flows._common import cover_paths
+    from foragerr.config import Settings
+
+    series_id = await _make(db, root_folder_id, format_profile_id, root_folder_path / "Saga")
+    settings = Settings(config_dir=root_folder_path.parent / "cfg")
+    settings.config_dir.mkdir(exist_ok=True)
+    cover_path, url_path = cover_paths(settings, series_id)
+    cover_path.parent.mkdir(parents=True, exist_ok=True)
+    cover_path.write_bytes(b"jpeg-bytes")
+    url_path.write_text("https://example.com/cover.jpg")
+
+    await delete_series(db, series_id, settings=settings)
+
+    assert not cover_path.exists()
+    assert not url_path.exists()
+
+
 @pytest.mark.req("FRG-SER-014")
 async def test_delete_keeps_files_and_cascades_rows(
     db, root_folder_id, root_folder_path, format_profile_id, tmp_path

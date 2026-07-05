@@ -14,7 +14,7 @@ import datetime as dt
 import logging
 import os
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Awaitable, Callable, Iterator
 
 from sqlalchemy import select
 
@@ -33,13 +33,30 @@ from foragerr.library.flows._common import ScanSeriesCommand
 
 logger = logging.getLogger("foragerr.library.flows.scan")
 
+#: ``HandlerContext.offload``-compatible callable (``daemon_offload`` in
+#: production): runs a blocking function on a thread so it never stalls the
+#: shared event loop.
+OffloadFn = Callable[..., Awaitable[Any]]
 
-async def scan_series(db: Database, settings: Settings, series_id: int) -> str:
+
+async def scan_series(
+    db: Database,
+    settings: Settings,
+    series_id: int,
+    *,
+    offload: OffloadFn | None = None,
+) -> str:
     """Match on-disk files under a series' path to its issues.
 
     Returns a ``"matched=N unmatched=M"`` summary (recorded as the command's
     job-history result). A missing series folder is not an error — it simply
     yields zero files.
+
+    ``offload`` (the command handler passes ``ctx.offload``) runs the
+    directory walk + per-file ``stat`` on a thread instead of the event loop
+    — worth it on a slow/network-mounted library path. Direct callers (tests,
+    scripts) may omit it, in which case the walk runs inline exactly as
+    before.
     """
     async with db.read_session() as session:
         series = await repo.get_series(session, series_id)
@@ -62,9 +79,15 @@ async def scan_series(db: Database, settings: Settings, series_id: int) -> str:
         (issue.id, parse_issue_number(issue.issue_number)) for issue in issues
     ]
 
+    files = (
+        await offload(_collect_archive_files, series_path)
+        if offload is not None
+        else _collect_archive_files(series_path)
+    )
+
     matched: list[tuple[int, str, int]] = []
     unmatched = 0
-    for file_path, size in _iter_archive_files(series_path):
+    for file_path, size in files:
         if file_path in existing_paths:
             continue  # already recorded by an earlier scan/import
         parsed = parse(
@@ -115,15 +138,25 @@ def _match_issue(
 
 
 def _series_title_matches(parsed_key: str, series_key: str) -> bool:
-    """Loose series-title match: exact, or one key's tokens are a subset of
-    the other's (tolerates a subtitle/extra word on either side)."""
+    """Loose series-title match: exact, or the parsed key's tokens are a
+    subset of the series key's (tolerates the parser under-extracting a
+    subtitle/extra word the full ComicVine title carries).
+
+    Deliberately NOT symmetric: allowing the series key to be a subset of the
+    parsed key (the other direction) would let a short registered series name
+    swallow a misfiled file that actually belongs to a different, longer
+    series sharing that name as a prefix — a common pattern in comics
+    ("Batman" / "Batman Beyond", "X-Men" / "X-Men Legacy", "Avengers" /
+    "Avengers Academy", ...). Since scan already scopes the walk to one
+    series' own folder, only the narrower direction is safe to tolerate.
+    """
     if not parsed_key or not series_key:
         return False
     if parsed_key == series_key:
         return True
     parsed_tokens = set(parsed_key.split())
     series_tokens = set(series_key.split())
-    return series_tokens <= parsed_tokens or parsed_tokens <= series_tokens
+    return parsed_tokens <= series_tokens
 
 
 def _issue_equal(a: Issue, b: Issue) -> bool:
@@ -140,6 +173,12 @@ def _norm_name(name: str | None) -> str | None:
 
 
 # --- filesystem -------------------------------------------------------------
+
+
+def _collect_archive_files(series_path: str) -> list[tuple[str, int]]:
+    """Materialize :func:`_iter_archive_files` — a plain function so it can
+    be handed to ``offload``/``asyncio.to_thread`` as a callable."""
+    return list(_iter_archive_files(series_path))
 
 
 def _iter_archive_files(series_path: str) -> Iterator[tuple[str, int]]:
@@ -166,4 +205,6 @@ def _iter_archive_files(series_path: str) -> Iterator[tuple[str, int]]:
 
 @register_handler("scan-series")
 async def _handle_scan(command: ScanSeriesCommand, ctx: HandlerContext) -> str:
-    return await scan_series(ctx.db, ctx.settings, command.series_id)
+    return await scan_series(
+        ctx.db, ctx.settings, command.series_id, offload=ctx.offload
+    )

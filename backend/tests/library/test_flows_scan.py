@@ -81,6 +81,63 @@ async def test_scan_is_idempotent(
 
 
 @pytest.mark.req("FRG-SER-005")
+async def test_scan_does_not_misattribute_a_longer_named_series_file(
+    db, settings, root_folder_id, format_profile_id, tmp_path
+):
+    """A file for a different, longer-named series (misfiled under a
+    shorter series whose name is a prefix of it) must NOT match — the
+    subset-title tolerance is one-directional (see _series_title_matches)."""
+    series_dir = tmp_path / "Batman (1940)"
+    series_dir.mkdir()
+    async with db.write_session() as session:
+        series = await repo.create_series(
+            session, cv_volume_id=4, title="Batman", start_year=1940,
+            format_profile_id=format_profile_id, root_folder_id=root_folder_id,
+            path=str(series_dir),
+        )
+        batman_1 = await repo.create_issue(
+            session, series_id=series.id, cv_issue_id=1, issue_number="1"
+        )
+        series_id, batman_1_id = series.id, batman_1.id
+    # Misfiled: belongs to the distinct series "Batman Beyond", not "Batman".
+    (series_dir / "Batman Beyond 001 (1999).cbz").write_bytes(b"x" * 10)
+
+    summary = await scan_series(db, settings, series_id)
+    assert summary == "matched=0 unmatched=1"
+    assert await _files_for(db, batman_1_id) == []
+
+
+@pytest.mark.req("FRG-SER-005")
+async def test_scan_uses_offload_when_supplied(
+    db, settings, root_folder_id, format_profile_id, tmp_path
+):
+    """The directory walk runs through offload when supplied (the command
+    handler passes ctx.offload so it never blocks the event loop), and
+    falls back to an inline call when omitted (existing direct-call tests
+    above rely on this default)."""
+    series_dir = tmp_path / "Saga (2012)"
+    series_dir.mkdir()
+    async with db.write_session() as session:
+        series = await repo.create_series(
+            session, cv_volume_id=5, title="Saga", start_year=2012,
+            format_profile_id=format_profile_id, root_folder_id=root_folder_id,
+            path=str(series_dir),
+        )
+        series_id = series.id
+    (series_dir / "Saga 001 (2012).cbz").write_bytes(b"x" * 10)
+
+    calls = []
+
+    async def fake_offload(func, *args, **kwargs):
+        calls.append((func, args))
+        return func(*args, **kwargs)
+
+    summary = await scan_series(db, settings, series_id, offload=fake_offload)
+    assert summary == "matched=0 unmatched=1"  # no issues registered
+    assert len(calls) == 1
+
+
+@pytest.mark.req("FRG-SER-005")
 async def test_scan_missing_folder_is_not_an_error(
     db, settings, root_folder_id, format_profile_id, tmp_path
 ):

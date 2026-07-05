@@ -144,6 +144,33 @@ async def test_add_without_profile_uses_seeded_default(
     assert series.format_profile_id == format_profile_id
 
 
+@pytest.mark.req("FRG-SER-005")
+async def test_add_rejects_colliding_computed_path(
+    db, settings, commands, root_folder_id
+):
+    """Two volumes whose default path collides (same title+year) must reject
+    cleanly (SeriesValidationError -> 400), not raise a raw IntegrityError."""
+    factory = build_factory(
+        settings,
+        FakeCV()
+        .volume(11, name="Bone", start_year=1991)
+        .volume(12, name="Bone", start_year=1991)
+        .handler(),
+    )
+    await add_series(
+        db, settings, cv_volume_id=11, root_folder_id=root_folder_id,
+        commands=commands, factory=factory,
+    )
+    with pytest.raises(SeriesValidationError):
+        await add_series(
+            db, settings, cv_volume_id=12, root_folder_id=root_folder_id,
+            commands=commands, factory=factory,
+        )
+    async with db.read_session() as session:
+        rows = (await session.execute(select(SeriesRow))).scalars().all()
+    assert len(rows) == 1
+
+
 @pytest.mark.req("FRG-SER-008")
 async def test_path_override_must_be_under_root(
     db, settings, commands, root_folder_id, root_folder_path, tmp_path

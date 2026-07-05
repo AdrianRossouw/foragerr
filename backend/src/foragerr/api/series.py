@@ -381,8 +381,9 @@ async def remove_series(
     """Row-only delete by default; ``deleteFiles=true`` is 501 in M1
     (FRG-SER-014)."""
     db = request.app.state.db
+    settings = request.app.state.settings
     try:
-        await delete_series(db, series_id, delete_files=deleteFiles)
+        await delete_series(db, series_id, delete_files=deleteFiles, settings=settings)
     except DeleteFilesNotSupportedError as exc:
         raise ApiError(501, str(exc)) from exc
     except SeriesNotFoundError as exc:

@@ -43,8 +43,10 @@ def _int(value: Any) -> int | None:
         return value
     if isinstance(value, str):
         stripped = value.strip()
-        if stripped.lstrip("-").isdigit():
+        try:
             return int(stripped)
+        except ValueError:
+            return None
     return None
 
 

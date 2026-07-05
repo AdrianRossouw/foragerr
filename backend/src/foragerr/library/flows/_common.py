@@ -17,6 +17,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import ClassVar, Literal
 
 from foragerr.commands.registry import BaseCommand, register_command
@@ -164,6 +165,16 @@ def comicvine_factory(settings: Settings) -> HttpClientFactory:
 
 
 # --- chained command models (FRG-SER-005) -----------------------------------
+
+
+def cover_paths(settings: Settings, series_id: int) -> tuple[Path, Path]:
+    """The cached-cover JPEG and its URL-tracking sidecar for one series.
+
+    Shared by the refresh cover-cache (which writes them) and series delete
+    (which must remove them) so the naming scheme lives in exactly one place.
+    """
+    covers_dir = Path(settings.config_dir) / "covers"
+    return covers_dir / f"{series_id}.jpg", covers_dir / f"{series_id}.url"
 
 
 @register_command
