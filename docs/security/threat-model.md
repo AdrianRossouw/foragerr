@@ -349,6 +349,73 @@ allocated yet).
 
 ---
 
+## Change deltas
+
+### 2026-07-05 — m1-foundation (change 1 of Phase 3)
+
+New attack surface introduced and its disposition:
+
+- **HTTP listener exists** (COMP 1 partial): FastAPI app on 8789 with `/health`
+  (unauthenticated by design, FRG-DEP-007) and `/api/v1` skeleton (error shape,
+  paging, command endpoints). Auth mode none per FRG-AUTH-001 (RISK-020 acceptance
+  restated; route-inventory tests prove no dormant auth paths). WebSocket and OPDS
+  listeners are NOT yet present (changes 7).
+- **Outbound HTTP choke point** (cross-cutting): all egress flows through one
+  factory — mandatory timeouts, TLS always verified, manual bounded redirect walk,
+  streaming byte caps (FRG-NFR-006), per-hop SSRF egress validation with
+  external/local-service profiles (FRG-SEC-001; RISK-025 mitigated with the
+  DNS-rebinding TOCTOU accepted residual recorded in the register).
+- **Secrets handling** (COMP 11 partial): SecretStr config fields self-register
+  with the log-redaction filter (FRG-NFR-008; RISK-013 log-exposure arm closed);
+  no secrets in repo/image (FRG-DEP-005). At-rest encryption remains M3.
+- **Persistence + queue surfaces** (COMP 10/12): single-writer WAL SQLite with
+  guarded forward-only migrations and pre-migration backups; persisted command
+  queue with orphan recovery and graceful drain. No network exposure; failure
+  modes are availability-class and covered by tagged tests (FRG-DB-*, FRG-SCHED-*).
+
+No new STRIDE categories beyond those already modeled; component sections above
+remain accurate with the M1 subset now implemented.
+
+### 2026-07-05 — m1-library-metadata (change 3 of Phase 3)
+
+New attack surface introduced and its disposition (COMP 8 — ComicVine client, plus
+the COMP 9 path-construction threats it feeds):
+
+- **ComicVine client is live** (T-CV-1..6): JSON-only (no XML/expat path exists —
+  `T-CV-4`'s XXE concern does not apply to CV traffic at all), built exclusively on
+  the change-1 outbound factory (TLS-verify-always, bounded timeouts, `T-CV-2`
+  closed), API key sent as a query param but never logged (factory + logging-filter
+  redaction, `T-CV-1` closed), honest configurable User-Agent (`T-CV-6` closed).
+  A process-global rate limiter serializes all CV traffic including cover fetches
+  (FRG-META-003/FRG-NFR-004), which is also the DoS-politeness half of `T-CV-4`.
+- **Untrusted CV content sanitized at ingest** (`T-CV-3` closed for the CV arm,
+  RISK-011/014): `sanitize_cv_text()` strips HTML/control characters and caps
+  length on every string the client maps out of a CV response — no raw wiki HTML
+  or CR/LF-forging bytes reach the DB, API, or logs. `T-API-3`/`T-DDL-6` (the
+  broader UI-XSS/log-injection threats) remain open for the DDL text arm (change 5).
+- **Cover-image SSRF narrowed, not closed** (`T-CV-5`, RISK-025): cover fetches now
+  go through the SAME rate-limited, egress-validated outbound client as every other
+  CV call, PLUS a config-driven image-host allowlist (`comicvine_image_hosts`) — an
+  operator-controlled allowlist rather than trusting an arbitrary wiki-editable
+  `image_url` verbatim. The general cross-cutting SSRF-egress-controls gap (G-3) for
+  indexer/SAB/pull-source hosts is still open; this change only closes the
+  ComicVine-cover-image instance of it.
+- **Path construction from CV titles** (T-FILE-2, RISK-019): `safe_path_component()`
+  reduces every CV-derived title to one filesystem-safe segment before it is joined
+  onto a root folder path (separator/control-char stripping, reserved-name
+  de-reservation, trailing dot/space trim); `validate_under_root()` rejects any
+  per-series path override outside a registered root. Gap G-4a (a central
+  safe-join/containment guarantee against symlink escape and TOCTOU across the
+  *whole* destination-path pipeline) remains open, deferred to change 6's renaming
+  engine (FRG-SEC-004).
+- **New COMP 8 asset**: the local cover cache under `<config>/covers/` — write path
+  is a system-generated filename (never derived from the remote URL), closing a
+  latent zip-slip-style naming risk before it could ever be introduced.
+
+No new STRIDE categories; COMP 8/9 sections above remain accurate with the M1
+subset now implemented. Residual/open items for this component are tracked above,
+not re-litigated here.
+
 ## Coverage summary
 
 - **Well covered by the five drafts** (mitigation named, no new requirement needed): OPDS
