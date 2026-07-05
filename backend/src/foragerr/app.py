@@ -148,6 +148,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(downloadclient_router, prefix="/api/v1")
 
+    # --- library config lists (m1-ui-opds-deploy): read-only root-folder and
+    #     format-profile pickers for the add-series flow (FRG-SER-008,
+    #     FRG-QUAL-001, FRG-UI-005) under /api/v1 ---
+    from foragerr.api.library_config import router as library_config_router
+
+    app.include_router(library_config_router, prefix="/api/v1")
+
     # --- search integration (m1-search-indexers, area 3): importing registers
     #     the search / grab / prune commands + handlers (FRG-SRCH-008/009/014,
     #     FRG-API-008); mount the interactive-search release router; register
