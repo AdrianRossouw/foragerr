@@ -32,5 +32,5 @@
 ## 4. Security docs, traceability, merge gate
 
 - [x] 4.1 Risk register: RISK-024/035 → mitigated-by FRG-SEC-002; RISK-027 → FRG-NFR-005/010; threat-model delta for the indexer integration (FRG-PROC-006)
-- [ ] 4.2 Every in-scope id tagged-tested; flip 25 registry rows; trace.py exit 0 (FRG-PROC-004, FRG-PROC-005)
-- [ ] 4.3 Suite green → /code-review → /simplify → merge --no-ff → archive → decision-index update (FRG-PROC-007)
+- [x] 4.2 Every in-scope id tagged-tested; flip 25 registry rows; trace.py exit 0 (FRG-PROC-004, FRG-PROC-005)
+- [x] 4.3 Suite green → /code-review → /simplify → merge --no-ff → archive → decision-index update (FRG-PROC-007)
