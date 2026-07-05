@@ -180,6 +180,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # since it is appended after register_scheduler(app) above.
     app.state.startup_hooks.append(_register_search_tasks)
 
+    # --- downloads tracking area (m1-downloads, area: tracking): importing the
+    #     module registers TrackDownloadsCommand + handler (FRG-DL-007); mount
+    #     the queue read/remove router (FRG-DL-008, FRG-API-007); register the
+    #     ~1-minute tracking task. ---
+    import foragerr.downloads.tracking  # noqa: F401 — command/handler registration
+    from foragerr.api.queue import router as queue_router
+
+    app.include_router(queue_router, prefix="/api/v1")
+
+    async def _register_tracking_task(app: FastAPI) -> None:
+        await app.state.scheduler.register_task(
+            "track-downloads",
+            "track-downloads",
+            interval_seconds=app.state.settings.track_downloads_interval_seconds,
+            min_interval_seconds=60,
+        )
+
+    app.state.startup_hooks.append(_register_tracking_task)
+
     return app
 
 
