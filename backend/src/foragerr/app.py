@@ -123,6 +123,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     #     drain shutdown (FRG-SCHED-011) ---
     register_scheduler(app)
 
+    # --- library flows (change 3): importing registers the chained
+    #     refresh-series/scan-series/series-search commands + handlers
+    #     (FRG-SER-005/006/007, FRG-META-008). A bare import for the decorator
+    #     side effect is sufficient — the flows keep no app-level state. ---
+    from foragerr.library import flows as _library_flows  # noqa: F401
+
     # --- api area (tasks 5.x): error handling, health, version, command
     #     routers (FRG-API-001/002, FRG-DEP-007/010, FRG-AUTH-001) ---
     register_api(app)
