@@ -136,27 +136,27 @@ Milestones: `M1` vertical slice · `M2` torrents + streaming/quality clusters ·
 | FRG-TOR-004 | Seeding-aware import and removal | tor | approved | M2 |
 | FRG-TOR-005 | Seeder-based decision and prioritization | tor | approved | M2 |
 | FRG-TOR-006 | Blocklist by info-hash | tor | approved | M2 |
-| FRG-IMP-001 | Single parser implementation for all consumers | imp | approved | M1 |
-| FRG-IMP-002 | Pure, deterministic parse function | imp | approved | M1 |
-| FRG-IMP-003 | Structured parse result with confidence, no sentinels, no crashes | imp | approved | M1 |
-| FRG-IMP-004 | Tokenization and separator handling | imp | approved | M1 |
-| FRG-IMP-005 | Unicode-native handling and single-sourced normalization | imp | approved | M1 |
-| FRG-IMP-006 | Archive extension recognition | imp | approved | M1 |
-| FRG-IMP-007 | Plain integer and #-prefixed issue numbers with leading-title guard | imp | approved | M1 |
-| FRG-IMP-008 | Decimal, negative, and Unicode-fraction issue numbers | imp | approved | M1 |
-| FRG-IMP-009 | Alphanumeric issue suffixes and named issues | imp | approved | M1 |
-| FRG-IMP-010 | Issue ranges | imp | approved | M1 |
-| FRG-IMP-011 | Mini-series counts and cover/page-tag stripping | imp | approved | M1 |
-| FRG-IMP-012 | Volume designators including volume-years | imp | approved | M1 |
-| FRG-IMP-013 | Year and cover-date extraction | imp | approved | M1 |
-| FRG-IMP-014 | Year-equals-issue one-shot disambiguation | imp | approved | M1 |
-| FRG-IMP-015 | Annuals and specials as structured classification | imp | approved | M1 |
-| FRG-IMP-016 | Booktype detection as distinct enum | imp | approved | M1 |
-| FRG-IMP-017 | Generic annotation classification (scan groups, edition tags) | imp | approved | M1 |
-| FRG-IMP-018 | Embedded issue-ID pass-through | imp | approved | M1 |
-| FRG-IMP-019 | Series title output and alternate title splits | imp | approved | M1 |
-| FRG-IMP-020 | Total, collision-free issue ordering keys | imp | approved | M1 |
-| FRG-IMP-021 | Corpus-driven regression suite | imp | approved | M1 |
+| FRG-IMP-001 | Single parser implementation for all consumers | imp | implemented | M1 |
+| FRG-IMP-002 | Pure, deterministic parse function | imp | implemented | M1 |
+| FRG-IMP-003 | Structured parse result with confidence, no sentinels, no crashes | imp | implemented | M1 |
+| FRG-IMP-004 | Tokenization and separator handling | imp | implemented | M1 |
+| FRG-IMP-005 | Unicode-native handling and single-sourced normalization | imp | implemented | M1 |
+| FRG-IMP-006 | Archive extension recognition | imp | implemented | M1 |
+| FRG-IMP-007 | Plain integer and #-prefixed issue numbers with leading-title guard | imp | implemented | M1 |
+| FRG-IMP-008 | Decimal, negative, and Unicode-fraction issue numbers | imp | implemented | M1 |
+| FRG-IMP-009 | Alphanumeric issue suffixes and named issues | imp | implemented | M1 |
+| FRG-IMP-010 | Issue ranges | imp | implemented | M1 |
+| FRG-IMP-011 | Mini-series counts and cover/page-tag stripping | imp | implemented | M1 |
+| FRG-IMP-012 | Volume designators including volume-years | imp | implemented | M1 |
+| FRG-IMP-013 | Year and cover-date extraction | imp | implemented | M1 |
+| FRG-IMP-014 | Year-equals-issue one-shot disambiguation | imp | implemented | M1 |
+| FRG-IMP-015 | Annuals and specials as structured classification | imp | implemented | M1 |
+| FRG-IMP-016 | Booktype detection as distinct enum | imp | implemented | M1 |
+| FRG-IMP-017 | Generic annotation classification (scan groups, edition tags) | imp | implemented | M1 |
+| FRG-IMP-018 | Embedded issue-ID pass-through | imp | implemented | M1 |
+| FRG-IMP-019 | Series title output and alternate title splits | imp | implemented | M1 |
+| FRG-IMP-020 | Total, collision-free issue ordering keys | imp | implemented | M1 |
+| FRG-IMP-021 | Corpus-driven regression suite | imp | implemented | M1 |
 | FRG-IMP-022 | Library scan walk | imp | approved | M2 |
 | FRG-IMP-023 | Existing-library import staging and review | imp | approved | M2 |
 | FRG-IMP-024 | Embedded metadata read during import | imp | approved | M2 |
