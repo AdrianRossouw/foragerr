@@ -35,7 +35,7 @@ from urllib.parse import urlsplit
 
 from foragerr.ddl.errors import DdlDownloadError, OutboundNotAllowedError
 from foragerr.http import HttpClientFactory, OutboundHttpError
-from foragerr.library.paths import safe_path_component
+from foragerr.security.paths import safe_path_component
 
 logger = logging.getLogger("foragerr.ddl.download")
 

@@ -47,7 +47,7 @@ from foragerr.downloads.settings import SabnzbdSettings
 from foragerr.http import HttpClientFactory, OutboundHttpError
 from foragerr.indexers.errors import IndexerMalformedError
 from foragerr.indexers.xml import parse_indexer_xml
-from foragerr.library.paths import safe_path_component
+from foragerr.security.paths import safe_path_component
 from foragerr.logging import register_secret
 from foragerr.providers.backoff import (
     PROVIDER_DOWNLOAD_CLIENT,
