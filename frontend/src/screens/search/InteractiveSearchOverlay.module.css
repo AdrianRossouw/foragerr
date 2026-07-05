@@ -1,0 +1,158 @@
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-base);
+}
+
+.table th {
+  text-align: left;
+  padding: var(--spacing-sm) var(--spacing-md);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--surface-border);
+  white-space: nowrap;
+}
+
+.table td {
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-bottom: 1px solid var(--surface-border);
+  vertical-align: middle;
+}
+
+.table tbody tr:hover {
+  background: var(--surface-card-hover);
+}
+
+.titleCell {
+  color: var(--color-accent);
+  word-break: break-word;
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+.numeric {
+  white-space: nowrap;
+}
+
+/* --- Decision chips --- */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: 2px var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+
+.chipApproved {
+  color: var(--color-success);
+  border-color: var(--color-success);
+}
+
+.chipRejected {
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+}
+
+.chipTemporary {
+  color: var(--color-warning);
+  border-color: var(--color-warning);
+}
+
+.rejectionList {
+  margin: 0;
+  padding-left: var(--spacing-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+/* --- Grab --- */
+
+.grabBtn {
+  appearance: none;
+  font: inherit;
+  font-size: var(--font-size-sm);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-accent);
+  background: none;
+  color: var(--color-accent);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.grabBtn:hover:not(:disabled) {
+  background: var(--color-accent);
+  color: var(--text-on-accent);
+}
+
+.grabBtn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.grabBtn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.grabbed {
+  color: var(--color-success);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+}
+
+/* --- Banners / states --- */
+
+.state {
+  padding: var(--spacing-xl) var(--spacing-md);
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.errorBanner {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-danger);
+  background: rgba(240, 80, 80, 0.12);
+  color: var(--text-primary);
+}
+
+/* Expired release cache: a distinct, actionable warning — not a failure. */
+.expiredBanner {
+  composes: errorBanner;
+  border-color: var(--color-warning);
+  background: rgba(221, 181, 0, 0.12);
+}
+
+.bannerAction {
+  margin-left: auto;
+  appearance: none;
+  font: inherit;
+  font-size: var(--font-size-sm);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-warning);
+  background: none;
+  color: var(--color-warning);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.bannerAction:hover {
+  background: rgba(221, 181, 0, 0.2);
+}
