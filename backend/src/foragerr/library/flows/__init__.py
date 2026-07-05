@@ -28,7 +28,9 @@ from foragerr.library.flows._common import (
     SeriesValidationError,
     comicvine_factory,
     decode_add_options,
+    decode_aliases,
     encode_add_options,
+    encode_aliases,
 )
 from foragerr.library.flows.add import AddSeriesResult, add_series
 from foragerr.library.flows.edit_delete import delete_series, edit_series
@@ -52,9 +54,11 @@ __all__ = [
     "add_series",
     "comicvine_factory",
     "decode_add_options",
+    "decode_aliases",
     "delete_series",
     "edit_series",
     "encode_add_options",
+    "encode_aliases",
     "refresh_series",
     "scan_series",
 ]

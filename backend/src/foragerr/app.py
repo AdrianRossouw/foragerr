@@ -139,6 +139,38 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(indexer_router, prefix="/api/v1")
 
+    # --- search integration (m1-search-indexers, area 3): importing registers
+    #     the search / grab / prune commands + handlers (FRG-SRCH-008/009/014,
+    #     FRG-API-008); mount the interactive-search release router; register
+    #     the scheduled backlog + cache-prune tasks. A shared caps cache lives
+    #     on app.state for the interactive-search request path (FRG-IDX-004). ---
+    import foragerr.search_ops  # noqa: F401 — command/handler registration
+    from foragerr.api.release import router as release_router
+    from foragerr.indexers.caps import CapsCache
+
+    app.include_router(release_router, prefix="/api/v1")
+    app.state.caps_cache = CapsCache()
+
+    async def _register_search_tasks(app: FastAPI) -> None:
+        scheduler = app.state.scheduler
+        settings = app.state.settings
+        await scheduler.register_task(
+            "backlog-search",
+            "backlog-search",
+            interval_seconds=settings.backlog_search_interval_seconds,
+            min_interval_seconds=3600,
+        )
+        await scheduler.register_task(
+            "prune-release-cache",
+            "prune-release-cache",
+            interval_seconds=1800,
+            min_interval_seconds=300,
+        )
+
+    # Runs after the scheduler startup hook (which creates app.state.scheduler),
+    # since it is appended after register_scheduler(app) above.
+    app.state.startup_hooks.append(_register_search_tasks)
+
     return app
 
 

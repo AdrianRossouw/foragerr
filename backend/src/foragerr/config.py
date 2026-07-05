@@ -198,6 +198,34 @@ class Settings(BaseSettings):
         ge=1,
         description="Days of job_history rows kept; older rows are pruned by housekeeping.",
     )
+    usenet_retention_days: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Global usenet retention in days: search candidates older than "
+            "this are rejected by the decision engine and requested with a "
+            "maxage cap (FRG-IDX-009). 0 disables the check. A per-indexer "
+            "retention override always wins over this global value."
+        ),
+    )
+    backlog_search_interval_seconds: int = Field(
+        default=6 * 3600,
+        ge=3600,
+        description=(
+            "How often the scheduled backlog re-searches every wanted issue "
+            "(FRG-SRCH-009). Minimum 1 hour."
+        ),
+    )
+    backlog_search_delay_seconds: int = Field(
+        default=30,
+        ge=0,
+        description=(
+            "Politeness delay in seconds between consecutive per-issue "
+            "searches in a backlog run (FRG-SRCH-009). Clamped UP to a "
+            "documented 30 s floor so indexer API limits are respected — a "
+            "smaller value is raised to the floor, never honored as-is."
+        ),
+    )
     comicvine_api_key: SecretStr = Field(
         default=SecretStr(""),
         description="ComicVine API key (secret; empty by default, supply at runtime).",

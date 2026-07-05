@@ -87,6 +87,54 @@ def encode_add_options(
     )
 
 
+# --- alias codec (FRG-SRCH-003) ---------------------------------------------
+
+#: Cap on the number of user aliases stored per series — a small, sane bound so
+#: the JSON column can never grow unbounded from a bad edit.
+MAX_SERIES_ALIASES = 50
+
+
+def encode_aliases(aliases: list[str] | tuple[str, ...] | None) -> str | None:
+    """Canonical-JSON encoding of user aliases for ``series.aliases``.
+
+    Strips whitespace, drops blank entries, and de-duplicates while preserving
+    first-seen order. Returns ``None`` (SQL NULL) for an empty result so an
+    aliasless series stores nothing rather than an empty array.
+    """
+    if not aliases:
+        return None
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for raw in aliases:
+        text = (raw or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        cleaned.append(text)
+    if not cleaned:
+        return None
+    return json.dumps(cleaned, ensure_ascii=False)
+
+
+def decode_aliases(raw: str | None) -> tuple[str, ...]:
+    """Decode ``series.aliases`` into the raw user strings (empty when unset)."""
+    if not raw:
+        return ()
+    data = json.loads(raw)
+    if not isinstance(data, list):
+        return ()
+    return tuple(str(item) for item in data)
+
+
+def validate_aliases(aliases: list[str]) -> None:
+    """Reject an alias edit that exceeds the stored cap (FRG-SRCH-003)."""
+    if len(aliases) > MAX_SERIES_ALIASES:
+        raise SeriesValidationError(
+            f"too many aliases ({len(aliases)}); at most "
+            f"{MAX_SERIES_ALIASES} alternate search names are allowed"
+        )
+
+
 @dataclass(frozen=True)
 class AddOptions:
     """Decoded ``series.add_options`` payload."""

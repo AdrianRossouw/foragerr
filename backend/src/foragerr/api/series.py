@@ -35,6 +35,7 @@ from foragerr.library.flows import (
     SeriesValidationError,
     add_series,
     comicvine_factory,
+    decode_aliases,
     delete_series,
     edit_series,
 )
@@ -98,6 +99,7 @@ def _series_fields(row: SeriesRow, stats: SeriesStatistics) -> dict:
         "added_at": row.added_at,
         "refreshed_at": row.refreshed_at,
         "description_sanitized": row.description_sanitized,
+        "aliases": list(decode_aliases(row.aliases)),
         "statistics": SeriesStatisticsResource.from_stats(stats),
     }
 
@@ -122,6 +124,9 @@ class SeriesResource(BaseModel):
     added_at: dt.datetime
     refreshed_at: dt.datetime | None
     description_sanitized: str | None
+    #: User-editable alternate search names the search engine maps releases
+    #: through (FRG-SRCH-003). Empty when the series has none.
+    aliases: list[str]
     statistics: SeriesStatisticsResource
 
     @classmethod
@@ -175,6 +180,9 @@ class SeriesEdit(BaseModel):
     format_profile_id: int | None = None
     root_folder_id: int | None = None
     path: str | None = None
+    #: When supplied, REPLACES the stored alternate search names wholesale
+    #: (FRG-SRCH-003); pass ``[]`` to clear. ``None`` leaves them unchanged.
+    aliases: list[str] | None = None
 
 
 class LookupCandidateResource(BaseModel):
@@ -352,6 +360,7 @@ async def update_series(
             format_profile_id=body.format_profile_id,
             root_folder_id=body.root_folder_id,
             path=body.path,
+            aliases=body.aliases,
         )
     except SeriesNotFoundError as exc:
         raise ApiError(404, str(exc)) from exc

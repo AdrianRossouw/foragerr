@@ -128,7 +128,13 @@ def test_full_app_lifecycle_starts_runs_and_drains_cleanly(config_dir):
     with TestClient(app) as client:
         assert app.state.db is not None
         assert app.state.commands.health()["status"] == "up"
-        assert app.state.scheduler.task_names() == ["housekeeping"]
+        # housekeeping (sched area) plus the search area's scheduled backlog
+        # and release-cache prune tasks (m1-search-indexers).
+        assert app.state.scheduler.task_names() == [
+            "backlog-search",
+            "housekeeping",
+            "prune-release-cache",
+        ]
 
         async def round_trip():
             record = await app.state.commands.enqueue("noop", {"note": "demo"})
