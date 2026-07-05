@@ -39,3 +39,4 @@ sample-comics/
 .DS_Store
 .idea/
 .vscode/
+.claude/worktrees/

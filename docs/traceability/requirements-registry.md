@@ -25,6 +25,7 @@ Milestones: `M1` vertical slice · `M2` torrents + streaming/quality clusters ·
 | FRG-PROC-007 | Branch-based integration, green main | dev-process | active | — |
 | FRG-PROC-008 | Worktree isolation for concurrent agents | dev-process | active | — |
 | FRG-PROC-009 | Spec approval gate | dev-process | active | — |
+| FRG-PROC-010 | End-to-end slice verification harness | dev-process | proposed | M1 |
 | FRG-SER-001 | Series entity from ComicVine volume | ser | approved | M1 |
 | FRG-SER-002 | Issue entity | ser | approved | M1 |
 | FRG-SER-003 | Two-level monitored flags | ser | approved | M1 |
