@@ -1,0 +1,28 @@
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-xs);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.toggle:hover:not(:disabled) {
+  color: var(--text-primary);
+}
+
+.toggle:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.monitored {
+  color: var(--color-accent);
+}
+
+.monitored:hover:not(:disabled) {
+  color: var(--color-accent-hover);
+}
