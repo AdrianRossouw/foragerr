@@ -1,0 +1,128 @@
+import { useEffect, useRef } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '../api/queryKeys';
+import type { QueueItem } from '../api/types';
+import { useConnectionStore } from './connectionStore';
+import {
+  defaultSocketFactory,
+  type SocketFactory,
+  type SocketLike,
+} from './socket';
+import { isQueueProgress, parseWsMessage, type WsMessage } from './messages';
+
+export interface WebSocketBridgeProps {
+  url?: string;
+  socketFactory?: SocketFactory;
+  /** Base reconnect delay in ms (doubled each attempt, capped at maxBackoffMs). */
+  baseBackoffMs?: number;
+  maxBackoffMs?: number;
+  /** Test hook: invoked with the scheduled delay + attempt number on each retry. */
+  onReconnectScheduled?: (delayMs: number, attempt: number) => void;
+}
+
+/**
+ * WebSocketBridge (FRG-UI-001).
+ *
+ * The SINGLE place server-push messages touch client state. It maps
+ * {name, action, resource} messages onto React Query cache operations:
+ *   - a `series` message invalidates ['series'] (active queries refetch);
+ *   - a queue-progress message PATCHES the cached ['queue', page] entry in place
+ *     with NO new request.
+ * It reconnects on an increasing backoff and reflects connection state in the
+ * shared store (rendered by the sidebar footer). It holds no server data itself.
+ */
+export function WebSocketBridge({
+  url = '/api/v1/ws',
+  socketFactory = defaultSocketFactory,
+  baseBackoffMs = 1000,
+  maxBackoffMs = 30000,
+  onReconnectScheduled,
+}: WebSocketBridgeProps): null {
+  const queryClient = useQueryClient();
+  const setStatus = useConnectionStore((s) => s.setStatus);
+
+  // Refs so the connect closure is stable across renders and reconnects.
+  const socketRef = useRef<SocketLike | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const attemptRef = useRef(0);
+  const disposedRef = useRef(false);
+
+  useEffect(() => {
+    disposedRef.current = false;
+
+    const applyMessage = (msg: WsMessage): void => {
+      if (isQueueProgress(msg)) {
+        const { id, page, progress, sizeLeft, status } = msg.resource;
+        // Patch in place — setQueryData never issues a network request.
+        queryClient.setQueryData<QueueItem[]>(queryKeys.queue.page(page), (prev) =>
+          prev?.map((item) =>
+            item.id === id
+              ? { ...item, progress, sizeLeft, status: status ?? item.status }
+              : item,
+          ),
+        );
+        return;
+      }
+      if (msg.name === 'series') {
+        // Invalidate — active ['series'] observers refetch; no manual refetch in
+        // any screen component.
+        void queryClient.invalidateQueries({ queryKey: queryKeys.series.all() });
+      }
+    };
+
+    const scheduleReconnect = (): void => {
+      if (disposedRef.current) return;
+      attemptRef.current += 1;
+      const delay = Math.min(
+        baseBackoffMs * 2 ** (attemptRef.current - 1),
+        maxBackoffMs,
+      );
+      onReconnectScheduled?.(delay, attemptRef.current);
+      timerRef.current = setTimeout(connect, delay);
+    };
+
+    function connect(): void {
+      if (disposedRef.current) return;
+      setStatus('connecting');
+      const socket = socketFactory(url);
+      socketRef.current = socket;
+
+      socket.onopen = () => {
+        attemptRef.current = 0;
+        setStatus('connected');
+      };
+      socket.onmessage = (data) => {
+        const msg = parseWsMessage(data);
+        if (msg) applyMessage(msg);
+      };
+      socket.onclose = () => {
+        if (disposedRef.current) return;
+        setStatus('disconnected');
+        scheduleReconnect();
+      };
+      socket.onerror = () => {
+        // Errors are followed by close; surface disconnected immediately.
+        setStatus('disconnected');
+      };
+    }
+
+    connect();
+
+    return () => {
+      disposedRef.current = true;
+      if (timerRef.current) clearTimeout(timerRef.current);
+      socketRef.current?.close();
+      socketRef.current = null;
+    };
+  }, [
+    url,
+    socketFactory,
+    baseBackoffMs,
+    maxBackoffMs,
+    onReconnectScheduled,
+    queryClient,
+    setStatus,
+  ]);
+
+  return null;
+}
