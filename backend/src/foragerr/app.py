@@ -23,13 +23,15 @@ blocks (db, sched) or by mounting routers on ``api_router`` (api area).
 from __future__ import annotations
 
 import logging
+import signal
 import sys
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 import uvicorn
-from fastapi import APIRouter, FastAPI
+from fastapi import FastAPI
 
+from foragerr.api import register_api
 from foragerr.commands import register_scheduler
 from foragerr.config import ConfigError, Settings, load_settings
 from foragerr.db import register_database
@@ -83,6 +85,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openapi_url="/api/v1/openapi.json",
         docs_url="/api/v1/docs",
         redoc_url=None,
+        # FastAPI's oauth2-redirect helper route defaults to "/docs/..." even
+        # with a custom docs_url, and would be the one route outside
+        # /api/v1 (FRG-API-001). No auth/OAuth2 exists in M1 (FRG-AUTH-001)
+        # so the redirect helper is unused; disable it outright.
+        swagger_ui_oauth2_redirect_url=None,
     )
     app.state.settings = settings
     app.state.startup_hooks = []  # async (app) -> None, run in order at startup
@@ -96,16 +103,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     #     drain shutdown (FRG-SCHED-011) ---
     register_scheduler(app)
 
-    api_router = APIRouter()
-    # --- api area (tasks 5.x): mount health/version/command routers here ---
-    app.include_router(api_router, prefix="/api/v1")
+    # --- api area (tasks 5.x): error handling, health, version, command
+    #     routers (FRG-API-001/002, FRG-DEP-007/010, FRG-AUTH-001) ---
+    register_api(app)
 
     return app
 
 
 def main() -> None:
-    """Console entrypoint: run uvicorn on the configured host/port (8789)."""
+    """Console entrypoint: run uvicorn on the configured host/port (8789).
+
+    FRG-DEP-008 requires a clean exit code 0 on SIGTERM/SIGINT. Uvicorn's own
+    signal handling runs our graceful shutdown correctly (lifespan hooks
+    drain the queue and WAL-checkpoint) but then deliberately re-raises the
+    captured signal against the *restored* pre-existing disposition once
+    shutdown completes, so a caller can observe "died from signal N" — by
+    default that pre-existing disposition is the interpreter's default
+    action, which terminates the process (a negative/128+N exit status, not
+    0). Pre-installing SIG_IGN makes that post-shutdown re-raise a no-op:
+    during the run, uvicorn still overrides the disposition with its own
+    handler (which is what actually triggers the graceful shutdown), so
+    behavior while serving is unaffected.
+    """
     settings = _load_settings_or_exit()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(sig, signal.SIG_IGN)
     uvicorn.run(
         "foragerr.app:create_app",
         factory=True,
