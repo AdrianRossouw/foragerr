@@ -80,17 +80,24 @@ async def test_usenet_release_routes_to_the_sabnzbd_client(tmp_path, db):
 
 
 @pytest.mark.req("FRG-DL-002")
-async def test_ddl_protocol_has_no_wired_client_yet_is_typed_not_a_crash(tmp_path, db):
-    # A ddl client row exists but the ddl area has not registered its factory:
-    # resolution is a TYPED retryable failure, never a silent drop / crash.
+async def test_ddl_protocol_resolves_to_the_ddl_client_once_the_area_is_present(
+    tmp_path, db
+):
+    # With the ddl area imported, its factory is wired onto the ``ddl``
+    # implementation, so the ddl protocol resolves to a concrete DdlClient —
+    # "just another client" (FRG-DL-002 / FRG-DDL-001).
+    import foragerr.ddl  # noqa: F401 — registers the DDL client factory
+    from foragerr.ddl.client import DdlClient
     from foragerr.downloads.settings import BuiltinDdlSettings
 
     await create_download_client(
         db, name="DDL", implementation="ddl", settings=BuiltinDdlSettings()
     )
     factory, backoff = _infra(tmp_path, db)
-    with pytest.raises(NoDownloadClientError):
-        await resolve_client_for(db, "ddl", http_factory=factory, backoff=backoff)
+    client = await resolve_client_for(
+        db, "ddl", http_factory=factory, backoff=backoff
+    )
+    assert isinstance(client, DdlClient)
 
 
 @pytest.mark.req("FRG-DL-002")

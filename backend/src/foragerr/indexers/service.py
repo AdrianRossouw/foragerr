@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
+from typing import Awaitable, Callable
 
 from foragerr.http import HttpClientFactory
 from foragerr.indexers.caps import (
@@ -50,6 +51,26 @@ logger = logging.getLogger("foragerr.indexers.service")
 
 #: Bounded pagination depth per query (FRG-NFR-005 "bounded pagination depth").
 MAX_PAGES_PER_QUERY = 20
+
+#: Alternate search-provider implementations keyed by ``row.implementation``.
+#: The default (Newznab) path is NOT registered here; only a non-Newznab
+#: provider (e.g. the m1-downloads ``getcomics`` provider, protocol ``ddl``)
+#: registers a factory so :func:`search_indexer` can dispatch to it while every
+#: caller still sees the one ``IndexerSearchOutcome`` contract. Kept generic so
+#: the pipeline never branches on provider type (design decision 6).
+SearchProviderFn = Callable[..., Awaitable["IndexerSearchOutcome"]]
+_SEARCH_PROVIDERS: dict[str, SearchProviderFn] = {}
+
+
+def register_search_provider(implementation: str, fn: SearchProviderFn) -> None:
+    """Register a non-Newznab search provider for an implementation id."""
+    _SEARCH_PROVIDERS[implementation] = fn
+
+
+def get_search_provider(implementation: str) -> SearchProviderFn | None:
+    """The registered search provider for ``implementation``, or ``None`` for
+    the default Newznab path."""
+    return _SEARCH_PROVIDERS.get(implementation)
 
 
 @dataclass(slots=True)
@@ -161,6 +182,22 @@ async def search_indexer(
     min_interval: float = DEFAULT_MIN_INTERVAL,
 ) -> IndexerSearchOutcome:
     """Search one indexer for one target (see module docstring for the steps)."""
+    provider = get_search_provider(row.implementation)
+    if provider is not None:
+        # A non-Newznab provider (e.g. GetComics, protocol ``ddl``) owns its
+        # whole flow — including its own back-off gate/key — and returns the
+        # same outcome contract (FRG-DDL-002). The Newznab-specific steps below
+        # are skipped for it.
+        return await provider(
+            row,
+            target,
+            factory=factory,
+            backoff=backoff,
+            caps_cache=caps_cache,
+            retention_days=retention_days,
+            min_interval=min_interval,
+        )
+
     outcome = IndexerSearchOutcome(indexer_id=row.id, indexer_name=row.name)
 
     status = await backoff.status(PROVIDER_INDEXER, row.id)

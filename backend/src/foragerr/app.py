@@ -199,6 +199,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.state.startup_hooks.append(_register_tracking_task)
 
+    # --- ddl area (m1-downloads, area: ddl): importing registers the DDL
+    #     client factory, the GetComics search provider, and the
+    #     process-ddl-queue command; the task drains the persistent queue. ---
+    import foragerr.ddl  # noqa: F401 — client/provider/command registration
+    from foragerr.ddl.commands import (
+        PROCESS_DDL_QUEUE_INTERVAL,
+        PROCESS_DDL_QUEUE_MIN_INTERVAL,
+        PROCESS_DDL_QUEUE_TASK,
+    )
+
+    async def _register_ddl_tasks(app: FastAPI) -> None:
+        await app.state.scheduler.register_task(
+            PROCESS_DDL_QUEUE_TASK,
+            PROCESS_DDL_QUEUE_TASK,
+            interval_seconds=PROCESS_DDL_QUEUE_INTERVAL,
+            min_interval_seconds=PROCESS_DDL_QUEUE_MIN_INTERVAL,
+        )
+
+    app.state.startup_hooks.append(_register_ddl_tasks)
+
     return app
 
 
