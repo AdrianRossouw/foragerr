@@ -267,6 +267,7 @@ async def reconcile_downloads(
     db,
     observations: list[ClientObservation],
     *,
+    polled_client_ids: set[int | None] | None = None,
     now: dt.datetime | None = None,
 ) -> None:
     """Upsert ``tracked_downloads`` from the current client observations.
@@ -274,9 +275,16 @@ async def reconcile_downloads(
     Matches each observation to its ``grab_history`` row by download id, drives
     the state machine (persisting transitions + ok/warning/error status + human
     messages, emitting a :class:`TrackedStateChanged` per change), and marks a
-    download that has vanished from every client (while still ``downloading``) as
-    ``failed_pending``. Restart-safe: all state lives in the row. The failure
-    loop runs separately in :func:`process_failures`.
+    download that has vanished from a SUCCESSFULLY-POLLED client (while still
+    ``downloading``) as ``failed_pending``. Restart-safe: all state lives in the
+    row. The failure loop runs separately in :func:`process_failures`.
+
+    ``polled_client_ids`` names the clients whose ``get_items()`` succeeded this
+    cycle (from :func:`collect_observations`). A ``downloading`` row is only
+    treated as vanished when its OWNING client was polled — a transient client
+    outage (SAB unreachable for one cycle) must NOT promote its whole in-flight
+    queue to ``failed`` and trigger a blocklist + re-search storm (FRG-DL-011).
+    ``None`` disables the gate (legacy callers that pass observations directly).
     """
     now = now or utcnow()
     seen: set[str] = {obs.item.download_id for obs in observations}
@@ -320,12 +328,15 @@ async def reconcile_downloads(
                         ),
                     )
 
-        # Vanished-before-completion: a still-downloading row absent from every
-        # client this cycle is a failure (FRG-DL-011).
+        # Vanished-before-completion: a still-downloading row absent from its
+        # (successfully-polled) client this cycle is a failure (FRG-DL-011). A row
+        # whose owning client was NOT polled this cycle is skipped — an unreachable
+        # client's in-flight downloads are not "vanished", they are just unseen.
         for row in existing:
             if (
                 row.download_id not in seen
                 and row.state == TrackedDownloadState.DOWNLOADING.value
+                and (polled_client_ids is None or row.client_id in polled_client_ids)
             ):
                 row.state = TrackedDownloadState.FAILED_PENDING.value
                 row.status = TRACKED_STATUS_ERROR
@@ -623,12 +634,17 @@ async def build_client_for_id(
 
 async def collect_observations(
     clients: list[tuple[DownloadClientRow, DownloadClient]],
-) -> list[ClientObservation]:
+) -> tuple[set[int | None], list[ClientObservation]]:
     """Poll ``get_items()`` on every client, isolating each (FRG-DL-007).
 
     A client that is unreachable (or otherwise raises) is logged and skipped —
-    one downed client never crashes the whole refresh.
+    one downed client never crashes the whole refresh. Returns
+    ``(polled_client_ids, observations)`` where ``polled_client_ids`` are the
+    clients whose poll SUCCEEDED — the vanished-download check in
+    :func:`reconcile_downloads` must only fire for a client that was actually
+    reachable this cycle, never for one that raised (FRG-DL-011).
     """
+    polled_ids: set[int | None] = set()
     observations: list[ClientObservation] = []
     for row, client in clients:
         try:
@@ -645,6 +661,7 @@ async def collect_observations(
                 extra={"client_id": row.id, "client_name": row.name},
             )
             continue
+        polled_ids.add(row.id)
         for item in items:
             observations.append(
                 ClientObservation(
@@ -654,15 +671,17 @@ async def collect_observations(
                     item=item,
                 )
             )
-    return observations
+    return polled_ids, observations
 
 
 async def run_tracking(ctx: HandlerContext) -> str:
     """One full tracking refresh: collect → reconcile → process failures."""
     now = utcnow()
     clients = await load_enabled_clients(ctx.db, settings=ctx.settings)
-    observations = await collect_observations(clients)
-    await reconcile_downloads(ctx.db, observations, now=now)
+    polled_ids, observations = await collect_observations(clients)
+    await reconcile_downloads(
+        ctx.db, observations, polled_client_ids=polled_ids, now=now
+    )
     infos = await process_failures(
         ctx.db, commands=ctx.commands, settings=ctx.settings, now=now
     )

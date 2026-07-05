@@ -152,11 +152,13 @@ async def test_collect_observations_isolates_one_failing_client(db):
             raise DownloadClientUnreachableError("down")
 
     good = FakeClient([make_item("ok1", status=ClientItemStatus.DOWNLOADING)])
-    obs = await collect_observations(
+    polled, obs = await collect_observations(
         [
             (fake_row(client_id=1, name="Good"), good),
             (fake_row(client_id=2, name="Bad"), _Boom([])),
         ]
     )
-    # The healthy client's item still surfaces; the failing client is skipped.
+    # The healthy client's item still surfaces; the failing client is skipped —
+    # and only the healthy client's id is reported as polled (FRG-DL-011).
     assert [o.item.download_id for o in obs] == ["ok1"]
+    assert polled == {1}
