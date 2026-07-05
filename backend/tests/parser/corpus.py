@@ -275,7 +275,12 @@ CORPUS: tuple[Row, ...] = (
         "Swamp Thing", ("FRG-IMP-004", "FRG-IMP-017", "FRG-IMP-021"),
         issue="3", display="003", year=2012, scan_group="Empire-ZurEnArrh",
         annotations_contain=(("edition", "digital"),)),
+    # 78: a disqualified issue candidate (suffix A) is NOT volume evidence —
+    # a trade format only fabricates v1 with no numeric candidate at all
+    # (FRG-IMP-016). The suffixed issue survives; volume stays None.
+    Row(78, "Saga TPB 05A (2013).cbz", "Saga", ("FRG-IMP-016", "FRG-IMP-021"),
+        issue="5", display="05A", suffix="A", year=2013, booktype="TPB"),
 )
 
-assert len(CORPUS) == 77
-assert [r.n for r in CORPUS] == list(range(1, 78))
+assert len(CORPUS) == 78
+assert [r.n for r in CORPUS] == list(range(1, 79))

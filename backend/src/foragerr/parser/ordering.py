@@ -24,7 +24,7 @@ from __future__ import annotations
 from fractions import Fraction
 
 from .result import Issue, IssueClassification
-from .vocab import DEFAULT_OPTIONS, ParseOptions
+from .vocab import DEFAULT_OPTIONS, ParseOptions, suffix_vocab_order
 
 _CLASS_RANK = {
     IssueClassification.REGULAR: 0,
@@ -45,9 +45,7 @@ def sort_key(issue: Issue, options: ParseOptions = DEFAULT_OPTIONS) -> SortKey:
         suffix_rank, suffix_text = -1, ""
     else:
         canonical = issue.suffix.upper()
-        vocab = [s.upper() for s in options.issue_suffixes] + [
-            s.upper() for s in options.single_letter_suffixes
-        ]
+        vocab = suffix_vocab_order(options)
         suffix_rank = vocab.index(canonical) if canonical in vocab else len(vocab)
         suffix_text = canonical
     name_text = issue.name.casefold() if issue.name is not None else ""

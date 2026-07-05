@@ -57,3 +57,19 @@ def test_default_booktype_is_issue_with_no_fabricated_volume():
     assert r.booktype is Booktype.ISSUE
     assert r.volume_ordinal is None
     assert r.volume_year is None
+
+
+@pytest.mark.req("FRG-IMP-016")
+def test_trade_fabricates_v1_only_with_no_numeric_evidence():
+    # No number at all: fabricate v1 (the only fabrication path).
+    r = parse("East of West TPB (2014).cbz", reference_year=2026)
+    assert r.booktype is Booktype.TPB
+    assert r.volume_ordinal == 1
+    # A disqualified candidate (suffix) is NOT volume evidence: the issue
+    # survives and volume stays None — v1 is not fabricated over it.
+    r = parse("Saga TPB 05A (2013).cbz", reference_year=2026)
+    assert r.booktype is Booktype.TPB
+    assert r.volume_ordinal is None
+    assert r.issue is not None
+    assert r.issue.value == 5
+    assert r.issue.suffix == "A"

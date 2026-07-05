@@ -8,8 +8,11 @@ scoring/disambiguation — never for correctness — and none exists today.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, replace
+from functools import lru_cache
 
+from .normalize import fold
 from .result import Booktype, IssueClassification
 
 #: Comic archive extensions — the single definition (FRG-IMP-006), shared by
@@ -140,3 +143,78 @@ class ParseOptions:
 
 
 DEFAULT_OPTIONS = ParseOptions()
+
+
+# ---------------------------------------------------------------------------
+# Derived-vocabulary accessors (FRG-IMP-001 efficiency).
+#
+# ``ParseOptions`` is a frozen, fully-hashable dataclass, so these derivations
+# are memoized per options object instead of being rebuilt on every call/token.
+# This is the single normalization site for each derived form — in particular
+# the uppercase issue-suffix set has ONE definition here (previously rebuilt in
+# grammar, ordering, and the space-suffix attach path).
+
+
+@lru_cache(maxsize=None)
+def folded_edition_tags(options: ParseOptions) -> frozenset[str]:
+    """Whole edition tags, folded, for whole-text edition matching."""
+    return frozenset(fold(tag) for tag in options.edition_tags)
+
+
+@lru_cache(maxsize=None)
+def issue_suffix_set(options: ParseOptions) -> frozenset[str]:
+    """Uppercase multi-letter issue-suffix vocabulary (the one definition)."""
+    return frozenset(s.upper() for s in options.issue_suffixes)
+
+
+@lru_cache(maxsize=None)
+def single_letter_suffix_set(options: ParseOptions) -> frozenset[str]:
+    """Uppercase single-letter suffix vocabulary."""
+    return frozenset(s.upper() for s in options.single_letter_suffixes)
+
+
+@lru_cache(maxsize=None)
+def suffix_vocab_order(options: ParseOptions) -> tuple[str, ...]:
+    """Ordered uppercase suffix vocabulary for stable ``sort_key`` ranking."""
+    return tuple(s.upper() for s in options.issue_suffixes) + tuple(
+        s.upper() for s in options.single_letter_suffixes
+    )
+
+
+@lru_cache(maxsize=None)
+def extension_re(options: ParseOptions) -> re.Pattern[str]:
+    """Compiled trailing-extension pattern (single trailing occurrence)."""
+    return re.compile(
+        r"\.(" + "|".join(re.escape(e) for e in options.extensions) + r")$",
+        re.IGNORECASE,
+    )
+
+
+@lru_cache(maxsize=None)
+def booktype_cue_phrases(
+    options: ParseOptions,
+) -> tuple[tuple[tuple[str, ...], Booktype], ...]:
+    """Folded booktype-cue phrases, longest first (longest-match precedence)."""
+    return tuple(
+        sorted(
+            ((tuple(fold(c).split()), bt) for c, bt in options.booktype_cues),
+            key=lambda p: -len(p[0]),
+        )
+    )
+
+
+@lru_cache(maxsize=None)
+def edition_phrases(
+    options: ParseOptions,
+) -> tuple[tuple[tuple[str, ...], Booktype | None], ...]:
+    """Multi-word edition phrases, folded, each paired with the booktype it
+    doubles as (``digital tpb`` -> TPB) or ``None``; longest first."""
+    pairs: list[tuple[tuple[str, ...], Booktype | None]] = []
+    for tag in options.edition_tags:
+        if " " not in tag:
+            continue
+        phrase = tuple(fold(tag).split())
+        joined = " ".join(phrase)
+        bt = next((b for c, b in options.booktype_cues if joined == fold(c)), None)
+        pairs.append((phrase, bt))
+    return tuple(sorted(pairs, key=lambda p: -len(p[0])))
