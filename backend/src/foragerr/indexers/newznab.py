@@ -25,7 +25,7 @@ from typing import Any, Mapping
 from urllib.parse import parse_qsl
 
 from foragerr.db.migrations import app_version
-from foragerr.http import HttpClientFactory, OutboundHttpError
+from foragerr.http import HttpClientFactory, OutboundHttpError, parse_retry_after
 from foragerr.indexers import ratelimit
 from foragerr.indexers.caps import Capabilities, parse_caps
 from foragerr.indexers.errors import (
@@ -136,7 +136,7 @@ class NewznabClient:
         if code in (401, 403):
             raise IndexerAuthError(f"indexer authentication failed (HTTP {code})")
         if code == 429:
-            retry_after = _retry_after(result.headers)
+            retry_after = parse_retry_after(result.headers)
             raise IndexerLimitError(
                 f"indexer rate-limited (HTTP {code})", retry_after=retry_after
             )
@@ -160,11 +160,3 @@ def _parse_additional(value: str | None) -> dict[str, str]:
     if not value:
         return {}
     return dict(parse_qsl(value.lstrip("?&"), keep_blank_values=False))
-
-
-def _retry_after(headers: Mapping[str, str]) -> float | None:
-    """Parse a numeric Retry-After header (seconds); ignore HTTP-date form."""
-    raw = headers.get("retry-after")
-    if raw and raw.strip().isdigit():
-        return float(raw.strip())
-    return None
