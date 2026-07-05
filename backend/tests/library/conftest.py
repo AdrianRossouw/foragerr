@@ -10,6 +10,17 @@ from foragerr.library import repo
 from foragerr.quality.models import DEFAULT_PROFILE_NAME, FormatProfileRow
 
 
+@pytest.fixture(autouse=True)
+def _reset_cv_gate():
+    """Isolate the process-global ComicVine rate gate around every test so
+    flow tests that drive the real client never leak timing/degraded state."""
+    from foragerr.metadata import ratelimit
+
+    ratelimit.reset_gate()
+    yield
+    ratelimit.reset_gate()
+
+
 @pytest.fixture
 async def format_profile_id(db) -> int:
     """The id of the seeded default format profile (FRG-QUAL-002)."""
