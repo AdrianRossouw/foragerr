@@ -33,6 +33,7 @@ export const queryKeys = {
     forSeries: (seriesId: number) => ['issues', seriesId] as const,
   },
   command: {
+    all: () => ['command'] as const,
     detail: (id: number) => ['command', id] as const,
   },
   // ComicVine lookup deliberately does NOT live under the ['series'] prefix
