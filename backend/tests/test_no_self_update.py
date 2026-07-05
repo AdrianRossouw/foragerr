@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 
 import pytest
+from fastapi import routing
 
 from foragerr.app import create_app
 from foragerr.config import Settings
@@ -51,9 +52,9 @@ def test_no_update_route_or_config_setting(tmp_path):
     path.mkdir()
     app = create_app(Settings(config_dir=path))
     offending_routes = [
-        route.path
-        for route in app.routes
-        if hasattr(route, "path") and "update" in route.path.lower()
+        ctx.route.path
+        for ctx in routing.iter_route_contexts(app.routes)
+        if hasattr(ctx.route, "path") and "update" in ctx.route.path.lower()
     ]
     assert not offending_routes
     assert not any("update" in name.lower() for name in Settings.model_fields)
