@@ -18,11 +18,23 @@ OPDS-PSE/OpenSearch (M2), auth (M3), any reader.
 
 ## Decisions
 
-1. **Screen-by-screen Sonarr v3 mapping** (owner-approval anchor):
+1. **Screen-by-screen Sonarr mapping** (owner-approval anchor). Ground truth for
+   every row is the screenshot-grounded analysis in `docs/research/sonarr-ui/`
+   (19 captures of a live seeded Sonarr 4.0.19 + per-screen anatomy + the P1–P16
+   shared-primitive inventory); design intent is Adrian's exploration
+   `docs/research/Foragerr.dc.html` (2026-07-05, early). Where the two disagree,
+   the mapping row says which wins and why.
    - Library index ← Sonarr Series index: dark left sidebar (Library / Activity /
      Settings / System groups), top toolbar (view toggle poster/table, sort, filter),
      poster grid with hover overlays + table view with sortable columns
-     (title/count/have/profile/path).
+     (title/count/have/profile/path), the alphabet jump bar (worth keeping at
+     comic-library scale), and the have+queued/total progress pill ("0+1/63")
+     copied exactly. Divergence: missing-issues state gets a clearer affordance
+     than Sonarr's corner triangle (subtle and colorblind-hostile — Sonarr ships
+     colorImpaired mitigation tokens for it). Index card/row components must not
+     hard-assume one-series-per-entry: the design file's "Group volumes" option
+     (collapse sequel volumes into one entry, future milestone) arrives as a
+     view-level grouping over the same components.
    - Series detail ← Sonarr series page: banner header (cover, monitored toggle,
      profile, path, stats), toolbar actions (Refresh, Rescan, Search Monitored —
      all `POST /command`), issue table (monitor toggle per row, issue number TEXT,
@@ -36,13 +48,26 @@ OPDS-PSE/OpenSearch (M2), auth (M3), any reader.
    - Interactive search ← Sonarr interactive search modal: full-width overlay table
      — decision chip (approved/rejected + reason list tooltip), source/indexer,
      title, size, age, score; grab button per approved row (cache-key POST).
+     Divergence: any active result filter is indicated inline in the overlay —
+     Sonarr's season-level search silently applies a Season Pack filter whose
+     only clue is "all results are hidden" (observed live; the quiet-filter trap
+     is a documented anti-goal).
    - Settings: Indexers + Download Clients ← Sonarr settings cards + modal forms —
      provider cards with enable toggles; add/edit modal rendered 100% from
      `/schema` (field metadata → widget map: text/number/select/checkbox/password),
-     test button wired to `/test`, secrets write-only placeholders.
-   Divergences (explicit): no seasons layer anywhere; format profile instead of
-   quality profile; single-user no-auth (no login screens); ant/foraging accent
-   token set (accent color, logo, name) on the Sonarr-shaped shell.
+     test button wired to `/test`, secrets write-only placeholders. Save model
+     copied as-is: settings pages use the toolbar dirty-save ("No Changes" ↔
+     "Save Changes"), modals save in the footer.
+   Divergences (explicit): no seasons layer anywhere — comic series detail is a
+   flat issue table (Sonarr's season accordion has no M1 equivalent; the hero
+   band ports directly); format profile instead of quality profile; single-user
+   no-auth (no login screens); ant/foraging accent token set (accent color,
+   logo, name) on the Sonarr-shaped shell. Future-milestone affordances from the
+   design file — series-detail credits block, Issues/Collections tabs,
+   "Collected in" chips, and the add-flow "Collect as" (singles-vs-trades)
+   selector — are design-notes only: M1 components keep those regions
+   composable but none of it is in scope, and "Collect as" is a new-requirement
+   candidate awaiting an owner decision at the comics-native milestone.
 
 2. **Frontend architecture** (FRG-UI-001/002): Vite + React 18 + TS strict;
    TanStack Query with query keys mirroring API paths (`['series']`,
@@ -51,7 +76,12 @@ OPDS-PSE/OpenSearch (M2), auth (M3), any reader.
    `/api/v1/ws`, maps `{name, action, resource}` → query invalidation/patch;
    reconnect with backoff; connection state surfaced in the sidebar footer.
    Design tokens in `src/theme/tokens.css` (`--color-accent`, `--surface-*`,
-   `--spacing-*` — theme-neutral names); Sonarr-dark default values; ant accent.
+   `--spacing-*` — theme-neutral names); Sonarr-dark defaults seeded from the
+   measured token set in `docs/research/sonarr-ui/sonarr-ui-analysis.md` §3
+   (page `#202020`, chrome `#2a2a2a`, cards `#333`, sidebar 210px, header +
+   toolbar 60px, breakpoints 480/768/992/1200/1450, Roboto 14px/1.53); ant
+   accent starts from the design file's green `#57b877`. If a light theme ever
+   ships it keeps the dark sidebar (the school's signature).
    No component library lock-in: headless primitives (Radix) + custom CSS mirroring
    the Sonarr look — avoids fighting a kit to match the school.
    Vitest + Testing Library; FRG ids in test names (trace.py discovery).
@@ -98,7 +128,8 @@ OPDS-PSE/OpenSearch (M2), auth (M3), any reader.
 
 - [Recreating Sonarr's look without its code] → tokens + a few core layout
   components get us "same school" not "pixel clone"; screen-mapping above is the
-  acceptance anchor, reviewed against screenshots at the gate.
+  acceptance anchor, reviewed at the gate against the committed captures in
+  `docs/research/sonarr-ui/`.
 - [WS + React Query consistency] → invalidation (refetch) over patching for M1
   except queue progress (patch) — correctness first, optimization M2.
 - [Slow OPDS clients on big libraries] → feed pagination mandatory + per-page cap;
