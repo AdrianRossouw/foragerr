@@ -349,6 +349,214 @@ allocated yet).
 
 ---
 
+## Change deltas
+
+### 2026-07-05 — m1-foundation (change 1 of Phase 3)
+
+New attack surface introduced and its disposition:
+
+- **HTTP listener exists** (COMP 1 partial): FastAPI app on 8789 with `/health`
+  (unauthenticated by design, FRG-DEP-007) and `/api/v1` skeleton (error shape,
+  paging, command endpoints). Auth mode none per FRG-AUTH-001 (RISK-020 acceptance
+  restated; route-inventory tests prove no dormant auth paths). WebSocket and OPDS
+  listeners are NOT yet present (changes 7).
+- **Outbound HTTP choke point** (cross-cutting): all egress flows through one
+  factory — mandatory timeouts, TLS always verified, manual bounded redirect walk,
+  streaming byte caps (FRG-NFR-006), per-hop SSRF egress validation with
+  external/local-service profiles (FRG-SEC-001; RISK-025 mitigated with the
+  DNS-rebinding TOCTOU accepted residual recorded in the register).
+- **Secrets handling** (COMP 11 partial): SecretStr config fields self-register
+  with the log-redaction filter (FRG-NFR-008; RISK-013 log-exposure arm closed);
+  no secrets in repo/image (FRG-DEP-005). At-rest encryption remains M3.
+- **Persistence + queue surfaces** (COMP 10/12): single-writer WAL SQLite with
+  guarded forward-only migrations and pre-migration backups; persisted command
+  queue with orphan recovery and graceful drain. No network exposure; failure
+  modes are availability-class and covered by tagged tests (FRG-DB-*, FRG-SCHED-*).
+
+No new STRIDE categories beyond those already modeled; component sections above
+remain accurate with the M1 subset now implemented.
+
+### 2026-07-05 — m1-library-metadata (change 3 of Phase 3)
+
+New attack surface introduced and its disposition (COMP 8 — ComicVine client, plus
+the COMP 9 path-construction threats it feeds):
+
+- **ComicVine client is live** (T-CV-1..6): JSON-only (no XML/expat path exists —
+  `T-CV-4`'s XXE concern does not apply to CV traffic at all), built exclusively on
+  the change-1 outbound factory (TLS-verify-always, bounded timeouts, `T-CV-2`
+  closed), API key sent as a query param but never logged (factory + logging-filter
+  redaction, `T-CV-1` closed), honest configurable User-Agent (`T-CV-6` closed).
+  A process-global rate limiter serializes all CV traffic including cover fetches
+  (FRG-META-003/FRG-NFR-004), which is also the DoS-politeness half of `T-CV-4`.
+- **Untrusted CV content sanitized at ingest** (`T-CV-3` closed for the CV arm,
+  RISK-011/014): `sanitize_cv_text()` strips HTML/control characters and caps
+  length on every string the client maps out of a CV response — no raw wiki HTML
+  or CR/LF-forging bytes reach the DB, API, or logs. `T-API-3`/`T-DDL-6` (the
+  broader UI-XSS/log-injection threats) remain open for the DDL text arm (change 5).
+- **Cover-image SSRF narrowed, not closed** (`T-CV-5`, RISK-025): cover fetches now
+  go through the SAME rate-limited, egress-validated outbound client as every other
+  CV call, PLUS a config-driven image-host allowlist (`comicvine_image_hosts`) — an
+  operator-controlled allowlist rather than trusting an arbitrary wiki-editable
+  `image_url` verbatim. The general cross-cutting SSRF-egress-controls gap (G-3) for
+  indexer/SAB/pull-source hosts is still open; this change only closes the
+  ComicVine-cover-image instance of it.
+- **Path construction from CV titles** (T-FILE-2, RISK-019): `safe_path_component()`
+  reduces every CV-derived title to one filesystem-safe segment before it is joined
+  onto a root folder path (separator/control-char stripping, reserved-name
+  de-reservation, trailing dot/space trim); `validate_under_root()` rejects any
+  per-series path override outside a registered root. Gap G-4a (a central
+  safe-join/containment guarantee against symlink escape and TOCTOU across the
+  *whole* destination-path pipeline) remains open, deferred to change 6's renaming
+  engine (FRG-SEC-004).
+- **New COMP 8 asset**: the local cover cache under `<config>/covers/` — write path
+  is a system-generated filename (never derived from the remote URL), closing a
+  latent zip-slip-style naming risk before it could ever be introduced.
+
+No new STRIDE categories; COMP 8/9 sections above remain accurate with the M1
+subset now implemented. Residual/open items for this component are tracked above,
+not re-litigated here.
+
+### 2026-07-05 — m1-search-indexers (change 4 of Phase 3)
+
+New attack surface introduced and its disposition (COMP 4 — indexer clients, plus
+the decision engine and release API built on them):
+
+- **Untrusted indexer XML is live and hardened** (`T-IDX-2`, RISK-024/035, gap
+  G-2's indexer arm CLOSED): every Newznab response is parsed at a single
+  defusedxml site (`indexers/xml.py`) with DTD, external entities, and entity
+  expansion disabled, under the factory's response byte cap; the FRG-SEC-002
+  hostile corpus (billion-laughs, external-entity, quadratic blowup, oversized,
+  junk) is tagged-tested, plus a static guard asserting no other XML-parser
+  construction exists in the package. The CBL reading-list arm of G-2 stays open
+  (backlog milestone).
+- **Indexer-host SSRF instance closed** (`T-IDX-3`, RISK-025 arm): all indexer
+  traffic uses `factory.external()` — the change-1 egress profile (loopback/
+  private/link-local refusal, TLS verify, bounded timeouts, no auto-redirects).
+  SAB/pull-source arms remain for changes 5+.
+- **Hostile/slow provider containment** (`T-IDX-5`, RISK-027 CLOSED for
+  indexers): persisted per-provider back-off ladder (0s→…→24h, Retry-After/auth
+  fast-forward, full reset on success — FRG-NFR-005) honored by every fetch
+  path; per-indexer 2s spacing; per-indexer fan isolation in the search
+  pipeline so one wedged provider cannot stall the pool — proven by the
+  FRG-NFR-010 end-to-end against live hang/drip/junk/429-storm fixture servers
+  with a healthy indexer completing in the same command.
+- **Indexer API keys** (`T-IDX-1`): SecretStr settings fields, write-only in
+  `GET /indexer/schema` responses (never echoed), registered for log redaction
+  at row load. Key-in-query-string to the indexer itself is inherent to the
+  Newznab protocol; redaction covers our logs/errors.
+- **Mislabelled payloads** (`T-IDX-4`, partial): `<error code>` and
+  non-XML/HTML responses map to typed failures feeding the ladder; NZB byte
+  validation before download-client handoff is change 5 (unchanged plan).
+- **New listener surface**: `GET/POST /api/v1/release` (interactive search +
+  cached grab) and the series-alias edit path. Release rows are resolved
+  strictly from the server-side `release_cache` (30-min expiry, housekeeping
+  prune) keyed `(indexer_id, guid)` — a client can only grab something an
+  indexer actually returned to *this* server; expired keys are a deterministic
+  404-class error, never a silent re-search. Alias edits are ORM-parameterized,
+  stored as canonical JSON, and used only via the normalized matching-key path;
+  rejection reasons and release titles rendered to the UI remain untrusted text
+  (output encoding is the UI's job — unchanged `T-API-3` posture).
+- **New assets**: `release_cache` rows (release titles/links from untrusted
+  indexers — treated as untrusted text throughout), `provider_backoff` state,
+  `series.aliases` (operator-supplied).
+
+### 2026-07-05 — m1-downloads (change 5 of Phase 3)
+
+Two new outbound attack surfaces went live: COMP 5 (SABnzbd client) and COMP 6
+(DDL scraper + downloader). Disposition of the STRIDE-relevant threats:
+
+**COMP 5 — SABnzbd client**
+
+- **Server-side NZB fetch + content validation** (`T-SAB-1`/`T-IDX-4`, RISK-028/026):
+  the client fetches the NZB bytes itself from the indexer link over the change-1
+  `external` egress profile — routed through the indexer's `PROVIDER_INDEXER`
+  back-off ladder — and validates them (non-empty, parse under the ONE hardened
+  `parse_indexer_xml` defusedxml site reused from FRG-SEC-002, ≥1 `<segment>`)
+  BEFORE upload (`_validate_nzb`, FRG-DL-003). A hostile/mislabelled/empty payload
+  is a typed `GrabValidationError` and the bytes are never POSTed to SAB; indexer
+  credentials never reach SAB. Intake is `mode=addfile` only — Mylar's add-by-URL /
+  one-time-download-key callback surface is permanently excluded (`T-SAB-1` closed).
+- **Egress split** (`T-SAB-4`, RISK-025 SAB arm): every SAB API call uses the
+  change-1 `local_service` profile bound to the operator-configured base URL —
+  deliberately permitting the operator's LAN/loopback SAB host (which the strict
+  `external` profile would refuse) while keeping TLS-verify, bounded timeouts, and
+  the per-hop validation. The compensating control is that the base URL is
+  operator-configured, not attacker-supplied. The server-side NZB fetch above,
+  by contrast, uses the strict `external` profile (indexer link is remote).
+- **SAB API-key redaction** (`T-SAB-3`, RISK-013): the key is a `SecretStr`,
+  `register_secret`-registered for log redaction at construction (FRG-NFR-008); it
+  rides as an `apikey` query param to SAB (inherent to the SAB protocol) but is
+  scrubbed from our logs/errors. At-rest encryption of the stored row remains M3
+  (FRG-AUTH-008).
+- **Remote-path-mapping confusion** (`T-SAB-2`, RISK-029): a completed `storage`
+  path is rewritten through the client's `RemotePathMapping` prefixes; a foreign,
+  unmapped path (Windows-shaped on this POSIX host, or any path when mappings exist
+  yet none match) is surfaced as a `WARNING` item carrying "check remote path
+  mapping" — never a silent import failure, never a crash (FRG-DL-005).
+- **Encrypted / corrupt items** (RISK-030 usenet arm): `ENCRYPTED/`-prefixed or
+  password-fragment history items map to `FAILED` (+ `encrypted` flag + reason);
+  a disk-full unpack maps to a recoverable `WARNING` (FRG-DL-004).
+- **Known-bad re-grab defense** (RISK-014 loop / FRG-DL-012): grab rows and the
+  failure blocklist now carry `pub_date`, so the multi-field blocklist match key
+  actually distinguishes a resurfacing failed release (a missing `pub_date` on
+  either side is not treated as a mismatch — `BlocklistEntry.matches`).
+
+**COMP 6 — DDL scraper + downloader**
+
+- **SSRF / egress per-hop allowlist — now covering EVERY scraped fetch**
+  (`T-DDL-2`, RISK-007): a per-provider scheme(`https`)+host `AllowList`
+  (`build_allowlist` = provider host + `KNOWN_DDL_HOSTS`) is enforced by a
+  `hop_check` re-run on every redirect hop, on top of the always-on `external`
+  SSRF egress policy. This change extended that gate — previously on the file
+  download only — to the scraped **post-page and search-page** fetches too
+  (`search_provider._fetch_page`, `queue` post-page fetch via `build_hop_check`),
+  closing the residual where a hostile GetComics response could steer a page fetch
+  to an arbitrary public host. No cross-host cookies; TLS verify always on
+  (FRG-DDL-012).
+- **Safe system-generated filenames** (`T-DDL-1`, RISK-006): the on-disk name is
+  `{series} {issue} [__{issueid}__]{ext}`, built from library metadata + the queue
+  id, every component reduced by the shared `safe_path_component` (FRG-DDL-011 /
+  FRG-NFR-012). No redirect-final URL or `Content-Disposition` value ever reaches
+  the path (static-tested against a hostile-CD response and a traversal-name
+  corpus); `resolve_output_path` is a containment backstop that raises if a name
+  ever resolved outside the staging dir. The final extension comes from verified
+  magic bytes, never the remote name.
+- **Content verification before import** (`T-DDL-5`, RISK-015/030 DDL arm):
+  `verify_file` gates every completed file — size floor, magic-byte type
+  (zip/rar/pdf), and (for `.cbz`) opens as a real zip with ≥1 image entry, with NO
+  extraction (FRG-DDL-010). An HTML ad/error page named as a comic, a truncated
+  transfer, or a corrupt archive fails and the queue fails over to the next host.
+  Deep malware/AV scanning and supply-chain trust remain the accepted RISK-015
+  residual.
+- **Politeness + back-off** (`T-DDL-8`, RISK-027 DDL arm CLOSED): page fetches are
+  spaced ≥15 s (floor-clamped) plus jitter, with the per-provider last-run
+  persisted across restart (`politeness.throttle`, FRG-DDL-006); 429/503, a
+  Cloudflare challenge marker, or a connection fault fast-forward the shared
+  `PROVIDER_DDL` back-off ladder (FRG-NFR-005). The change-4 note that the generic
+  ladder was "ready for DDL reuse" is now realized.
+- **TLS always on** (`T-DDL-4` partial, RISK-009): no `verify=False` anywhere —
+  all DDL traffic goes through the factory choke point, guarded by a static test
+  asserting no `verify=False` exists in `backend/src` (FRG-DDL-012). The Cloudflare
+  clearance-cookie / FlareSolverr arm of `T-DDL-4` is NOT live: Cloudflare session
+  handling is deferred to backlog B (FRG-DDL-016), so the `.gc_cookies.dat`
+  at-rest concern in RISK-009 has no code yet.
+- **Scraped untrusted text** (`T-DDL-6`, RISK-014 DDL arm): scraped titles/sizes/
+  years become `ReleaseCandidate` fields treated as untrusted text end-to-end —
+  same posture as indexer release titles (output encoding is the UI's job). No
+  ingest-time HTML/CR-LF sanitizer equivalent to ComicVine's `sanitize_cv_text`
+  is applied to DDL text; this arm therefore remains open, not advanced.
+
+**Deferred and still open** — backlog **B**: safe archive extraction of DDL packs
+(FRG-DDL-015; `T-DDL-3` / RISK-008 stays open — M1 DDL lands single files only, so
+`extractall` never runs), Cloudflare/FlareSolverr session handling (FRG-DDL-016;
+`T-DDL-4`/RISK-009 cookie arm), mirror-host adapters (FRG-DDL-017 — Mega/MediaFire/
+Pixeldrain never reach the downloader), pack/booktype recognition (FRG-DDL-014).
+**Change 6**: import execution and full completed-download cleanup policy
+(`mark_imported` is a minimal history-delete stub today).
+
+No new STRIDE categories; COMP 5/6 sections above remain accurate with the M1
+subset now implemented. Residual/open items are tracked above, not re-litigated.
+
 ## Coverage summary
 
 - **Well covered by the five drafts** (mitigation named, no new requirement needed): OPDS
