@@ -48,7 +48,8 @@ The system SHALL persist one issue record per ComicVine issue of a watched serie
 #### Scenario: Issues sort in reading order via the persisted ordering key
 
 - **WHEN** those issues are listed via `GET /api/v1/issues?seriesId={id}` sorted by reading order
-- **THEN** they are returned ordered `1`, `1.5`, `1.MU` using the persisted ordering key, independent of insertion order
+- **THEN** they are returned ordered `1`, `1.MU`, `1.5` using the persisted ordering key, independent of insertion order
+- **Note (corrected 2026-07-05, m1-library-metadata)**: an earlier draft of this scenario listed the order as `1`, `1.5`, `1.MU`. The persisted ordering key deliberately reuses the single shared ordering implementation from FRG-IMP-020 (`foragerr.parser.ordering.sort_key`) rather than a second, divergent rule — under that implementation `1.MU` shares `1`'s base numeric value (and sorts before any strictly greater value like `1.5`) by its own established, tested tie-break rules. The example was wrong, not the implementation; corrected here to match the actual, intentional, single-ordering-implementation behavior.
 
 #### Scenario: Absent dates and files are stored as null, not sentinels
 
