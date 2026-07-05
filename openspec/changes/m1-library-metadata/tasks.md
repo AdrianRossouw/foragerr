@@ -38,4 +38,4 @@
 
 - [x] 5.1 Risk register: RISK-011/014/019 mitigation status → implemented-by FRG-META-014/FRG-NFR-012; threat-model delta for the CV integration (FRG-PROC-006)
 - [x] 5.2 Every in-scope FRG id has ≥1 passing tagged test; flip 28 registry rows to `implemented`; `tools/trace.py` exit 0 (FRG-PROC-004, FRG-PROC-005)
-- [ ] 5.3 Suite green → /code-review (medium) → /simplify → suite + trace green → `--no-ff` merge → archive → update docs/process/decisions.md (FRG-PROC-007)
+- [x] 5.3 Suite green → /code-review (medium) → /simplify → suite + trace green → `--no-ff` merge → archive → update docs/process/decisions.md (FRG-PROC-007)
