@@ -199,7 +199,7 @@ The system SHALL support a global usenet retention setting (days) that is passed
 
 ### Requirement: FRG-IDX-010 — Indexer failure back-off and recovery
 
-On indexer request failure, the system SHALL escalate the indexer through a back-off ladder (approx. 0 s, 1 m, 5 m, 15 m, 30 m, 1 h, 3 h, 6 h, 12 h, 24 h) setting a disabled-until time, SHALL de-escalate one level on success, SHALL fast-forward the ladder on rate-limit responses (Retry-After / request-limit errors), and SHALL exclude disabled indexers from RSS and search while showing them in health.
+On indexer request failure, the system SHALL escalate the indexer through a back-off ladder (approx. 0 s, 1 m, 5 m, 15 m, 30 m, 1 h, 3 h, 6 h, 12 h, 24 h) setting a disabled-until time, SHALL fully reset the ladder on success, SHALL fast-forward the ladder on rate-limit responses (Retry-After / request-limit errors), and SHALL exclude disabled indexers from RSS and search while showing them in health.
 
 - **Milestone**: M1
 - **Source**: sonarr-arch §2.6 (EscalationBackOff, FilterBlockedIndexers); mylar-fs SRCH (temporary provider blocks)
@@ -208,7 +208,7 @@ On indexer request failure, the system SHALL escalate the indexer through a back
 #### Scenario: Repeated failures escalate the ladder and skip the provider
 
 - **WHEN** an indexer fails several consecutive requests
-- **THEN** its persisted back-off state (keyed by `(provider_type, provider_id)`) escalates through the ladder (1m→5m→15m→1h→3h→6h→12h→24h), setting a next-allowed time so the next fetch skips and logs it while it stays visible as unhealthy in health
+- **THEN** its persisted back-off state (keyed by `(provider_type, provider_id)`) escalates through the ladder (1m→5m→15m→30m→1h→3h→6h→12h→24h), setting a next-allowed time so the next fetch skips and logs it while it stays visible as unhealthy in health
 
 #### Scenario: Rate-limit responses fast-forward the ladder
 
