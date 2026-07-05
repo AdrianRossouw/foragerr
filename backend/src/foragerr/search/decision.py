@@ -62,7 +62,9 @@ class Decision:
     parser (FRG-SRCH-002). ``mapped_series_id`` / ``mapped_issue_id`` are the
     library entities the candidate resolved to (FRG-SRCH-003), or ``None`` when
     mapping failed — carried here so the search-command layer can hand off a
-    grab without re-deriving them.
+    grab without re-deriving them. ``fmt`` is the resolved container format the
+    engine already computed once (FRG-SRCH-004), carried so the comparator and
+    the release API read it instead of re-running ``candidate_format``.
     """
 
     candidate: ReleaseCandidate
@@ -71,6 +73,7 @@ class Decision:
     parsed: ParseResult
     mapped_series_id: int | None = None
     mapped_issue_id: int | None = None
+    fmt: str | None = None
 
     @property
     def approved(self) -> bool:

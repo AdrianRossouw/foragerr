@@ -71,6 +71,7 @@ class DecisionEngine:
             mapped_issue_id=(
                 mapping.issue.issue_id if mapping.issue is not None else None
             ),
+            fmt=fmt,
         )
 
     def evaluate_all(

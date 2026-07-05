@@ -19,7 +19,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from fractions import Fraction
-from typing import Protocol, runtime_checkable
+from types import MappingProxyType
+from typing import Mapping, Protocol, runtime_checkable
 
 from foragerr.db.base import utcnow
 from foragerr.releases import ReleaseCandidate
@@ -197,8 +198,16 @@ class EngineConfig:
     """
 
     #: Usenet retention: candidates older than this are permanently rejected.
-    #: ``None`` disables the check (FRG-IDX-009 / FRG-SRCH-004).
+    #: ``None`` disables the check (FRG-IDX-009 / FRG-SRCH-004). This is the
+    #: GLOBAL fallback; a per-indexer override in ``retention_by_indexer`` wins.
     retention_days: int | None = None
+    #: Per-indexer effective retention (already resolved: override-wins-over-
+    #: global) keyed by indexer id (FRG-IDX-009). A candidate's own indexer's
+    #: entry is used when present, else ``retention_days``. Empty by default so
+    #: a plain mapping evaluation behaves exactly as before.
+    retention_by_indexer: Mapping[int, int | None] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
     #: Minimum release age in minutes; younger candidates are *temporarily*
     #: rejected so they can pass on a later run (FRG-SRCH-004).
     min_age_minutes: int = 0
@@ -208,6 +217,16 @@ class EngineConfig:
     must_not_contain: tuple[str, ...] = ()
     #: Whether upgrades over an existing file are permitted at all.
     upgrades_allowed: bool = True
+
+    def retention_for(self, indexer_id: int) -> int | None:
+        """The effective retention (days) for a candidate from ``indexer_id``.
+
+        A per-indexer override (already resolved into ``retention_by_indexer``)
+        wins over the global ``retention_days``; ``None`` means "no retention
+        limit" for that indexer (FRG-IDX-009)."""
+        if indexer_id in self.retention_by_indexer:
+            return self.retention_by_indexer[indexer_id]
+        return self.retention_days
 
 
 DEFAULT_CONFIG = EngineConfig()

@@ -48,6 +48,12 @@ class UpgradeAllowedSpec:
             return None
         if not issue.files:
             return None  # nothing on disk -> any allowed format is wanted
+        if ev.fmt is None:
+            # An unknown container format is unjudgeable before download —
+            # exactly as FormatAllowedSpec permits it here (import re-verifies).
+            # Rejecting it as "not an upgrade" would also render a bare 'None'
+            # in the reason string. Pass and let import decide (FRG-SRCH-004).
+            return None
         if not ctx.config.upgrades_allowed:
             return Rejection(
                 reason="Upgrades are disabled: a file already exists for this issue",

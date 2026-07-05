@@ -26,7 +26,7 @@ from foragerr.indexers.caps import CapsCache
 from foragerr.library.models import IssueRow
 from foragerr.providers.backoff import ProviderBackoff
 from foragerr.search import Decision
-from foragerr.search.titles import candidate_format
+from foragerr.search.titles import to_naive_utc
 from foragerr.search_ops import cache_decisions, get_cached, make_indexer_factory, run_search
 
 router = APIRouter(prefix="/release", tags=["release"])
@@ -79,13 +79,10 @@ def _caps_cache(request: Request) -> CapsCache:
 
 def _row(decision: Decision, profile, now) -> ReleaseDecisionResource:
     candidate = decision.candidate
-    fmt = candidate_format(decision.parsed, candidate.title)
+    fmt = decision.fmt
     age = None
     if candidate.pub_date is not None:
-        pub = candidate.pub_date
-        if pub.tzinfo is not None:
-            pub = pub.replace(tzinfo=None)
-        age = max((now - pub).total_seconds(), 0.0)
+        age = max((to_naive_utc(now) - to_naive_utc(candidate.pub_date)).total_seconds(), 0.0)
     return ReleaseDecisionResource(
         indexer_id=candidate.indexer_id,
         guid=candidate.guid,
@@ -147,6 +144,6 @@ async def grab_release(body: ReleaseGrabRequest, request: Request) -> CommandRes
             "before grabbing",
         )
     record = await request.app.state.commands.enqueue(
-        "grab-release", handoff.payload(), triggered_by="interactive"
+        "grab-release", handoff.model_dump(), triggered_by="interactive"
     )
     return CommandResource.from_record(record)

@@ -16,6 +16,8 @@ collapsed. Survivor order follows first appearance so results are stable.
 
 from __future__ import annotations
 
+from typing import Callable, Hashable
+
 from .decision import Decision
 from .titles import normalized_title
 
@@ -40,31 +42,36 @@ def _preference(decision: Decision) -> tuple[int, int, int, str]:
     return (len(decision.rejections), c.indexer_priority, c.indexer_id, c.guid)
 
 
-def deduplicate(decisions: list[Decision]) -> list[Decision]:
-    """Return the de-duplicated decisions (FRG-SRCH-010)."""
-    # Stage 1: per-indexer guid.
-    by_guid: dict[tuple[int, str], Decision] = {}
-    guid_order: list[tuple[int, str]] = []
+def _collapse(
+    decisions: list[Decision], key_fn: Callable[[Decision], Hashable]
+) -> list[Decision]:
+    """Collapse decisions sharing a ``key_fn`` key, keeping the best (fewest
+    rejections, then higher-priority indexer). Survivor order follows first
+    appearance so results are stable (both de-dup stages are this same shape)."""
+    winners: dict[Hashable, Decision] = {}
+    order: list[Hashable] = []
     for decision in decisions:
-        key = (decision.candidate.indexer_id, decision.candidate.guid)
-        current = by_guid.get(key)
-        if current is None:
-            by_guid[key] = decision
-            guid_order.append(key)
-        elif _preference(decision) < _preference(current):
-            by_guid[key] = decision
-    guid_deduped = [by_guid[k] for k in guid_order]
-
-    # Stage 2: cross-indexer by normalized title + size bucket.
-    winners: dict[tuple[str, int], Decision] = {}
-    cross_order: list[tuple[str, int]] = []
-    for decision in guid_deduped:
-        c = decision.candidate
-        key = (normalized_title(c.title), _size_bucket(c.size_bytes))
+        key = key_fn(decision)
         current = winners.get(key)
         if current is None:
             winners[key] = decision
-            cross_order.append(key)
+            order.append(key)
         elif _preference(decision) < _preference(current):
             winners[key] = decision
-    return [winners[k] for k in cross_order]
+    return [winners[k] for k in order]
+
+
+def _guid_key(decision: Decision) -> tuple[int, str]:
+    return (decision.candidate.indexer_id, decision.candidate.guid)
+
+
+def _title_size_key(decision: Decision) -> tuple[str, int]:
+    c = decision.candidate
+    return (normalized_title(c.title), _size_bucket(c.size_bytes))
+
+
+def deduplicate(decisions: list[Decision]) -> list[Decision]:
+    """Return the de-duplicated decisions (FRG-SRCH-010)."""
+    # Stage 1: per-indexer guid. Stage 2: cross-indexer title + size bucket.
+    guid_deduped = _collapse(decisions, _guid_key)
+    return _collapse(guid_deduped, _title_size_key)

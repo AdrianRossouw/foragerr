@@ -23,7 +23,7 @@ from datetime import datetime
 
 from .context import FormatProfile
 from .decision import Decision
-from .titles import candidate_format
+from .titles import to_naive_utc
 
 #: A very large bucket so undated releases sort after any dated one.
 _NO_AGE_BUCKET = 1_000_000
@@ -33,9 +33,9 @@ def _age_bucket(pub_date: datetime | None, now: datetime) -> int:
     """Log-bucketed age in hours: fresh ≫ day ≫ week, trivial deltas collapse."""
     if pub_date is None:
         return _NO_AGE_BUCKET
-    pub = pub_date.replace(tzinfo=None) if pub_date.tzinfo is not None else pub_date
-    now_naive = now.replace(tzinfo=None) if now.tzinfo is not None else now
-    hours = max((now_naive - pub).total_seconds() / 3600.0, 0.0)
+    hours = max(
+        (to_naive_utc(now) - to_naive_utc(pub_date)).total_seconds() / 3600.0, 0.0
+    )
     return int(math.log2(hours + 1.0))
 
 
@@ -67,9 +67,8 @@ def comparator_key(
     issue shares it, so it is passed once rather than carried per decision.
     """
     candidate = decision.candidate
-    fmt = candidate_format(decision.parsed, candidate.title)
     return (
-        -profile.rung(fmt),  # higher rung first
+        -profile.rung(decision.fmt),  # higher rung first
         candidate.indexer_priority,  # lower priority number first
         candidate.query_tier,  # lower (more specific) tier first
         _age_bucket(candidate.pub_date, now),  # fresher first

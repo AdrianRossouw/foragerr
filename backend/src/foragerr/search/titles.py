@@ -6,8 +6,19 @@ All pure functions over already-parsed data — no I/O, no state.
 from __future__ import annotations
 
 import re
+from datetime import datetime
 
 from foragerr.parser.result import ParseResult
+
+
+def to_naive_utc(value: datetime) -> datetime:
+    """Drop tzinfo so a naive-UTC ``now`` subtracts cleanly from any pub_date.
+
+    The one shared to-naive-UTC helper for the age specs, the comparator, and
+    the release API (all of which subtract an aware-or-naive ``pub_date`` from a
+    naive-UTC ``now``); previously three private copies of this line existed.
+    """
+    return value.replace(tzinfo=None) if value.tzinfo is not None else value
 
 #: Container formats foragerr tracks. Kept lowercase; matched case-insensitively.
 KNOWN_FORMATS: tuple[str, ...] = ("cbz", "cbr", "cb7", "pdf", "epub")

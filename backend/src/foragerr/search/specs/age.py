@@ -14,17 +14,11 @@ checks rather than guessing.
 
 from __future__ import annotations
 
-from datetime import datetime
-
 from ..decision import Rejection, RejectionType
+from ..titles import to_naive_utc
 from .base import Evaluation, EvaluationContext
 
 _MIN_PLAUSIBLE_YEAR = 1900
-
-
-def _naive(value: datetime) -> datetime:
-    """Drop tz so naive-UTC ``now`` and any aware pub_date subtract cleanly."""
-    return value.replace(tzinfo=None) if value.tzinfo is not None else value
 
 
 class YearSanitySpec:
@@ -47,11 +41,11 @@ class RetentionSpec:
     name = "retention"
 
     def evaluate(self, ev: Evaluation, ctx: EvaluationContext) -> Rejection | None:
-        retention = ctx.config.retention_days
+        retention = ctx.config.retention_for(ev.candidate.indexer_id)
         pub = ev.candidate.pub_date
         if retention is None or pub is None:
             return None
-        age_days = (_naive(ctx.now) - _naive(pub)).total_seconds() / 86400
+        age_days = (to_naive_utc(ctx.now) - to_naive_utc(pub)).total_seconds() / 86400
         if age_days <= retention:
             return None
         return Rejection(
@@ -72,7 +66,7 @@ class MinAgeSpec:
         pub = ev.candidate.pub_date
         if min_minutes <= 0 or pub is None:
             return None
-        age_minutes = (_naive(ctx.now) - _naive(pub)).total_seconds() / 60
+        age_minutes = (to_naive_utc(ctx.now) - to_naive_utc(pub)).total_seconds() / 60
         if age_minutes >= min_minutes:
             return None
         return Rejection(
