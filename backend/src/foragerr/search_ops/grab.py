@@ -49,6 +49,11 @@ class GrabReleaseCommand(BaseCommand):
     link: str
     title: str
     size_bytes: int | None = None
+    #: The release's publish date (FRG-DL-006): persisted on ``grab_history`` and
+    #: carried onto the blocklist so the usenet multi-field match (Sonarr SameNzb)
+    #: can catch the SAME bad post resurfacing under a new guid (FRG-DL-012).
+    #: Optional + additive, so no change-4 grab enqueue site had to move.
+    pub_date: dt.datetime | None = None
     #: The library entities this release satisfies (resolved by the engine).
     series_id: int | None = None
     issue_id: int | None = None
@@ -73,6 +78,7 @@ def handoff_from_decision(decision: Decision) -> GrabReleaseCommand:
         link=candidate.link,
         title=candidate.title,
         size_bytes=candidate.size_bytes,
+        pub_date=candidate.pub_date,
         series_id=decision.mapped_series_id,
         issue_id=decision.mapped_issue_id,
         indexer_name=candidate.indexer_name,
@@ -101,7 +107,6 @@ async def write_grab_history_rows(
     protocol: str,
     source: str,
     pub_date: dt.datetime | None = None,
-    score: int | None = None,
     client_id: int | None = None,
     now: dt.datetime,
 ) -> int:
@@ -131,7 +136,6 @@ async def write_grab_history_rows(
                 pub_date=pub_date,
                 protocol=protocol,
                 source=source,
-                score=score,
                 created_at=now,
             )
         )
@@ -191,6 +195,7 @@ async def _handle_grab_release(
             title=command.title,
             link=command.link,
             size_bytes=command.size_bytes,
+            pub_date=command.pub_date,
             protocol=protocol,
             source=source,
             client_id=client_id,

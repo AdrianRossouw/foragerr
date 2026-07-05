@@ -82,7 +82,6 @@ def upgrade() -> None:
         sa.Column("protocol", sa.Text(), nullable=False, server_default="usenet"),
         # provenance: 'indexer' | 'ddl' (FRG-DL-006 / FRG-DDL-001).
         sa.Column("source", sa.Text(), nullable=False, server_default="indexer"),
-        sa.Column("score", sa.Integer(), nullable=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
     )
     op.create_index("ix_grab_history_download_id", "grab_history", ["download_id"])

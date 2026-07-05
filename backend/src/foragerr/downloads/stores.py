@@ -82,9 +82,12 @@ class BlocklistEntry:
           literal cached release.
         - **DDL** (``source``/``protocol`` = ``ddl``): the same source URL or
           title, since a GetComics post has no stable guid.
-        - **Usenet**: the same title + indexer + size + publish date, so the same
-          bad post is caught even when it resurfaces under a NEW guid (Sonarr's
-          ``SameNzb`` match, the reason a multi-field key beats Mylar's id-only).
+        - **Usenet**: the same title + indexer + size, so the same bad post is
+          caught even when it resurfaces under a NEW guid (Sonarr's ``SameNzb``
+          match, the reason a multi-field key beats Mylar's id-only). Publish
+          date is a TIE-CHECKER, not a mandatory key: it may only VETO a match
+          when it is present on BOTH sides and differs — a missing pub_date on
+          either side never vetoes an otherwise-strong title+indexer+size match.
         """
         if (
             self.guid is not None
@@ -105,8 +108,11 @@ class BlocklistEntry:
             and self.indexer_name == candidate.indexer_name
             and self.size_bytes is not None
             and self.size_bytes == candidate.size_bytes
-            and self.publish_date is not None
-            and self.publish_date == candidate.pub_date
+            and (
+                self.publish_date is None
+                or candidate.pub_date is None
+                or self.publish_date == candidate.pub_date
+            )
         )
 
 

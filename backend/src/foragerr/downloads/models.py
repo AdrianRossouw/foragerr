@@ -82,7 +82,6 @@ class GrabHistoryRow(Base):
     protocol: Mapped[str] = mapped_column(Text, nullable=False, default="usenet")
     #: Provenance ``indexer`` | ``ddl`` (FRG-DL-006 / FRG-DDL-001).
     source: Mapped[str] = mapped_column(Text, nullable=False, default=SOURCE_INDEXER)
-    score: Mapped[int | None] = mapped_column(StrictInteger, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(StrictDateTime, nullable=False)
 
     __table_args__ = (
