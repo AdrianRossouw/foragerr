@@ -42,6 +42,18 @@ _IMPLEMENTATIONS: dict[str, Implementation] = {
 }
 
 
+def register_implementation(impl: Implementation) -> Implementation:
+    """Add (or replace) an implementation in the registry (extension hook).
+
+    Lets a later change register a non-Newznab search provider — e.g. the
+    m1-downloads ``getcomics`` provider (protocol ``ddl``) — as a first-class
+    indexer implementation without editing this module's static seed, keeping
+    ``load_settings`` / ``select_for_path`` / the schema endpoint working for it
+    unchanged."""
+    _IMPLEMENTATIONS[impl.name] = impl
+    return impl
+
+
 class UnknownImplementationError(ValueError):
     """The requested implementation identifier is not registered."""
 
@@ -81,5 +93,6 @@ __all__ = [
     "ValidationError",
     "get_implementation",
     "implementations",
+    "register_implementation",
     "validate_settings",
 ]
