@@ -16,6 +16,7 @@ export const queryKeys = {
     detail: (id: number) => ['series', id] as const,
   },
   queue: {
+    all: () => ['queue'] as const,
     page: (page: number) => ['queue', page] as const,
   },
   release: {
