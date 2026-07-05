@@ -70,6 +70,68 @@ async def create_download_client(
     return row
 
 
+#: Sentinel mirroring :data:`foragerr.indexers.repo._UNSET` — "field omitted
+#: (keep stored value)" vs. an explicit ``None`` for a partial PUT (FRG-DL-002).
+_UNSET: object = object()
+
+
+async def get_download_client(db, client_id: int) -> DownloadClientRow | None:
+    """Load one download-client row by id (detached), or ``None`` (FRG-DL-002)."""
+    async with db.read_session() as session:
+        row = await session.get(DownloadClientRow, client_id)
+        if row is not None:
+            session.expunge(row)
+        return row
+
+
+async def update_download_client(
+    db,
+    client_id: int,
+    *,
+    name: object = _UNSET,
+    priority: object = _UNSET,
+    enabled: object = _UNSET,
+    remove_completed_downloads: object = _UNSET,
+    settings: object = _UNSET,
+) -> DownloadClientRow | None:
+    """Partially update a download-client row (FRG-DL-002); omitted kwargs are
+    left untouched. ``settings`` (when given) is an already-validated settings
+    model with any omitted secret merged onto the stored value by the caller
+    (write-only survival, FRG-API-009). Returns the detached row, or ``None``
+    if no such client exists."""
+    async with db.write_session() as session:
+        row = await session.get(DownloadClientRow, client_id)
+        if row is None:
+            return None
+        if name is not _UNSET:
+            row.name = name  # type: ignore[assignment]
+        if priority is not _UNSET:
+            row.priority = priority  # type: ignore[assignment]
+        if enabled is not _UNSET:
+            row.enabled = enabled  # type: ignore[assignment]
+        if remove_completed_downloads is not _UNSET:
+            row.remove_completed_downloads = remove_completed_downloads  # type: ignore[assignment]
+        if settings is not _UNSET:
+            register_row_secrets(settings)  # type: ignore[arg-type]
+            row.settings = serialize_settings(settings)  # type: ignore[arg-type]
+        await session.flush()
+        session.expunge(row)
+        return row
+
+
+async def delete_download_client(db, client_id: int) -> bool:
+    """Delete one download-client row (FRG-DL-002). ``True`` if one was removed.
+
+    The ``remote_path_mappings.client_id`` FK is ``ON DELETE CASCADE``, so a
+    client's mappings are removed with it."""
+    async with db.write_session() as session:
+        row = await session.get(DownloadClientRow, client_id)
+        if row is None:
+            return False
+        await session.delete(row)
+        return True
+
+
 @dataclass(frozen=True, slots=True)
 class ClientListing:
     """Loaded download-client rows split into healthy vs. failed (FRG-NFR-010)."""
@@ -133,9 +195,12 @@ async def load_mappings(db, client_id: int) -> list[RemotePathMapping]:
 __all__ = [
     "ClientListing",
     "create_download_client",
+    "delete_download_client",
+    "get_download_client",
     "list_download_clients",
     "load_download_clients",
     "load_mappings",
     "load_settings",
     "public_settings",
+    "update_download_client",
 ]
