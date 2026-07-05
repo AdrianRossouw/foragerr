@@ -136,27 +136,27 @@ Milestones: `M1` vertical slice · `M2` torrents + streaming/quality clusters ·
 | FRG-TOR-004 | Seeding-aware import and removal | tor | approved | M2 |
 | FRG-TOR-005 | Seeder-based decision and prioritization | tor | approved | M2 |
 | FRG-TOR-006 | Blocklist by info-hash | tor | approved | M2 |
-| FRG-IMP-001 | Single parser implementation for all consumers | imp | approved | M1 |
-| FRG-IMP-002 | Pure, deterministic parse function | imp | approved | M1 |
-| FRG-IMP-003 | Structured parse result with confidence, no sentinels, no crashes | imp | approved | M1 |
-| FRG-IMP-004 | Tokenization and separator handling | imp | approved | M1 |
-| FRG-IMP-005 | Unicode-native handling and single-sourced normalization | imp | approved | M1 |
-| FRG-IMP-006 | Archive extension recognition | imp | approved | M1 |
-| FRG-IMP-007 | Plain integer and #-prefixed issue numbers with leading-title guard | imp | approved | M1 |
-| FRG-IMP-008 | Decimal, negative, and Unicode-fraction issue numbers | imp | approved | M1 |
-| FRG-IMP-009 | Alphanumeric issue suffixes and named issues | imp | approved | M1 |
-| FRG-IMP-010 | Issue ranges | imp | approved | M1 |
-| FRG-IMP-011 | Mini-series counts and cover/page-tag stripping | imp | approved | M1 |
-| FRG-IMP-012 | Volume designators including volume-years | imp | approved | M1 |
-| FRG-IMP-013 | Year and cover-date extraction | imp | approved | M1 |
-| FRG-IMP-014 | Year-equals-issue one-shot disambiguation | imp | approved | M1 |
-| FRG-IMP-015 | Annuals and specials as structured classification | imp | approved | M1 |
-| FRG-IMP-016 | Booktype detection as distinct enum | imp | approved | M1 |
-| FRG-IMP-017 | Generic annotation classification (scan groups, edition tags) | imp | approved | M1 |
-| FRG-IMP-018 | Embedded issue-ID pass-through | imp | approved | M1 |
-| FRG-IMP-019 | Series title output and alternate title splits | imp | approved | M1 |
-| FRG-IMP-020 | Total, collision-free issue ordering keys | imp | approved | M1 |
-| FRG-IMP-021 | Corpus-driven regression suite | imp | approved | M1 |
+| FRG-IMP-001 | Single parser implementation for all consumers | imp | implemented | M1 |
+| FRG-IMP-002 | Pure, deterministic parse function | imp | implemented | M1 |
+| FRG-IMP-003 | Structured parse result with confidence, no sentinels, no crashes | imp | implemented | M1 |
+| FRG-IMP-004 | Tokenization and separator handling | imp | implemented | M1 |
+| FRG-IMP-005 | Unicode-native handling and single-sourced normalization | imp | implemented | M1 |
+| FRG-IMP-006 | Archive extension recognition | imp | implemented | M1 |
+| FRG-IMP-007 | Plain integer and #-prefixed issue numbers with leading-title guard | imp | implemented | M1 |
+| FRG-IMP-008 | Decimal, negative, and Unicode-fraction issue numbers | imp | implemented | M1 |
+| FRG-IMP-009 | Alphanumeric issue suffixes and named issues | imp | implemented | M1 |
+| FRG-IMP-010 | Issue ranges | imp | implemented | M1 |
+| FRG-IMP-011 | Mini-series counts and cover/page-tag stripping | imp | implemented | M1 |
+| FRG-IMP-012 | Volume designators including volume-years | imp | implemented | M1 |
+| FRG-IMP-013 | Year and cover-date extraction | imp | implemented | M1 |
+| FRG-IMP-014 | Year-equals-issue one-shot disambiguation | imp | implemented | M1 |
+| FRG-IMP-015 | Annuals and specials as structured classification | imp | implemented | M1 |
+| FRG-IMP-016 | Booktype detection as distinct enum | imp | implemented | M1 |
+| FRG-IMP-017 | Generic annotation classification (scan groups, edition tags) | imp | implemented | M1 |
+| FRG-IMP-018 | Embedded issue-ID pass-through | imp | implemented | M1 |
+| FRG-IMP-019 | Series title output and alternate title splits | imp | implemented | M1 |
+| FRG-IMP-020 | Total, collision-free issue ordering keys | imp | implemented | M1 |
+| FRG-IMP-021 | Corpus-driven regression suite | imp | implemented | M1 |
 | FRG-IMP-022 | Library scan walk | imp | approved | M2 |
 | FRG-IMP-023 | Existing-library import staging and review | imp | approved | M2 |
 | FRG-IMP-024 | Embedded metadata read during import | imp | approved | M2 |
@@ -180,8 +180,8 @@ Milestones: `M1` vertical slice · `M2` torrents + streaming/quality clusters ·
 | FRG-PP-017 | ComicInfo.xml tagging on import | pp | approved | M2 |
 | FRG-PP-018 | CBR-to-CBZ conversion and library-wide retagging | pp | approved | M3 |
 | FRG-PP-019 | Permissions and ownership enforcement | pp | approved | B |
-| FRG-API-001 | Versioned, OpenAPI-documented REST API | api | approved | M1 |
-| FRG-API-002 | Standard error and resource conventions | api | approved | M1 |
+| FRG-API-001 | Versioned, OpenAPI-documented REST API | api | implemented | M1 |
+| FRG-API-002 | Standard error and resource conventions | api | implemented | M1 |
 | FRG-API-003 | Series resources with ComicVine lookup | api | approved | M1 |
 | FRG-API-004 | Issue resources with monitored toggle | api | approved | M1 |
 | FRG-API-005 | Command endpoint for background actions | api | approved | M1 |
@@ -237,42 +237,42 @@ Milestones: `M1` vertical slice · `M2` torrents + streaming/quality clusters ·
 | FRG-NOTIF-006 | Additional channels (deferred) | notif | approved | B |
 | FRG-NOTIF-007 | Delivery isolation and failure handling | notif | approved | M2 |
 | FRG-NOTIF-008 | Cover image attachments | notif | approved | B |
-| FRG-DB-001 | single SQLite database under /config | db | approved | M1 |
-| FRG-DB-002 | versioned schema migrations | db | approved | M1 |
-| FRG-DB-003 | pre-migration automatic backup | db | approved | M1 |
-| FRG-DB-004 | refuse to run against a newer schema | db | approved | M1 |
-| FRG-DB-005 | WAL journal mode with busy timeout | db | approved | M1 |
-| FRG-DB-006 | single-writer discipline | db | approved | M1 |
-| FRG-DB-007 | transactional multi-step operations | db | approved | M1 |
-| FRG-DB-008 | typed, sentinel-free schema | db | approved | M1 |
+| FRG-DB-001 | single SQLite database under /config | db | implemented | M1 |
+| FRG-DB-002 | versioned schema migrations | db | implemented | M1 |
+| FRG-DB-003 | pre-migration automatic backup | db | implemented | M1 |
+| FRG-DB-004 | refuse to run against a newer schema | db | implemented | M1 |
+| FRG-DB-005 | WAL journal mode with busy timeout | db | implemented | M1 |
+| FRG-DB-006 | single-writer discipline | db | implemented | M1 |
+| FRG-DB-007 | transactional multi-step operations | db | implemented | M1 |
+| FRG-DB-008 | typed, sentinel-free schema | db | implemented | M1 |
 | FRG-DB-009 | scheduled backups with retention | db | approved | M2 |
 | FRG-DB-010 | restore from backup | db | approved | M2 |
 | FRG-DB-011 | library export and import | db | approved | B |
 | FRG-DB-012 | integrity verification | db | approved | M2 |
-| FRG-SCHED-001 | command abstraction for background work | sched | approved | M1 |
-| FRG-SCHED-002 | persisted command queue surviving restart | sched | approved | M1 |
-| FRG-SCHED-003 | command de-duplication | sched | approved | M1 |
-| FRG-SCHED-004 | priority and exclusivity | sched | approved | M1 |
-| FRG-SCHED-005 | worker pools per workload class | sched | approved | M1 |
-| FRG-SCHED-006 | interval scheduler | sched | approved | M1 |
-| FRG-SCHED-007 | force-run of any scheduled task | sched | approved | M1 |
-| FRG-SCHED-008 | persisted job history | sched | approved | M1 |
-| FRG-SCHED-009 | in-process event bus | sched | approved | M1 |
+| FRG-SCHED-001 | command abstraction for background work | sched | implemented | M1 |
+| FRG-SCHED-002 | persisted command queue surviving restart | sched | implemented | M1 |
+| FRG-SCHED-003 | command de-duplication | sched | implemented | M1 |
+| FRG-SCHED-004 | priority and exclusivity | sched | implemented | M1 |
+| FRG-SCHED-005 | worker pools per workload class | sched | implemented | M1 |
+| FRG-SCHED-006 | interval scheduler | sched | implemented | M1 |
+| FRG-SCHED-007 | force-run of any scheduled task | sched | implemented | M1 |
+| FRG-SCHED-008 | persisted job history | sched | implemented | M1 |
+| FRG-SCHED-009 | in-process event bus | sched | implemented | M1 |
 | FRG-SCHED-010 | command status push to UI | sched | approved | M2 |
-| FRG-SCHED-011 | graceful queue drain on shutdown | sched | approved | M1 |
+| FRG-SCHED-011 | graceful queue drain on shutdown | sched | implemented | M1 |
 | FRG-DEP-001 | Docker image per linuxserver.io conventions | dep | approved | M1 |
-| FRG-DEP-002 | all persistent state under /config | dep | approved | M1 |
-| FRG-DEP-003 | configuration via environment variables and config file | dep | approved | M1 |
+| FRG-DEP-002 | all persistent state under /config | dep | implemented | M1 |
+| FRG-DEP-003 | configuration via environment variables and config file | dep | implemented | M1 |
 | FRG-DEP-004 | versioned config-file migration | dep | approved | M2 |
-| FRG-DEP-005 | secrets never in image or repository | dep | approved | M1 |
-| FRG-DEP-006 | structured logging | dep | approved | M1 |
-| FRG-DEP-007 | health endpoint | dep | approved | M1 |
-| FRG-DEP-008 | graceful shutdown | dep | approved | M1 |
-| FRG-DEP-009 | no self-update (explicit divergence from Mylar) | dep | approved | M1 |
-| FRG-DEP-010 | version and build info | dep | approved | M1 |
+| FRG-DEP-005 | secrets never in image or repository | dep | implemented | M1 |
+| FRG-DEP-006 | structured logging | dep | implemented | M1 |
+| FRG-DEP-007 | health endpoint | dep | implemented | M1 |
+| FRG-DEP-008 | graceful shutdown | dep | implemented | M1 |
+| FRG-DEP-009 | no self-update (explicit divergence from Mylar) | dep | implemented | M1 |
+| FRG-DEP-010 | version and build info | dep | implemented | M1 |
 | FRG-DEP-011 | Tailscale-scoped exposure | dep | approved | M1 |
 | FRG-DEP-012 | secrets-stripped diagnostic bundle | dep | approved | B |
-| FRG-AUTH-001 | M1/M2 no-auth accepted risk | auth | approved | M1 |
+| FRG-AUTH-001 | M1/M2 no-auth accepted risk | auth | implemented | M1 |
 | FRG-AUTH-002 | single-user web login | auth | approved | M3 |
 | FRG-AUTH-003 | password storage with modern KDF | auth | approved | M3 |
 | FRG-AUTH-004 | session management | auth | approved | M3 |
@@ -287,15 +287,15 @@ Milestones: `M1` vertical slice · `M2` torrents + streaming/quality clusters ·
 | FRG-NFR-003 | UI responsiveness at library scale | nfr | approved | M2 |
 | FRG-NFR-004 | ComicVine rate limiting | nfr | approved | M1 |
 | FRG-NFR-005 | indexer and DDL politeness with failure backoff | nfr | approved | M1 |
-| FRG-NFR-006 | bounded, verified outbound requests | nfr | approved | M1 |
+| FRG-NFR-006 | bounded, verified outbound requests | nfr | implemented | M1 |
 | FRG-NFR-007 | crash-safe queues and idempotent work | nfr | approved | M2 |
-| FRG-NFR-008 | secret redaction in logs and errors | nfr | approved | M1 |
-| FRG-NFR-009 | configuration validation at startup | nfr | approved | M1 |
+| FRG-NFR-008 | secret redaction in logs and errors | nfr | implemented | M1 |
+| FRG-NFR-009 | configuration validation at startup | nfr | implemented | M1 |
 | FRG-NFR-010 | resilience to external-service failure | nfr | approved | M1 |
 | FRG-NFR-011 | observable component health | nfr | approved | M2 |
 | FRG-NFR-012 | untrusted external content handling | nfr | approved | M1 |
 | FRG-NFR-013 | resource footprint | nfr | approved | B |
-| FRG-SEC-001 | SSRF egress controls for server-side fetches | sec | approved | M1 |
+| FRG-SEC-001 | SSRF egress controls for server-side fetches | sec | implemented | M1 |
 | FRG-SEC-002 | Hardened XML parsing (XXE / entity-expansion) | sec | approved | M1 |
 | FRG-SEC-003 | Archive-processing safety (bomb / zip-slip limits) | sec | approved | M1 |
 | FRG-SEC-004 | Filesystem path confinement (safe-join) | sec | approved | M1 |

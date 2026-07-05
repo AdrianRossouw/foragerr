@@ -349,6 +349,33 @@ allocated yet).
 
 ---
 
+## Change deltas
+
+### 2026-07-05 — m1-foundation (change 1 of Phase 3)
+
+New attack surface introduced and its disposition:
+
+- **HTTP listener exists** (COMP 1 partial): FastAPI app on 8789 with `/health`
+  (unauthenticated by design, FRG-DEP-007) and `/api/v1` skeleton (error shape,
+  paging, command endpoints). Auth mode none per FRG-AUTH-001 (RISK-020 acceptance
+  restated; route-inventory tests prove no dormant auth paths). WebSocket and OPDS
+  listeners are NOT yet present (changes 7).
+- **Outbound HTTP choke point** (cross-cutting): all egress flows through one
+  factory — mandatory timeouts, TLS always verified, manual bounded redirect walk,
+  streaming byte caps (FRG-NFR-006), per-hop SSRF egress validation with
+  external/local-service profiles (FRG-SEC-001; RISK-025 mitigated with the
+  DNS-rebinding TOCTOU accepted residual recorded in the register).
+- **Secrets handling** (COMP 11 partial): SecretStr config fields self-register
+  with the log-redaction filter (FRG-NFR-008; RISK-013 log-exposure arm closed);
+  no secrets in repo/image (FRG-DEP-005). At-rest encryption remains M3.
+- **Persistence + queue surfaces** (COMP 10/12): single-writer WAL SQLite with
+  guarded forward-only migrations and pre-migration backups; persisted command
+  queue with orphan recovery and graceful drain. No network exposure; failure
+  modes are availability-class and covered by tagged tests (FRG-DB-*, FRG-SCHED-*).
+
+No new STRIDE categories beyond those already modeled; component sections above
+remain accurate with the M1 subset now implemented.
+
 ## Coverage summary
 
 - **Well covered by the five drafts** (mitigation named, no new requirement needed): OPDS
