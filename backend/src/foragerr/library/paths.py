@@ -6,17 +6,18 @@ and any per-series path override must resolve under a registered root folder.
 
 Component sanitization itself is *not* owned here: `safe_path_component` was
 relocated to :mod:`foragerr.security.paths` under single ownership (FRG-SEC-004,
-change 6 design decision 5). This module consumes that one sanitizer to render
-the fixed series-folder template; systematic destination-path confinement
-(safe-join) also lives in ``security.paths``.
+change 6 design decision 5). The series-folder *template* is likewise no longer
+rendered here: change 6 moves that to the one token renaming engine
+(:func:`foragerr.importer.renamer.render_series_folder`, SER-008 template
+ownership transfer, FRG-PP-010). :func:`series_folder_name` now delegates to it,
+byte-for-byte unchanged for existing rows. Systematic destination-path
+confinement (safe-join) lives in ``security.paths``.
 """
 
 from __future__ import annotations
 
 import os
 from pathlib import Path
-
-from foragerr.security import paths as _security_paths
 
 
 class PathNotUnderRootError(ValueError):
@@ -30,11 +31,14 @@ def series_folder_name(title: str, start_year: int | None) -> str:
     the schema (a defensive allowance beyond the spec, which assumes it is
     always known from ComicVine) — when absent the year suffix is simply
     omitted rather than rendering a placeholder.
+
+    Rendered by the change-6 token engine (SER-008 ownership transfer,
+    FRG-PP-010): this is a thin delegation so there is exactly one implementation
+    of the series-folder template, with no behaviour change for existing rows.
     """
-    safe_title = _security_paths.safe_path_component(title)
-    if start_year is None:
-        return safe_title
-    return f"{safe_title} ({start_year})"
+    from foragerr.importer.renamer import render_series_folder
+
+    return render_series_folder(title, start_year)
 
 
 def build_series_path(root_folder_path: str | Path, title: str, start_year: int | None) -> Path:
