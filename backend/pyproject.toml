@@ -37,4 +37,6 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
     "req(id): maps test to requirement",
+    "docker: integration test that requires a docker daemon (skipped by default)",
+    "live: integration test that requires live news-server credentials (skipped by default)",
 ]
