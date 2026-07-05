@@ -6,7 +6,6 @@ Baseline requirements for cross-cutting non-functional requirements, mined from 
 Phase 1 reference research (`docs/research/`). Baseline depth per the Phase 2 scope
 decision: SHALL + coarse acceptance; scenario-level elaboration happens in the
 milestone change that implements each requirement (FRG-PROC-003, FRG-PROC-009).
-
 ## Requirements
 
 ### Requirement: FRG-NFR-001 — startup time
@@ -56,10 +55,25 @@ The system SHALL enforce a client-side ComicVine rate limit shared across ALL co
 - **Source**: mylar-comicvine.md §1.3 and §3.1 (fixed sleep, unlocked concurrency, no Retry-After handling — weaknesses to fix), §5 (candidate requirement).
 - **Notes**: Divergence from Mylar: a real shared limiter (async token/lock), not a per-call sleep. CV client behavior (endpoints, pagination) is META's; NFR owns the politeness budget.
 
-#### Scenario: Baseline acceptance
+#### Scenario: Limiter is process-global across all call sites
 
-- **WHEN** this requirement is verified against the implementation
-- **THEN** A test driving concurrent refresh+search operations records inter-request spacing ≥ the limit at the HTTP layer; a simulated ban response flips CV health to degraded and suppresses further calls for the cool-down.
+- **WHEN** concurrent ComicVine operations spanning search, volume, issue, and cover call sites are driven simultaneously
+- **THEN** observed inter-request wire times at the HTTP layer are serialized to at least the configured minimum interval across all call sites combined, never per-call-site independent spacing
+
+#### Scenario: 429 with Retry-After is honored
+
+- **WHEN** ComicVine returns a 429 response carrying a `Retry-After` header
+- **THEN** the limiter suppresses further ComicVine requests until at least the Retry-After delay has elapsed and does not retry in a tight loop
+
+#### Scenario: Ban/degraded state is observable via health
+
+- **WHEN** a simulated ComicVine ban/rate-limit signal is received
+- **THEN** the ComicVine backend is marked degraded in the exposed component health, and further calls are suppressed for the cool-down window rather than reissued immediately
+
+#### Scenario: Configured interval below the floor is clamped
+
+- **WHEN** the limiter interval is configured below the documented floor
+- **THEN** the effective interval is clamped to the floor (with a warning) and enforced spacing never drops below that documented minimum
 
 ### Requirement: FRG-NFR-005 — indexer and DDL politeness with failure backoff
 
@@ -82,10 +96,25 @@ Every outbound HTTP request SHALL have explicit connect and read timeouts, TLS c
 - **Source**: mylar-comicvine.md §4 (no timeout in cv.pulldetails; CV_VERIFY global disable); mylar-ddl.md §4 (verify=False to FlareSolverr, blind redirect following, SSRF).
 - **Notes**: Enforce by funnelling all outbound traffic through one shared client factory — makes the acceptance testable and gives NFR redaction and politeness a single choke point.
 
-#### Scenario: Baseline acceptance
+#### Scenario: All outbound traffic flows through the shared client factory with timeouts and TLS verify
 
-- **WHEN** this requirement is verified against the implementation
-- **THEN** Static/code-review check (or HTTP-client wrapper test) shows no timeout-less or verify=False call sites; a hung mock server fails the request at the timeout instead of wedging a worker.
+- **WHEN** the codebase is checked for outbound HTTP call sites (static check plus client-construction test)
+- **THEN** every outbound request is issued via the single shared `httpx.AsyncClient` factory with no direct `httpx`/`requests` call site outside it, every client the factory produces carries explicit connect, read, write, and pool timeouts (none defaulted to unlimited), and TLS certificate verification is enabled with no per-call or per-host opt-out parameter exposed by the factory API
+
+#### Scenario: Hung server aborts at the configured timeout
+
+- **WHEN** a request is made through the factory client to a mock server that accepts the connection but never sends a response body
+- **THEN** the request fails with a timeout error at the configured read timeout (observed duration within tolerance of the configured value), and the calling worker/task is released rather than wedged
+
+#### Scenario: Redirect chain is walked manually and bounded at 5 hops
+
+- **WHEN** a mock server returns a chain of 6 redirect responses
+- **THEN** the client (auto-redirects disabled; hops walked manually) stops after the 5th hop and raises a bounded too-many-redirects error, and a 4-hop chain to a valid target succeeds with each hop observable to the egress-validation layer (FRG-SEC-001)
+
+#### Scenario: Oversize and slow-drip responses are aborted by the streaming byte cap
+
+- **WHEN** a parsed-response fetch streams a body that exceeds the configured maximum byte cap (including a server that omits/lies in Content-Length and drips an unbounded body)
+- **THEN** the response is aborted at the cap with a bounded, logged error; no unbounded buffer is accumulated in memory and the partial body is not handed to any parser
 
 ### Requirement: FRG-NFR-007 — crash-safe queues and idempotent work
 
@@ -108,10 +137,20 @@ The system SHALL redact secret material (API keys, passwords, session tokens, au
 - **Source**: mylar-comicvine.md §1.2/§4 (CV key embedded in logged URLs); mylar-feature-surface.md §8 (carepackage stripping); CLAUDE.md Secrets ("never echo them into files, logs").
 - **Notes**: Implement as a logging filter plus the outbound-client choke point — the same machinery serves the DEP diagnostic bundle. Complements (does not replace) "send keys outside the URL".
 
-#### Scenario: Baseline acceptance
+#### Scenario: Registered secret values never reach any handler unmasked
 
-- **WHEN** this requirement is verified against the implementation
-- **THEN** A test configuring known sentinel secret values exercises logging-heavy paths (CV calls, indexer errors, login failures) and asserts the sentinels never appear in captured logs; the shared HTTP client logs URLs with credential query params masked.
+- **WHEN** the configuration is loaded with known sentinel secret values (API keys, passwords) and logging-heavy paths are exercised (outbound client errors, config dumps, failure paths)
+- **THEN** each secret-valued config field self-registers with the redaction filter at config load time, and the sentinel values never appear in output captured from any attached log handler — every occurrence is replaced with a mask token
+
+#### Scenario: Redaction covers messages, args, and formatted exception traces
+
+- **WHEN** log records are emitted that carry a sentinel secret (a) inline in the message string, (b) via a `%s`/args parameter, and (c) inside the text of a formatted exception traceback (e.g., an httpx error whose URL embeds the key)
+- **THEN** all three record forms are masked before reaching any handler; the captured output for each case contains the mask token and not the sentinel
+
+#### Scenario: api_key-shaped URL query parameters are masked
+
+- **WHEN** a URL containing a credential-bearing query parameter (e.g., `?api_key=…`, `?apikey=…`) is logged by the shared HTTP client or any other path
+- **THEN** the parameter value appears masked in the captured log line even if that specific value was not pre-registered as a config secret, while non-secret query parameters remain readable
 
 ### Requirement: FRG-NFR-009 — configuration validation at startup
 
@@ -121,10 +160,20 @@ The system SHALL validate the entire effective configuration (types, ranges, int
 - **Source**: mylar-feature-surface.md §7 (typed _CONFIG_DEFINITIONS, interval min-clamping); sonarr-architecture.md §7.2 (validated settings contracts).
 - **Notes**: Pydantic settings models give this nearly for free. DEP owns config sources/precedence /migration; NFR owns validation semantics — dedup hint for the orchestrator.
 
-#### Scenario: Baseline acceptance
+#### Scenario: Invalid configuration fails fast with field-precise errors
 
-- **WHEN** this requirement is verified against the implementation
-- **THEN** A config with a bad type, an impossible path, and a too-small interval produces: startup failure listing the first two by key name, and (with those fixed) a clamped interval plus warning for the third.
+- **WHEN** the application starts with a configuration containing a wrong-typed value and a nonexistent/unwritable required path
+- **THEN** startup fails before the listener binds, with a pydantic-settings validation report naming each offending key (field-precise, both errors reported in one pass) and the expected form/type for each
+
+#### Scenario: Startup failure exits non-zero
+
+- **WHEN** the process is launched with an invalid configuration
+- **THEN** the process terminates with a non-zero exit code (observable to the container supervisor) rather than continuing in a partially configured state
+
+#### Scenario: Out-of-range intervals are clamped with a warning
+
+- **WHEN** the configuration supplies a polling/politeness interval below its documented safe floor (where the spec designates clamping rather than rejection)
+- **THEN** startup succeeds, the effective value is the documented floor, and a warning log names the key, the supplied value, and the clamped value
 
 ### Requirement: FRG-NFR-010 — resilience to external-service failure
 
@@ -160,10 +209,25 @@ All strings originating from external services (ComicVine wiki fields, scraped D
 - **Source**: mylar-comicvine.md §4 (user-editable wiki HTML → UI/search); mylar-ddl.md §4 (redirect-derived filenames, hostile archives, scraped text into logs/DB/UI).
 - **Notes**: Cross-cutting security NFR feeding docs/security/ STRIDE (FRG-PROC-006). Archive-bomb /extraction limits belong to the DDL/PP AREAs; this requirement owns the string-handling discipline everywhere.
 
-#### Scenario: Baseline acceptance
+#### Scenario: HTML is stripped and length-capped at ingest
 
-- **WHEN** this requirement is verified against the implementation
-- **THEN** Tests feed hostile fixtures (script tags in CV descriptions, path-traversal filenames in redirect URLs, format-string metacharacters in titles) through ingest paths and assert sanitized persistence, encoded rendering, and system-generated download filenames.
+- **WHEN** a ComicVine description containing `<script>` and other HTML tags exceeding the length cap is ingested
+- **THEN** the value persisted to the database has HTML removed and is truncated to the documented length cap, and that same sanitized text is what appears in API responses and logs
+
+#### Scenario: Path traversal in a title cannot escape the target directory
+
+- **WHEN** a series or issue title contains path-traversal and separator sequences (e.g. `../`, embedded `/` or `\`, a reserved device name)
+- **THEN** filesystem path segments are built only from sanitized safe components with separators and reserved names stripped, so the resulting path stays within the intended library directory
+
+#### Scenario: Control/ANSI characters do not reach logs unescaped
+
+- **WHEN** an externally sourced string containing ANSI escape and control characters (including CR/LF) is written toward the logs
+- **THEN** the logged form is sanitized so no raw control sequences or forged log lines appear
+
+#### Scenario: Hostile fixture round-trips harmlessly end to end
+
+- **WHEN** a hostile fixture combining script tags, path traversal in the title, and ANSI/control characters is fed through the ingest paths
+- **THEN** it persists sanitized, renders/serializes encoded, produces a system-generated (not remote-derived) download filename, and causes no injection, traversal, or log-forging side effects
 
 ### Requirement: FRG-NFR-013 — resource footprint
 
@@ -177,7 +241,6 @@ The system SHALL operate within a steady-state memory budget of 512 MB RSS on th
 
 - **WHEN** this requirement is verified against the implementation
 - **THEN** A 24-hour soak (scheduled jobs cycling, several downloads) stays under the RSS budget with no monotonic growth trend.
-
 
 ### Requirement: FRG-NFR-014 — Listener request resource limits
 

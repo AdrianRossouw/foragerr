@@ -1,0 +1,200 @@
+## MODIFIED Requirements
+
+### Requirement: FRG-DB-001 — single SQLite database under /config
+
+The system SHALL persist all application state (library, issues, files, queues, job history, provider state, download history) in a single SQLite database file located under the container's `/config` volume.
+
+- **Milestone**: M1
+- **Source**: mylar-feature-surface.md §8 "DB" (mylar.db, ~24 tables); sonarr-architecture.md §6 (commands/scheduled_tasks tables).
+- **Notes**: Pairs with DEP `/config`-volume requirement — DEP owns the volume convention, DB owns "all state lives in the DB file". Cover-art cache may live beside the DB under `/config` but is reconstructable, not state.
+
+#### Scenario: State survives container recreate with the same volume
+
+- **WHEN** the application has written library and queue state, the container is destroyed, and a new container starts with the same `/config` volume
+- **THEN** all previously persisted library and queue state is intact and served identically to before the recreate
+
+#### Scenario: All state lives in the single database file
+
+- **WHEN** the filesystem inside and outside `/config` is inspected after normal operation (series added, jobs run, downloads recorded)
+- **THEN** exactly one SQLite database file (plus its WAL/SHM companions) exists, located under `/config`, and no application state files exist outside `/config`
+
+#### Scenario: Fresh start creates the database under /config
+
+- **WHEN** the application starts against an empty `/config` volume
+- **THEN** it creates the SQLite database file at its configured path under `/config` and becomes healthy without manual database setup
+
+### Requirement: FRG-DB-002 — versioned schema migrations
+
+The system SHALL manage the database schema with versioned, ordered, forward-only migrations (alembic-style) applied automatically at startup, recording the applied revision in the database.
+
+- **Milestone**: M1
+- **Source**: mylar-feature-surface.md §8 DB ("additive idempotent ALTER-TABLE migrations, DB version row"); sonarr-architecture.md §6 (persisted stores imply schema evolution).
+- **Notes**: Deliberate divergence from Mylar's ad-hoc idempotent ALTERs — explicit revision chain with up() scripts, testable in CI. Downgrade scripts are NOT required (see refuse-downgrade requirement below).
+
+#### Scenario: Pending migrations apply exactly once at startup
+
+- **WHEN** a build containing newer migrations starts against a database stamped at an older revision
+- **THEN** all pending Alembic migrations are applied programmatically during startup, in order, exactly once, and the database's recorded revision equals the application's head revision
+
+#### Scenario: Restart at head is a no-op
+
+- **WHEN** the application restarts against a database already stamped at the head revision
+- **THEN** startup completes without applying any migration and the recorded revision is unchanged
+
+#### Scenario: Empty database is migrated from base to head
+
+- **WHEN** the application starts against a brand-new, empty database file
+- **THEN** the full forward-only migration chain runs from base to head and the resulting schema matches the head revision
+
+#### Scenario: Failed migration does not stamp the new revision
+
+- **WHEN** a migration script raises an error partway through startup
+- **THEN** the application fails to start with an error identifying the failing revision, and the database's recorded revision remains the last successfully applied one
+
+### Requirement: FRG-DB-003 — pre-migration automatic backup
+
+The system SHALL take an automatic backup of the database file before applying any schema migration, retaining at least the most recent N (configurable, default 3) pre-migration backups.
+
+- **Milestone**: M1
+- **Source**: mylar-feature-surface.md §7 ("automatic config backup before upgrade with retention") and §8 Maintenance & ops (rolling versioned backups of DB+config).
+- **Notes**: Distinct from the scheduled backup requirement below (that one is periodic; this one is event-triggered). Config-file migration backup is a DEP requirement — dedup on wording.
+
+#### Scenario: Backup is taken before migrations run
+
+- **WHEN** startup detects pending migrations against an existing database
+- **THEN** before the first migration executes, a WAL-checkpointed copy of the database is written to `/config/backups/pre-migration-<version>-<timestamp>/`, and that copy reflects the pre-migration schema revision
+
+#### Scenario: No backup when there is nothing to migrate
+
+- **WHEN** the application starts against a database already at the head revision
+- **THEN** no new pre-migration backup directory is created
+
+#### Scenario: Retention prunes oldest backups beyond the limit
+
+- **WHEN** more pre-migration backups exist than the configured retention count (default 3) after a new backup is taken
+- **THEN** the oldest backups are pruned so that exactly the retention count remain, and the most recent backups are the ones kept
+
+#### Scenario: Backup is a consistent, restorable copy
+
+- **WHEN** a pre-migration backup directory is taken while the database has uncheckpointed WAL content
+- **THEN** the backed-up database file passes `PRAGMA integrity_check` and contains all data committed before the backup point
+
+### Requirement: FRG-DB-004 — refuse to run against a newer schema
+
+The system SHALL refuse to start (with a clear error naming the schema revision and the application version) when the database schema revision is newer than the running application supports.
+
+- **Milestone**: M1
+- **Source**: mylar-feature-surface.md §8 DB (DB version row); divergence — Mylar has no downgrade guard.
+- **Notes**: This is the accepted alternative to writing downgrade migrations. Container rollback story: restore the pre-migration backup instead.
+
+#### Scenario: Older build refuses to start against a newer database
+
+- **WHEN** an application build whose migration head is older than the database's recorded revision starts against that database
+- **THEN** startup aborts with a non-zero exit before serving any requests, and the error message names both the database's schema revision and the running application version
+
+#### Scenario: Refusal leaves the database untouched
+
+- **WHEN** startup is refused because the database revision is newer than the code supports
+- **THEN** the database file's content and recorded revision are byte-for-byte unchanged, and no pre-migration backup is created
+
+#### Scenario: Unknown revision is treated as newer
+
+- **WHEN** the database's recorded revision does not exist in the application's migration chain
+- **THEN** the application refuses to start with the same clear error rather than attempting to migrate or run
+
+### Requirement: FRG-DB-005 — WAL journal mode with busy timeout
+
+The system SHALL open the SQLite database in WAL journal mode with `synchronous=NORMAL` (or stricter), foreign keys enabled, and a configured busy timeout on every connection.
+
+- **Milestone**: M1
+- **Source**: mylar-feature-surface.md §8 DB ("retry-on-locked wrapper") — WAL is the modern fix for the lock contention Mylar works around; sonarr-architecture.md (SQLite/FastAPI/asyncio target).
+- **Notes**: WAL means readers never block on the writer; combined with the single-writer requirement this replaces Mylar's retry-on-locked wrapper almost entirely.
+
+#### Scenario: Every pooled connection reports the required PRAGMAs
+
+- **WHEN** any connection obtained from the engine (including newly created pool connections) is queried for its PRAGMA state
+- **THEN** `PRAGMA journal_mode` returns `wal`, `PRAGMA foreign_keys` returns `1`, `PRAGMA synchronous` returns `NORMAL` (1) or stricter, and `PRAGMA busy_timeout` returns the configured non-zero value
+
+#### Scenario: Readers are not blocked by an open write transaction
+
+- **WHEN** a read query executes while a separate write transaction is open and uncommitted
+- **THEN** the read completes successfully with the last-committed data, without waiting for the writer or raising a locked error
+
+#### Scenario: Foreign key constraints are enforced
+
+- **WHEN** an insert or delete that violates a declared foreign key constraint is attempted through the persistence layer
+- **THEN** the operation fails with a constraint error rather than silently persisting an orphaned or dangling row
+
+### Requirement: FRG-DB-006 — single-writer discipline
+
+The system SHALL serialize all database writes through a single writer path (one writer connection or an async write lock), with any residual `SQLITE_BUSY`/locked errors retried with bounded backoff rather than surfaced to callers.
+
+- **Milestone**: M1
+- **Source**: mylar-feature-surface.md §8 ("plus a serialized DB-writer thread"; DB "locked-retry wrapper").
+- **Notes**: In asyncio this is naturally a single writer session/queue; keep read connections separate and read-only. This is the DB-side twin of SCHED's worker-pool design.
+
+#### Scenario: Concurrent writers are serialized without locked errors
+
+- **WHEN** a stress test runs many concurrent tasks that each perform mutations through `write_session()` (simulating search, post-processing, and scheduler activity)
+- **THEN** all mutations complete successfully with zero unhandled "database is locked" errors surfaced to callers, and the final row counts match the total work submitted
+
+#### Scenario: Writes hold the lock one at a time
+
+- **WHEN** two tasks enter `write_session()` concurrently
+- **THEN** the second task's session does not begin its write transaction until the first has committed or rolled back, observable as non-overlapping write windows
+
+#### Scenario: Residual locked errors are retried, not surfaced
+
+- **WHEN** a write encounters a residual `SQLITE_BUSY`/locked condition (e.g., induced by an external process holding the lock briefly)
+- **THEN** the write is retried with bounded backoff and either eventually succeeds or fails with a distinct timeout error after the bound is exhausted — a raw locked error never reaches the caller
+
+### Requirement: FRG-DB-007 — transactional multi-step operations
+
+The system SHALL execute multi-step state changes (e.g., series add with issues, import finalization, queue state transitions, migration steps) as atomic transactions that either fully commit or fully roll back.
+
+- **Milestone**: M1
+- **Source**: sonarr-architecture.md §1.2 (add → refresh chain), §4.4-4.5 (state machine transitions); mylar-comicvine.md §3.7 (silent partial writes as an anti-pattern).
+- **Notes**: Backs NFR crash-safe-queues. Event publication happens after commit, not inside the transaction.
+
+#### Scenario: Interrupted series add leaves no partial records
+
+- **WHEN** the process is killed (or the operation raises) partway through a series-add that inserts the series row plus its issue rows in one `write_session()`
+- **THEN** on next inspection the database contains either the complete series with all its issues or no trace of the series — never a series with a partial issue set
+
+#### Scenario: Failure inside write_session rolls back every statement
+
+- **WHEN** an exception is raised inside a `write_session()` block after some statements have executed
+- **THEN** the session rolls back, none of the block's changes are visible to subsequent readers, and the exception propagates to the caller
+
+#### Scenario: Events publish only after commit
+
+- **WHEN** a multi-step operation inside `write_session()` would publish domain events but the transaction fails before commit
+- **THEN** no event is published; and when the same operation commits successfully, its events are published only after the commit completes
+
+### Requirement: FRG-DB-008 — typed, sentinel-free schema
+
+The system SHALL store all fields as typed columns with SQL NULL for missing values, and SHALL NOT persist sentinel strings (e.g., `'None'`, `'0000'`, `'0000-00-00'`) in place of nulls; issue numbers SHALL be stored in a form preserving decimals and suffixes (e.g., `1.5`, `1.MU`).
+
+- **Milestone**: M1
+- **Source**: mylar-comicvine.md §3.7-3.8 (sentinel-string weaknesses, explicit candidate requirement); sonarr-architecture.md §1.1 (decimal/string issue numbers).
+- **Notes**: Explicit divergence from Mylar. Heuristic-derived fields (book type, volume) carry a provenance flag per the ComicVine research — that flag is a schema concern here, behavior is META's.
+
+#### Scenario: Missing values persist and round-trip as SQL NULL
+
+- **WHEN** a record is saved through the persistence layer with an absent optional field (e.g., no publication date, no ComicVine ID)
+- **THEN** the corresponding column contains SQL NULL, and reading the record back yields `None` — not `'None'`, `'0000'`, `'0000-00-00'`, or any other sentinel string
+
+#### Scenario: Sentinel strings are rejected by the persistence layer
+
+- **WHEN** a write attempts to persist a sentinel string (`'None'`, `'0000'`, `'0000-00-00'`) into a date, number, or id column
+- **THEN** the persistence layer rejects or normalizes the value so that a data-quality query scanning those columns for sentinel strings returns zero rows
+
+#### Scenario: Issue numbers preserve decimals and suffixes
+
+- **WHEN** issues numbered `1`, `1.5`, and `1.MU` are stored and read back
+- **THEN** each issue number round-trips exactly as written (stored as TEXT), with no coercion to integers, floats, or lossy normalization
+
+#### Scenario: Typed columns reject mistyped values
+
+- **WHEN** a value of the wrong type is written to a typed column (e.g., a non-date string to a date column) through the persistence layer
+- **THEN** the write fails with a validation or type error rather than storing a stringly-typed approximation
