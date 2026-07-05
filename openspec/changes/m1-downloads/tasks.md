@@ -6,6 +6,7 @@
 - [ ] 1.2 SABnzbd client: local-service profile; server-side NZB fetch (external profile, ladder) + defusedxml validation + mode=addfile; queue/history polling → typed ClientItem states incl. encrypted; version/config checks in test action (FRG-DL-003, FRG-DL-004)
 - [ ] 1.3 Remote path mapping table + application to completed paths with check-mapping warning (FRG-DL-005)
 - [ ] 1.4 Tagged tests on recorded SAB fixtures: state mapping matrix, encrypted, addfile round-trip, unreachable-client retryable grab, mapping rewrites (FRG-DL-001..005)
+- [ ] 1.5 SAB container integration layer (docker-gated marker, runs at the change gate + in change 8): spin up linuxserver/sabnzbd, exercise the live API contract — auth, mode=addfile → real nzo_id, queue/history shapes, category filtering, delete, get_config/version in the test action — and regenerate the recorded fixtures from its responses so fixture drift is bounded; download completion stays fixture-based (no news server) with SAB's fetch-failure states exercised as real failure input (FRG-DL-003, FRG-DL-004)
 
 ## 2. Tracking + failure loop (worktree area: tracking)
 
