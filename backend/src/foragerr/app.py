@@ -139,6 +139,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(indexer_router, prefix="/api/v1")
 
+    # --- downloads area (m1-downloads, area: downloads): download-client
+    #     provider schema + test endpoints under /api/v1/downloadclient
+    #     (FRG-DL-002, FRG-API-009). Importing the package maps the six change-5
+    #     ORM models onto Base.metadata. ---
+    import foragerr.downloads  # noqa: F401 — ORM model registration
+    from foragerr.api.downloadclient import router as downloadclient_router
+
+    app.include_router(downloadclient_router, prefix="/api/v1")
+
     # --- search integration (m1-search-indexers, area 3): importing registers
     #     the search / grab / prune commands + handlers (FRG-SRCH-008/009/014,
     #     FRG-API-008); mount the interactive-search release router; register
@@ -170,6 +179,45 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Runs after the scheduler startup hook (which creates app.state.scheduler),
     # since it is appended after register_scheduler(app) above.
     app.state.startup_hooks.append(_register_search_tasks)
+
+    # --- downloads tracking area (m1-downloads, area: tracking): importing the
+    #     module registers TrackDownloadsCommand + handler (FRG-DL-007); mount
+    #     the queue read/remove router (FRG-DL-008, FRG-API-007); register the
+    #     ~1-minute tracking task. ---
+    import foragerr.downloads.tracking  # noqa: F401 — command/handler registration
+    from foragerr.api.queue import router as queue_router
+
+    app.include_router(queue_router, prefix="/api/v1")
+
+    async def _register_tracking_task(app: FastAPI) -> None:
+        await app.state.scheduler.register_task(
+            "track-downloads",
+            "track-downloads",
+            interval_seconds=app.state.settings.track_downloads_interval_seconds,
+            min_interval_seconds=60,
+        )
+
+    app.state.startup_hooks.append(_register_tracking_task)
+
+    # --- ddl area (m1-downloads, area: ddl): importing registers the DDL
+    #     client factory, the GetComics search provider, and the
+    #     process-ddl-queue command; the task drains the persistent queue. ---
+    import foragerr.ddl  # noqa: F401 — client/provider/command registration
+    from foragerr.ddl.commands import (
+        PROCESS_DDL_QUEUE_INTERVAL,
+        PROCESS_DDL_QUEUE_MIN_INTERVAL,
+        PROCESS_DDL_QUEUE_TASK,
+    )
+
+    async def _register_ddl_tasks(app: FastAPI) -> None:
+        await app.state.scheduler.register_task(
+            PROCESS_DDL_QUEUE_TASK,
+            PROCESS_DDL_QUEUE_TASK,
+            interval_seconds=PROCESS_DDL_QUEUE_INTERVAL,
+            min_interval_seconds=PROCESS_DDL_QUEUE_MIN_INTERVAL,
+        )
+
+    app.state.startup_hooks.append(_register_ddl_tasks)
 
     return app
 

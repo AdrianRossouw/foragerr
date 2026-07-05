@@ -128,12 +128,15 @@ def test_full_app_lifecycle_starts_runs_and_drains_cleanly(config_dir):
     with TestClient(app) as client:
         assert app.state.db is not None
         assert app.state.commands.health()["status"] == "up"
-        # housekeeping (sched area) plus the search area's scheduled backlog
-        # and release-cache prune tasks (m1-search-indexers).
+        # housekeeping (sched area), the search area's scheduled backlog +
+        # release-cache prune tasks (m1-search-indexers), and the m1-downloads
+        # tracking refresh (FRG-DL-007) + DDL queue drainer (ddl area).
         assert app.state.scheduler.task_names() == [
             "backlog-search",
             "housekeeping",
+            "process-ddl-queue",
             "prune-release-cache",
+            "track-downloads",
         ]
 
         async def round_trip():

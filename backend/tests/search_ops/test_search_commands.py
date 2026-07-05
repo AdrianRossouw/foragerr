@@ -116,20 +116,28 @@ async def test_series_search_covers_each_wanted_issue(
 
 
 @pytest.mark.req("FRG-SRCH-008")
-async def test_grab_handoff_is_inert_until_change_5(
+async def test_grab_handoff_is_live_in_change_5(
     db, format_profile_id, root_folder_id, tmp_path
 ):
-    """The grab hand-off command records intent and downloads nothing here."""
+    """The grab hand-off is now LIVE (change 5, FRG-DL-006): it resolves the
+    protocol-matched download client instead of recording an inert string. With
+    no download client configured, a grab fails typed + retryable (never a silent
+    drop), proving the handler is no longer inert."""
+    from foragerr.downloads.errors import NoDownloadClientError
     from foragerr.search_ops.grab import GrabReleaseCommand
 
+    indexer_id = await make_indexer(db)  # so the release protocol resolves
     ctx = make_ctx(db, make_settings(tmp_path))
-    result = await get_handler("grab-release")(
-        GrabReleaseCommand(
-            indexer_id=1, guid="g-1", link="https://idx.test/nzb/1", title="Saga 007"
-        ),
-        ctx,
-    )
-    assert "inert" in result  # recorded, not downloaded
+    with pytest.raises(NoDownloadClientError):
+        await get_handler("grab-release")(
+            GrabReleaseCommand(
+                indexer_id=indexer_id,
+                guid="g-1",
+                link="https://idx.test/nzb/1",
+                title="Saga 007",
+            ),
+            ctx,
+        )
 
 
 @pytest.mark.req("FRG-SRCH-008")

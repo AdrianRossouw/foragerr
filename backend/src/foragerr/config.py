@@ -291,6 +291,23 @@ class Settings(BaseSettings):
         default=SecretStr(""),
         description="SABnzbd API key (secret; empty by default, supply at runtime).",
     )
+    track_downloads_interval_seconds: int = Field(
+        default=60,
+        ge=60,
+        description=(
+            "How often the scheduled TrackDownloadsCommand polls every enabled "
+            "download client and advances the tracked-download state machine "
+            "(FRG-DL-007). Minimum 60 s (the download pool is serialized)."
+        ),
+    )
+    auto_redownload_failed: bool = Field(
+        default=True,
+        description=(
+            "When a tracked download fails, immediately enqueue a fresh search "
+            "for the affected issues so the blocklist + decision engine select a "
+            "different release (FRG-DL-013, the self-healing loop). On by default."
+        ),
+    )
 
     @classmethod
     def settings_customise_sources(  # env vars override init kwargs (= file values)

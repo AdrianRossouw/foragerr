@@ -59,7 +59,7 @@ async def cache_decisions(
                 "indexer_id": handoff.indexer_id,
                 "guid": handoff.guid,
                 "issue_id": issue_id,
-                "payload": json.dumps(handoff.model_dump()),
+                "payload": json.dumps(handoff.model_dump(mode="json")),
                 "created_at": now,
                 "expires_at": expires_at,
             }
