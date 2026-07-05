@@ -133,6 +133,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     #     routers (FRG-API-001/002, FRG-DEP-007/010, FRG-AUTH-001) ---
     register_api(app)
 
+    # --- indexers area (m1-search-indexers): provider schema + test endpoints
+    #     under /api/v1/indexer (FRG-IDX-003, FRG-API-009) ---
+    from foragerr.api.indexers import router as indexer_router
+
+    app.include_router(indexer_router, prefix="/api/v1")
+
     return app
 
 
