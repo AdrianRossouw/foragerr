@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import logging
+from dataclasses import dataclass, field
 
 from pydantic import BaseModel, SecretStr
 from sqlalchemy import select
@@ -20,6 +22,8 @@ from foragerr.db.base import utcnow
 from foragerr.indexers.models import USAGE_PATHS, IndexerRow
 from foragerr.indexers.registry import get_implementation, validate_settings
 from foragerr.logging import register_secret
+
+logger = logging.getLogger("foragerr.indexers.repo")
 
 
 def serialize_settings(model: BaseModel) -> str:
@@ -101,15 +105,53 @@ async def create_indexer(
     return row
 
 
-async def list_indexers(db) -> list[IndexerRow]:
-    """All configured indexers, each with its secrets re-registered."""
+@dataclass(frozen=True, slots=True)
+class IndexerListing:
+    """The result of loading every indexer with per-row settings validation.
+
+    ``healthy`` rows have valid, secret-registered settings and are safe to
+    search. ``failed`` rows are those whose settings JSON could not load (a
+    corrupt/incompatible row); they are isolated here so ONE bad row can never
+    abort the whole batch (FRG-NFR-010) — the caller surfaces them as failed
+    per-indexer outcomes rather than searching them.
+    """
+
+    healthy: list[IndexerRow] = field(default_factory=list)
+    failed: list[IndexerRow] = field(default_factory=list)
+
+
+async def load_indexers(db) -> IndexerListing:
+    """Load all indexers, validating each row's settings in isolation.
+
+    A row whose settings fail to load is skipped with a structured warning
+    (naming the indexer) and reported as ``failed`` rather than raising and
+    wedging every healthy indexer in the same search (FRG-NFR-010)."""
     async with db.read_session() as session:
         rows = (await session.execute(select(IndexerRow))).scalars().all()
         for row in rows:
             session.expunge(row)
+    healthy: list[IndexerRow] = []
+    failed: list[IndexerRow] = []
     for row in rows:
-        load_settings(row.implementation, row.settings)  # redaction re-register
-    return list(rows)
+        try:
+            load_settings(row.implementation, row.settings)  # redaction re-register
+        except Exception as exc:  # noqa: BLE001 — isolate one corrupt row
+            logger.warning(
+                "indexer settings failed to load; skipping this indexer",
+                extra={"indexer_id": row.id, "indexer_name": row.name, "error": str(exc)},
+            )
+            failed.append(row)
+            continue
+        healthy.append(row)
+    return IndexerListing(healthy=healthy, failed=failed)
+
+
+async def list_indexers(db) -> list[IndexerRow]:
+    """All configured, loadable indexers, each with its secrets re-registered.
+
+    A thin wrapper over :func:`load_indexers` returning only the healthy rows
+    (corrupt rows are skipped and logged, never fatal)."""
+    return (await load_indexers(db)).healthy
 
 
 def select_for_path(rows: list[IndexerRow], path: str) -> list[IndexerRow]:

@@ -33,7 +33,6 @@ from foragerr.search_ops.commands import (
     run_series_search,
 )
 from foragerr.search_ops.grab import (
-    GrabHandoff,
     GrabReleaseCommand,
     enqueue_grab,
     handoff_from_decision,
@@ -48,7 +47,6 @@ __all__ = [
     "BACKLOG_MIN_DELAY_SECONDS",
     "BacklogSearchCommand",
     "CACHE_TTL_MINUTES",
-    "GrabHandoff",
     "GrabReleaseCommand",
     "IssueSearchCommand",
     "PruneReleaseCacheCommand",

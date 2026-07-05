@@ -45,16 +45,17 @@ def _file_format(path: str) -> str:
     return Path(path).suffix.lstrip(".").lower()
 
 
-def _alias_keys(raw_aliases: str | None) -> tuple[str, ...]:
+def _alias_keys(raw_aliases: str | None, series_id: int | None = None) -> tuple[str, ...]:
     """Normalized matching keys for a series' user aliases (FRG-SRCH-003).
 
     Each raw alias is folded through the one shared ``matching_key`` so the
     engine compares like-for-like against a parsed release's key; blank folds
-    are dropped and duplicates collapsed.
+    are dropped and duplicates collapsed. A corrupt aliases value degrades to
+    no keys (``decode_aliases`` logs it with ``series_id``).
     """
     keys: list[str] = []
     seen: set[str] = set()
-    for raw in decode_aliases(raw_aliases):
+    for raw in decode_aliases(raw_aliases, series_id=series_id):
         key = matching_key(raw)
         if key and key not in seen:
             seen.add(key)
@@ -63,13 +64,14 @@ def _alias_keys(raw_aliases: str | None) -> tuple[str, ...]:
 
 
 async def build_series_context(
-    session: AsyncSession, series_id: int
+    session: AsyncSession, series: SeriesRow
 ) -> SeriesContext | None:
-    """Resolve one library series into a :class:`SeriesContext`, or ``None``."""
-    series = await session.get(SeriesRow, series_id)
-    if series is None:
-        return None
+    """Resolve one already-loaded library series into a :class:`SeriesContext`.
 
+    Takes the loaded :class:`SeriesRow` (not an id) so a caller that already
+    has the row does not pay a second load. On-disk files for every issue are
+    fetched in one ``IssueFileRow`` ``IN()`` query rather than one query per
+    issue (no N+1)."""
     profile_row = await session.get(FormatProfileRow, series.format_profile_id)
     if profile_row is None:  # pragma: no cover - FK guarantees presence
         return None
@@ -81,29 +83,33 @@ async def build_series_context(
     issue_rows = (
         (
             await session.execute(
-                select(IssueRow).where(IssueRow.series_id == series_id)
+                select(IssueRow).where(IssueRow.series_id == series.id)
             )
         )
         .scalars()
         .all()
     )
-    issues: list[IssueContext] = []
-    for issue_row in issue_rows:
-        parsed = parse_issue_number(issue_row.issue_number)
+    files_by_issue: dict[int, list[IssueFileRow]] = {}
+    issue_ids = [r.id for r in issue_rows]
+    if issue_ids:
         file_rows = (
             (
                 await session.execute(
-                    select(IssueFileRow).where(
-                        IssueFileRow.issue_id == issue_row.id
-                    )
+                    select(IssueFileRow).where(IssueFileRow.issue_id.in_(issue_ids))
                 )
             )
             .scalars()
             .all()
         )
+        for f in file_rows:
+            files_by_issue.setdefault(f.issue_id, []).append(f)
+
+    issues: list[IssueContext] = []
+    for issue_row in issue_rows:
+        parsed = parse_issue_number(issue_row.issue_number)
         files = tuple(
             ExistingFile(format=_file_format(f.path), size_bytes=f.size)
-            for f in file_rows
+            for f in files_by_issue.get(issue_row.id, ())
         )
         issues.append(
             IssueContext(
@@ -119,7 +125,7 @@ async def build_series_context(
         series_id=series.id,
         matching_key=series.matching_key,
         profile=profile,
-        aliases=_alias_keys(series.aliases),
+        aliases=_alias_keys(series.aliases, series.id),
         start_year=series.start_year,
         volume_year=series.start_year,
         monitored=series.monitored,
@@ -129,7 +135,7 @@ async def build_series_context(
 
 async def build_evaluation_context(
     session: AsyncSession,
-    series_id: int,
+    series: SeriesRow,
     *,
     issue_id: int | None = None,
     config: EngineConfig = DEFAULT_CONFIG,
@@ -137,17 +143,17 @@ async def build_evaluation_context(
 ) -> EvaluationContext | None:
     """Build the full :class:`EvaluationContext` for a search over one series.
 
-    ``issue_id`` set makes this a search-path evaluation (an engine
-    :class:`SearchTarget` is attached, so the search-match specification
-    verifies each candidate maps to the searched series+issue). ``None``
-    yields a plain mapping evaluation (no target). The change-5 dynamic-store
-    seams (queue / blocklist / free-space) keep their inert defaults here.
-    """
-    series_ctx = await build_series_context(session, series_id)
+    The library snapshot is candidate- and issue-independent, so a caller can
+    build it once (``issue_id=None``, no target) and stamp a per-issue
+    :class:`SearchTarget` on cheaply with ``dataclasses.replace`` — that is how
+    the search-command loops reuse one context across a series' wanted issues.
+    ``issue_id`` set here attaches the target directly (the single-issue path).
+    The change-5 dynamic-store seams keep their inert defaults."""
+    series_ctx = await build_series_context(session, series)
     if series_ctx is None:
         return None
     target = (
-        SearchTarget(series_id=series_id, issue_id=issue_id)
+        SearchTarget(series_id=series.id, issue_id=issue_id)
         if issue_id is not None
         else None
     )

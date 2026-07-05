@@ -18,8 +18,6 @@ from __future__ import annotations
 import logging
 from typing import ClassVar, Literal
 
-from pydantic import BaseModel
-
 from foragerr.commands.registry import BaseCommand, register_command, register_handler
 from foragerr.commands.service import HandlerContext
 from foragerr.search import Decision
@@ -52,49 +50,34 @@ class GrabReleaseCommand(BaseCommand):
     indexer_name: str | None = None
 
 
-class GrabHandoff(BaseModel):
-    """The grab payload derived from a decided release (test/typed view)."""
+def handoff_from_decision(decision: Decision) -> GrabReleaseCommand:
+    """Build the grab hand-off command from a decided release.
 
-    indexer_id: int
-    guid: str
-    link: str
-    title: str
-    size_bytes: int | None = None
-    series_id: int | None = None
-    issue_id: int | None = None
-    indexer_name: str | None = None
-
-    def payload(self) -> dict:
-        """The enqueue payload for :class:`GrabReleaseCommand`."""
-        return self.model_dump()
-
-
-def handoff_from_decision(
-    decision: Decision, *, issue_id: int | None = None
-) -> GrabHandoff:
-    """Build the grab hand-off payload from an approved decision.
-
-    ``issue_id`` (the searched issue) overrides the mapped issue when supplied,
-    so an automatic single-issue search records the issue it was launched for
-    even if the engine mapped the release to the same issue independently.
+    The hand-off stamps the DECISION's own mapped identity — what the engine
+    resolved this release actually IS (``mapped_series_id`` /
+    ``mapped_issue_id``), NOT the issue a search happened to be launched for
+    (FRG-SRCH-014). That keeps the ``(indexer_id, guid)`` cache key sound: two
+    searches that surface the same release converge on one identity rather than
+    overwriting each other with whichever issue was searched. An unmapped
+    release carries ``issue_id=None`` (change 5 routes those to manual import).
     """
     candidate = decision.candidate
-    return GrabHandoff(
+    return GrabReleaseCommand(
         indexer_id=candidate.indexer_id,
         guid=candidate.guid,
         link=candidate.link,
         title=candidate.title,
         size_bytes=candidate.size_bytes,
         series_id=decision.mapped_series_id,
-        issue_id=issue_id if issue_id is not None else decision.mapped_issue_id,
+        issue_id=decision.mapped_issue_id,
         indexer_name=candidate.indexer_name,
     )
 
 
-async def enqueue_grab(ctx: HandlerContext, handoff: GrabHandoff) -> int:
+async def enqueue_grab(ctx: HandlerContext, handoff: GrabReleaseCommand) -> int:
     """Enqueue the grab hand-off command and return its id (dedup-aware)."""
     record = await ctx.commands.enqueue(
-        "grab-release", handoff.payload(), triggered_by="search"
+        "grab-release", handoff.model_dump(), triggered_by="search"
     )
     return record.id
 

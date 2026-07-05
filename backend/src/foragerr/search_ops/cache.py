@@ -7,8 +7,9 @@ error once the entry has expired (never a silent re-search). Rows live in the
 ``release_cache`` table (created by the indexers migration; owned here). A
 scheduled prune drops expired rows so the cache cannot grow without bound.
 
-The cached payload is exactly the grab hand-off (:class:`GrabHandoff`): the POST
-needs no display fields, only what it takes to enqueue the grab.
+The cached payload is exactly the grab hand-off (a :class:`GrabReleaseCommand`
+``model_dump``): the POST needs no display fields, only what it takes to enqueue
+the grab.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ import logging
 from typing import ClassVar, Literal
 
 from sqlalchemy import delete, select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from foragerr.commands.registry import BaseCommand, register_command, register_handler
 from foragerr.commands.service import HandlerContext
@@ -26,7 +28,7 @@ from foragerr.db.base import utcnow
 from foragerr.indexers.models import ReleaseCacheRow
 from foragerr.search import Decision
 
-from foragerr.search_ops.grab import GrabHandoff, handoff_from_decision
+from foragerr.search_ops.grab import GrabReleaseCommand, handoff_from_decision
 
 logger = logging.getLogger("foragerr.search_ops.cache")
 
@@ -49,39 +51,41 @@ async def cache_decisions(
     """
     now = now or utcnow()
     expires_at = now + dt.timedelta(minutes=ttl_minutes)
+    rows = []
+    for decision in decisions:
+        handoff = handoff_from_decision(decision)
+        rows.append(
+            {
+                "indexer_id": handoff.indexer_id,
+                "guid": handoff.guid,
+                "issue_id": issue_id,
+                "payload": json.dumps(handoff.model_dump()),
+                "created_at": now,
+                "expires_at": expires_at,
+            }
+        )
+    if not rows:
+        return
+    # One batched upsert keyed on the (indexer_id, guid) unique constraint: a
+    # repeat search for the same release refreshes the payload and pushes the
+    # expiry forward rather than duplicating — no per-row SELECT round-trip.
+    stmt = sqlite_insert(ReleaseCacheRow).values(rows)
+    stmt = stmt.on_conflict_do_update(
+        index_elements=[ReleaseCacheRow.indexer_id, ReleaseCacheRow.guid],
+        set_={
+            "issue_id": stmt.excluded.issue_id,
+            "payload": stmt.excluded.payload,
+            "created_at": stmt.excluded.created_at,
+            "expires_at": stmt.excluded.expires_at,
+        },
+    )
     async with db.write_session() as session:
-        for decision in decisions:
-            handoff = handoff_from_decision(decision, issue_id=issue_id)
-            payload = json.dumps(handoff.payload())
-            existing = (
-                await session.execute(
-                    select(ReleaseCacheRow).where(
-                        ReleaseCacheRow.indexer_id == handoff.indexer_id,
-                        ReleaseCacheRow.guid == handoff.guid,
-                    )
-                )
-            ).scalar_one_or_none()
-            if existing is None:
-                session.add(
-                    ReleaseCacheRow(
-                        indexer_id=handoff.indexer_id,
-                        guid=handoff.guid,
-                        issue_id=issue_id,
-                        payload=payload,
-                        created_at=now,
-                        expires_at=expires_at,
-                    )
-                )
-            else:
-                existing.issue_id = issue_id
-                existing.payload = payload
-                existing.created_at = now
-                existing.expires_at = expires_at
+        await session.execute(stmt)
 
 
 async def get_cached(
     db, indexer_id: int, guid: str, *, now: dt.datetime | None = None
-) -> GrabHandoff | None:
+) -> GrabReleaseCommand | None:
     """Return the cached grab hand-off for a live entry, or ``None``.
 
     ``None`` covers both a cache miss and an expired entry — the caller maps
@@ -100,7 +104,9 @@ async def get_cached(
         ).scalar_one_or_none()
     if row is None or row.expires_at <= now:
         return None
-    return GrabHandoff(**json.loads(row.payload))
+    # The stored payload is a GrabReleaseCommand ``model_dump`` — it round-trips
+    # including the redundant ``name`` key, which the model simply re-validates.
+    return GrabReleaseCommand(**json.loads(row.payload))
 
 
 async def prune_expired(db, *, now: dt.datetime | None = None) -> int:

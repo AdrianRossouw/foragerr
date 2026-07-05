@@ -27,7 +27,6 @@ from sqlalchemy import func
 from foragerr.commands.registry import BaseCommand, register_command, register_handler
 from foragerr.commands.service import HandlerContext
 from foragerr.config import Settings
-from foragerr.indexers.caps import CapsCache
 from foragerr.indexers.ratelimit import DEFAULT_MIN_INTERVAL
 from foragerr.library.flows._common import SeriesSearchCommand
 from foragerr.library.models import IssueRow
@@ -64,16 +63,34 @@ async def _politeness_sleep(seconds: float) -> None:
 
 
 def _build_infra(ctx: HandlerContext):
-    """The outbound factory, back-off ladder, and one caps cache for a run.
+    """The outbound factory, back-off ladder, and the shared caps cache.
 
-    A fresh :class:`CapsCache` per command run is shared across every issue
-    that run searches, so caps are probed once per indexer per command rather
-    than per issue.
+    Requires a settings-bearing context (the factory needs settings); a
+    settings-less context is a wiring bug, so fail early and clearly rather
+    than with an ``AttributeError`` deep in the factory. The caps cache is the
+    ONE process-level cache on the context (FRG-IDX-004), not a per-run one.
     """
+    if ctx.settings is None:
+        raise RuntimeError("series-search requires a settings-bearing CommandService")
     factory = pipeline.make_indexer_factory(ctx.settings)
     backoff = ProviderBackoff(ctx.db)
-    caps_cache = CapsCache()
-    return factory, backoff, caps_cache
+    return factory, backoff, ctx.caps_cache
+
+
+async def _grab_best(ctx: HandlerContext, result) -> Decision | None:
+    """Record a grab for the best approved release of a search result.
+
+    Returns the handed-off decision, or ``None`` for an explainable no-grab
+    (the rejection reasons live on the decisions the pipeline produced). The
+    grab carries the DECISION's own mapped identity (FRG-SRCH-014)."""
+    if result is None:
+        return None
+    approved = result.approved
+    if not approved:
+        return None
+    best = approved[0]  # already comparator-ordered best-first
+    await enqueue_grab(ctx, handoff_from_decision(best))
+    return best
 
 
 async def _search_one_issue(
@@ -85,12 +102,7 @@ async def _search_one_issue(
     backoff,
     caps_cache,
 ) -> Decision | None:
-    """Search one issue and record a grab for the best approved release.
-
-    Returns the approved decision that was handed off, or ``None`` when nothing
-    was approved (an explainable no-grab — the rejection reasons live on the
-    decisions the pipeline produced).
-    """
+    """Search one issue and record a grab for the best approved release."""
     result = await run_search(
         db=ctx.db,
         settings=ctx.settings,
@@ -102,14 +114,53 @@ async def _search_one_issue(
         path="auto",
         min_interval=MIN_INTERVAL,
     )
-    if result is None:
-        return None
-    approved = result.approved
-    if not approved:
-        return None
-    best = approved[0]  # already comparator-ordered best-first
-    await enqueue_grab(ctx, handoff_from_decision(best, issue_id=issue_id))
-    return best
+    return await _grab_best(ctx, result)
+
+
+async def _run_wanted_loop(
+    ctx: HandlerContext,
+    targets: list[tuple[int, int]],
+    *,
+    path: str,
+    delay: int,
+) -> int:
+    """Search each ``(series_id, issue_id)`` target, grabbing the best approved
+    release per issue; return the grab count (FRG-SRCH-008/009).
+
+    Series-independent infra (indexer rows + retention config) is built ONCE,
+    and each series' library context is prepared once and reused across its
+    wanted issues — only the per-issue search target varies. ``delay`` (>0 for
+    the backlog walk, 0 for series search) is the clamped inter-search
+    politeness gap, applied between issues only."""
+    factory, backoff, caps_cache = _build_infra(ctx)
+    fleet = await pipeline.select_fleet(ctx.db, settings=ctx.settings, path=path)
+    prepared_by_series: dict[int, pipeline.PreparedSeries | None] = {}
+    grabbed = 0
+    for index, (series_id, issue_id) in enumerate(targets):
+        if index > 0 and delay > 0:
+            # Serialize per-issue searches with the clamped politeness delay so
+            # indexer API limits are respected (FRG-SRCH-009).
+            await _politeness_sleep(delay)
+        if series_id not in prepared_by_series:
+            prepared_by_series[series_id] = await pipeline.prepare_series(
+                ctx.db, fleet, series_id
+            )
+        prepared = prepared_by_series[series_id]
+        if prepared is None:
+            continue  # series vanished mid-walk
+        result = await pipeline.search_prepared(
+            fleet,
+            prepared,
+            db=ctx.db,
+            factory=factory,
+            backoff=backoff,
+            caps_cache=caps_cache,
+            issue_id=issue_id,
+            min_interval=MIN_INTERVAL,
+        )
+        if await _grab_best(ctx, result) is not None:
+            grabbed += 1
+    return grabbed
 
 
 async def _wanted_issue_targets(
@@ -175,21 +226,11 @@ async def run_series_search(
     Records a grab hand-off for the best approved release per wanted issue, or
     leaves an explainable no-grab (the decisions carry the rejection reasons).
     Called by the ``series-search`` handler, replacing the change-3 inert stub.
+    No inter-search delay: a single series' wanted issues are few, and the
+    ``search`` pool size of 1 already serializes indexer politeness.
     """
-    factory, backoff, caps_cache = _build_infra(ctx)
     targets = await _wanted_issue_targets(ctx, series_id=command.series_id)
-    grabbed = 0
-    for series_id, issue_id in targets:
-        handed_off = await _search_one_issue(
-            ctx,
-            series_id=series_id,
-            issue_id=issue_id,
-            factory=factory,
-            backoff=backoff,
-            caps_cache=caps_cache,
-        )
-        if handed_off is not None:
-            grabbed += 1
+    grabbed = await _run_wanted_loop(ctx, targets, path="auto", delay=0)
     return (
         f"series {command.series_id}: searched {len(targets)} wanted issue(s), "
         f"{grabbed} grab(s) recorded"
@@ -217,25 +258,9 @@ class BacklogSearchCommand(BaseCommand):
 async def _handle_backlog_search(
     command: BacklogSearchCommand, ctx: HandlerContext
 ) -> str:
-    factory, backoff, caps_cache = _build_infra(ctx)
     targets = await _wanted_issue_targets(ctx)
     delay = effective_backlog_delay(ctx.settings)
-    grabbed = 0
-    for index, (series_id, issue_id) in enumerate(targets):
-        if index > 0:
-            # Serialize per-issue searches with the clamped politeness delay so
-            # indexer API limits are respected (FRG-SRCH-009).
-            await _politeness_sleep(delay)
-        handed_off = await _search_one_issue(
-            ctx,
-            series_id=series_id,
-            issue_id=issue_id,
-            factory=factory,
-            backoff=backoff,
-            caps_cache=caps_cache,
-        )
-        if handed_off is not None:
-            grabbed += 1
+    grabbed = await _run_wanted_loop(ctx, targets, path="auto", delay=delay)
     return (
         f"backlog: searched {len(targets)} wanted issue(s) oldest-first "
         f"(delay {delay}s), {grabbed} grab(s) recorded"

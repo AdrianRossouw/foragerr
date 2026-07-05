@@ -25,6 +25,7 @@ from pydantic import BaseModel, ValidationError
 from foragerr.api.errors import ApiError
 from foragerr.http import HttpClientFactory
 from foragerr.indexers.caps import parse_caps
+from foragerr.search_ops import make_indexer_factory
 from foragerr.indexers.errors import (
     IndexerAuthError,
     IndexerLimitError,
@@ -69,10 +70,14 @@ class IndexerTestResponse(BaseModel):
 
 
 def _factory(request: Request) -> HttpClientFactory:
+    """The outbound factory: an ``app.state.http_factory`` test override wins,
+    else the shared ``make_indexer_factory`` seam — so ``/indexer/test`` and
+    real searches resolve indexer HTTP through the SAME indirection tests
+    monkeypatch (mirrors ``api.release``)."""
     override = getattr(request.app.state, "http_factory", None)
     if override is not None:
         return override
-    return HttpClientFactory(request.app.state.settings)
+    return make_indexer_factory(request.app.state.settings)
 
 
 @router.get("/schema", response_model=list[IndexerImplementationSchema])
