@@ -88,7 +88,7 @@ def handoff_from_decision(decision: Decision) -> GrabReleaseCommand:
 async def enqueue_grab(ctx: HandlerContext, handoff: GrabReleaseCommand) -> int:
     """Enqueue the grab hand-off command and return its id (dedup-aware)."""
     record = await ctx.commands.enqueue(
-        "grab-release", handoff.model_dump(), triggered_by="search"
+        "grab-release", handoff.model_dump(mode="json"), triggered_by="search"
     )
     return record.id
 
