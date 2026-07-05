@@ -173,11 +173,11 @@ class CommandService:
         self._settings = settings
         if pool_sizes is None:
             if settings is not None:
+                # Single-source the class list off DEFAULT_POOL_SIZES so the
+                # settings-driven mapping can never drift from the fallback.
                 pool_sizes = {
-                    "search": settings.workers_search,
-                    "download": settings.workers_download,
-                    "pp": settings.workers_pp,
-                    "default": settings.workers_default,
+                    cls: getattr(settings, f"workers_{cls}")
+                    for cls in DEFAULT_POOL_SIZES
                 }
             else:
                 pool_sizes = dict(DEFAULT_POOL_SIZES)
@@ -273,9 +273,7 @@ class CommandService:
         """Scheduler-state component health for /health (api area consumes)."""
         return {
             "status": "stopping" if self._stopping else "up",
-            "workers": {
-                cls: count for cls, count in self.pool_sizes.items()
-            },
+            "workers": dict(self.pool_sizes),
             "workers_alive": sum(1 for t in self._workers if not t.done()),
             "active_groups": sorted(self._active_groups),
         }
