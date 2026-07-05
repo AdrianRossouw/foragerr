@@ -69,4 +69,8 @@ labelling/technical documentation, and a maintained SOUP document.
 
 ## Approval
 
-- Pending owner approval (FRG-PROC-009).
+- **Approver:** Adrian
+- **Date:** 2026-07-05
+- **Decision:** Approved in-session, covering the full amended scope (commits 08fea6c +
+  0bacdfe): FRG-PROC-011 manual + README labelling, FRG-PROC-012 SOUP register with
+  mechanical gate check, and the backfill implementation.
