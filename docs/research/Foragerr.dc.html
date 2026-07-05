@@ -1,0 +1,1894 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{font-family:'Roboto',system-ui,sans-serif;background:#202020;color:#e1e1e1;font-size:14px}
+  ::-webkit-scrollbar{width:11px;height:11px}
+  ::-webkit-scrollbar-thumb{background:#3a3a3a;border-radius:6px;border:2px solid #202020}
+  ::-webkit-scrollbar-thumb:hover{background:#484848}
+  ::-webkit-scrollbar-track{background:transparent}
+  input{font-family:inherit}
+  @keyframes fgspin{to{transform:rotate(360deg)}}
+  image-slot::part(frame){background:transparent}
+  image-slot::part(empty){color:rgba(255,255,255,.5)}
+  image-slot::part(ring){border-color:rgba(255,255,255,.2)}
+  image-slot::part(image){border-radius:0}
+</style>
+<script src="./image-slot.js"></script>
+</helmet>
+<div style="display:flex;height:100vh;overflow:hidden;background:#202020">
+
+  <!-- ============ SIDEBAR ============ -->
+  <aside style="width:212px;flex:none;background:#262626;border-right:1px solid #161616;display:flex;flex-direction:column;z-index:2">
+    <div style="height:60px;flex:none;display:flex;align-items:center;gap:11px;padding:0 16px;border-bottom:1px solid #1c1c1c">
+      <div style="width:32px;height:32px;flex:none;border-radius:7px;background:linear-gradient(160deg,#57b877,#3f8f5c);display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,.4)">
+        <i class="fas fa-bug" style="color:#12240f;font-size:16px"></i>
+      </div>
+      <div style="font-size:19px;font-weight:700;letter-spacing:.3px;color:#f0f0f0">Forager<span style="color:#57b877">r</span></div>
+    </div>
+    <nav style="flex:1;overflow-y:auto;padding:10px 0">
+      <sc-for list="{{ navItems }}" as="n" hint-placeholder-count="6">
+        <a onClick="{{ n.onClick }}" style="{{ n.style }}" style-hover="background:#2e2e2e;color:#ffffff">
+          <i class="{{ n.icon }}" style="width:19px;text-align:center;font-size:15px;color:{{ n.iconColor }}"></i>
+          <span style="flex:1">{{ n.label }}</span>
+          <sc-if value="{{ n.badge }}" hint-placeholder-val="{{ true }}">
+            <span style="background:{{ n.badgeBg }};color:{{ n.badgeColor }};font-size:10px;font-weight:500;padding:1px 7px;border-radius:9px;min-width:20px;text-align:center">{{ n.badge }}</span>
+          </sc-if>
+        </a>
+      </sc-for>
+      <div style="margin:12px 16px 6px;font-size:10px;font-weight:500;letter-spacing:1.2px;color:#5f5f5f;text-transform:uppercase">System</div>
+      <a onClick="{{ noop }}" style="display:flex;align-items:center;gap:11px;padding:9px 18px;color:#a9a9a9;font-size:13px;cursor:pointer" style-hover="background:#2e2e2e;color:#fff">
+        <i class="fas fa-gear" style="width:19px;text-align:center;font-size:15px;color:#7a7a7a"></i><span>Settings</span>
+      </a>
+      <a onClick="{{ noop }}" style="display:flex;align-items:center;gap:11px;padding:9px 18px;color:#a9a9a9;font-size:13px;cursor:pointer" style-hover="background:#2e2e2e;color:#fff">
+        <i class="fas fa-server" style="width:19px;text-align:center;font-size:15px;color:#7a7a7a"></i><span>System</span>
+      </a>
+    </nav>
+    <div style="flex:none;padding:11px 16px;border-top:1px solid #1c1c1c;font-size:11px;color:#5f5f5f;display:flex;align-items:center;gap:7px">
+      <span style="width:7px;height:7px;border-radius:50%;background:#57b877;box-shadow:0 0 6px #57b877"></span>
+      Foragerr 1.4.2 — all healthy
+    </div>
+  </aside>
+
+  <!-- ============ MAIN ============ -->
+  <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+
+    <!-- global header -->
+    <header style="height:60px;flex:none;background:#262626;border-bottom:1px solid #1c1c1c;display:flex;align-items:center;padding:0 20px;gap:14px">
+      <div style="position:relative;width:320px;max-width:40vw">
+        <i class="fas fa-magnifying-glass" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#777;font-size:13px"></i>
+        <input value="{{ query }}" onChange="{{ onSearch }}" placeholder="Search comics"
+          style="width:100%;height:36px;padding:0 12px 0 34px;background:#1c1c1c;border:1px solid #333;border-radius:5px;color:#e1e1e1;font-size:13px;outline:none"
+          style-focus="border-color:#57b877;background:#181818" />
+      </div>
+      <div style="flex:1"></div>
+      <div style="display:flex;align-items:center;gap:4px">
+        <button onClick="{{ noop }}" title="Health" style="width:38px;height:38px;border:none;background:transparent;color:#9a9a9a;border-radius:5px;cursor:pointer;font-size:15px" style-hover="background:#2f2f2f;color:#fff"><i class="fas fa-heart-pulse"></i></button>
+        <button onClick="{{ noop }}" title="Donate" style="width:38px;height:38px;border:none;background:transparent;color:#9a9a9a;border-radius:5px;cursor:pointer;font-size:15px" style-hover="background:#2f2f2f;color:#fff"><i class="fas fa-hand-holding-heart"></i></button>
+        <div style="width:1px;height:22px;background:#3a3a3a;margin:0 6px"></div>
+        <button onClick="{{ noop }}" style="display:flex;align-items:center;gap:8px;height:38px;padding:0 8px 0 6px;border:none;background:transparent;color:#cfcfcf;border-radius:5px;cursor:pointer" style-hover="background:#2f2f2f">
+          <span style="width:26px;height:26px;border-radius:50%;background:#3f8f5c;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:#0f1f0d">FK</span>
+          <i class="fas fa-caret-down" style="font-size:12px;color:#888"></i>
+        </button>
+      </div>
+    </header>
+
+    <!-- page toolbar -->
+    <div style="min-height:62px;flex:none;background:#202020;border-bottom:1px solid #2b2b2b;display:flex;align-items:stretch;padding:0 22px;position:relative;z-index:3">
+      <sc-if value="{{ isDetail }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;align-items:center;gap:14px">
+          <button onClick="{{ closeDetail }}" style="display:flex;align-items:center;gap:8px;padding:8px 14px;border:1px solid #3a3a3a;background:#2a2a2a;color:#dcdcdc;border-radius:5px;cursor:pointer;font-size:13px" style-hover="background:#333;color:#fff"><i class="fas fa-arrow-left"></i>Library</button>
+          <span style="font-size:16px;font-weight:500;color:#efefef">{{ detailTitle }}</span>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isComics }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;align-items:center;gap:2px">
+          <button onClick="{{ openAdd }}" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 13px;border:none;background:transparent;color:#dcdcdc;cursor:pointer;border-radius:4px;min-width:62px;font-size:11px" style-hover="background:#2c2c2c;color:#fff"><i class="fas fa-plus" style="font-size:17px;color:#57b877"></i>Add New</button>
+          <button onClick="{{ noop }}" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 13px;border:none;background:transparent;color:#dcdcdc;cursor:pointer;border-radius:4px;min-width:62px;font-size:11px" style-hover="background:#2c2c2c;color:#fff"><i class="fas fa-book-atlas" style="font-size:17px"></i>Import</button>
+          <button onClick="{{ noop }}" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 13px;border:none;background:transparent;color:#dcdcdc;cursor:pointer;border-radius:4px;min-width:62px;font-size:11px" style-hover="background:#2c2c2c;color:#fff"><i class="fas fa-arrows-rotate" style="font-size:17px"></i>Update All</button>
+          <div style="width:1px;background:#333;margin:12px 12px"></div>
+          <button onClick="{{ noop }}" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 13px;border:none;background:transparent;color:#dcdcdc;cursor:pointer;border-radius:4px;min-width:62px;font-size:11px" style-hover="background:#2c2c2c;color:#fff"><i class="fas fa-rss" style="font-size:17px"></i>RSS Sync</button>
+        </div>
+        <div style="flex:1"></div>
+        <div style="display:flex;align-items:center;gap:2px">
+          <div style="display:flex;border:1px solid #333;border-radius:5px;overflow:hidden;margin-right:6px">
+            <button onClick="{{ setViewPosters }}" title="Posters" style="width:40px;height:34px;border:none;background:{{ vpBg }};color:{{ vpColor }};cursor:pointer;font-size:14px"><i class="fas fa-table-cells-large"></i></button>
+            <button onClick="{{ setViewOverview }}" title="Overview" style="width:40px;height:34px;border:none;border-left:1px solid #333;background:{{ voBg }};color:{{ voColor }};cursor:pointer;font-size:14px"><i class="fas fa-list"></i></button>
+            <button onClick="{{ setViewTable }}" title="Table" style="width:40px;height:34px;border:none;border-left:1px solid #333;background:{{ vtBg }};color:{{ vtColor }};cursor:pointer;font-size:14px"><i class="fas fa-table-list"></i></button>
+          </div>
+
+          <div style="position:relative">
+            <button onClick="{{ toggleOptions }}" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 13px;border:none;background:transparent;color:#dcdcdc;cursor:pointer;border-radius:4px;min-width:60px;font-size:11px" style-hover="background:#2c2c2c;color:#fff"><i class="fas fa-sliders" style="font-size:16px"></i>Options</button>
+            <sc-if value="{{ isOptionsOpen }}" hint-placeholder-val="{{ false }}">
+              <div style="position:absolute;top:100%;right:0;margin-top:4px;background:#2b2b2b;border:1px solid #3a3a3a;border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.5);width:186px;padding:10px 12px;z-index:20">
+                <div style="font-size:11px;color:#8a8a8a;margin-bottom:8px">POSTER SIZE</div>
+                <div style="display:flex;gap:6px">
+                  <sc-for list="{{ sizeOptions }}" as="s" hint-placeholder-count="3">
+                    <button onClick="{{ s.onClick }}" style="flex:1;padding:7px 0;border:1px solid {{ s.border }};background:{{ s.bg }};color:{{ s.color }};border-radius:4px;cursor:pointer;font-size:12px">{{ s.label }}</button>
+                  </sc-for>
+                </div>
+                <div style="height:1px;background:#3a3a3a;margin:12px -12px 11px"></div>
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+                  <div>
+                    <div style="font-size:12px;color:#dcdcdc">Group volumes</div>
+                    <div style="font-size:10.5px;color:#7a7a7a;margin-top:2px;line-height:1.3">Collapse a series' volumes<br>into one entry</div>
+                  </div>
+                  <button onClick="{{ toggleGroup }}" style="width:40px;height:22px;border-radius:11px;border:none;cursor:pointer;background:{{ switchBg }};position:relative;flex:none;transition:background .15s">
+                    <span style="position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;transition:transform .15s;transform:{{ switchKnob }}"></span>
+                  </button>
+                </div>
+              </div>
+            </sc-if>
+          </div>
+
+          <div style="position:relative">
+            <button onClick="{{ toggleSort }}" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 13px;border:none;background:transparent;color:#dcdcdc;cursor:pointer;border-radius:4px;min-width:60px;font-size:11px" style-hover="background:#2c2c2c;color:#fff"><i class="fas fa-arrow-down-wide-short" style="font-size:16px"></i>Sort</button>
+            <sc-if value="{{ isSortOpen }}" hint-placeholder-val="{{ false }}">
+              <div style="position:absolute;top:100%;right:0;margin-top:4px;background:#2b2b2b;border:1px solid #3a3a3a;border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.5);min-width:178px;padding:5px;z-index:20">
+                <sc-for list="{{ sortOptions }}" as="o" hint-placeholder-count="4">
+                  <button onClick="{{ o.onClick }}" style="display:flex;align-items:center;gap:9px;width:100%;padding:8px 10px;border:none;background:transparent;color:{{ o.color }};cursor:pointer;border-radius:4px;font-size:13px;text-align:left" style-hover="background:#353535">
+                    <i class="fas fa-check" style="font-size:11px;width:12px;opacity:{{ o.checkOpacity }}"></i>{{ o.label }}
+                  </button>
+                </sc-for>
+              </div>
+            </sc-if>
+          </div>
+
+          <div style="position:relative">
+            <button onClick="{{ toggleFilter }}" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 13px;border:none;background:transparent;color:{{ filterActiveColor }};cursor:pointer;border-radius:4px;min-width:60px;font-size:11px" style-hover="background:#2c2c2c;color:#fff"><i class="fas fa-filter" style="font-size:16px"></i>{{ filterLabel }}</button>
+            <sc-if value="{{ isFilterOpen }}" hint-placeholder-val="{{ false }}">
+              <div style="position:absolute;top:100%;right:0;margin-top:4px;background:#2b2b2b;border:1px solid #3a3a3a;border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.5);min-width:190px;padding:5px;z-index:20">
+                <sc-for list="{{ filterOptions }}" as="o" hint-placeholder-count="4">
+                  <button onClick="{{ o.onClick }}" style="display:flex;align-items:center;gap:9px;width:100%;padding:8px 10px;border:none;background:transparent;color:{{ o.color }};cursor:pointer;border-radius:4px;font-size:13px;text-align:left" style-hover="background:#353535">
+                    <i class="fas fa-check" style="font-size:11px;width:12px;opacity:{{ o.checkOpacity }}"></i><span style="flex:1">{{ o.label }}</span><span style="font-size:11px;color:#777">{{ o.count }}</span>
+                  </button>
+                </sc-for>
+              </div>
+            </sc-if>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isCreatorPage }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;align-items:center;gap:14px">
+          <button onClick="{{ backToCreators }}" style="display:flex;align-items:center;gap:8px;padding:8px 14px;border:1px solid #3a3a3a;background:#2a2a2a;color:#dcdcdc;border-radius:5px;cursor:pointer;font-size:13px" style-hover="background:#333;color:#fff"><i class="fas fa-arrow-left"></i>Creators</button>
+          <span style="font-size:16px;font-weight:500;color:#efefef">{{ creatorPage.name }}</span>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ notComics }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;align-items:center;gap:12px">
+          <i class="{{ screenIcon }}" style="font-size:18px;color:#57b877"></i>
+          <span style="font-size:17px;font-weight:500;color:#efefef">{{ screenTitle }}</span>
+        </div>
+      </sc-if>
+    </div>
+
+    <!-- content -->
+    <div style="flex:1;overflow-y:auto" onClick="{{ closeMenus }}">
+
+      <!-- ===== SERIES / VOLUME DETAIL ===== -->
+      <sc-if value="{{ isDetail }}" hint-placeholder-val="{{ false }}">
+        <div>
+          <div style="position:relative;overflow:hidden">
+            <div style="position:absolute;inset:0;background-image:url({{ detail.coverUrl }});background-size:cover;background-position:center 28%;filter:blur(34px) brightness(.3);transform:scale(1.25)"></div>
+            <div style="position:absolute;inset:0;background:linear-gradient(to bottom,rgba(32,32,32,.35),rgba(32,32,32,.82) 62%,#202020)"></div>
+            <div style="position:relative;display:flex;gap:30px;padding:36px 36px 28px;align-items:flex-end">
+              <image-slot id="cover-{{ detail.id }}" src="{{ detail.coverUrl }}" credit="ComicVine" credit-href="https://comicvine.gamespot.com" placeholder="{{ detail.title }}" shape="rounded" radius="6" fit="cover" style="width:206px;height:309px;flex:none;background:{{ detail.tint }};box-shadow:0 10px 34px rgba(0,0,0,.55)"></image-slot>
+              <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:14px;padding-bottom:4px">
+                <div style="display:flex;align-items:center;gap:13px;flex-wrap:wrap">
+                  <h1 style="margin:0;font-size:33px;font-weight:700;color:#fff;letter-spacing:.2px">{{ detail.title }}</h1>
+                  <sc-if value="{{ detail.hasVol }}" hint-placeholder-val="{{ false }}">
+                    <span style="background:rgba(87,184,119,.9);color:#0f1f0d;font-size:12px;font-weight:600;padding:4px 10px;border-radius:5px">{{ detail.volLabel }}</span>
+                  </sc-if>
+                </div>
+                <div style="display:flex;align-items:center;gap:13px;flex-wrap:wrap;font-size:13px;color:#cacaca">
+                  <span style="display:inline-flex;align-items:center;gap:7px;color:{{ detail.monColor }}"><i class="{{ detail.monIcon }}"></i>{{ detail.monLabel }}</span>
+                  <span style="color:#5f5f5f">•</span><span>{{ detail.publisher }}</span>
+                  <span style="color:#5f5f5f">•</span><span>First issue {{ detail.firstIssue }}</span>
+                  <span style="color:#5f5f5f">•</span><span>{{ detail.statusLabel }}</span>
+                  <span style="color:#5f5f5f">•</span><span>{{ detail.countText }} issues</span>
+                  <span style="color:#5f5f5f">•</span><span>CBR / CBZ</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:22px;flex-wrap:wrap">
+                  <sc-for list="{{ detail.credits }}" as="cr" hint-placeholder-count="2">
+                    <div style="display:flex;flex-direction:column;gap:2px">
+                      <span style="font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#808080">{{ cr.role }}</span>
+                      <span onClick="{{ cr.onClick }}" style="font-size:14.5px;font-weight:500;color:#8fd3a6;cursor:pointer" style-hover="color:#57b877;text-decoration:underline">{{ cr.name }}</span>
+                    </div>
+                  </sc-for>
+                </div>
+                <div style="display:flex;gap:2px;margin:2px 0 0 -6px">
+                  <button onClick="{{ noop }}" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 13px;border:none;background:transparent;color:#e6e6e6;cursor:pointer;border-radius:4px;min-width:70px;font-size:11px" style-hover="background:rgba(255,255,255,.08);color:#fff"><i class="fas fa-magnifying-glass" style="font-size:16px;color:#57b877"></i>Search Monitored</button>
+                  <button onClick="{{ noop }}" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 13px;border:none;background:transparent;color:#e6e6e6;cursor:pointer;border-radius:4px;min-width:64px;font-size:11px" style-hover="background:rgba(255,255,255,.08);color:#fff"><i class="fas fa-magnifying-glass-arrow-right" style="font-size:16px"></i>Search All</button>
+                  <button onClick="{{ noop }}" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 13px;border:none;background:transparent;color:#e6e6e6;cursor:pointer;border-radius:4px;min-width:64px;font-size:11px" style-hover="background:rgba(255,255,255,.08);color:#fff"><i class="fas fa-arrows-rotate" style="font-size:16px"></i>Refresh</button>
+                  <button onClick="{{ noop }}" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 13px;border:none;background:transparent;color:#e6e6e6;cursor:pointer;border-radius:4px;min-width:58px;font-size:11px" style-hover="background:rgba(255,255,255,.08);color:#fff"><i class="fas fa-pen" style="font-size:15px"></i>Edit</button>
+                  <button onClick="{{ noop }}" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 13px;border:none;background:transparent;color:#e6e6e6;cursor:pointer;border-radius:4px;min-width:58px;font-size:11px" style-hover="background:rgba(217,83,79,.18);color:#e57373"><i class="fas fa-trash-can" style="font-size:15px"></i>Delete</button>
+                </div>
+                <p style="margin:4px 0 0;max-width:820px;font-size:13.5px;line-height:1.6;color:#c2c2c2">{{ detail.overview }}</p>
+              </div>
+            </div>
+          </div>
+
+          <div style="padding:22px 30px 46px">
+            <div style="border:1px solid #333;border-radius:7px;overflow:hidden">
+              <div style="display:flex;align-items:center;gap:13px;padding:12px 16px;background:#262626;border-bottom:1px solid #2f2f2f">
+                <div style="display:flex;border:1px solid #3a3a3a;border-radius:6px;overflow:hidden">
+                  <button onClick="{{ setDetIssues }}" style="padding:7px 15px;border:none;background:{{ diBg }};color:{{ diColor }};cursor:pointer;font-size:12.5px;font-weight:500">Issues · {{ detail.total }}</button>
+                  <button onClick="{{ setDetCollections }}" style="padding:7px 15px;border:none;border-left:1px solid #3a3a3a;background:{{ dcBg }};color:{{ dcColor }};cursor:pointer;font-size:12.5px;font-weight:500">Collections · {{ detail.tradesCount }}</button>
+                </div>
+                <div style="flex:1"></div>
+                <div style="position:relative;width:160px;height:20px;border-radius:4px;overflow:hidden;background:{{ detail.trackBg }}">
+                  <div style="position:absolute;left:0;top:0;bottom:0;width:{{ detail.progressPct }};background:#57b877"></div>
+                  <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:500;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.6)">{{ detail.countText }}</div>
+                </div>
+              </div>
+
+              <sc-if value="{{ isDetIssues }}" hint-placeholder-val="{{ true }}">
+                <table style="width:100%;border-collapse:collapse;font-size:13px">
+                  <thead>
+                    <tr style="background:#222;text-align:left;color:#8a8a8a">
+                      <th style="padding:9px 16px;width:42px;font-weight:500"></th>
+                      <th style="padding:9px 8px;width:70px;font-weight:500">Issue</th>
+                      <th style="padding:9px 8px;width:120px;font-weight:500">Release</th>
+                      <th style="padding:9px 8px;width:130px;font-weight:500">Status</th>
+                      <th style="padding:9px 8px;font-weight:500">Collected in</th>
+                      <th style="padding:9px 8px;width:100px;font-weight:500">Size</th>
+                      <th style="padding:9px 16px;width:84px;font-weight:500;text-align:right"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <sc-for list="{{ detail.issues }}" as="i" hint-placeholder-count="8">
+                      <tr style="border-top:1px solid #2b2b2b" style-hover="background:#262626">
+                        <td style="padding:9px 16px"><i class="{{ i.monIcon }}" style="font-size:13px;color:{{ i.monColor }}"></i></td>
+                        <td style="padding:9px 8px;font-weight:500;color:#e2e2e2">{{ i.num }}</td>
+                        <td style="padding:9px 8px;color:#9a9a9a">{{ i.date }}</td>
+                        <td style="padding:9px 8px"><span style="display:inline-block;padding:3px 10px;border-radius:11px;font-size:11px;font-weight:500;color:{{ i.statusColor }};background:{{ i.statusBg }}">{{ i.statusLabel }}</span></td>
+                        <td style="padding:9px 8px">
+                          <div style="display:flex;flex-wrap:wrap;gap:4px">
+                            <sc-for list="{{ i.collectedIn }}" as="ci" hint-placeholder-count="2">
+                              <span style="display:inline-block;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:600;color:{{ ci.chipColor }};background:{{ ci.chipBg }}">{{ ci.short }}</span>
+                            </sc-for>
+                          </div>
+                        </td>
+                        <td style="padding:9px 8px;color:#9a9a9a">{{ i.size }}</td>
+                        <td style="padding:9px 16px;text-align:right">
+                          <div style="display:inline-flex;gap:4px">
+                            <button onClick="{{ noop }}" title="Search" style="width:30px;height:30px;border-radius:5px;border:none;background:transparent;color:#9a9a9a;cursor:pointer;font-size:13px" style-hover="background:#333;color:#57b877"><i class="fas fa-magnifying-glass"></i></button>
+                            <button onClick="{{ noop }}" title="More" style="width:30px;height:30px;border-radius:5px;border:none;background:transparent;color:#9a9a9a;cursor:pointer;font-size:13px" style-hover="background:#333;color:#fff"><i class="fas fa-ellipsis"></i></button>
+                          </div>
+                        </td>
+                      </tr>
+                    </sc-for>
+                  </tbody>
+                </table>
+              </sc-if>
+
+              <sc-if value="{{ isDetCollections }}" hint-placeholder-val="{{ false }}">
+                <div>
+                  <sc-for list="{{ detail.trades }}" as="t" hint-placeholder-count="4">
+                    <div style="display:flex;align-items:center;gap:16px;padding:13px 16px;border-top:1px solid #2b2b2b" style-hover="background:#262626">
+                      <div style="width:46px;height:69px;flex:none;border-radius:3px;background:{{ t.tint }};border-left:3px solid {{ t.fmtColor }};display:flex;align-items:center;justify-content:center;font-size:9px;letter-spacing:.5px;color:rgba(255,255,255,.4);text-align:center;padding:4px;font-family:ui-monospace,monospace">TPB</div>
+                      <div style="flex:1;min-width:0">
+                        <div style="display:flex;align-items:center;gap:9px">
+                          <span style="font-size:14.5px;font-weight:500;color:#e6e6e6">{{ t.name }}</span>
+                          <span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:4px;color:{{ t.fmtColor }};background:{{ t.fmtBg }}">{{ t.format }}</span>
+                        </div>
+                        <div style="margin-top:4px;font-size:12px;color:#8f8f8f">{{ t.collectsText }} · {{ t.countText }} · {{ t.pagesText }}</div>
+                      </div>
+                      <span style="font-size:12px;color:#9a9a9a;flex:none">{{ t.release }}</span>
+                      <span style="flex:none;display:inline-block;padding:3px 10px;border-radius:11px;font-size:11px;font-weight:500;color:{{ t.statusColor }};background:{{ t.statusBg }}">{{ t.statusLabel }}</span>
+                      <button onClick="{{ noop }}" style="flex:none;display:inline-flex;align-items:center;gap:7px;padding:7px 13px;border:1px solid #3a3a3a;background:#2c2c2c;color:#dcdcdc;border-radius:5px;cursor:pointer;font-size:12px" style-hover="background:#57b877;color:#12240f;border-color:#57b877"><i class="{{ t.actionIcon }}" style="font-size:11px"></i>{{ t.actionLabel }}</button>
+                    </div>
+                  </sc-for>
+                </div>
+              </sc-if>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== COMICS ===== -->
+      <sc-if value="{{ isComics }}" hint-placeholder-val="{{ true }}">
+        <div style="padding:22px 26px 40px">
+          <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:18px">
+            <span style="font-size:14px;color:#9a9a9a">{{ libCountText }}</span>
+            <span style="font-size:13px;color:#5f5f5f">·</span>
+            <span style="font-size:13px;color:#57b877">{{ monitoredCount }} monitored</span>
+            <span style="font-size:13px;color:#5f5f5f">·</span>
+            <span style="font-size:13px;color:#e5a54b">{{ missingCount }} with missing issues</span>
+          </div>
+
+          <sc-if value="{{ noResults }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:80px 0;text-align:center;color:#777">
+              <i class="fas fa-book-open" style="font-size:34px;color:#3a3a3a"></i>
+              <div style="margin-top:14px;font-size:15px">No comics match your search.</div>
+            </div>
+          </sc-if>
+
+          <!-- POSTERS -->
+          <sc-if value="{{ isPosters }}" hint-placeholder-val="{{ true }}">
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax({{ gridMin }},1fr));gap:20px">
+              <sc-for list="{{ comics }}" as="c" hint-placeholder-count="12">
+                <div style="{{ c.cardStyle }}">
+                  <div style="position:relative;aspect-ratio:2/3;background:{{ c.tint }}">
+                    <div style="position:absolute;inset:0;background:repeating-linear-gradient(135deg,rgba(255,255,255,.035) 0 7px,transparent 7px 15px);pointer-events:none;z-index:1"></div>
+                    <image-slot id="cover-{{ c.id }}" src="{{ c.coverUrl }}" credit="ComicVine" credit-href="https://comicvine.gamespot.com" placeholder="{{ c.title }}" shape="rect" fit="cover" style="position:absolute;inset:0;width:100%;height:100%;display:block"></image-slot>
+                    <div style="position:absolute;top:8px;left:8px;width:26px;height:26px;border-radius:4px;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:3;pointer-events:none">
+                      <i class="{{ c.monIcon }}" style="font-size:13px;color:{{ c.monColor }}"></i>
+                    </div>
+                    <div style="position:absolute;top:8px;right:8px;display:flex;flex-direction:column;align-items:flex-end;gap:5px;z-index:3;pointer-events:none">
+                      <span style="background:rgba(0,0,0,.6);color:#cfcfcf;font-size:10px;font-weight:500;padding:3px 7px;border-radius:4px">{{ c.publisher }}</span>
+                      <sc-if value="{{ c.hasVol }}" hint-placeholder-val="{{ false }}">
+                        <span style="display:inline-flex;align-items:center;gap:5px;background:{{ c.volChipBg }};color:{{ c.volChipColor }};font-size:10px;font-weight:600;padding:3px 7px;border-radius:4px"><sc-if value="{{ c.isGroup }}" hint-placeholder-val="{{ false }}"><i class="fas fa-layer-group" style="font-size:9px"></i></sc-if>{{ c.volChip }}</span>
+                      </sc-if>
+                    </div>
+                  </div>
+                  <div style="position:relative;height:20px;background:{{ c.trackBg }}">
+                    <div style="position:absolute;left:0;top:0;bottom:0;width:{{ c.progressPct }};background:#57b877"></div>
+                    <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:500;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.6)">{{ c.countText }}</div>
+                  </div>
+                  <div style="padding:9px 11px 10px">
+                    <div onClick="{{ c.onOpen }}" style="font-size:13px;font-weight:500;color:#e6e6e6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer" style-hover="color:#57b877">{{ c.title }}</div>
+                    <div style="margin-top:3px;font-size:11px;color:#8a8a8a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ c.subLine }}</div>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+
+          <!-- OVERVIEW -->
+          <sc-if value="{{ isOverview }}" hint-placeholder-val="{{ false }}">
+            <div>
+              <sc-for list="{{ comics }}" as="c" hint-placeholder-count="6">
+                <div style="display:flex;gap:16px;background:#282828;border:1px solid #333;border-radius:5px;padding:14px;margin-bottom:12px" style-hover="border-color:#454545">
+                  <image-slot id="cover-{{ c.id }}" src="{{ c.coverUrl }}" placeholder="{{ c.title }}" shape="rounded" radius="4" fit="cover" style="width:74px;height:111px;flex:none;background:{{ c.tint }}"></image-slot>
+                  <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+                    <div style="display:flex;align-items:center;gap:10px">
+                      <i class="{{ c.monIcon }}" style="font-size:13px;color:{{ c.monColor }}"></i>
+                      <span onClick="{{ c.onOpen }}" style="font-size:17px;font-weight:500;color:#efefef;cursor:pointer" style-hover="color:#57b877">{{ c.title }}</span>
+                      <span style="background:{{ c.pillBg }};color:{{ c.pillColor }};font-size:10px;font-weight:500;padding:2px 8px;border-radius:10px">{{ c.statusLabel }}</span>
+                    </div>
+                    <div style="margin-top:5px;font-size:13px;color:#8f8f8f">{{ c.publisher }} · {{ c.subLine }}</div>
+                    <div style="flex:1"></div>
+                    <div style="display:flex;align-items:center;gap:12px;margin-top:10px">
+                      <div style="position:relative;flex:1;max-width:340px;height:20px;border-radius:4px;overflow:hidden;background:{{ c.trackBg }}">
+                        <div style="position:absolute;left:0;top:0;bottom:0;width:{{ c.progressPct }};background:#57b877"></div>
+                        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:500;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.6)">{{ c.countText }} issues</div>
+                      </div>
+                      <span style="font-size:12px;color:#7a7a7a">{{ c.pctText }} complete</span>
+                    </div>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+
+          <!-- TABLE -->
+          <sc-if value="{{ isTable }}" hint-placeholder-val="{{ false }}">
+            <div style="border:1px solid #333;border-radius:6px;overflow:hidden">
+              <table style="width:100%;border-collapse:collapse;font-size:13px">
+                <thead>
+                  <tr style="background:#262626;text-align:left;color:#9a9a9a">
+                    <th style="padding:11px 14px;width:36px;font-weight:500"></th>
+                    <th style="padding:11px 8px;font-weight:500">Title</th>
+                    <th style="padding:11px 8px;font-weight:500;width:130px">Publisher</th>
+                    <th style="padding:11px 8px;font-weight:500;width:150px">Issues</th>
+                    <th style="padding:11px 8px;font-weight:500;width:120px">Status</th>
+                    <th style="padding:11px 14px;font-weight:500;width:70px">Year</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <sc-for list="{{ comics }}" as="c" hint-placeholder-count="10">
+                    <tr style="border-top:1px solid #2c2c2c;background:{{ c.rowBg }}" style-hover="background:#2c2c2c">
+                      <td style="padding:9px 14px"><i class="{{ c.monIcon }}" style="font-size:13px;color:{{ c.monColor }}"></i></td>
+                      <td style="padding:9px 8px;font-weight:500;color:#e6e6e6"><span onClick="{{ c.onOpen }}" style="cursor:pointer" style-hover="color:#57b877">{{ c.title }}</span> <sc-if value="{{ c.hasVol }}" hint-placeholder-val="{{ false }}"><span style="color:#7f7f7f;font-weight:400;font-size:12px;margin-left:2px">{{ c.volChip }}</span></sc-if></td>
+                      <td style="padding:9px 8px;color:#b0b0b0">{{ c.publisher }}</td>
+                      <td style="padding:9px 8px">
+                        <div style="position:relative;height:18px;width:130px;border-radius:3px;overflow:hidden;background:{{ c.trackBg }}">
+                          <div style="position:absolute;left:0;top:0;bottom:0;width:{{ c.progressPct }};background:#57b877"></div>
+                          <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:500;color:#fff;text-shadow:0 1px 1px rgba(0,0,0,.6)">{{ c.countText }}</div>
+                        </div>
+                      </td>
+                      <td style="padding:9px 8px"><span style="color:{{ c.pillColor }}">{{ c.statusLabel }}</span></td>
+                      <td style="padding:9px 14px;color:#9a9a9a">{{ c.year }}</td>
+                    </tr>
+                  </sc-for>
+                </tbody>
+              </table>
+            </div>
+          </sc-if>
+        </div>
+      </sc-if>
+
+      <!-- ===== ADD NEW ===== -->
+      <sc-if value="{{ isAdd }}" hint-placeholder-val="{{ false }}">
+        <div style="padding:26px 30px 46px;max-width:1000px">
+          <div style="position:relative;margin-bottom:9px">
+            <i class="fas fa-magnifying-glass" style="position:absolute;left:17px;top:50%;transform:translateY(-50%);color:#777;font-size:15px"></i>
+            <input value="{{ addQuery }}" onInput="{{ onAddInput }}" onKeyDown="{{ onAddKey }}" placeholder="Search ComicVine for a series to add…" style="width:100%;height:52px;padding:0 16px 0 46px;background:#1c1c1c;border:1px solid #3a3a3a;border-radius:8px;color:#e6e6e6;font-size:15px;outline:none" style-focus="border-color:#57b877;background:#181818" />
+          </div>
+          <div style="font-size:12px;color:#7a7a7a;margin-bottom:22px">Results are pulled live from the ComicVine database.</div>
+
+          <sc-if value="{{ addLoading }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;align-items:center;gap:11px;color:#9a9a9a;font-size:14px;padding:14px 2px"><i class="fas fa-circle-notch" style="font-size:16px;color:#57b877;animation:fgspin .9s linear infinite"></i>Searching ComicVine…</div>
+          </sc-if>
+
+          <sc-if value="{{ hasAddError }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;align-items:center;gap:10px;color:#e5a54b;font-size:13px;background:rgba(229,165,75,.1);border:1px solid rgba(229,165,75,.25);border-radius:7px;padding:14px 16px"><i class="fas fa-triangle-exclamation"></i>{{ addError }}</div>
+          </sc-if>
+
+          <sc-if value="{{ addPrompt }}" hint-placeholder-val="{{ true }}">
+            <div style="padding:56px 0;text-align:center;color:#777">
+              <i class="fas fa-magnifying-glass" style="font-size:30px;color:#3a3a3a"></i>
+              <div style="margin-top:15px;font-size:15px;color:#8a8a8a">Search for a comic series to add to your library.</div>
+              <div style="margin-top:6px;font-size:12.5px;color:#5f5f5f">Try “Saga”, “Immortal Thor”, or a creator’s book.</div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ addNoResults }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:44px 0;text-align:center;color:#777;font-size:14px">No ComicVine volumes matched that search.</div>
+          </sc-if>
+
+          <sc-for list="{{ addResults }}" as="r" hint-placeholder-count="0">
+            <div style="background:#282828;border:1px solid #333;border-radius:9px;overflow:hidden;margin-bottom:14px">
+              <div onClick="{{ r.onToggle }}" style="display:flex;gap:17px;padding:15px;cursor:pointer" style-hover="background:#2c2c2c">
+                <div style="width:72px;height:108px;flex:none;border-radius:4px;background-color:{{ r.tint }};background-image:url({{ r.coverUrl }});background-size:cover;background-position:center;border:1px solid #3a3a3a"></div>
+                <div style="flex:1;min-width:0">
+                  <div style="display:flex;align-items:center;gap:11px;flex-wrap:wrap">
+                    <span style="font-size:17px;font-weight:600;color:#efefef">{{ r.name }}</span>
+                    <span style="font-size:14px;color:#8a8a8a">{{ r.yearText }}</span>
+                    <sc-if value="{{ r.inLibrary }}" hint-placeholder-val="{{ false }}">
+                      <span style="display:inline-flex;align-items:center;gap:6px;background:rgba(87,184,119,.16);color:#7fce9a;font-size:11px;font-weight:600;padding:3px 9px;border-radius:5px"><i class="fas fa-check" style="font-size:10px"></i>In library</span>
+                    </sc-if>
+                  </div>
+                  <div style="margin-top:5px;font-size:12.5px;color:#8f8f8f">{{ r.publisher }} · {{ r.issuesText }} · via ComicVine</div>
+                  <div style="margin-top:8px;font-size:13px;line-height:1.55;color:#b4b4b4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">{{ r.deckText }}</div>
+                </div>
+                <div style="flex:none;display:flex;align-items:center">
+                  <sc-if value="{{ r.inLibrary }}" hint-placeholder-val="{{ false }}">
+                    <i class="fas fa-circle-check" style="font-size:22px;color:#57b877"></i>
+                  </sc-if>
+                  <sc-if value="{{ r.expanded }}" hint-placeholder-val="{{ false }}">
+                    <i class="fas fa-chevron-up" style="font-size:13px;color:#8a8a8a"></i>
+                  </sc-if>
+                </div>
+              </div>
+
+              <sc-if value="{{ r.expanded }}" hint-placeholder-val="{{ false }}">
+                <div style="border-top:1px solid #333;background:#232323;padding:20px">
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;max-width:660px">
+                    <div>
+                      <div style="font-size:11px;letter-spacing:.6px;text-transform:uppercase;color:#808080;margin-bottom:7px">Root Folder</div>
+                      <select value="{{ addRoot }}" onChange="{{ onRootChange }}" style="width:100%;height:38px;padding:0 12px;background:#1c1c1c;border:1px solid #3a3a3a;border-radius:6px;color:#e0e0e0;font-size:13px;outline:none">
+                        <option value="/comics">/comics</option>
+                        <option value="/mnt/media/comics">/mnt/media/comics</option>
+                        <option value="/data/comics">/data/comics</option>
+                      </select>
+                    </div>
+                    <div>
+                      <div style="font-size:11px;letter-spacing:.6px;text-transform:uppercase;color:#808080;margin-bottom:7px">Format Profile</div>
+                      <select value="{{ addProfile }}" onChange="{{ onProfileChange }}" style="width:100%;height:38px;padding:0 12px;background:#1c1c1c;border:1px solid #3a3a3a;border-radius:6px;color:#e0e0e0;font-size:13px;outline:none">
+                        <option value="CBZ preferred">CBZ preferred</option>
+                        <option value="CBR preferred">CBR preferred</option>
+                        <option value="Digital HD">Digital HD</option>
+                        <option value="Any">Any</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div style="margin-top:18px">
+                    <div style="font-size:11px;letter-spacing:.6px;text-transform:uppercase;color:#808080;margin-bottom:8px">Monitor</div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap">
+                      <sc-for list="{{ monitorOptions }}" as="m" hint-placeholder-count="4">
+                        <button onClick="{{ m.onClick }}" style="padding:8px 15px;border:1px solid {{ m.border }};background:{{ m.bg }};color:{{ m.color }};border-radius:6px;cursor:pointer;font-size:12.5px;font-weight:500">{{ m.label }}</button>
+                      </sc-for>
+                    </div>
+                  </div>
+
+                  <div style="margin-top:16px">
+                    <div style="font-size:11px;letter-spacing:.6px;text-transform:uppercase;color:#808080;margin-bottom:8px">Collect as</div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap">
+                      <sc-for list="{{ kindOptions }}" as="k" hint-placeholder-count="2">
+                        <button onClick="{{ k.onClick }}" style="padding:8px 15px;border:1px solid {{ k.border }};background:{{ k.bg }};color:{{ k.color }};border-radius:6px;cursor:pointer;font-size:12.5px;font-weight:500">{{ k.label }}</button>
+                      </sc-for>
+                    </div>
+                  </div>
+
+                  <div style="margin-top:22px;display:flex;justify-content:flex-end;gap:10px">
+                    <button onClick="{{ r.onToggle }}" style="padding:10px 18px;border:1px solid #3a3a3a;background:transparent;color:#cfcfcf;border-radius:6px;cursor:pointer;font-size:13px" style-hover="background:#2c2c2c;color:#fff">Cancel</button>
+                    <button onClick="{{ r.onAdd }}" style="display:inline-flex;align-items:center;gap:8px;padding:10px 20px;border:none;background:#57b877;color:#0f1f0d;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600" style-hover="background:#66c98a"><i class="fas fa-plus" style="font-size:12px"></i>Add {{ r.name }}</button>
+                  </div>
+                </div>
+              </sc-if>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <!-- ===== CALENDAR ===== -->
+      <sc-if value="{{ isCalendar }}" hint-placeholder-val="{{ false }}">
+        <div style="padding:22px 26px 40px">
+          <!-- toolbar -->
+          <div style="display:flex;align-items:center;gap:14px;margin-bottom:18px;flex-wrap:wrap">
+            <div style="display:flex;align-items:center;border:1px solid #333;border-radius:6px;overflow:hidden">
+              <button onClick="{{ calPrev }}" title="Previous week" style="width:34px;height:34px;border:none;background:transparent;color:#bdbdbd;cursor:pointer;font-size:13px" style-hover="background:#2c2c2c;color:#fff"><i class="fas fa-chevron-left"></i></button>
+              <button onClick="{{ noop }}" style="height:34px;padding:0 14px;border:none;border-left:1px solid #333;border-right:1px solid #333;background:#2c2c2c;color:#e6e6e6;cursor:pointer;font-size:12.5px;font-weight:500">This Week</button>
+              <button onClick="{{ calNext }}" title="Next week" style="width:34px;height:34px;border:none;background:transparent;color:#bdbdbd;cursor:pointer;font-size:13px" style-hover="background:#2c2c2c;color:#fff"><i class="fas fa-chevron-right"></i></button>
+            </div>
+            <span style="font-size:15px;font-weight:500;color:#efefef">{{ calRangeLabel }}</span>
+            <div style="flex:1"></div>
+            <select value="{{ calPub }}" onChange="{{ calPubChange }}" style="height:34px;padding:0 30px 0 12px;background:#1c1c1c;border:1px solid #333;border-radius:6px;color:#dcdcdc;font-size:12.5px;outline:none;cursor:pointer" style-focus="border-color:#57b877">
+              <sc-for list="{{ calPubOptions }}" as="p" hint-placeholder-count="6">
+                <option value="{{ p.value }}">{{ p.label }}</option>
+              </sc-for>
+            </select>
+            <div style="display:flex;border:1px solid #333;border-radius:6px;overflow:hidden">
+              <button onClick="{{ calSetLibrary }}" style="height:34px;padding:0 14px;border:none;background:{{ calLibBg }};color:{{ calLibColor }};cursor:pointer;font-size:12.5px;font-weight:500">Following</button>
+              <button onClick="{{ calSetAll }}" style="height:34px;padding:0 14px;border:none;border-left:1px solid #333;background:{{ calAllBg }};color:{{ calAllColor }};cursor:pointer;font-size:12.5px;font-weight:500">All releases</button>
+            </div>
+          </div>
+
+          <!-- reality banner -->
+          <div style="display:flex;align-items:center;gap:13px;background:#242424;border:1px solid #313131;border-radius:8px;padding:13px 16px;margin-bottom:26px">
+            <i class="fas fa-layer-group" style="color:#57b877;font-size:16px;flex:none"></i>
+            <div style="font-size:13px;color:#c2c2c2;line-height:1.5">{{ calBannerText }}</div>
+          </div>
+
+          <sc-if value="{{ calEmpty }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:70px 0;text-align:center;color:#777">
+              <i class="fas fa-calendar-day" style="font-size:32px;color:#3a3a3a"></i>
+              <div style="margin-top:14px;font-size:15px">No releases this week for that filter.</div>
+            </div>
+          </sc-if>
+
+          <!-- date-grouped agenda -->
+          <sc-for list="{{ calDays }}" as="d" hint-placeholder-count="4">
+            <div style="display:grid;grid-template-columns:72px 1fr;gap:20px;margin-bottom:26px">
+              <div style="text-align:center;padding-top:3px">
+                <div style="font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:{{ d.accent }};font-weight:600">{{ d.dow }}</div>
+                <div style="font-size:36px;font-weight:300;color:{{ d.dateColor }};line-height:1.05;margin-top:1px">{{ d.date }}</div>
+                <div style="font-size:11px;color:#777;text-transform:uppercase;letter-spacing:.5px">{{ d.mon }}</div>
+              </div>
+              <div style="border-left:2px solid {{ d.barColor }};padding-left:20px;min-width:0">
+                <div style="display:flex;align-items:center;gap:11px;margin-bottom:13px;flex-wrap:wrap">
+                  <sc-if value="{{ d.isBig }}" hint-placeholder-val="{{ false }}">
+                    <span style="display:inline-flex;align-items:center;gap:7px;background:rgba(87,184,119,.16);color:#7fce9a;font-size:11px;font-weight:600;letter-spacing:.6px;padding:4px 11px;border-radius:5px;text-transform:uppercase"><i class="fas fa-bolt" style="font-size:10px"></i>New Comic Day</span>
+                  </sc-if>
+                  <sc-if value="{{ d.isToday }}" hint-placeholder-val="{{ false }}">
+                    <span style="background:rgba(87,184,119,.9);color:#0f1f0d;font-size:11px;font-weight:600;padding:4px 10px;border-radius:5px">Today</span>
+                  </sc-if>
+                  <span style="font-size:14px;font-weight:500;color:#e6e6e6">{{ d.countText }}</span>
+                  <sc-if value="{{ d.hasFollowed }}" hint-placeholder-val="{{ false }}">
+                    <span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#7fce9a"><i class="fas fa-bookmark" style="font-size:10px"></i>{{ d.followedText }}</span>
+                  </sc-if>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(228px,1fr));gap:10px">
+                  <sc-for list="{{ d.releases }}" as="r" hint-placeholder-count="6">
+                    <div style="display:flex;gap:11px;align-items:center;background:{{ r.cardBg }};border:1px solid {{ r.cardBorder }};border-radius:6px;padding:8px 11px 8px 8px" style-hover="border-color:#4a4a4a">
+                      <div style="width:36px;height:54px;flex:none;border-radius:3px;background-color:{{ r.tint }};background-image:url({{ r.coverUrl }});background-size:cover;background-position:center;border-left:2px solid {{ r.accent }}"></div>
+                      <div style="flex:1;min-width:0">
+                        <div style="font-size:12.5px;font-weight:500;color:#e6e6e6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.title }}</div>
+                        <div style="margin-top:3px;font-size:11px;color:#8a8a8a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.issue }} · {{ r.publisher }}</div>
+                      </div>
+                      <i class="{{ r.monIcon }}" style="font-size:12px;color:{{ r.monColor }};flex:none"></i>
+                    </div>
+                  </sc-for>
+                </div>
+                <sc-if value="{{ d.hiddenText }}" hint-placeholder-val="{{ false }}">
+                  <div style="margin-top:12px;font-size:12px;color:#7a7a7a;display:inline-flex;align-items:center;gap:8px"><i class="fas fa-ellipsis" style="color:#5f5f5f"></i>{{ d.hiddenText }}</div>
+                </sc-if>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <!-- ===== ACTIVITY / QUEUE ===== -->
+      <sc-if value="{{ isActivity }}" hint-placeholder-val="{{ false }}">
+        <div style="padding:22px 26px 40px">
+          <div style="font-size:13px;color:#8a8a8a;margin-bottom:16px">{{ queueCount }} items in queue</div>
+          <div style="border:1px solid #333;border-radius:6px;overflow:hidden">
+            <table style="width:100%;border-collapse:collapse;font-size:13px">
+              <thead>
+                <tr style="background:#262626;text-align:left;color:#9a9a9a">
+                  <th style="padding:11px 14px;font-weight:500">Comic</th>
+                  <th style="padding:11px 8px;font-weight:500;width:90px">Issue</th>
+                  <th style="padding:11px 8px;font-weight:500;width:220px">Progress</th>
+                  <th style="padding:11px 8px;font-weight:500;width:90px">Size</th>
+                  <th style="padding:11px 8px;font-weight:500;width:120px">Time Left</th>
+                  <th style="padding:11px 14px;font-weight:500;width:130px">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                <sc-for list="{{ queue }}" as="q" hint-placeholder-count="4">
+                  <tr style="border-top:1px solid #2c2c2c" style-hover="background:#2a2a2a">
+                    <td style="padding:11px 14px;font-weight:500;color:#e6e6e6">{{ q.title }}</td>
+                    <td style="padding:11px 8px;color:#b0b0b0">{{ q.issue }}</td>
+                    <td style="padding:11px 8px">
+                      <div style="position:relative;height:8px;border-radius:4px;overflow:hidden;background:#3a3a3a">
+                        <div style="position:absolute;left:0;top:0;bottom:0;width:{{ q.pct }};background:{{ q.barColor }}"></div>
+                      </div>
+                      <div style="margin-top:4px;font-size:11px;color:#8a8a8a">{{ q.pct }}</div>
+                    </td>
+                    <td style="padding:11px 8px;color:#9a9a9a">{{ q.size }}</td>
+                    <td style="padding:11px 8px;color:#9a9a9a">{{ q.timeleft }}</td>
+                    <td style="padding:11px 14px">
+                      <span style="display:inline-flex;align-items:center;gap:7px;color:{{ q.statusColor }};font-size:12px;font-weight:500">
+                        <i class="{{ q.statusIcon }}" style="font-size:11px;{{ q.spinStyle }}"></i>{{ q.status }}
+                      </span>
+                    </td>
+                  </tr>
+                </sc-for>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== WANTED ===== -->
+      <sc-if value="{{ isWanted }}" hint-placeholder-val="{{ false }}">
+        <div style="padding:22px 26px 40px">
+          <div style="font-size:13px;color:#8a8a8a;margin-bottom:16px">{{ missingCount }} comics with missing issues · <span style="color:#e5a54b">{{ missingIssuesTotal }} issues wanted</span></div>
+          <div style="border:1px solid #333;border-radius:6px;overflow:hidden">
+            <table style="width:100%;border-collapse:collapse;font-size:13px">
+              <thead>
+                <tr style="background:#262626;text-align:left;color:#9a9a9a">
+                  <th style="padding:11px 14px;font-weight:500">Title</th>
+                  <th style="padding:11px 8px;font-weight:500;width:150px">Publisher</th>
+                  <th style="padding:11px 8px;font-weight:500;width:180px">Missing</th>
+                  <th style="padding:11px 8px;font-weight:500;width:130px">Status</th>
+                  <th style="padding:11px 14px;font-weight:500;width:120px;text-align:right"></th>
+                </tr>
+              </thead>
+              <tbody>
+                <sc-for list="{{ wanted }}" as="w" hint-placeholder-count="5">
+                  <tr style="border-top:1px solid #2c2c2c" style-hover="background:#2a2a2a">
+                    <td style="padding:11px 14px;font-weight:500;color:#e6e6e6">{{ w.title }}</td>
+                    <td style="padding:11px 8px;color:#b0b0b0">{{ w.publisher }}</td>
+                    <td style="padding:11px 8px;color:#e5a54b">{{ w.missingText }}</td>
+                    <td style="padding:11px 8px;color:#9a9a9a">{{ w.statusLabel }}</td>
+                    <td style="padding:11px 14px;text-align:right">
+                      <button onClick="{{ noop }}" style="display:inline-flex;align-items:center;gap:7px;padding:6px 12px;border:1px solid #3a3a3a;background:#2c2c2c;color:#dcdcdc;border-radius:5px;cursor:pointer;font-size:12px" style-hover="background:#57b877;color:#12240f;border-color:#57b877"><i class="fas fa-magnifying-glass" style="font-size:11px"></i>Search</button>
+                    </td>
+                  </tr>
+                </sc-for>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== CREATORS ===== -->
+      <sc-if value="{{ isCreators }}" hint-placeholder-val="{{ false }}">
+        <div style="padding:22px 26px 40px">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px">
+            <span style="font-size:13px;color:#8a8a8a">{{ creatorCountText }}</span>
+            <sc-if value="{{ hasCreatorFocus }}" hint-placeholder-val="{{ false }}">
+              <button onClick="{{ clearCreatorFocus }}" style="display:inline-flex;align-items:center;gap:8px;padding:4px 11px;border:1px solid #3a3a3a;background:#2a2a2a;color:#cfcfcf;border-radius:14px;cursor:pointer;font-size:12px" style-hover="background:#333;color:#fff">{{ creatorFocus }} <i class="fas fa-xmark" style="font-size:11px"></i></button>
+            </sc-if>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(362px,1fr));gap:16px">
+            <sc-for list="{{ creators }}" as="cr" hint-placeholder-count="6">
+              <div style="background:#282828;border:1px solid #333;border-radius:8px;padding:16px">
+                <div style="display:flex;align-items:center;gap:13px">
+                  <div onClick="{{ cr.onOpen }}" style="display:flex;align-items:center;gap:13px;flex:1;min-width:0;cursor:pointer" style-hover="opacity:.82">
+                    <div style="width:46px;height:46px;flex:none;border-radius:50%;background:linear-gradient(150deg,#3f8f5c,#2f6b46);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:600;color:#eafff0">{{ cr.initials }}</div>
+                    <div style="flex:1;min-width:0">
+                      <div style="font-size:15px;font-weight:600;color:#ededed;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ cr.name }}</div>
+                      <div style="margin-top:2px;font-size:12px;color:#8a8a8a">{{ cr.roleText }} · {{ cr.countText }}</div>
+                    </div>
+                  </div>
+                  <button onClick="{{ cr.onToggle }}" style="display:inline-flex;align-items:center;gap:7px;padding:7px 14px;border:1px solid {{ cr.followBorder }};background:{{ cr.followBg }};color:{{ cr.followColor }};border-radius:16px;cursor:pointer;font-size:12px;font-weight:500;flex:none" style-hover="border-color:#57b877"><i class="{{ cr.followIcon }}" style="font-size:11px"></i>{{ cr.followLabel }}</button>
+                </div>
+                <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+                  <sc-for list="{{ cr.works }}" as="w" hint-placeholder-count="3">
+                    <div onClick="{{ w.onOpen }}" title="{{ w.title }}" style="width:44px;height:66px;border-radius:3px;background-color:{{ w.tint }};background-image:url({{ w.coverUrl }});background-size:cover;background-position:center;cursor:pointer;border:1px solid #3a3a3a" style-hover="border-color:#57b877"></div>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== CREATOR PROFILE ===== -->
+      <sc-if value="{{ isCreatorPage }}" hint-placeholder-val="{{ false }}">
+        <div>
+          <div style="padding:32px 36px 26px;background:linear-gradient(155deg,#272c29,#202020 72%);border-bottom:1px solid #2b2b2b">
+            <div style="display:flex;gap:22px;align-items:center;flex-wrap:wrap">
+              <div style="width:82px;height:82px;flex:none;border-radius:50%;background:linear-gradient(150deg,#3f8f5c,#2f6b46);display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:600;color:#eafff0;box-shadow:0 6px 20px rgba(0,0,0,.4)">{{ creatorPage.initials }}</div>
+              <div style="flex:1;min-width:220px">
+                <h1 style="margin:0;font-size:30px;font-weight:700;color:#fff;letter-spacing:.2px">{{ creatorPage.name }}</h1>
+                <div style="margin-top:6px;font-size:13.5px;color:#9fbfaa">{{ creatorPage.roleText }}</div>
+                <div style="margin-top:2px;font-size:12.5px;color:#8a8a8a">{{ creatorPage.pubText }}</div>
+              </div>
+              <button onClick="{{ creatorPage.onToggle }}" style="flex:none;display:inline-flex;align-items:center;gap:8px;padding:10px 20px;border:1px solid {{ creatorPage.followBorder }};background:{{ creatorPage.followBg }};color:{{ creatorPage.followColor }};border-radius:18px;cursor:pointer;font-size:13px;font-weight:600" style-hover="border-color:#57b877"><i class="{{ creatorPage.followIcon }}" style="font-size:12px"></i>{{ creatorPage.followLabel }}</button>
+            </div>
+            <div style="display:flex;gap:34px;margin-top:22px">
+              <div>
+                <div style="font-size:24px;font-weight:600;color:#f0f0f0">{{ creatorPage.worksCount }}</div>
+                <div style="font-size:11px;letter-spacing:.6px;text-transform:uppercase;color:#808080;margin-top:2px">Series</div>
+              </div>
+              <div style="width:1px;background:#333"></div>
+              <div>
+                <div style="font-size:24px;font-weight:600;color:#f0f0f0">{{ creatorPage.ownedCount }} <span style="font-size:14px;font-weight:400;color:#7a7a7a">/ {{ creatorPage.totalCount }}</span></div>
+                <div style="font-size:11px;letter-spacing:.6px;text-transform:uppercase;color:#808080;margin-top:2px">Issues in library</div>
+              </div>
+              <div style="width:1px;background:#333"></div>
+              <div>
+                <div style="font-size:24px;font-weight:600;color:#f0f0f0">{{ creatorPage.pubCount }}</div>
+                <div style="font-size:11px;letter-spacing:.6px;text-transform:uppercase;color:#808080;margin-top:2px">Publishers</div>
+              </div>
+            </div>
+          </div>
+
+          <div style="padding:24px 30px 46px">
+            <sc-if value="{{ creatorPage.hasLib }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;align-items:center;gap:9px;margin-bottom:14px">
+                <span style="font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:#7a7a7a">In your library</span>
+                <span style="font-size:11px;font-weight:600;color:#7fce9a;background:rgba(87,184,119,.14);padding:1px 8px;border-radius:9px">{{ creatorPage.worksCount }}</span>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px">
+                <sc-for list="{{ creatorPage.libWorks }}" as="w" hint-placeholder-count="4">
+                  <div onClick="{{ w.onOpen }}" style="display:flex;gap:14px;background:#282828;border:1px solid #333;border-radius:7px;padding:13px;cursor:pointer" style-hover="border-color:#4a4a4a;background:#2c2c2c">
+                    <image-slot id="cover-{{ w.id }}" src="{{ w.coverUrl }}" placeholder="{{ w.title }}" shape="rounded" radius="4" fit="cover" style="width:70px;height:105px;flex:none;background:{{ w.tint }}"></image-slot>
+                    <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+                      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                        <span style="font-size:15px;font-weight:600;color:#efefef">{{ w.title }}</span>
+                        <sc-if value="{{ w.hasVol }}" hint-placeholder-val="{{ false }}">
+                          <span style="font-size:11px;color:#8a8a8a">{{ w.volLabel }}</span>
+                        </sc-if>
+                      </div>
+                      <div style="display:flex;gap:6px;margin-top:7px;flex-wrap:wrap">
+                        <sc-for list="{{ w.roles }}" as="rl" hint-placeholder-count="1">
+                          <span style="font-size:10px;font-weight:600;padding:2px 9px;border-radius:4px;color:{{ rl.color }};background:{{ rl.bg }}">{{ rl.label }}</span>
+                        </sc-for>
+                      </div>
+                      <div style="margin-top:7px;font-size:12.5px;color:#8a8a8a">{{ w.metaLine }}</div>
+                      <div style="flex:1"></div>
+                      <div style="position:relative;height:18px;border-radius:4px;overflow:hidden;background:{{ w.trackBg }};margin-top:10px">
+                        <div style="position:absolute;left:0;top:0;bottom:0;width:{{ w.progressPct }};background:#57b877"></div>
+                        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:500;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.6)">{{ w.countText }}</div>
+                      </div>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ creatorPage.hasMore }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;align-items:center;gap:9px;margin:30px 0 6px">
+                <span style="font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:#7a7a7a">More from {{ creatorPage.name }}</span>
+                <span style="font-size:11px;font-weight:600;color:#c8c8c8;background:#333;padding:1px 8px;border-radius:9px">{{ creatorPage.moreCount }}</span>
+              </div>
+              <div style="font-size:12.5px;color:#7a7a7a;margin-bottom:14px">Not in your library yet — subscribe to any of these to start tracking them.</div>
+              <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px">
+                <sc-for list="{{ creatorPage.moreWorks }}" as="w" hint-placeholder-count="6">
+                  <div style="display:flex;gap:14px;background:#242424;border:1px solid #2f2f2f;border-radius:7px;padding:13px">
+                    <div style="width:70px;height:105px;flex:none;border-radius:4px;background:{{ w.tint }};display:flex;align-items:center;justify-content:center;text-align:center;padding:7px;font-size:9px;line-height:1.3;color:rgba(255,255,255,.42);font-family:ui-monospace,monospace">{{ w.title }}</div>
+                    <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+                      <span style="font-size:15px;font-weight:600;color:#e6e6e6">{{ w.title }}</span>
+                      <div style="display:flex;gap:6px;margin-top:7px;flex-wrap:wrap">
+                        <span style="font-size:10px;font-weight:600;padding:2px 9px;border-radius:4px;color:{{ w.role.color }};background:{{ w.role.bg }}">{{ w.role.label }}</span>
+                      </div>
+                      <div style="margin-top:7px;font-size:12.5px;color:#8a8a8a">{{ w.metaLine }}</div>
+                      <div style="flex:1"></div>
+                      <button onClick="{{ w.onAdd }}" style="align-self:flex-start;display:inline-flex;align-items:center;gap:7px;padding:7px 14px;border:1px solid #3a3a3a;background:#2c2c2c;color:#dcdcdc;border-radius:6px;cursor:pointer;font-size:12px;font-weight:500;margin-top:10px" style-hover="background:#57b877;color:#12240f;border-color:#57b877"><i class="fas fa-plus" style="font-size:11px"></i>Add to library</button>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+          </div>
+        </div>
+      </sc-if>
+
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = {
+    screen: 'comics',
+    view: 'posters',
+    sort: 'title',
+    filter: 'all',
+    query: '',
+    size: 'medium',
+    menu: null, // 'sort' | 'filter' | 'options'
+    covers: {},
+    group: false,
+    calScope: 'library',
+    calPub: 'all',
+    detail: null,
+    detailView: 'issues',
+    decks: {},
+    followed: {},
+    creatorFocus: null,
+    creatorPage: null,
+    addQuery: '',
+    addResults: [],
+    addLoading: false,
+    addError: '',
+    addExpanded: null,
+    addMonitor: 'all',
+    addKind: 'issues',
+    addRoot: '/comics',
+    addProfile: 'CBZ preferred',
+    addedRaw: [],
+    addedCredits: {},
+  };
+
+  // Broader bibliography per creator — series NOT in the library, surfaced on a
+  // creator's page so you can subscribe to individual books from there.
+  // [title, publisher, startYear, role, issueCount]
+  CREATOR_WORKS = {
+    'Tom King': [
+      ['Mister Miracle', 'DC', 2017, 'Writer', 12],
+      ['The Vision', 'Marvel', 2015, 'Writer', 12],
+      ['Strange Adventures', 'DC', 2020, 'Writer', 12],
+      ['Human Target', 'DC', 2021, 'Writer', 12],
+      ['Rorschach', 'DC', 2020, 'Writer', 12],
+      ['Supergirl: Woman of Tomorrow', 'DC', 2021, 'Writer', 8],
+      ['The Sheriff of Babylon', 'Vertigo', 2015, 'Writer', 12],
+    ],
+    'Jeff Lemire': [
+      ['Gideon Falls', 'Image', 2018, 'Writer', 27],
+      ['Royal City', 'Image', 2017, 'Writer', 14],
+      ['Ascender', 'Image', 2019, 'Writer', 18],
+      ['Animal Man', 'DC', 2011, 'Writer', 29],
+      ['Essex County', 'Top Shelf', 2007, 'Writer', 3],
+      ['Plutona', 'Image', 2015, 'Writer', 5],
+    ],
+    'Brian K. Vaughan': [
+      ['Y: The Last Man', 'Vertigo', 2002, 'Writer', 60],
+      ['Ex Machina', 'Wildstorm', 2004, 'Writer', 50],
+      ['Runaways', 'Marvel', 2003, 'Writer', 18],
+      ['We Stand on Guard', 'Image', 2015, 'Writer', 6],
+      ['Barrier', 'Image', 2018, 'Writer', 5],
+    ],
+    'Robert Kirkman': [
+      ['Oblivion Song', 'Image', 2018, 'Writer', 36],
+      ['Fire Power', 'Image', 2020, 'Writer', 30],
+      ['Outcast', 'Image', 2014, 'Writer', 48],
+      ['Super Dinosaur', 'Image', 2011, 'Writer', 30],
+    ],
+    'Jonathan Hickman': [
+      ['Decorum', 'Image', 2020, 'Writer', 8],
+      ['The Black Monday Murders', 'Image', 2016, 'Writer', 8],
+      ['The Manhattan Projects', 'Image', 2012, 'Writer', 25],
+      ['House of X', 'Marvel', 2019, 'Writer', 6],
+    ],
+    'James Tynion IV': [
+      ['The Department of Truth', 'Image', 2020, 'Writer', 24],
+      ['The Nice House on the Lake', 'DC', 2021, 'Writer', 12],
+      ['Wynd', 'BOOM!', 2020, 'Writer', 10],
+      ['The Woods', 'BOOM!', 2014, 'Writer', 36],
+    ],
+    'Kieron Gillen': [
+      ['The Wicked + The Divine', 'Image', 2014, 'Writer', 45],
+      ['Die', 'Image', 2018, 'Writer', 20],
+      ['Phonogram', 'Image', 2006, 'Writer', 6],
+      ['Immortal X-Men', 'Marvel', 2022, 'Writer', 18],
+    ],
+    'Rick Remender': [
+      ['Black Science', 'Image', 2013, 'Writer', 43],
+      ['Low', 'Image', 2014, 'Writer', 26],
+      ['Tokyo Ghost', 'Image', 2015, 'Writer', 10],
+      ['Fear Agent', 'Image', 2005, 'Writer', 32],
+      ['Uncanny X-Force', 'Marvel', 2010, 'Writer', 35],
+    ],
+    'Ram V': [
+      ['The Many Deaths of Laila Starr', 'BOOM!', 2021, 'Writer', 5],
+      ['These Savage Shores', 'Vault', 2018, 'Writer', 5],
+      ['Rare Flavours', 'BOOM!', 2023, 'Writer', 6],
+    ],
+    'Neil Gaiman': [
+      ['The Books of Magic', 'Vertigo', 1990, 'Writer', 4],
+      ['Sandman: Overture', 'Vertigo', 2013, 'Writer', 6],
+      ['Marvel 1602', 'Marvel', 2003, 'Writer', 8],
+      ['Death: The High Cost of Living', 'Vertigo', 1993, 'Writer', 3],
+    ],
+    'Chip Zdarsky': [
+      ['Sex Criminals', 'Image', 2013, 'Writer', 30],
+      ['Public Domain', 'Image', 2022, 'Writer', 10],
+    ],
+    'Tom Taylor': [
+      ['DCeased', 'DC', 2019, 'Writer', 6],
+      ['Injustice: Gods Among Us', 'DC', 2013, 'Writer', 36],
+      ['Superman: Son of Kal-El', 'DC', 2021, 'Writer', 18],
+    ],
+    'Joshua Williamson': [
+      ['Nailbiter', 'Image', 2014, 'Writer', 30],
+      ['Birthright', 'Image', 2014, 'Writer', 50],
+      ['Robin', 'DC', 2021, 'Writer', 17],
+    ],
+    'Greg Rucka': [
+      ['Lazarus', 'Image', 2013, 'Writer', 28],
+      ['Gotham Central', 'DC', 2003, 'Writer', 40],
+      ['Queen & Country', 'Oni', 2001, 'Writer', 32],
+    ],
+    'Al Ewing': [
+      ['Immortal Thor', 'Marvel', 2023, 'Writer', 15],
+      ['The Ultimates', 'Marvel', 2024, 'Writer', 12],
+      ['Guardians of the Galaxy', 'Marvel', 2020, 'Writer', 18],
+    ],
+    'Bill Willingham': [
+      ['Fairest', 'Vertigo', 2012, 'Writer', 33],
+      ['Jack of Fables', 'Vertigo', 2006, 'Writer', 50],
+    ],
+    'Mike Mignola': [
+      ['B.P.R.D.', 'Dark Horse', 2003, 'Writer', 38],
+      ['Baltimore', 'Dark Horse', 2010, 'Writer', 20],
+      ['Lobster Johnson', 'Dark Horse', 2007, 'Writer', 14],
+    ],
+    'Jeff Smith': [
+      ['RASL', 'Cartoon Books', 2008, 'Writer', 15],
+      ['Tuki', 'Cartoon Books', 2014, 'Writer', 8],
+    ],
+    'Charles Soule': [
+      ['Curse Words', 'Image', 2017, 'Writer', 25],
+      ['Undiscovered Country', 'Image', 2019, 'Writer', 30],
+    ],
+    'Gerry Duggan': [
+      ['Deadpool', 'Marvel', 2012, 'Writer', 45],
+      ['Marauders', 'Marvel', 2019, 'Writer', 27],
+    ],
+  };
+
+  // Writer / artist per volume (keyed by id = slug + start year).
+  CREDITS = {
+    'the-amazing-spider-man-2015': ['Dan Slott', 'Giuseppe Camuncoli'],
+    'the-amazing-spider-man-2018': ['Nick Spencer', 'Ryan Ottley'],
+    'immortal-hulk-2018': ['Al Ewing', 'Joe Bennett'],
+    'daredevil-2015': ['Charles Soule', 'Ron Garney'],
+    'daredevil-2019': ['Chip Zdarsky', 'Marco Checchetto'],
+    'moon-knight-2021': ['Jed MacKay', 'Alessandro Cappuccio'],
+    'x-men-2021': ['Gerry Duggan', 'Pepe Larraz'],
+    'the-flash-1987': ['William Messner-Loebs', 'Greg LaRocque'],
+    'the-flash-2011': ['Francis Manapul', 'Francis Manapul'],
+    'the-flash-2016': ['Joshua Williamson', 'Carmine Di Giandomenico'],
+    'batman-2016': ['Tom King', 'Mikel Janín'],
+    'nightwing-2016': ['Tom Taylor', 'Bruno Redondo'],
+    'wonder-woman-2016': ['Greg Rucka', 'Liam Sharp'],
+    'swamp-thing-2021': ['Ram V', 'Mike Perkins'],
+    'the-sandman-1989': ['Neil Gaiman', 'Sam Kieth'],
+    'fables-2002': ['Bill Willingham', 'Mark Buckingham'],
+    'sweet-tooth-2009': ['Jeff Lemire', 'Jeff Lemire'],
+    'saga-2012': ['Brian K. Vaughan', 'Fiona Staples'],
+    'the-walking-dead-2003': ['Robert Kirkman', 'Charlie Adlard'],
+    'monstress-2015': ['Marjorie Liu', 'Sana Takeda'],
+    'paper-girls-2015': ['Brian K. Vaughan', 'Cliff Chiang'],
+    'invincible-2003': ['Robert Kirkman', 'Ryan Ottley'],
+    'east-of-west-2013': ['Jonathan Hickman', 'Nick Dragotta'],
+    'descender-2015': ['Jeff Lemire', 'Dustin Nguyen'],
+    'deadly-class-2014': ['Rick Remender', 'Wes Craig'],
+    'something-is-killing-the-children-2019': ['James Tynion IV', "Werther Dell'Edera"],
+    'once-future-2019': ['Kieron Gillen', 'Dan Mora'],
+    'brzrkr-2021': ['Keanu Reeves', 'Ron Garney'],
+    'bone-1991': ['Jeff Smith', 'Jeff Smith'],
+    'hellboy-1994': ['Mike Mignola', 'Mike Mignola'],
+    'black-hammer-2016': ['Jeff Lemire', 'Dean Ormston'],
+  };
+
+  KEY = '1a5b3f9666a2325ba3ec935c31a9933276c44f9a';
+
+  TINTS = {
+    'Marvel': '#3a2626',
+    'DC': '#26303c',
+    'Image': '#2b2b2b',
+    'BOOM!': '#3a3124',
+    'Vertigo': '#2f2638',
+    'Dark Horse': '#243030',
+    'Cartoon Books': '#26332b',
+    'IDW': '#2b2b2b',
+  };
+
+  RAW = [
+    ['The Amazing Spider-Man','Marvel',18,18,false,'ended',2015,'The Amazing Spider-Man','Vol. 4'],
+    ['The Amazing Spider-Man','Marvel',41,52,true,'continuing',2018,'The Amazing Spider-Man','Vol. 5'],
+    ['Immortal Hulk','Marvel',50,50,true,'ended',2018],
+    ['Daredevil','Marvel',36,36,false,'ended',2015,'Daredevil','Vol. 5'],
+    ['Daredevil','Marvel',26,36,true,'continuing',2019,'Daredevil','Vol. 6'],
+    ['Moon Knight','Marvel',30,30,false,'ended',2021],
+    ['X-Men','Marvel',20,35,true,'continuing',2021],
+    ['The Flash','DC',50,50,false,'ended',1987,'The Flash','Vol. 2'],
+    ['The Flash','DC',52,52,false,'ended',2011,'The Flash','Vol. 4'],
+    ['The Flash','DC',67,88,true,'continuing',2016,'The Flash','Vol. 5'],
+    ['Batman','DC',118,130,true,'continuing',2016],
+    ['Nightwing','DC',82,101,true,'continuing',2016],
+    ['Wonder Woman','DC',60,78,false,'continuing',2016],
+    ['Swamp Thing','DC',0,16,true,'ended',2021],
+    ['The Sandman','Vertigo',75,75,true,'ended',1989],
+    ['Fables','Vertigo',150,150,false,'ended',2002],
+    ['Sweet Tooth','Vertigo',40,40,true,'ended',2009],
+    ['Saga','Image',66,66,true,'continuing',2012],
+    ['The Walking Dead','Image',193,193,true,'ended',2003],
+    ['Monstress','Image',44,52,true,'continuing',2015],
+    ['Paper Girls','Image',30,30,false,'ended',2015],
+    ['Invincible','Image',144,144,true,'ended',2003],
+    ['East of West','Image',45,45,true,'ended',2013],
+    ['Descender','Image',32,32,true,'ended',2015],
+    ['Deadly Class','Image',56,56,false,'ended',2014],
+    ['Something is Killing the Children','BOOM!',30,38,true,'continuing',2019],
+    ['Once & Future','BOOM!',30,30,true,'ended',2019],
+    ['BRZRKR','BOOM!',10,12,true,'continuing',2021],
+    ['Bone','Cartoon Books',55,55,false,'ended',1991],
+    ['Hellboy','Dark Horse',48,60,true,'continuing',1994],
+    ['Black Hammer','Dark Horse',26,26,true,'ended',2016],
+  ];
+
+  _slug(x) { return String(x).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''); }
+
+  _progress(owned, total) {
+    const complete = total > 0 && owned >= total;
+    const pct = total ? Math.round((owned / total) * 100) : 0;
+    return {
+      complete, missing: !complete,
+      countText: owned + ' / ' + total,
+      progressPct: pct + '%', pctText: pct + '%',
+      trackBg: complete ? '#2f5d40' : '#4a2523',
+    };
+  }
+
+  _cardStyle(group) {
+    const base = 'background:#282828;border:1px solid #333;border-radius:5px;overflow:hidden;';
+    return group
+      ? base + 'box-shadow:0 1px 4px rgba(0,0,0,.4), 6px -6px 0 -1px #313131, 12px -12px 0 -2px #292929'
+      : base + 'box-shadow:0 1px 4px rgba(0,0,0,.4)';
+  }
+
+  build(r) {
+    const [title, pub, owned, total, mon, status, year, series, volLabel] = r;
+    const pr = this._progress(owned, total);
+    const cont = status === 'continuing';
+    const vl = volLabel || '';
+    const id = this._slug(title) + '-' + year;
+    const cr = this.CREDITS[id] || (this.state.addedCredits && this.state.addedCredits[id]) || [];
+    const writer = cr[0] || '', artist = cr[1] || '';
+    const sub = vl
+      ? (writer ? vl + ' · ' + writer : vl + ' · ' + year)
+      : (writer ? writer : (cont ? 'Continuing' : 'Ended') + ' · ' + year);
+    return {
+      id,
+      writer, artist,
+      title, publisher: pub, owned, total, year,
+      series: series || title,
+      volLabel: vl,
+      tint: this.TINTS[pub] || '#2b2b2b',
+      monitored: mon,
+      monIcon: mon ? 'fas fa-bookmark' : 'far fa-bookmark',
+      monColor: mon ? '#57b877' : '#6f6f6f',
+      ...pr,
+      rowBg: 'transparent',
+      statusLabel: cont ? 'Continuing' : 'Ended',
+      pillBg: cont ? 'rgba(87,184,119,.16)' : 'rgba(255,255,255,.08)',
+      pillColor: cont ? '#7fce9a' : '#a9a9a9',
+      subLine: sub,
+      hasVol: !!vl,
+      volChip: vl,
+      volChipBg: 'rgba(0,0,0,.6)', volChipColor: '#cfcfcf',
+      isGroup: false, volCount: 1,
+      openId: id,
+      cardStyle: this._cardStyle(false),
+    };
+  }
+
+  // Collapse volumes sharing a series into one stacked card with aggregate
+  // totals — comic volumes are sequels, not seasons, so grouping is optional.
+  _collapse(list) {
+    const groups = new Map();
+    const order = [];
+    for (const c of list) {
+      if (!groups.has(c.series)) { groups.set(c.series, []); order.push(c.series); }
+      groups.get(c.series).push(c);
+    }
+    const out = [];
+    for (const series of order) {
+      const vols = groups.get(series);
+      if (vols.length === 1) { out.push({ ...vols[0] }); continue; }
+      const owned = vols.reduce((a, v) => a + v.owned, 0);
+      const total = vols.reduce((a, v) => a + v.total, 0);
+      const latest = vols.slice().sort((a, b) => b.year - a.year)[0];
+      const years = vols.map(v => v.year);
+      const mon = vols.some(v => v.monitored);
+      const cont = vols.some(v => v.statusLabel === 'Continuing');
+      out.push({
+        ...this._progress(owned, total),
+        isGroup: true, volCount: vols.length,
+        id: 'group-' + this._slug(series),
+        openId: latest.id,
+        title: series, series, publisher: latest.publisher, tint: latest.tint,
+        coverUrl: latest.coverUrl, owned, total, year: latest.year,
+        monitored: mon,
+        monIcon: mon ? 'fas fa-bookmark' : 'far fa-bookmark',
+        monColor: mon ? '#57b877' : '#6f6f6f',
+        rowBg: 'transparent',
+        statusLabel: cont ? 'Continuing' : 'Ended',
+        pillBg: cont ? 'rgba(87,184,119,.16)' : 'rgba(255,255,255,.08)',
+        pillColor: cont ? '#7fce9a' : '#a9a9a9',
+        subLine: vols.length + ' volumes · ' + Math.min(...years) + '–' + Math.max(...years),
+        hasVol: true,
+        volChip: vols.length + ' vols',
+        volChipBg: 'rgba(87,184,119,.9)', volChipColor: '#0f1f0d',
+        cardStyle: this._cardStyle(true),
+      });
+    }
+    return out;
+  }
+
+  get all() { return [...this.RAW, ...this.state.addedRaw].map(r => this.build(r)); }
+
+  set(patch) { this.setState(patch); }
+
+  openDetail(id) {
+    this.setState({ detail: id, detailView: 'issues', menu: null });
+    const c = this.all.find(x => x.id === id);
+    if (c && !this.state.decks[id]) this._fetchDeck(c);
+  }
+
+  openCreator(name) { this.setState({ screen: 'creator', creatorPage: name, detail: null, menu: null }); }
+
+  // Subscribe to a series straight from a creator's page. Registers the credit
+  // so the added book still attributes back to this creator, then grabs a cover.
+  addCreatorWork(name, w) {
+    const year = w.year || new Date().getFullYear();
+    const id = this._slug(w.title) + '-' + year;
+    const credit = w.role === 'Artist' ? ['', name] : [name, ''];
+    const status = year >= 2016 ? 'continuing' : 'ended';
+    const row = [w.title, w.publisher, 0, w.total, true, status, year];
+    this.setState(s => ({
+      addedRaw: [...s.addedRaw, row],
+      addedCredits: { ...s.addedCredits, [id]: credit },
+    }));
+    this._fetchCover({ title: w.title, publisher: w.publisher, year, id })
+      .then(u => { if (u) this.setState(s => ({ covers: { ...s.covers, [id]: u } })); })
+      .catch(() => {});
+  }
+
+  _creatorCount(name) {
+    let n = 0;
+    for (const c of this.all) { if (c.writer === name || c.artist === name) n++; }
+    return n;
+  }
+
+  _isFollowing(name) {
+    return (name in this.state.followed) ? this.state.followed[name] : (this._creatorCount(name) >= 2);
+  }
+
+  toggleFollow(name) {
+    const cur = this._isFollowing(name);
+    this.setState(s => ({ followed: { ...s.followed, [name]: !cur } }));
+  }
+
+  // ── Add New: live ComicVine volume search ──
+  _onAddInput(e) {
+    const v = e.target.value;
+    this.setState({ addQuery: v });
+    clearTimeout(this._addTimer);
+    this._addTimer = setTimeout(() => this._searchAdd(v), 450);
+  }
+
+  _onAddKey(e) {
+    if (e.key === 'Enter') { clearTimeout(this._addTimer); this._searchAdd(this.state.addQuery); }
+  }
+
+  async _searchAdd(q) {
+    if (this._addToken == null) this._addToken = 0;
+    const token = ++this._addToken;
+    if (!q || q.trim().length < 2) { this.setState({ addResults: [], addLoading: false, addError: '' }); return; }
+    this.setState({ addLoading: true, addError: '' });
+    try {
+      const url = 'https://comicvine.gamespot.com/api/search/?api_key=' + this.KEY +
+        '&format=jsonp&limit=14&resources=volume&query=' + encodeURIComponent(q) +
+        '&field_list=name,image,start_year,publisher,count_of_issues,deck';
+      const data = await this._jsonp(url);
+      if (token !== this._addToken) return;
+      const results = (data && data.results) || [];
+      const mapped = results.map(r => {
+        const img = r.image || {};
+        const year = parseInt(r.start_year, 10) || '';
+        return {
+          id: this._slug(r.name) + '-' + year,
+          name: r.name, year,
+          publisher: (r.publisher && r.publisher.name) || '—',
+          issueCount: r.count_of_issues || 0,
+          coverUrl: img.medium_url || img.screen_url || img.small_url || '',
+          deck: r.deck || '',
+        };
+      }).filter(r => r.name);
+      this.setState({ addResults: mapped, addLoading: false });
+    } catch (e) {
+      if (token !== this._addToken) return;
+      this.setState({ addLoading: false, addError: 'Search failed — check the connection and try again.' });
+    }
+  }
+
+  addResult(r) {
+    const pubMap = [['Marvel', 'Marvel'], ['DC', 'DC'], ['Image', 'Image'], ['BOOM', 'BOOM!'], ['Dark Horse', 'Dark Horse'], ['Vertigo', 'Vertigo']];
+    let pub = r.publisher || 'Image';
+    for (const [needle, key] of pubMap) { if (pub.indexOf(needle) >= 0) { pub = key; break; } }
+    const monitored = this.state.addMonitor !== 'none';
+    const total = r.issueCount || 12;
+    const row = [r.name, pub, 0, total, monitored, 'continuing', r.year || new Date().getFullYear()];
+    const id = this._slug(r.name) + '-' + (r.year || new Date().getFullYear());
+    this.setState(s => ({
+      addedRaw: [...s.addedRaw, row],
+      covers: { ...s.covers, [id]: r.coverUrl || '' },
+      addExpanded: null,
+    }));
+  }
+
+  // Pull the volume's short summary (deck) from ComicVine when a listing opens.
+  async _fetchDeck(c) {
+    try {
+      const norm = (x) => String(x || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const url = 'https://comicvine.gamespot.com/api/search/?api_key=' + this.KEY +
+        '&format=jsonp&limit=8&resources=volume&query=' + encodeURIComponent(c.title) +
+        '&field_list=name,deck,start_year';
+      const data = await this._jsonp(url);
+      const results = (data && data.results) || [];
+      const nt = norm(c.title);
+      let best = null, bs = -1;
+      for (const r of results) {
+        const nm = norm(r.name); let sc = 0;
+        if (nm === nt) sc += 5; else if (nm.includes(nt) || nt.includes(nm)) sc += 2; else continue;
+        const yr = parseInt(r.start_year, 10);
+        if (yr && Math.abs(yr - c.year) <= 1) sc += 3;
+        if (r.deck) sc += 1;
+        if (sc > bs) { bs = sc; best = r; }
+      }
+      const deck = (best && best.deck) ? String(best.deck) : '';
+      this.setState((s) => ({ decks: { ...s.decks, [c.id]: deck || '__none__' } }));
+    } catch (e) { /* leave fallback overview */ }
+  }
+
+  // Collected editions. Real trades overlap — a single issue is typically
+  // in a TPB, a bigger Deluxe HC, and (for long runs) an Omnibus.
+  _buildTrades(c) {
+    const T = [];
+    const words = ['One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten'];
+    const start = new Date(c.year, 6, 1);
+    let n = 0;
+    for (let i = 0; i < c.total; i += 6) {
+      n++;
+      T.push({ a: i + 1, b: Math.min(i + 6, c.total), name: 'Vol. ' + n, format: 'TPB', short: 'TPB ' + n,
+        fmtBg: 'rgba(93,156,236,.16)', fmtColor: '#8ab6f0' });
+    }
+    let d = 0;
+    for (let i = 0; i < c.total; i += 12) {
+      d++;
+      T.push({ a: i + 1, b: Math.min(i + 12, c.total), name: 'Deluxe Book ' + (words[d - 1] || d), format: 'Deluxe HC', short: 'DLX ' + d,
+        fmtBg: 'rgba(198,132,66,.18)', fmtColor: '#d99a5b' });
+    }
+    if (c.total >= 24) {
+      let o = 0;
+      for (let i = 0; i < c.total; i += 40) {
+        o++;
+        T.push({ a: i + 1, b: Math.min(i + 40, c.total), name: c.total > 40 ? 'Omnibus Vol. ' + o : 'Omnibus', format: 'Omnibus', short: c.total > 40 ? 'OMN ' + o : 'OMN',
+          fmtBg: 'rgba(87,184,119,.18)', fmtColor: '#7fce9a' });
+      }
+    }
+    return T.map(t => {
+      const count = t.b - t.a + 1;
+      const ownedAll = c.owned >= t.b;
+      const partial = c.owned >= t.a;
+      const rel = new Date(start.getTime()); rel.setMonth(start.getMonth() + t.b + 4);
+      return {
+        ...t, tint: c.tint,
+        chipBg: t.fmtBg, chipColor: t.fmtColor,
+        collectsText: 'Collects #' + t.a + '–#' + t.b,
+        countText: count + ' issues',
+        pagesText: (count * 22 + 24) + ' pages',
+        release: rel.toLocaleString('en-US', { month: 'short', year: 'numeric' }),
+        statusLabel: ownedAll ? 'In library' : (partial ? 'Partial' : 'Not owned'),
+        statusColor: ownedAll ? '#7fce9a' : (partial ? '#d99a5b' : '#9a9a9a'),
+        statusBg: ownedAll ? 'rgba(87,184,119,.14)' : (partial ? 'rgba(198,132,66,.14)' : 'rgba(255,255,255,.05)'),
+        actionLabel: ownedAll ? 'Open' : 'Add',
+        actionIcon: ownedAll ? 'fas fa-up-right-from-square' : 'fas fa-plus',
+      };
+    }).sort((x, y) => x.a - y.a || x.b - y.b);
+  }
+
+  _buildDetail(c, coverUrl, deck) {
+    const start = new Date(c.year, 6, 1);
+    const trades = this._buildTrades(c);
+    const issues = [];
+    for (let n = 1; n <= c.total; n++) {
+      const d = new Date(start.getTime()); d.setMonth(start.getMonth() + (n - 1));
+      const downloaded = n <= c.owned;
+      const mon = downloaded || c.monitored;
+      const collectedIn = trades.filter(t => n >= t.a && n <= t.b)
+        .map(t => ({ short: t.short, chipBg: t.chipBg, chipColor: t.chipColor }));
+      issues.push({
+        num: '#' + n,
+        date: d.toLocaleString('en-US', { month: 'short', year: 'numeric' }),
+        downloaded,
+        statusLabel: downloaded ? 'Downloaded' : 'Missing',
+        statusColor: downloaded ? '#7fce9a' : '#e5a54b',
+        statusBg: downloaded ? 'rgba(87,184,119,.14)' : 'rgba(229,165,75,.14)',
+        monIcon: mon ? 'fas fa-bookmark' : 'far fa-bookmark',
+        monColor: mon ? '#57b877' : '#6f6f6f',
+        size: downloaded ? (24 + ((n * 37) % 26)) + '.' + ((n * 3) % 10) + ' MB' : '—',
+        collectedIn,
+      });
+    }
+    const ov = (deck && deck !== '__none__') ? deck
+      : ('No overview on file for this volume yet. Foragerr is monitoring it and currently tracks ' +
+         c.owned + ' of ' + c.total + ' issues.');
+    // Creator credits — collapse to one line if writer also draws.
+    const credits = [];
+    if (c.writer && c.artist && c.writer === c.artist) {
+      credits.push({ role: 'Writer · Artist', name: c.writer, onClick: () => this.openCreator(c.writer) });
+    } else {
+      if (c.writer) credits.push({ role: 'Writer', name: c.writer, onClick: () => this.openCreator(c.writer) });
+      if (c.artist) credits.push({ role: 'Artist', name: c.artist, onClick: () => this.openCreator(c.artist) });
+    }
+    return {
+      id: c.id, title: c.title, publisher: c.publisher, year: c.year,
+      statusLabel: c.statusLabel,
+      monIcon: c.monitored ? 'fas fa-bookmark' : 'far fa-bookmark',
+      monColor: c.monitored ? '#57b877' : '#8a8a8a',
+      monLabel: c.monitored ? 'Monitored' : 'Unmonitored',
+      coverUrl, tint: c.tint,
+      owned: c.owned, total: c.total,
+      countText: c.owned + ' / ' + c.total,
+      ...this._progress(c.owned, c.total),
+      volLabel: c.volLabel, hasVol: !!c.volLabel,
+      overview: ov,
+      firstIssue: start.toLocaleString('en-US', { month: 'short', year: 'numeric' }),
+      credits, issues, issuesLabel: c.total + ' issues',
+      trades, tradesCount: trades.length,
+    };
+  }
+
+  componentDidMount() { this.loadCovers(); }
+
+  // ComicVine has no CORS headers but supports JSONP — inject a script el and
+  // read the callback. Resolves the parsed payload or rejects on error/timeout.
+  _jsonp(url) {
+    return new Promise((resolve, reject) => {
+      const cb = 'fgcv_' + Math.random().toString(36).slice(2);
+      const s = document.createElement('scr' + 'ipt');
+      let done = false;
+      const cleanup = () => { try { delete window[cb]; } catch (e) { window[cb] = undefined; } s.remove(); };
+      window[cb] = (data) => { done = true; resolve(data); cleanup(); };
+      s.onerror = () => { if (!done) { cleanup(); reject(new Error('network')); } };
+      s.src = url + '&json_callback=' + cb;
+      document.body.appendChild(s);
+      setTimeout(() => { if (!done) { cleanup(); reject(new Error('timeout')); } }, 9000);
+    });
+  }
+
+  async _fetchCover(c) {
+    const norm = (x) => String(x || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const url = 'https://comicvine.gamespot.com/api/search/?api_key=' + this.KEY +
+      '&format=jsonp&limit=8&resources=volume&query=' + encodeURIComponent(c.title) +
+      '&field_list=name,image,start_year,publisher';
+    const data = await this._jsonp(url);
+    const results = (data && data.results) || [];
+    const nt = norm(c.title), np = norm(c.publisher.replace('!', ''));
+    let best = null, bestScore = -1;
+    for (const r of results) {
+      const nm = norm(r.name);
+      let score = 0;
+      if (nm === nt) score += 5; else if (nm.includes(nt) || nt.includes(nm)) score += 2; else continue;
+      const yr = parseInt(r.start_year, 10);
+      if (yr && Math.abs(yr - c.year) <= 1) score += 3;
+      else if (yr && Math.abs(yr - c.year) <= 4) score += 1;
+      if (r.publisher && np && norm(r.publisher.name).includes(np)) score += 1;
+      const img = r.image || {};
+      if (img.medium_url || img.screen_url || img.small_url) score += 1;
+      if (score > bestScore) { bestScore = score; best = r; }
+    }
+    if (!best || !best.image) return '';
+    const img = best.image;
+    return img.medium_url || img.screen_url || img.small_url || img.super_url || '';
+  }
+
+  async loadCovers() {
+    const all = this.all;
+    const cached = {};
+    const missing = [];
+    for (const c of all) {
+      let v = null;
+      try { v = localStorage.getItem('fg-cover-' + c.id); } catch (e) {}
+      if (v === '__none__') continue;
+      if (v) cached[c.id] = v; else missing.push(c);
+    }
+    if (Object.keys(cached).length) this.setState((s) => ({ covers: { ...s.covers, ...cached } }));
+    for (const c of missing) {
+      try {
+        const u = await this._fetchCover(c);
+        if (u) {
+          try { localStorage.setItem('fg-cover-' + c.id, u); } catch (e) {}
+          this.setState((s) => ({ covers: { ...s.covers, [c.id]: u } }));
+        } else {
+          try { localStorage.setItem('fg-cover-' + c.id, '__none__'); } catch (e) {}
+        }
+      } catch (e) { /* transient — retry on next load */ }
+      await new Promise((r) => setTimeout(r, 350));
+    }
+  }
+
+  // ── Calendar: comics ship in one weekly drop, so a 7-col grid piles
+  //    everything on New Comic Day. Model it as a date-grouped agenda that
+  //    defaults to the series you follow, with an "All releases" escape hatch. ──
+  _calData() {
+    const s = this.state;
+    const cov = s.covers;
+    const acc = (p) => this._accent(p);
+    const tint = (p) => this.TINTS[p] || '#2b2b2b';
+
+    // [title, issue, publisher, dayIndex, libraryId|null]  (Mon=0 … Sun=6)
+    const RAWCAL = [
+      ['The Amazing Spider-Man', '#54', 'Marvel', 0, 'the-amazing-spider-man-2018'],
+      ['Ultimate Spider-Man', '#20', 'Marvel', 1, null],
+      ['Saga', '#67', 'Image', 1, 'saga-2012'],
+      // ── New Comic Day (Wednesday) — the weekly flood ──
+      ['X-Men', '#21', 'Marvel', 2, 'x-men-2021'],
+      ['Batman', '#131', 'DC', 2, 'batman-2016'],
+      ['Nightwing', '#83', 'DC', 2, 'nightwing-2016'],
+      ['The Flash', '#89', 'DC', 2, 'the-flash-2016'],
+      ['Daredevil', '#27', 'Marvel', 2, 'daredevil-2019'],
+      ['Something is Killing the Children', '#31', 'BOOM!', 2, 'something-is-killing-the-children-2019'],
+      ['Monstress', '#45', 'Image', 2, 'monstress-2015'],
+      ['Hellboy', '#49', 'Dark Horse', 2, 'hellboy-1994'],
+      ['BRZRKR', '#11', 'BOOM!', 2, 'brzrkr-2021'],
+      ['Avengers', '#18', 'Marvel', 2, null],
+      ['Fantastic Four', '#22', 'Marvel', 2, null],
+      ['Wolverine', '#9', 'Marvel', 2, null],
+      ['Thor', '#33', 'Marvel', 2, null],
+      ['Captain America', '#12', 'Marvel', 2, null],
+      ['Venom', '#40', 'Marvel', 2, null],
+      ['Deadpool', '#10', 'Marvel', 2, null],
+      ['Iron Man', '#15', 'Marvel', 2, null],
+      ['Ms. Marvel', '#6', 'Marvel', 2, null],
+      ['Superman', '#22', 'DC', 2, null],
+      ['Green Lantern', '#14', 'DC', 2, null],
+      ['Detective Comics', '#1091', 'DC', 2, null],
+      ['Aquaman', '#7', 'DC', 2, null],
+      ['Justice League Unlimited', '#8', 'DC', 2, null],
+      ['Green Arrow', '#19', 'DC', 2, null],
+      ['Titans', '#21', 'DC', 2, null],
+      ['Poison Ivy', '#30', 'DC', 2, null],
+      ['The Department of Truth', '#28', 'Image', 2, null],
+      ['Geiger', '#12', 'Image', 2, null],
+      ['Ice Cream Man', '#42', 'Image', 2, null],
+      ['Radiant Black', '#33', 'Image', 2, null],
+      ['Power Rangers', '#22', 'BOOM!', 2, null],
+      ['Grim', '#19', 'BOOM!', 2, null],
+      ['Resident Alien', '#5', 'Dark Horse', 2, null],
+      ['Teenage Mutant Ninja Turtles', '#12', 'IDW', 2, null],
+      ['Star Trek', '#28', 'IDW', 2, null],
+      ['Godzilla', '#4', 'IDW', 2, null],
+      // ── stragglers on other days ──
+      ['The Sixth Gun', '#3', 'Dark Horse', 4, null],
+      ['Sensational She-Hulk', '#9', 'Marvel', 6, null],
+    ];
+
+    const scope = s.calScope;   // 'library' | 'all'
+    const pub = s.calPub;       // 'all' | publisher
+
+    let items = RAWCAL.map((r) => {
+      const [title, issue, publisher, day, libId] = r;
+      const inLib = !!libId;
+      return {
+        id: (libId || this._slug(title)) + '-' + issue,
+        title, issue, publisher, day, inLibrary: inLib,
+        coverUrl: libId ? (cov[libId] || '') : '',
+        accent: acc(publisher), tint: tint(publisher),
+        monIcon: inLib ? 'fas fa-bookmark' : 'far fa-bookmark',
+        monColor: inLib ? '#57b877' : '#5f5f5f',
+        cardBg: inLib ? '#282828' : '#232323',
+        cardBorder: inLib ? '#334133' : '#2f2f2f',
+      };
+    });
+
+    if (pub !== 'all') items = items.filter((r) => r.publisher === pub);
+
+    const weekAll = items.length;
+    const weekFollowed = items.filter((r) => r.inLibrary).length;
+    const visible = scope === 'library' ? items.filter((r) => r.inLibrary) : items;
+
+    const meta = [
+      { dow: 'Mon', date: 29, mon: 'Jun' },
+      { dow: 'Tue', date: 30, mon: 'Jun' },
+      { dow: 'Wed', date: 1, mon: 'Jul', big: true },
+      { dow: 'Thu', date: 2, mon: 'Jul' },
+      { dow: 'Fri', date: 3, mon: 'Jul' },
+      { dow: 'Sat', date: 4, mon: 'Jul' },
+      { dow: 'Sun', date: 5, mon: 'Jul', today: true },
+    ];
+
+    const days = meta.map((m, idx) => {
+      const rel = visible.filter((r) => r.day === idx);
+      const dayAll = items.filter((r) => r.day === idx).length;
+      const followed = rel.filter((r) => r.inLibrary).length;
+      const hidden = dayAll - rel.length;
+      const big = !!m.big;
+      return {
+        dow: m.dow, date: m.date, mon: m.mon,
+        isBig: big, isToday: !!m.today,
+        releases: rel, count: rel.length,
+        countText: rel.length + (rel.length === 1 ? ' issue' : ' issues'),
+        followedText: (scope === 'all' && followed > 0) ? followed + ' followed' : '',
+        hasFollowed: scope === 'all' && followed > 0,
+        hiddenText: (scope === 'library' && hidden > 0)
+          ? '+ ' + hidden + ' more title' + (hidden === 1 ? '' : 's') + ' shipping this day across all publishers'
+          : '',
+        accent: big ? '#57b877' : (m.today ? '#7fce9a' : '#7a7a7a'),
+        dateColor: m.today ? '#57b877' : (big ? '#f0f0f0' : '#c8c8c8'),
+        barColor: big ? '#57b877' : '#2f2f2f',
+      };
+    }).filter((d) => d.count > 0);
+
+    const pubSet = [...new Set(RAWCAL.map((r) => r[2]))].sort();
+    const calPubOptions = [{ value: 'all', label: 'All publishers' }]
+      .concat(pubSet.map((p) => ({ value: p, label: p })));
+
+    const banner = scope === 'library'
+      ? ('Comics ship in one big weekly drop. You\u2019re seeing the ' + weekFollowed +
+         ' issue' + (weekFollowed === 1 ? '' : 's') + ' from series you follow \u2014 ' +
+         (weekAll - weekFollowed) + ' more titles ship this week across every publisher.')
+      : ('Showing all ' + weekAll + ' single issues shipping this week \u2014 ' +
+         weekFollowed + ' from series you already follow.');
+
+    const seg = (on) => ({ bg: on ? '#31543f' : 'transparent', color: on ? '#7fce9a' : '#9a9a9a' });
+    const libSeg = seg(scope === 'library'), allSeg = seg(scope === 'all');
+
+    return {
+      calRangeLabel: 'Jun 29 \u2013 Jul 5, 2026',
+      calDays: days,
+      calEmpty: days.length === 0,
+      calBannerText: banner,
+      calPub: pub, calPubOptions,
+      calPubChange: (e) => this.set({ calPub: e.target.value }),
+      calSetLibrary: () => this.set({ calScope: 'library' }),
+      calSetAll: () => this.set({ calScope: 'all' }),
+      calLibBg: libSeg.bg, calLibColor: libSeg.color,
+      calAllBg: allSeg.bg, calAllColor: allSeg.color,
+      calPrev: () => {}, calNext: () => {},
+    };
+  }
+
+  renderVals() {
+    const s = this.state;
+    const all = this.all;
+
+    const monitoredCount = all.filter(c => c.monitored).length;
+    const missingList = all.filter(c => c.missing);
+    const missingCount = missingList.length;
+    const missingIssuesTotal = missingList.reduce((a,c) => a + (c.total - c.owned), 0);
+
+    let detail = null;
+    if (s.detail) {
+      const dc = all.find(x => x.id === s.detail);
+      if (dc) detail = this._buildDetail(dc, s.covers[dc.id] || '', s.decks[dc.id]);
+    }
+
+    // ── Creators (subscribe to writers & artists, Readarr-style) ──
+    const cmap = new Map();
+    for (const c of all) {
+      for (const [role, name] of [['Writer', c.writer], ['Artist', c.artist]]) {
+        if (!name) continue;
+        if (!cmap.has(name)) cmap.set(name, { name, roles: new Set(), ids: new Set(), works: [] });
+        const e = cmap.get(name);
+        e.roles.add(role);
+        if (!e.ids.has(c.id)) { e.ids.add(c.id); e.works.push({ id: c.id, title: c.title, volLabel: c.volLabel, tint: c.tint, coverUrl: s.covers[c.id] || '' }); }
+      }
+    }
+    let creators = [...cmap.values()].map(e => {
+      const following = (e.name in s.followed) ? s.followed[e.name] : (e.works.length >= 2);
+      return {
+        name: e.name,
+        initials: e.name.split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase(),
+        roleText: [...e.roles].join(' · '),
+        count: e.works.length,
+        countText: e.works.length + (e.works.length === 1 ? ' series' : ' series'),
+        works: e.works.map(w => ({ ...w, onOpen: () => this.openDetail(w.id) })),
+        following,
+        followLabel: following ? 'Following' : 'Follow',
+        followIcon: following ? 'fas fa-check' : 'fas fa-plus',
+        followBg: following ? '#57b877' : 'transparent',
+        followColor: following ? '#0f1f0d' : '#cfcfcf',
+        followBorder: following ? '#57b877' : '#3f3f3f',
+        onToggle: () => this.toggleFollow(e.name),
+      onOpen: () => this.openCreator(e.name),
+      };
+    });
+    creators.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+    const followingCount = creators.filter(c => c.following).length;
+    if (s.creatorFocus) creators = creators.filter(c => c.name === s.creatorFocus);
+    const creatorCountText = s.creatorFocus
+      ? '1 creator'
+      : (cmap.size + ' creators · ' + followingCount + ' followed');
+
+    // ── Creator profile page: everything a person has worked on ──
+    let creatorPage = null;
+    if (s.screen === 'creator' && s.creatorPage) {
+      const name = s.creatorPage;
+      const roleChip = (label) => label === 'Writer'
+        ? { label, bg: 'rgba(87,184,119,.16)', color: '#7fce9a' }
+        : { label, bg: 'rgba(93,156,236,.16)', color: '#8ab6f0' };
+      const works = [];
+      let owned = 0, total = 0;
+      const pubs = new Set(), rolesG = new Set();
+      for (const c of all) {
+        const isW = c.writer === name, isA = c.artist === name;
+        if (!isW && !isA) continue;
+        const roles = [];
+        if (isW) { roles.push('Writer'); rolesG.add('Writer'); }
+        if (isA) { roles.push('Artist'); rolesG.add('Artist'); }
+        owned += c.owned; total += c.total; pubs.add(c.publisher);
+        works.push({
+          id: c.id, title: c.title, volLabel: c.volLabel, hasVol: !!c.volLabel,
+          publisher: c.publisher, year: c.year, tint: c.tint,
+          coverUrl: s.covers[c.id] || '',
+          metaLine: c.publisher + ' · ' + c.year,
+          roles: roles.map(roleChip),
+          ...this._progress(c.owned, c.total),
+          onOpen: () => this.openDetail(c.id),
+        });
+      }
+      works.sort((a, b) => b.year - a.year || a.title.localeCompare(b.title));
+
+      // Broader bibliography — series this person made that aren't in the library.
+      const libTitles = new Set(works.map(w => w.title));
+      const moreWorks = (this.CREATOR_WORKS[name] || [])
+        .filter(([title]) => !libTitles.has(title))
+        .map(([title, publisher, year, role, issues]) => ({
+          id: this._slug(title) + '-' + year,
+          title, publisher, year,
+          tint: this.TINTS[publisher] || '#2b2b2b',
+          role: roleChip(role),
+          metaLine: publisher + ' · ' + year + ' · ' + issues + ' issues',
+          onAdd: () => this.addCreatorWork(name, { title, publisher, year, role, total: issues }),
+        }))
+        .sort((a, b) => b.year - a.year || a.title.localeCompare(b.title));
+
+      const following = (name in s.followed) ? s.followed[name] : (works.length >= 2);
+      const pubList = [...pubs];
+      creatorPage = {
+        name,
+        initials: name.split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase(),
+        roleText: [...rolesG].join(' · '),
+        pubText: pubList.join(' · '),
+        libWorks: works, worksCount: works.length,
+        moreWorks, moreCount: moreWorks.length,
+        hasLib: works.length > 0, hasMore: moreWorks.length > 0,
+        ownedCount: owned, totalCount: total,
+        pubCount: pubList.length,
+        pubCountText: pubList.length + (pubList.length === 1 ? ' publisher' : ' publishers'),
+        following,
+        followLabel: following ? 'Following' : 'Follow',
+        followIcon: following ? 'fas fa-check' : 'fas fa-plus',
+        followBg: following ? '#57b877' : 'transparent',
+        followColor: following ? '#0f1f0d' : '#cfcfcf',
+        followBorder: following ? '#57b877' : '#3f3f3f',
+        onToggle: () => this.toggleFollow(name),
+      };
+    }
+
+    // filter + search + sort
+    let list = all.slice();
+    if (s.filter === 'monitored') list = list.filter(c => c.monitored);
+    else if (s.filter === 'missing') list = list.filter(c => c.missing);
+    else if (s.filter === 'continuing') list = list.filter(c => c.statusLabel === 'Continuing');
+    if (s.query.trim()) {
+      const q = s.query.trim().toLowerCase();
+      list = list.filter(c => c.title.toLowerCase().includes(q) || c.publisher.toLowerCase().includes(q));
+    }
+    list = list.map(c => ({ ...c, coverUrl: s.covers[c.id] || '' }));
+    if (s.group) list = this._collapse(list);
+
+    const byTitle = (a, b) => a.title.localeCompare(b.title);
+    if (s.sort === 'title') list.sort(byTitle);
+    else if (s.sort === 'publisher') list.sort((a,b) => a.publisher.localeCompare(b.publisher) || byTitle(a,b));
+    else if (s.sort === 'owned') list.sort((a,b) => b.owned - a.owned);
+    else if (s.sort === 'year') list.sort((a,b) => b.year - a.year);
+
+    list = list.map(c => ({ ...c, onOpen: () => this.openDetail(c.openId || c.id) }));
+
+    const volumesShown = s.group ? list.reduce((a,c) => a + c.volCount, 0) : list.length;
+    const libCountText = s.group
+      ? (list.length + ' series · ' + volumesShown + ' volumes')
+      : (list.length + ' comics');
+
+    const nav = (key, label, icon, badge, badgeKind) => {
+      const active = s.screen === key;
+      return {
+        label, icon,
+        iconColor: active ? '#57b877' : '#7a7a7a',
+        style: 'display:flex;align-items:center;gap:11px;padding:9px 18px;margin:1px 8px;border-radius:5px;font-size:13px;cursor:pointer;' +
+          (active ? 'background:#2f2f2f;color:#ffffff;box-shadow:inset 3px 0 0 #57b877' : 'background:transparent;color:#b5b5b5'),
+        badge: badge || null,
+        badgeBg: badgeKind === 'warn' ? 'rgba(229,165,75,.2)' : '#3a3a3a',
+        badgeColor: badgeKind === 'warn' ? '#e5a54b' : '#c8c8c8',
+        onClick: () => this.set({ screen: key, menu: null, detail: null, creatorFocus: null }),
+      };
+    };
+
+    const navItems = [
+      nav('comics', 'Comics', 'fas fa-book', all.length, ''),
+      nav('creators', 'Creators', 'fas fa-feather-pointed', followingCount, ''),
+      nav('calendar', 'Calendar', 'fas fa-calendar-days', null, ''),
+      nav('activity', 'Activity', 'fas fa-download', 4, ''),
+      nav('wanted', 'Wanted', 'fas fa-triangle-exclamation', missingCount, 'warn'),
+    ];
+
+    const seg = (v) => ({ bg: s.view === v ? '#31543f' : 'transparent', color: s.view === v ? '#7fce9a' : '#9a9a9a' });
+    const vp = seg('posters'), vo = seg('overview'), vt = seg('table');
+
+    const sortDef = [['title','Title'],['publisher','Publisher'],['owned','Issues owned'],['year','Year']];
+    const sortOptions = sortDef.map(([k,l]) => ({
+      label: l, color: s.sort === k ? '#7fce9a' : '#dcdcdc',
+      checkOpacity: s.sort === k ? '1' : '0',
+      onClick: () => this.set({ sort: k, menu: null }),
+    }));
+
+    const filterDef = [['all','All',all.length],['monitored','Monitored',monitoredCount],['missing','Missing issues',missingCount],['continuing','Continuing',all.filter(c=>c.statusLabel==='Continuing').length]];
+    const filterOptions = filterDef.map(([k,l,ct]) => ({
+      label: l, count: ct, color: s.filter === k ? '#7fce9a' : '#dcdcdc',
+      checkOpacity: s.filter === k ? '1' : '0',
+      onClick: () => this.set({ filter: k, menu: null }),
+    }));
+    const filterLabelMap = { all:'Filter', monitored:'Monitored', missing:'Missing', continuing:'Continuing' };
+
+    const sizes = { small:'134px', medium:'162px', large:'196px' };
+    const sizeOptions = [['small','S'],['medium','M'],['large','L']].map(([k,l]) => ({
+      label: l,
+      bg: s.size === k ? '#31543f' : '#232323',
+      border: s.size === k ? '#57b877' : '#3a3a3a',
+      color: s.size === k ? '#7fce9a' : '#bdbdbd',
+      onClick: () => this.set({ size: k }),
+    }));
+
+    const cal = this._calData();
+
+    // queue
+    const queue = [
+      { title:'The Amazing Spider-Man', issue:'#54', pct:'62%', size:'38.2 MB', timeleft:'1m 12s', status:'Downloading', statusColor:'#5d9cec', statusIcon:'fas fa-circle-notch', spin:true, barColor:'#5d9cec' },
+      { title:'Something is Killing the Children', issue:'#31', pct:'94%', size:'44.6 MB', timeleft:'18s', status:'Downloading', statusColor:'#5d9cec', statusIcon:'fas fa-circle-notch', spin:true, barColor:'#5d9cec' },
+      { title:'Monstress', issue:'#45', pct:'100%', size:'52.1 MB', timeleft:'—', status:'Importing', statusColor:'#e5a54b', statusIcon:'fas fa-file-import', spin:false, barColor:'#e5a54b' },
+      { title:'Daredevil', issue:'#27', pct:'0%', size:'36.0 MB', timeleft:'queued', status:'Queued', statusColor:'#9a9a9a', statusIcon:'fas fa-clock', spin:false, barColor:'#666' },
+    ].map(q => ({ ...q, spinStyle: q.spin ? 'animation:fgspin .9s linear infinite' : '' }));
+
+    const wanted = missingList.map(c => ({
+      title: c.title, publisher: c.publisher, statusLabel: c.statusLabel,
+      missingText: (c.total - c.owned) + ' of ' + c.total + ' issues',
+    }));
+
+    const titleMap = { calendar:'Calendar', activity:'Activity', wanted:'Wanted', creators:'Creators', add:'Add New Comic' };
+    const iconMap = { calendar:'fas fa-calendar-days', activity:'fas fa-download', wanted:'fas fa-triangle-exclamation', creators:'fas fa-feather-pointed', add:'fas fa-plus' };
+
+    // ── Add New view model ──
+    const segA = (v, cur, set) => ({ active: cur === v, bg: cur === v ? '#31543f' : '#242424', color: cur === v ? '#7fce9a' : '#bdbdbd', border: cur === v ? '#57b877' : '#3a3a3a', onClick: set });
+    const monitorOptions = [['all','All Issues'],['future','Future Only'],['first','First Issue'],['none','Nothing']].map(([v,l]) => ({ label: l, ...segA(v, s.addMonitor, () => this.set({ addMonitor: v })) }));
+    const kindOptions = [['issues','Single Issues'],['trades','Collected Editions']].map(([v,l]) => ({ label: l, ...segA(v, s.addKind, () => this.set({ addKind: v })) }));
+    const inLib = new Set(this.all.map(c => c.id));
+    const addResults = s.addResults.map(r => ({
+      ...r,
+      inLibrary: inLib.has(r.id),
+      expanded: s.addExpanded === r.id,
+      issuesText: r.issueCount ? r.issueCount + ' issues' : 'Issue count n/a',
+      deckText: r.deck || 'No overview on file for this volume.',
+      yearText: r.year || '—',
+      onToggle: () => this.set({ addExpanded: s.addExpanded === r.id ? null : r.id }),
+      onAdd: () => this.addResult(r),
+    }));
+
+    return {
+      navItems,
+      noop: () => {},
+      closeMenus: () => { if (this.state.menu) this.set({ menu: null }); },
+
+      // header search
+      query: s.query,
+      onSearch: (e) => this.set({ query: e.target.value }),
+
+      // screen flags
+      isComics: s.screen === 'comics' && !detail,
+      isCalendar: s.screen === 'calendar',
+      isActivity: s.screen === 'activity',
+      isWanted: s.screen === 'wanted',
+      isCreators: s.screen === 'creators' && !detail,
+      isCreatorPage: s.screen === 'creator' && !detail,
+      creatorPage,
+      backToCreators: () => this.setState({ screen: 'creators', creatorPage: null }),
+      isAdd: s.screen === 'add',
+      openAdd: () => this.set({ screen: 'add', menu: null, detail: null }),
+      addQuery: s.addQuery,
+      onAddInput: (e) => this._onAddInput(e),
+      onAddKey: (e) => this._onAddKey(e),
+      addLoading: s.addLoading,
+      addError: s.addError, hasAddError: !!s.addError,
+      addResults,
+      addPrompt: !s.addQuery.trim(),
+      addNoResults: !s.addLoading && !s.addError && s.addQuery.trim().length >= 2 && s.addResults.length === 0,
+      monitorOptions, kindOptions,
+      addRoot: s.addRoot, addProfile: s.addProfile,
+      onRootChange: (e) => this.set({ addRoot: e.target.value }),
+      onProfileChange: (e) => this.set({ addProfile: e.target.value }),
+      creators, creatorCountText,
+      creatorFocus: s.creatorFocus,
+      hasCreatorFocus: !!s.creatorFocus,
+      clearCreatorFocus: () => this.setState({ creatorFocus: null }),
+      notComics: s.screen !== 'comics' && s.screen !== 'creator' && !detail,
+      isDetail: !!detail,
+      detail,
+      detailTitle: detail ? detail.title : '',
+      closeDetail: () => this.setState({ detail: null }),
+      isDetIssues: s.detailView !== 'collections',
+      isDetCollections: s.detailView === 'collections',
+      setDetIssues: () => this.set({ detailView: 'issues' }),
+      setDetCollections: () => this.set({ detailView: 'collections' }),
+      diBg: s.detailView !== 'collections' ? '#31543f' : 'transparent',
+      diColor: s.detailView !== 'collections' ? '#7fce9a' : '#9a9a9a',
+      dcBg: s.detailView === 'collections' ? '#31543f' : 'transparent',
+      dcColor: s.detailView === 'collections' ? '#7fce9a' : '#9a9a9a',
+      screenTitle: titleMap[s.screen] || '',
+      screenIcon: iconMap[s.screen] || '',
+
+      // view flags
+      isPosters: s.view === 'posters',
+      isOverview: s.view === 'overview',
+      isTable: s.view === 'table',
+      setViewPosters: () => this.set({ view: 'posters' }),
+      setViewOverview: () => this.set({ view: 'overview' }),
+      setViewTable: () => this.set({ view: 'table' }),
+      vpBg: vp.bg, vpColor: vp.color, voBg: vo.bg, voColor: vo.color, vtBg: vt.bg, vtColor: vt.color,
+
+      // menus
+      toggleSort: () => this.set({ menu: s.menu === 'sort' ? null : 'sort' }),
+      toggleFilter: () => this.set({ menu: s.menu === 'filter' ? null : 'filter' }),
+      toggleOptions: () => this.set({ menu: s.menu === 'options' ? null : 'options' }),
+      isSortOpen: s.menu === 'sort',
+      isFilterOpen: s.menu === 'filter',
+      isOptionsOpen: s.menu === 'options',
+      sortOptions, filterOptions, sizeOptions,
+      filterLabel: filterLabelMap[s.filter],
+      filterActiveColor: s.filter === 'all' ? '#dcdcdc' : '#7fce9a',
+
+      // group volumes toggle
+      groupOn: s.group,
+      toggleGroup: () => this.set({ group: !this.state.group }),
+      switchBg: s.group ? '#57b877' : '#454545',
+      switchKnob: s.group ? 'translateX(16px)' : 'translateX(0)',
+
+      // grid
+      gridMin: sizes[s.size],
+      comics: list,
+      resultCount: list.length,
+      libCountText,
+      monitoredCount, missingCount, missingIssuesTotal,
+      noResults: list.length === 0,
+
+      // secondary
+      ...cal, queue, queueCount: queue.length, wanted,
+    };
+  }
+
+  _accent(pub) {
+    const m = { 'Marvel':'#c0555a','DC':'#5a86c0','Image':'#9a9a9a','BOOM!':'#c9a24a','Vertigo':'#9a6fc0','Dark Horse':'#5aa38f','Cartoon Books':'#6fb87a','IDW':'#8a8a8a' };
+    return m[pub] || '#57b877';
+  }
+}
+</script>
+</body>
+</html>
