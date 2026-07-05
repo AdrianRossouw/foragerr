@@ -6,21 +6,26 @@ a persisted :class:`GrabReleaseCommand` carrying everything a downloader needs
 (the release's indexer+guid identity, its NZB link, and the library series/issue
 it satisfies). The command is the durable, trackable hand-off record.
 
-The handler is deliberately **inert** in this change (FRG-SRCH-008): it records
-the intent and returns, performing no download. Change 5 (download clients + DDL)
-replaces only the handler body — the command name, payload contract, and every
-enqueue site stay exactly as they are here, so the grab hand-off is the stable
-seam change 5 consumes.
+Change 5 (m1-downloads, tracking area) makes the handler **live** (FRG-DL-006):
+it resolves the protocol-matched download client, hands the release to it, and
+records one ``grab_history`` row per issue keyed by the client download id — the
+join key for all subsequent tracking, import, and failure handling. The command
+name, payload contract, and every enqueue site are unchanged from the inert
+change-4 seam, so nothing upstream had to move.
 """
 
 from __future__ import annotations
 
+import datetime as dt
 import logging
-from typing import ClassVar, Literal
+from typing import TYPE_CHECKING, ClassVar, Iterable, Literal
 
 from foragerr.commands.registry import BaseCommand, register_command, register_handler
 from foragerr.commands.service import HandlerContext
 from foragerr.search import Decision
+
+if TYPE_CHECKING:  # avoid perturbing this pinned module's import graph
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger("foragerr.search_ops.grab")
 
@@ -82,24 +87,133 @@ async def enqueue_grab(ctx: HandlerContext, handoff: GrabReleaseCommand) -> int:
     return record.id
 
 
+async def write_grab_history_rows(
+    session: "AsyncSession",
+    *,
+    download_id: str,
+    issues: Iterable[tuple[int | None, int | None]],
+    indexer_id: int,
+    indexer_name: str | None,
+    guid: str,
+    title: str,
+    link: str,
+    size_bytes: int | None,
+    protocol: str,
+    source: str,
+    pub_date: dt.datetime | None = None,
+    score: int | None = None,
+    client_id: int | None = None,
+    now: dt.datetime,
+) -> int:
+    """Write one ``grab_history`` row per issue, all sharing ``download_id``.
+
+    ``download_id`` is the sole join key for tracking / import / failure handling
+    (FRG-DL-006). A multi-issue release yields one row per issue sharing the id;
+    every row carries the full release data so a tracked item's download_id can
+    recover its originating grab. Returns the number of rows written.
+    """
+    from foragerr.downloads.models import GrabHistoryRow
+
+    count = 0
+    for series_id, issue_id in issues:
+        session.add(
+            GrabHistoryRow(
+                download_id=download_id,
+                client_id=client_id,
+                series_id=series_id,
+                issue_id=issue_id,
+                indexer_id=indexer_id,
+                indexer_name=indexer_name,
+                guid=guid,
+                title=title,
+                link=link,
+                size_bytes=size_bytes,
+                pub_date=pub_date,
+                protocol=protocol,
+                source=source,
+                score=score,
+                created_at=now,
+            )
+        )
+        count += 1
+    return count
+
+
 @register_handler("grab-release")
 async def _handle_grab_release(
     command: GrabReleaseCommand, ctx: HandlerContext
 ) -> str:
-    """INERT grab hand-off (FRG-SRCH-008). Records intent; downloads nothing.
+    """LIVE grab hand-off (FRG-DL-006): resolve the client, download, record.
 
-    Change 5 replaces this body with the real download-client / DDL hand-off;
-    the command contract and enqueue sites are unchanged."""
+    Resolves the enabled client matching the release's protocol (derived from
+    ``indexer_id``), hands the release to ``client.download()``, then writes one
+    ``grab_history`` row per issue keyed by the returned download id. A client
+    that is unreachable at grab time (or the NZB fetch failing) raises a TYPED
+    :class:`DownloadClientUnreachableError` / :class:`NoDownloadClientError` — a
+    retryable command failure that leaves the release cache entry valid so the
+    grab is never silently dropped. Bad release content raises the typed
+    :class:`GrabValidationError`. The download id is the join key the tracking
+    loop matches on.
+    """
+    # Lazily imported so this pinned module keeps its lean import graph and the
+    # downloads.resolver -> search_ops.grab dependency never becomes a cycle.
+    from foragerr.db import utcnow
+    from foragerr.downloads import make_download_factory
+    from foragerr.downloads.models import SOURCE_DDL, SOURCE_INDEXER
+    from foragerr.downloads.registry import PROTOCOL_DDL
+    from foragerr.downloads.resolver import protocol_for_grab, resolve_client_for_grab
+    from foragerr.providers.backoff import ProviderBackoff
+
+    factory = make_download_factory(ctx.settings)
+    backoff = ProviderBackoff(ctx.db)
+
+    protocol = await protocol_for_grab(ctx.db, command)
+    client = await resolve_client_for_grab(
+        ctx.db,
+        command,
+        http_factory=factory,
+        backoff=backoff,
+        app_settings=ctx.settings,
+    )
+    download_id = await client.download(command)
+
+    now = utcnow()
+    source = SOURCE_DDL if protocol == PROTOCOL_DDL else SOURCE_INDEXER
+    client_id = getattr(client, "_client_id", None)
+    async with ctx.db.write_session() as session:
+        await write_grab_history_rows(
+            session,
+            download_id=download_id,
+            issues=[(command.series_id, command.issue_id)],
+            indexer_id=command.indexer_id,
+            indexer_name=command.indexer_name,
+            guid=command.guid,
+            title=command.title,
+            link=command.link,
+            size_bytes=command.size_bytes,
+            protocol=protocol,
+            source=source,
+            client_id=client_id,
+            now=now,
+        )
+
+    # Event-trigger a tracking refresh so the grab surfaces in the queue without
+    # waiting a full scheduled interval (dedup-safe on the command backbone).
+    if ctx.commands is not None:
+        await ctx.commands.enqueue("track-downloads", {}, triggered_by="grab")
+
     logger.info(
-        "grab hand-off recorded (inert until change 5)",
+        "grab handed to download client",
         extra={
+            "download_id": download_id,
             "indexer_id": command.indexer_id,
             "guid": command.guid,
             "series_id": command.series_id,
             "issue_id": command.issue_id,
+            "protocol": protocol,
         },
     )
     return (
-        f"grab recorded (inert): indexer={command.indexer_id} "
-        f"guid={command.guid} issue={command.issue_id}"
+        f"grab downloaded: indexer={command.indexer_id} guid={command.guid} "
+        f"issue={command.issue_id} download_id={download_id}"
     )

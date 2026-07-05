@@ -10,11 +10,11 @@
 
 ## 2. Tracking + failure loop (worktree area: tracking)
 
-- [ ] 2.1 grab_history writes at grab (per-issue rows, provenance); live grab command replaces change-4 inert handoff (FRG-DL-006)
-- [ ] 2.2 TrackDownloadsCommand (~1 min + event-triggered): id-match, parser fallback with issue-id tag priority, state machine with persisted transitions + events (FRG-DL-007)
-- [ ] 2.3 GET /api/v1/queue paged from tracked state (never live client calls) + DELETE with blocklist option (FRG-DL-008, FRG-API-007)
-- [ ] 2.4 Failed handling → multi-field blocklist rows → automatic IssueSearchCommand with dedup guards; wire change-4 queue/blocklist specs to live stores (FRG-DL-011, FRG-DL-012, FRG-DL-013)
-- [ ] 2.5 Tagged tests: state-machine matrix, restart safety, queue-within-one-cycle, failure loop end-to-end (failed → blocklist → re-search → different release), storm dedup (FRG-DL-006..008, 011..013)
+- [x] 2.1 grab_history writes at grab (per-issue rows, provenance); live grab command replaces change-4 inert handoff (FRG-DL-006)
+- [x] 2.2 TrackDownloadsCommand (~1 min + event-triggered): id-match, parser fallback with issue-id tag priority, state machine with persisted transitions + events (FRG-DL-007)
+- [x] 2.3 GET /api/v1/queue paged from tracked state (never live client calls) + DELETE with blocklist option (FRG-DL-008, FRG-API-007)
+- [x] 2.4 Failed handling → multi-field blocklist rows → automatic IssueSearchCommand with dedup guards; wire change-4 queue/blocklist specs to live stores (FRG-DL-011, FRG-DL-012, FRG-DL-013)
+- [x] 2.5 Tagged tests: state-machine matrix, restart safety, queue-within-one-cycle, failure loop end-to-end (failed → blocklist → re-search → different release), storm dedup (FRG-DL-006..008, 011..013)
 
 ## 3. DDL provider + execution (worktree area: ddl)
 
