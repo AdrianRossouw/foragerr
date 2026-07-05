@@ -18,12 +18,13 @@ import datetime as dt
 import json
 import logging
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
 from sqlalchemy import delete, select
 
 from foragerr.config import Settings
+from foragerr.indexers.caps import CapsCache
 from foragerr.db import (
     CommandRow,
     Database,
@@ -146,6 +147,11 @@ class HandlerContext:
     #: for backwards compatibility with callers that build a bare context;
     #: :class:`CommandService` wires itself in here at construction.
     commands: "CommandService | None" = None
+    #: One process-level indexer caps cache, so the search commands share a
+    #: single probe cache across runs instead of rebuilding one per command
+    #: (FRG-IDX-004). :class:`CommandService` builds it once at construction;
+    #: bare contexts default to a fresh cache.
+    caps_cache: CapsCache = field(default_factory=CapsCache)
 
 
 async def prune_job_history(db: Database, retention_days: int) -> int:
@@ -192,8 +198,16 @@ class CommandService:
         self._stopping = False
         self._active_groups: set[str] = set()
         self._workers: list[asyncio.Task[None]] = []
+        #: Built once here so every search command in this process shares one
+        #: caps cache rather than rebuilding a fresh one per run (FRG-IDX-004).
+        self.caps_cache = CapsCache()
         self.context = HandlerContext(
-            db=db, bus=bus, settings=settings, offload=daemon_offload, commands=self
+            db=db,
+            bus=bus,
+            settings=settings,
+            offload=daemon_offload,
+            commands=self,
+            caps_cache=self.caps_cache,
         )
 
     # -- lifecycle -----------------------------------------------------------

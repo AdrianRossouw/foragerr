@@ -1,0 +1,77 @@
+/*
+ * foragerr design-token layer (FRG-UI-002).
+ *
+ * The ant/foraging brand theme is expressed ONCE here as token values. No
+ * screen-level component may hardcode a brand color or theme-specific style —
+ * everything reads these custom properties.
+ *
+ * Token NAMES are deliberately theme-neutral (--color-accent, --surface-*,
+ * --spacing-*), never brand-named. A token-name audit test enforces this: any
+ * property whose name references `ant-`/brand naming fails the build.
+ *
+ * Default values are the Sonarr-dark design school (measured set:
+ * page #202020, chrome #2a2a2a, cards #333, sidebar 210px, header/toolbar 60px,
+ * Roboto 14px/1.53). --color-accent resolves to the ant brand color (#57b877).
+ */
+:root {
+  /* --- Accent (the one place the brand color lives) --- */
+  --color-accent: #57b877;
+  --color-accent-hover: #6bc98a;
+  --color-accent-contrast: #ffffff;
+
+  /* --- Surfaces (Sonarr-dark shell) --- */
+  --surface-page: #202020;
+  --surface-chrome: #2a2a2a;
+  --surface-card: #333333;
+  --surface-card-hover: #3a3a3a;
+  --surface-sidebar: #2a2a2a;
+  --surface-overlay: rgba(0, 0, 0, 0.6);
+  --surface-border: #454545;
+
+  /* --- Text --- */
+  --text-primary: #ffffff;
+  --text-secondary: #a0a0a0;
+  --text-muted: #707070;
+  --text-on-accent: var(--color-accent-contrast);
+
+  /* --- Status --- */
+  --color-success: #27c24c;
+  --color-warning: #ddb500;
+  --color-danger: #f05050;
+  --color-info: #5a9dd4;
+
+  /* --- Typography --- */
+  --font-family-base: 'Roboto', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --font-family-mono: 'Roboto Mono', 'SFMono-Regular', Menlo, monospace;
+  --font-size-base: 14px;
+  --font-size-sm: 12px;
+  --font-size-lg: 16px;
+  --font-size-heading: 21px;
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-bold: 700;
+  --line-height-base: 1.53;
+
+  /* --- Spacing --- */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+
+  /* --- Layout --- */
+  --layout-sidebar-width: 210px;
+  --layout-header-height: 60px;
+  --layout-toolbar-height: 60px;
+  --layout-content-max-width: 1450px;
+
+  /* --- Radius / elevation / iconography --- */
+  --radius-sm: 3px;
+  --radius-md: 4px;
+  --radius-lg: 8px;
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.35);
+  --shadow-overlay: 0 6px 24px rgba(0, 0, 0, 0.5);
+  --icon-size-sm: 14px;
+  --icon-size-md: 18px;
+  --icon-size-lg: 24px;
+}
