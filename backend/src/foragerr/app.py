@@ -139,6 +139,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(indexer_router, prefix="/api/v1")
 
+    # --- downloads area (m1-downloads, area: downloads): download-client
+    #     provider schema + test endpoints under /api/v1/downloadclient
+    #     (FRG-DL-002, FRG-API-009). Importing the package maps the six change-5
+    #     ORM models onto Base.metadata. ---
+    import foragerr.downloads  # noqa: F401 — ORM model registration
+    from foragerr.api.downloadclient import router as downloadclient_router
+
+    app.include_router(downloadclient_router, prefix="/api/v1")
+
     # --- search integration (m1-search-indexers, area 3): importing registers
     #     the search / grab / prune commands + handlers (FRG-SRCH-008/009/014,
     #     FRG-API-008); mount the interactive-search release router; register
