@@ -11,8 +11,18 @@ Status: `proposed` (in an open change) → `approved` (baseline approved by owne
 `implemented` (code + tagged tests merged) → `verified` (tests green in CI).
 Also: `deferred` (approved, explicitly parked), `withdrawn` (kept for history).
 
-Milestones: `M1` vertical slice · `M2` torrents + streaming/quality clusters ·
-`M3` authentication · `B` backlog · `—` process (not milestone-bound).
+Milestones: `M1` vertical slice · `M2` own your library (existing-collection
+import, manual import, naming preview, daily-use screens, backups, NFR
+hardening, quality trio) · `M3` comics-native (weekly pull list + discovery,
+volume grouping, trade typing, OPDS page streaming — grouping/trade ids
+allocated at proposal time) · `M4` sources (Humble Bundle importer — ids
+allocated at proposal time) · `M5` authentication · `B` backlog · `—` process
+(not milestone-bound).
+
+Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
+`M3` authentication). Torrents (FRG-TOR-*, FRG-IDX-012) and notifications
+(FRG-NOTIF-*, FRG-UI-013) parked to `B`; PULL area and FRG-UI-018 promoted from
+`B` to `M3`; auth cluster (FRG-AUTH-002..010, FRG-SEC-005) moved to `M5`.
 
 | ID | Title | Spec | Status | Milestone |
 |----|-------|------|--------|-----------|
@@ -54,15 +64,15 @@ Milestones: `M1` vertical slice · `M2` torrents + streaming/quality clusters ·
 | FRG-META-012 | Heuristic fields with provenance and override | meta | approved | B |
 | FRG-META-013 | Cover art download and cache | meta | implemented | M1 |
 | FRG-META-014 | ComicVine content is untrusted input | meta | implemented | M1 |
-| FRG-PULL-001 | Metadata-derived weekly release view | pull | approved | B |
-| FRG-PULL-002 | External pull-source fetch | pull | approved | B |
-| FRG-PULL-003 | Idempotent per-week storage | pull | approved | B |
-| FRG-PULL-004 | Matching pull entries to the library | pull | approved | B |
-| FRG-PULL-005 | Refresh trigger for missing pulled issues | pull | approved | B |
-| FRG-PULL-006 | Scheduled and manual pull refresh | pull | approved | B |
-| FRG-PULL-007 | Pull view actions | pull | approved | B |
-| FRG-PULL-008 | New-series surfacing (no auto-add) | pull | approved | B |
-| FRG-PULL-009 | Future/solicited releases | pull | approved | B |
+| FRG-PULL-001 | Metadata-derived weekly release view | pull | approved | M3 |
+| FRG-PULL-002 | External pull-source fetch | pull | approved | M3 |
+| FRG-PULL-003 | Idempotent per-week storage | pull | approved | M3 |
+| FRG-PULL-004 | Matching pull entries to the library | pull | approved | M3 |
+| FRG-PULL-005 | Refresh trigger for missing pulled issues | pull | approved | M3 |
+| FRG-PULL-006 | Scheduled and manual pull refresh | pull | approved | M3 |
+| FRG-PULL-007 | Pull view actions | pull | approved | M3 |
+| FRG-PULL-008 | New-series surfacing (no auto-add) | pull | approved | M3 |
+| FRG-PULL-009 | Future/solicited releases | pull | approved | M3 |
 | FRG-ARC-001 | Arc entity import by ComicVine arc ID | arc | approved | B |
 | FRG-ARC-002 | Arc-to-library linking by ComicVine ID | arc | approved | B |
 | FRG-ARC-003 | Arc progress | arc | approved | B |
@@ -84,7 +94,7 @@ Milestones: `M1` vertical slice · `M2` torrents + streaming/quality clusters ·
 | FRG-IDX-009 | Usenet retention parameter | idx | implemented | M1 |
 | FRG-IDX-010 | Indexer failure back-off and recovery | idx | implemented | M1 |
 | FRG-IDX-011 | RSS gap detection | idx | approved | B |
-| FRG-IDX-012 | Torznab indexer support | idx | approved | M2 |
+| FRG-IDX-012 | Torznab indexer support | idx | approved | B |
 | FRG-SRCH-001 | Unified decision engine with explainable rejections | srch | implemented | M1 |
 | FRG-SRCH-002 | Release title parsing | srch | implemented | M1 |
 | FRG-SRCH-003 | Release-to-library mapping | srch | implemented | M1 |
@@ -130,12 +140,12 @@ Milestones: `M1` vertical slice · `M2` torrents + streaming/quality clusters ·
 | FRG-DDL-015 | Safe archive extraction | ddl | approved | B |
 | FRG-DDL-016 | Cloudflare session handling | ddl | approved | B |
 | FRG-DDL-017 | Mirror host adapters | ddl | approved | B |
-| FRG-TOR-001 | Torrent as a second protocol | tor | approved | M2 |
-| FRG-TOR-002 | qBittorrent client | tor | approved | M2 |
-| FRG-TOR-003 | Magnet and .torrent handling | tor | approved | M2 |
-| FRG-TOR-004 | Seeding-aware import and removal | tor | approved | M2 |
-| FRG-TOR-005 | Seeder-based decision and prioritization | tor | approved | M2 |
-| FRG-TOR-006 | Blocklist by info-hash | tor | approved | M2 |
+| FRG-TOR-001 | Torrent as a second protocol | tor | approved | B |
+| FRG-TOR-002 | qBittorrent client | tor | approved | B |
+| FRG-TOR-003 | Magnet and .torrent handling | tor | approved | B |
+| FRG-TOR-004 | Seeding-aware import and removal | tor | approved | B |
+| FRG-TOR-005 | Seeder-based decision and prioritization | tor | approved | B |
+| FRG-TOR-006 | Blocklist by info-hash | tor | approved | B |
 | FRG-IMP-001 | Single parser implementation for all consumers | imp | implemented | M1 |
 | FRG-IMP-002 | Pure, deterministic parse function | imp | implemented | M1 |
 | FRG-IMP-003 | Structured parse result with confidence, no sentinels, no crashes | imp | implemented | M1 |
@@ -178,7 +188,7 @@ Milestones: `M1` vertical slice · `M2` torrents + streaming/quality clusters ·
 | FRG-PP-015 | Failed-download blocklist and auto re-search | pp | withdrawn | — |
 | FRG-PP-016 | Manual import resolution | pp | approved | M2 |
 | FRG-PP-017 | ComicInfo.xml tagging on import | pp | approved | M2 |
-| FRG-PP-018 | CBR-to-CBZ conversion and library-wide retagging | pp | approved | M3 |
+| FRG-PP-018 | CBR-to-CBZ conversion and library-wide retagging | pp | approved | B |
 | FRG-PP-019 | Permissions and ownership enforcement | pp | approved | B |
 | FRG-API-001 | Versioned, OpenAPI-documented REST API | api | implemented | M1 |
 | FRG-API-002 | Standard error and resource conventions | api | implemented | M1 |
@@ -208,12 +218,12 @@ Milestones: `M1` vertical slice · `M2` torrents + streaming/quality clusters ·
 | FRG-UI-010 | Activity: history screen | ui | approved | M2 |
 | FRG-UI-011 | Wanted screen | ui | approved | M2 |
 | FRG-UI-012 | Settings: media management and naming with rename preview | ui | approved | M2 |
-| FRG-UI-013 | Settings: notifications | ui | approved | M2 |
+| FRG-UI-013 | Settings: notifications | ui | approved | B |
 | FRG-UI-014 | Manual import overlay | ui | approved | M2 |
 | FRG-UI-015 | Library import (existing files) flow | ui | approved | M2 |
 | FRG-UI-016 | System status and tasks screens | ui | approved | M2 |
 | FRG-UI-017 | Blocklist screen | ui | approved | M2 |
-| FRG-UI-018 | Weekly pull / calendar view | ui | approved | B |
+| FRG-UI-018 | Weekly pull / calendar view | ui | approved | M3 |
 | FRG-OPDS-001 | OPDS 1.2 Atom catalog with navigation root | opds | approved | M1 |
 | FRG-OPDS-002 | Acquisition feeds with per-entry metadata | opds | approved | M1 |
 | FRG-OPDS-003 | Library-id-based file resolution only (no client-supplied paths) | opds | approved | M1 |
@@ -221,21 +231,21 @@ Milestones: `M1` vertical slice · `M2` torrents + streaming/quality clusters ·
 | FRG-OPDS-005 | Whole-file download with correct comic MIME types | opds | approved | M1 |
 | FRG-OPDS-006 | Feed pagination with totals | opds | approved | M1 |
 | FRG-OPDS-007 | Working OpenSearch (or none) | opds | approved | M2 |
-| FRG-OPDS-008 | OPDS-PSE page streaming | opds | approved | M2 |
-| FRG-OPDS-009 | Cached page counts and page index | opds | approved | M2 |
-| FRG-OPDS-010 | Natural page ordering within archives | opds | approved | M2 |
-| FRG-OPDS-011 | Cover and thumbnail links with local fallback | opds | approved | M2 |
-| FRG-OPDS-012 | Resource limits on archive and image handling | opds | approved | M2 |
+| FRG-OPDS-008 | OPDS-PSE page streaming | opds | approved | M3 |
+| FRG-OPDS-009 | Cached page counts and page index | opds | approved | M3 |
+| FRG-OPDS-010 | Natural page ordering within archives | opds | approved | M3 |
+| FRG-OPDS-011 | Cover and thumbnail links with local fallback | opds | approved | M3 |
+| FRG-OPDS-012 | Resource limits on archive and image handling | opds | approved | M3 |
 | FRG-OPDS-013 | Recent Additions shelf | opds | approved | M2 |
 | FRG-OPDS-014 | Publisher browse shelf | opds | approved | B |
 | FRG-OPDS-015 | Single OPDS version; no OPDS 2.0 | opds | approved | B |
-| FRG-NOTIF-001 | Generic notifier provider abstraction | notif | approved | M2 |
-| FRG-NOTIF-002 | Event catalog with per-connection opt-in | notif | approved | M2 |
-| FRG-NOTIF-003 | Event payload content | notif | approved | M2 |
-| FRG-NOTIF-004 | Test action per connection | notif | approved | M2 |
-| FRG-NOTIF-005 | Starter channel set | notif | approved | M2 |
+| FRG-NOTIF-001 | Generic notifier provider abstraction | notif | approved | B |
+| FRG-NOTIF-002 | Event catalog with per-connection opt-in | notif | approved | B |
+| FRG-NOTIF-003 | Event payload content | notif | approved | B |
+| FRG-NOTIF-004 | Test action per connection | notif | approved | B |
+| FRG-NOTIF-005 | Starter channel set | notif | approved | B |
 | FRG-NOTIF-006 | Additional channels (deferred) | notif | approved | B |
-| FRG-NOTIF-007 | Delivery isolation and failure handling | notif | approved | M2 |
+| FRG-NOTIF-007 | Delivery isolation and failure handling | notif | approved | B |
 | FRG-NOTIF-008 | Cover image attachments | notif | approved | B |
 | FRG-DB-001 | single SQLite database under /config | db | implemented | M1 |
 | FRG-DB-002 | versioned schema migrations | db | implemented | M1 |
@@ -273,15 +283,15 @@ Milestones: `M1` vertical slice · `M2` torrents + streaming/quality clusters ·
 | FRG-DEP-011 | Tailscale-scoped exposure | dep | approved | M1 |
 | FRG-DEP-012 | secrets-stripped diagnostic bundle | dep | approved | B |
 | FRG-AUTH-001 | M1/M2 no-auth accepted risk | auth | implemented | M1 |
-| FRG-AUTH-002 | single-user web login | auth | approved | M3 |
-| FRG-AUTH-003 | password storage with modern KDF | auth | approved | M3 |
-| FRG-AUTH-004 | session management | auth | approved | M3 |
-| FRG-AUTH-005 | HTTP Basic for OPDS realm | auth | approved | M3 |
-| FRG-AUTH-006 | API keys separate from session auth | auth | approved | M3 |
-| FRG-AUTH-007 | API key lifecycle | auth | approved | M3 |
-| FRG-AUTH-008 | at-rest secret encryption | auth | approved | M3 |
-| FRG-AUTH-009 | login rate limiting and audit | auth | approved | M3 |
-| FRG-AUTH-010 | uniform coverage of all surfaces | auth | approved | M3 |
+| FRG-AUTH-002 | single-user web login | auth | approved | M5 |
+| FRG-AUTH-003 | password storage with modern KDF | auth | approved | M5 |
+| FRG-AUTH-004 | session management | auth | approved | M5 |
+| FRG-AUTH-005 | HTTP Basic for OPDS realm | auth | approved | M5 |
+| FRG-AUTH-006 | API keys separate from session auth | auth | approved | M5 |
+| FRG-AUTH-007 | API key lifecycle | auth | approved | M5 |
+| FRG-AUTH-008 | at-rest secret encryption | auth | approved | M5 |
+| FRG-AUTH-009 | login rate limiting and audit | auth | approved | M5 |
+| FRG-AUTH-010 | uniform coverage of all surfaces | auth | approved | M5 |
 | FRG-NFR-001 | startup time | nfr | approved | M2 |
 | FRG-NFR-002 | library scan throughput | nfr | approved | M2 |
 | FRG-NFR-003 | UI responsiveness at library scale | nfr | approved | M2 |
@@ -299,7 +309,7 @@ Milestones: `M1` vertical slice · `M2` torrents + streaming/quality clusters ·
 | FRG-SEC-002 | Hardened XML parsing (XXE / entity-expansion) | sec | implemented | M1 |
 | FRG-SEC-003 | Archive-processing safety (bomb / zip-slip limits) | sec | approved | M1 |
 | FRG-SEC-004 | Filesystem path confinement (safe-join) | sec | approved | M1 |
-| FRG-SEC-005 | CSRF stance and WebSocket Origin validation | sec | approved | M3 |
+| FRG-SEC-005 | CSRF stance and WebSocket Origin validation | sec | approved | M5 |
 | FRG-NFR-014 | Listener request resource limits | nfr | approved | M2 |
 | FRG-QUAL-001 | Format profile entity | qual | implemented | M1 |
 | FRG-QUAL-002 | Default profile seeded on first run | qual | implemented | M1 |
