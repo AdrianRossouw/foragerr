@@ -39,7 +39,7 @@ For each provider family (indexers, download clients, notification connections),
 #### Scenario: Schema endpoint returns field metadata sufficient to render the form with zero per-implementation frontend code
 
 - **WHEN** a client calls `GET /api/v1/indexer/schema`
-- **THEN** the response lists each indexer implementation with typed `fields[]` metadata (name, type, label, help, required flag, secret flag) sufficient for the settings form to be rendered generically, with no per-implementation frontend code
+- **THEN** the response lists each indexer implementation with typed `fields[]` metadata (order, name, type, label, help, required flag, secret flag, select options for enumerated fields, advanced flag) sufficient for the settings form to be rendered generically — fields in a stable declared order, enumerated types carrying their options inline — with no per-implementation frontend code
 
 #### Scenario: Secret fields are write-only and never echoed in GET responses
 

@@ -24,8 +24,9 @@ scoring/size bounds (M2), UI (change 7).
    settings JSON, enable_rss/enable_auto/enable_interactive, priority, retention
    override). Implementations register a Pydantic settings contract; `newznab` is the
    only M1 implementation. `GET /api/v1/indexer/schema` returns field metadata
-   (name/type/label/help/required/secret) derived from the contract — the
-   zero-frontend seam; `POST /api/v1/indexer/test` runs the caps probe live and maps
+   (order/name/type/label/help/required/secret/selectOptions/advanced — the full
+   Sonarr Field-contract union, since the change-7 generic form renderer consumes
+   this verbatim) derived from the contract — the zero-frontend seam; `POST /api/v1/indexer/test` runs the caps probe live and maps
    failures to field-precise messages (FRG-IDX-003, API-009).
 
 2. **Caps probe** (FRG-IDX-004): `?t=caps` on save/test; cached per indexer with TTL;
