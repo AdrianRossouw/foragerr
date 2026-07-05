@@ -6,9 +6,7 @@ Baseline requirements for download clients (usenet), mined from the
 Phase 1 reference research (`docs/research/`). Baseline depth per the Phase 2 scope
 decision: SHALL + coarse acceptance; scenario-level elaboration happens in the
 milestone change that implements each requirement (FRG-PROC-003, FRG-PROC-009).
-
 ## Requirements
-
 ### Requirement: FRG-DL-001 — Download client abstraction
 
 Download clients SHALL implement one interface — download(release) → client-side download id; get-items() → items with download id, title, category, total/remaining size, estimated time, output path, and status (Queued/Paused/Downloading/Completed/Failed/Warning); remove-item(delete data); get-status(); mark-imported — with SABnzbd and the built-in DDL client as the two baseline implementations.
@@ -17,10 +15,20 @@ Download clients SHALL implement one interface — download(release) → client-
 - **Source**: sonarr-arch §4.1 (IDownloadClient, DownloadClientItem)
 - **Notes**: This seam is what makes DDL "just another client" instead of Mylar's parallel DDL_QUEUE world — the central DL design decision.
 
-#### Scenario: Baseline acceptance
+#### Scenario: One DownloadClient protocol implemented by both clients
 
-- **WHEN** this requirement is verified against the implementation
-- **THEN** The tracking loop and queue view operate identically over a SABnzbd item and a DDL item through the interface alone.
+- **WHEN** the SABnzbd client and the built-in DDL client are each instantiated
+- **THEN** both expose the same `DownloadClient` protocol surface — `test()`, `download(release) → download_id`, `get_items() → list[ClientItem]`, `remove(item, delete_data)`, and `mark_imported(item)` — with no client-specific methods reachable by the tracking loop
+
+#### Scenario: get_items yields a uniform typed ClientItem
+
+- **WHEN** `get_items()` is called on either client
+- **THEN** every returned `ClientItem` carries download_id, title, category, total_size and remaining_size in bytes, estimated_time, output_path, and a status drawn from the common enum {queued, paused, downloading, completed, failed, warning}, regardless of the underlying client's native shape
+
+#### Scenario: Tracking and queue operate through the interface alone
+
+- **WHEN** the tracking loop and queue view process one SABnzbd item and one DDL item
+- **THEN** each is handled identically through the `DownloadClient` protocol without branching on the concrete client type
 
 ### Requirement: FRG-DL-002 — Client configuration and selection
 
@@ -30,10 +38,20 @@ Download clients SHALL be stored as provider configuration rows (implementation 
 - **Source**: sonarr-arch §4.1 (DownloadClientProvider), §2.1, §7.2
 - **Notes**: Baseline has at most one client per protocol, but the priority/round-robin shape is kept so a second client is config, not code.
 
-#### Scenario: Baseline acceptance
+#### Scenario: Provider table mirrors the indexer contract
 
-- **WHEN** this requirement is verified against the implementation
-- **THEN** A usenet release routes to SABnzbd and a DDL release to the DDL client with both configured; disabling SABnzbd makes usenet grabs fail visibly (pending/error), not vanish.
+- **WHEN** a download client is configured
+- **THEN** it is persisted as a `download_clients` provider row (implementation, JSON settings, enable flag, priority, remove-completed-downloads flag) whose settings contract, `GET /api/v1/downloadclient/schema`, and `POST /api/v1/downloadclient/test` endpoints mirror the indexer provider table shape
+
+#### Scenario: Protocol-matched dispatch
+
+- **WHEN** a usenet release and a DDL release are each grabbed with both clients enabled
+- **THEN** the usenet release routes to SABnzbd and the DDL release routes to the built-in DDL client, selected by matching the release protocol to an enabled client
+
+#### Scenario: Client unreachable at grab is retryable, never lost
+
+- **WHEN** the protocol-matched client is unreachable at grab time
+- **THEN** the grab returns a typed command failure, the release cache entry remains valid, and the grab can be retried — the release is never silently dropped
 
 ### Requirement: FRG-DL-003 — SABnzbd add via file upload
 
@@ -43,10 +61,25 @@ To grab a usenet release, the system SHALL itself fetch the NZB bytes from the i
 - **Source**: sonarr-arch §4.2 (UsenetClientBase.Download, mode=addfile)
 - **Notes**: Deliberate divergence from Mylar's add-by-URL flow (SAB pulling the NZB back from Mylar's API with a one-time download key) — that scheme adds an extra auth surface and a callback dependency; recommend permanent exclusion (mylar-fs DL). Server-side fetch keeps indexer credentials off SAB and allows NZB validation.
 
-#### Scenario: Baseline acceptance
+#### Scenario: Server-side NZB fetch through the indexer back-off ladder
 
-- **WHEN** this requirement is verified against the implementation
-- **THEN** A grab produces an item in SABnzbd's "comics" category whose nzo_id is recorded; an indexer 404 on the NZB fetch surfaces as a failed grab with reason.
+- **WHEN** a usenet release is grabbed
+- **THEN** foragerr fetches the NZB bytes server-side from the indexer via the external egress profile, subject to the indexer's back-off ladder, so indexer credentials never reach SABnzbd
+
+#### Scenario: NZB validation before upload
+
+- **WHEN** fetched NZB bytes are validated before upload
+- **THEN** they must be non-empty, parse under defusedxml, and contain at least one file segment; bytes failing any check surface as a failed grab with a reason and are never POSTed to SABnzbd
+
+#### Scenario: addfile multipart upload records nzo_id as download_id
+
+- **WHEN** validated NZB bytes are uploaded with `mode=addfile` as a multipart POST carrying the configured category (default "comics") and priority
+- **THEN** the returned `nzo_id` is recorded as the download_id; an empty `nzo_id` response is treated as a grab failure
+
+#### Scenario: Local-service egress to the operator base URL
+
+- **WHEN** foragerr connects to the SABnzbd HTTP API
+- **THEN** the request uses the local-service egress profile against the operator-configured base URL, distinct from the external profile used to fetch NZBs from indexers
 
 ### Requirement: FRG-DL-004 — SABnzbd queue and history polling
 
@@ -56,10 +89,20 @@ The SABnzbd client SHALL read queue (`mode=queue`) and history (`mode=history`) 
 - **Source**: sonarr-arch §4.2 (GetItems, status mapping)
 - **Notes**: Version check (`mode=version`) and config sanity (`mode=get_config`) belong in the client test action.
 
-#### Scenario: Baseline acceptance
+#### Scenario: Queue and history merged, category-filtered
 
-- **WHEN** this requirement is verified against the implementation
-- **THEN** Each SAB state in a fixture set maps to the documented common status; items in other categories never appear.
+- **WHEN** `get_items()` polls `mode=queue` and `mode=history`
+- **THEN** the results are concatenated and filtered to the configured category, sizes are normalized to bytes, and items in any other category never appear
+
+#### Scenario: SAB states map to typed ClientItem states
+
+- **WHEN** each SAB status in a fixture set is mapped
+- **THEN** paused→paused; Queued/Grabbing/Propagating→queued; Verifying/Extracting/Repairing→downloading; Completed→completed; history Failed→failed, except a disk-full unpack message which maps to a warning
+
+#### Scenario: Encrypted / password history reported as failed with reason
+
+- **WHEN** a history item is `ENCRYPTED/`-prefixed or otherwise password-protected
+- **THEN** it is flagged encrypted and reported as a failed ClientItem carrying the encryption reason
 
 ### Requirement: FRG-DL-005 — Remote path mapping
 
@@ -69,10 +112,15 @@ The system SHALL support per-client remote-path-to-local-path mappings applied t
 - **Source**: sonarr-arch §4.2 (RemotePathMappings), §4.5 (path validation); mylar-fs DL (cdh_mapping)
 - **Notes**: Docker deployment target makes this near-certain to be needed on day one.
 
-#### Scenario: Baseline acceptance
+#### Scenario: Mapping table rewrites completed paths
 
-- **WHEN** this requirement is verified against the implementation
-- **THEN** With SAB reporting `/downloads/complete/x` mapped to `/mnt/sab/complete/x`, import reads the mapped path; an unmapped foreign path yields a "check remote path mapping" warning, not a silent failure.
+- **WHEN** a completed item's output path matches a remote-path-mapping row (host + remote prefix)
+- **THEN** the remote prefix is rewritten to the configured local prefix and import reads the mapped local path
+
+#### Scenario: Unmapped foreign path warns rather than fails silently
+
+- **WHEN** a completed item's path is foreign (e.g. a different-OS or unmapped prefix) with no matching mapping row
+- **THEN** the item is surfaced with a "check remote path mapping" warning instead of a silent import failure
 
 ### Requirement: FRG-DL-006 — Grab history with download-id join key
 
@@ -82,10 +130,20 @@ Every successful grab SHALL write one Grabbed history record per issue carrying 
 - **Source**: sonarr-arch §4.3 (EpisodeGrabbedEvent, HistoryService)
 - **Notes**: Replaces Mylar's `nzblog` name-normalization handshake (fragile string matching) with an id join — a deliberate, important divergence.
 
-#### Scenario: Baseline acceptance
+#### Scenario: grab_history row written at grab as the join key
 
-- **WHEN** this requirement is verified against the implementation
-- **THEN** Given a tracked item's download id, the originating grab record with full release data is retrievable; a grab spanning a multi-issue release yields one record per issue sharing the id.
+- **WHEN** a release is grabbed
+- **THEN** a `grab_history` row is written carrying download_id, issue, release guid/title/indexer, size, and provenance source (`indexer` or `ddl`), and download_id is the sole join key used by tracking, import, and failure handling
+
+#### Scenario: Multi-issue release yields one row per issue sharing the id
+
+- **WHEN** a single release spans multiple grabbed issues
+- **THEN** one `grab_history` row is written per issue, all sharing the same download_id
+
+#### Scenario: Retrieval by download_id returns full release data
+
+- **WHEN** a tracked item's download_id is used to look up its originating grab
+- **THEN** the `grab_history` row with its full release data (guid, title, indexer, size, source) is returned
 
 ### Requirement: FRG-DL-007 — Tracked-download state machine
 
@@ -95,10 +153,20 @@ A tracking refresh (scheduled ~every 1 minute, plus event-triggered on grab/impo
 - **Source**: sonarr-arch §4.4 (DownloadMonitoringService, TrackedDownloadService)
 - **Notes**: Keep Sonarr's check (fast, every refresh) vs process (slow, state-advancing) separation as an implementation hint.
 
-#### Scenario: Baseline acceptance
+#### Scenario: TrackDownloadsCommand matches client items by download_id
 
-- **WHEN** this requirement is verified against the implementation
-- **THEN** A grabbed release progresses through Downloading → ImportPending → Importing → Imported observably; each transition is recorded; an unmatched foreign item in the category becomes Ignored/warning, not a crash.
+- **WHEN** the ~1-minute `TrackDownloadsCommand` runs over the download pool (also event-triggered on grab/import)
+- **THEN** it lists items from all enabled clients and matches each to its `grab_history` row by download_id
+
+#### Scenario: Unmatched item re-parsed via the single parser, adopt-or-unknown
+
+- **WHEN** a client item has no matching download_id
+- **THEN** its title is re-parsed through the single parser (an issue-id tag wins over heuristics) and it is either adopted onto a known issue or recorded as unknown — never crashing the refresh
+
+#### Scenario: State transitions emit events and are restart-safe
+
+- **WHEN** a tracked download advances grabbed → downloading → import_pending (completed, awaiting the change-6 import pipeline) | failed | ignored
+- **THEN** each `tracked_downloads.state` transition is persisted with an ok/warning/error status and message, emits an event, and survives process restart
 
 ### Requirement: FRG-DL-008 — Queue view from tracked downloads
 
@@ -108,10 +176,20 @@ The user-facing queue SHALL be built exclusively from tracked-download state (pa
 - **Source**: sonarr-arch §4.4 (QueueService), §7.3 (QueueResource)
 - **Notes**: Queue actions (remove, with/without data; manual import for blocked items) ride on this resource.
 
-#### Scenario: Baseline acceptance
+#### Scenario: Queue served from tracked_downloads, never a live client call
 
-- **WHEN** this requirement is verified against the implementation
-- **THEN** Queue contents update within one tracking interval of client-side changes; queue rows expose rejection/status messages for warning states.
+- **WHEN** the queue resource is requested
+- **THEN** it is assembled from `tracked_downloads` joined to series/issues with size/remaining, status, state, status messages, download_id, client, and output path — with no live download-client call made at request time
+
+#### Scenario: import_pending visibility
+
+- **WHEN** a tracked download is in import_pending or import_blocked state
+- **THEN** it remains visible in the queue view with its state and status messages, rather than disappearing once the client reports completed
+
+#### Scenario: Queue reflects client changes within one tracking cycle
+
+- **WHEN** a client-side change occurs (item completes or fails)
+- **THEN** the queue reflects the new tracked-download state within one tracking interval, driven by the tracking refresh rather than by any user-facing poll of the client
 
 ### Requirement: FRG-DL-009 — Completed download handling
 
@@ -147,10 +225,15 @@ Tracked items reporting Failed, or flagged encrypted/password-protected, SHALL t
 - **Source**: sonarr-arch §4.6 (FailedDownloadService)
 - **Notes**: DDL failures (after host exhaustion) feed this same path — one failure pipeline for both protocols.
 
-#### Scenario: Baseline acceptance
+#### Scenario: Failed / encrypted / vanished converge to state failed
 
-- **WHEN** this requirement is verified against the implementation
-- **THEN** A password-protected NZB completes in SAB as encrypted and ends Failed in foragerr with the grab's issues identified.
+- **WHEN** a tracked item reports failed, is flagged encrypted/password-protected, or has vanished from the client
+- **THEN** it transitions to state failed and emits a failure event carrying the affected series/issues, source title, and the grab data (guid, indexer, title, size, download_id, source) needed for blocklisting
+
+#### Scenario: Both protocols feed one failure path
+
+- **WHEN** a DDL download fails after host exhaustion or a usenet download completes encrypted in SABnzbd
+- **THEN** both drive the identical failed transition and failure event, with the grab's issues correctly identified
 
 ### Requirement: FRG-DL-012 — Blocklist
 
@@ -160,10 +243,20 @@ Failed downloads SHALL be recorded in a blocklist (series, issue ids, source tit
 - **Source**: sonarr-arch §4.6 (BlocklistService, SameNzb match), §3.2 (BlocklistSpecification); mylar-fs SRCH (failed-result blacklist)
 - **Notes**: Mylar blocklists by provider result ID only; Sonarr's multi-field match also catches the same bad post re-surfacing under a new guid — adopt Sonarr's.
 
-#### Scenario: Baseline acceptance
+#### Scenario: Failure writes a multi-field blocklist row
 
-- **WHEN** this requirement is verified against the implementation
-- **THEN** After a release fails, the identical release from the same indexer is rejected "blocklisted" in the next search; deleting the blocklist row makes it grabbable again.
+- **WHEN** the failure event fires
+- **THEN** a blocklist row is written capturing guid, indexer, title, size, download_id, and source, so the same bad post is caught even if it resurfaces under a new guid
+
+#### Scenario: BlocklistSpecification rejects a matching candidate live
+
+- **WHEN** the change-4 `BlocklistSpecification` evaluates a future candidate against the live blocklist store (usenet: same title + indexer + size + publish date; DDL: source URL/title)
+- **THEN** a matching candidate is permanently rejected as "blocklisted"
+
+#### Scenario: Blocklist row is user-removable and re-enables grabbing
+
+- **WHEN** a user deletes a blocklist row via the paged blocklist resource
+- **THEN** the previously rejected release becomes grabbable again in the next search
 
 ### Requirement: FRG-DL-013 — Automatic re-search after failure
 
@@ -173,10 +266,20 @@ When a download fails and auto-redownload is enabled (default on), the system SH
 - **Source**: sonarr-arch §4.6 (RedownloadFailedDownloadService — the self-healing loop)
 - **Notes**: This closes the loop the whole acquisition pipeline exists for: bad/password-protected scans self-correct.
 
-#### Scenario: Baseline acceptance
+#### Scenario: Failure enqueues an automatic IssueSearchCommand
 
-- **WHEN** this requirement is verified against the implementation
-- **THEN** A failed grab is followed, without user action, by a search that grabs an alternative release while the failed one is rejected as blocklisted.
+- **WHEN** a download reaches state failed with auto-redownload enabled (default on)
+- **THEN** an `IssueSearchCommand` for the affected issues is enqueued automatically without user action
+
+#### Scenario: Re-search selects a different release, avoiding the failed one
+
+- **WHEN** the auto-enqueued search runs
+- **THEN** the change-4 already-queued and blocklist specifications evaluate the live stores so the just-failed release is rejected as blocklisted and an alternative release is grabbed
+
+#### Scenario: Dedup guards prevent re-search storms
+
+- **WHEN** multiple failures for the same issues occur in close succession
+- **THEN** dedup guards collapse the enqueued searches so a storm of duplicate `IssueSearchCommand`s is not created
 
 ### Requirement: FRG-DL-014 — SABnzbd retry passthrough
 
