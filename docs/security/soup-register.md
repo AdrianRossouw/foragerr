@@ -13,10 +13,9 @@ Transitive dependencies are not tracked here; the lockfiles (`uv.lock`,
 `package-lock.json` once present) remain the authoritative pin of the full
 resolved tree, per FRG-PROC-012's non-goals.
 
-**Frontend.** `frontend/package.json` does not exist yet at the time of this
-backfill (M1 vertical slice is backend-only pre-change-7). Frontend SOUP rows are
-added to this register in the change that creates `frontend/package.json`, per the
-"dependency added or upgraded" scenario.
+**Frontend.** `frontend/package.json` was created by the `m1-ui-opds-deploy` change.
+Its 5 runtime and 11 development/test dependencies were added to this register in
+that same change, per the "dependency added or upgraded" scenario.
 
 **Anomaly-review methodology.** This project has no network access from its
 development sandbox and no automated CVE-scanning service (see the change-8
@@ -52,8 +51,28 @@ methodology note should be updated to reflect that.
 | pytest | `>=8.2` | Test runner for the backend test suite (`backend/tests/`), including the `req(id)` marker used for requirement traceability (FRG-PROC-004) |
 | pytest-asyncio | `>=0.23` | Enables `async def` tests and fixtures for the FastAPI/SQLAlchemy-async codebase (`asyncio_mode = "auto"` in `pyproject.toml`) |
 
-## Frontend
+## Runtime SOUP items (frontend)
 
-Not yet applicable — see "Frontend" note above. This section will gain runtime and
-tooling tables mirroring the backend's, backfilled in the change that creates
-`frontend/package.json`.
+| Name | Version constraint | Source | Intended purpose | Requirements/subsystems supported | License | Known-anomaly review |
+|---|---|---|---|---|---|---|
+| react | `^18.3.1` | npm | Core UI rendering library; the component-tree runtime underlying the entire SPA | FRG-UI-001 (SPA architecture) and all FRG-UI-* screens (M1: 003-009) | MIT | 2026-07-05: no relevant known anomalies at review date. No CVE known against the `react` core package for the 18.3.x line. |
+| react-dom | `^18.3.1` | npm | DOM renderer that mounts the React component tree onto the browser DOM (`frontend/src/main.tsx`) | FRG-UI-001, and all FRG-UI-* screens that render into the DOM | MIT | 2026-07-05: no relevant known anomalies at review date. No CVE known against `react-dom` for the 18.3.x line. |
+| react-router-dom | `^6.26.2` | npm | Client-side routing between the library, series detail, add-series, queue, and settings screens | FRG-UI-001 (SPA architecture), FRG-UI-003..009 (per-screen routes) | MIT | 2026-07-05: the reviewer is aware of April 2025 React Router advisories (GHSA-4342-x723-ch2f "pre-render data spoofing" and GHSA-cpj6-fhp6-mr6j "`Cache-Control` header cache poisoning", CVE-2025-31137 family) affecting React Router v7 framework-mode/SSR (`@react-router/*` server packages). These target server-rendered/self-hosted deployments; foragerr uses `react-router-dom` v6 purely client-side (SPA, no SSR, no v7 framework mode), so the reviewer assesses **not applicable** at this pin — flag for re-review if the project ever adopts React Router v7 or SSR. |
+| @tanstack/react-query | `^5.59.0` | npm | Server-state fetching, caching, and invalidation layer for all REST API calls, paired with WebSocket-triggered cache invalidation | FRG-UI-001 (SPA architecture: server state via React Query + WS invalidation) | MIT | 2026-07-05: no relevant known anomalies at review date; none known to the reviewer for the 5.x line. |
+| zustand | `^4.5.5` | npm | Local (non-server) UI state store — library view mode/sort, sidebar collapse, interactive-search overlay target | FRG-UI-001 (local UI state kept out of React Query), FRG-UI-004, FRG-UI-007 | MIT | 2026-07-05: no relevant known anomalies at review date; none known to the reviewer for the 4.5.x line. |
+
+## Development/test tooling (frontend)
+
+| Name | Version constraint | Purpose |
+|---|---|---|
+| @testing-library/dom | `^10.4.0` | DOM query/assertion primitives underlying `@testing-library/react`, used across the component test suite |
+| @testing-library/jest-dom | `^6.5.0` | Custom vitest matchers (`toBeInTheDocument`, etc.) for readable component test assertions |
+| @testing-library/react | `^16.0.1` | React component rendering/interaction harness used by the screen and component test suite |
+| @testing-library/user-event | `^14.5.2` | Simulated realistic user interaction (click/type/etc.) in component tests |
+| @types/react | `^18.3.11` | TypeScript type definitions for React, used by `tsc`/`tsconfig` type-checking |
+| @types/react-dom | `^18.3.0` | TypeScript type definitions for react-dom |
+| @vitejs/plugin-react | `^4.3.2` | Vite plugin providing React Fast Refresh and the JSX transform during dev/build |
+| jsdom | `^25.0.1` | DOM environment vitest uses to run component tests in Node without a real browser |
+| typescript | `^5.6.2` | TypeScript compiler/type-checker (`tsc -b`, `npm run typecheck`) |
+| vite | `^5.4.8` | Dev server and production build tool for the SPA |
+| vitest | `^2.1.2` | Test runner for the frontend test suite (`frontend/src/**/*.test.tsx`) |
