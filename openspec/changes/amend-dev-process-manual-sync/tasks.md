@@ -8,14 +8,16 @@
 
 ## 2. Manual + labelling creation — backfill (FRG-PROC-011)
 
-- [ ] 2.1 Create `docs/manual/` structure: `index.md`, user guide, admin guide
-- [ ] 2.2 User guide backfill for behavior merged to `main` at backfill time: library &
-      series management, metadata refresh, search & indexers, downloads (SABnzbd + DDL),
-      import pipeline & renaming
-- [ ] 2.3 Admin guide backfill: deployment (Docker, linuxserver.io conventions, port
-      8789), configuration (`/config/config.yaml`, `FORAGERR_*` env precedence),
-      secrets handling, network exposure (Tailscale-only posture, no M1 auth)
-- [ ] 2.4 Create root `README.md` labelling: project purpose, security & regulatory
+- [x] 2.1 Create `docs/manual/` structure: `index.md`, user guide, admin guide
+- [x] 2.2 User guide backfill for behavior merged to `main` at backfill time: library &
+      series management, metadata refresh, search & indexers, downloads (SABnzbd + DDL);
+      `user/import.md` is a deliberate stub — filled at the m1-import-pipeline merge
+      gate (first live exercise of the sync rule), renaming documented with it
+- [x] 2.3 Admin guide backfill: deployment (explicitly marked forthcoming until change
+      7 ships the Dockerfile), configuration (`/config/config.yaml`, `FORAGERR_*` env
+      precedence), secrets handling, network exposure (Tailscale-only posture, no M1
+      auth as accepted RISK-020)
+- [x] 2.4 Create root `README.md` labelling: project purpose, security & regulatory
       posture (pointer to `docs/security/`), way of working (dev-process summary,
       pointer to `openspec/` + `docs/process/`), installation placeholder pointing at
       the admin guide (full install section deferred until after change 7)
