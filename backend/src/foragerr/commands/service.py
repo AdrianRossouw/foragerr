@@ -141,6 +141,11 @@ class HandlerContext:
     bus: EventBus | None
     settings: Settings | None
     offload: Callable[..., Awaitable[Any]]  # asyncio.to_thread-compatible (daemon)
+    #: The owning service, so a handler can chain follow-up commands onto the
+    #: same persisted backbone (e.g. refresh -> scan). Optional and defaulted
+    #: for backwards compatibility with callers that build a bare context;
+    #: :class:`CommandService` wires itself in here at construction.
+    commands: "CommandService | None" = None
 
 
 async def prune_job_history(db: Database, retention_days: int) -> int:
@@ -188,7 +193,7 @@ class CommandService:
         self._active_groups: set[str] = set()
         self._workers: list[asyncio.Task[None]] = []
         self.context = HandlerContext(
-            db=db, bus=bus, settings=settings, offload=daemon_offload
+            db=db, bus=bus, settings=settings, offload=daemon_offload, commands=self
         )
 
     # -- lifecycle -----------------------------------------------------------

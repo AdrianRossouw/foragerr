@@ -202,6 +202,55 @@ class Settings(BaseSettings):
         default=SecretStr(""),
         description="ComicVine API key (secret; empty by default, supply at runtime).",
     )
+    comicvine_min_interval_seconds: float = Field(
+        default=2.0,
+        gt=0,
+        description=(
+            "Minimum seconds between ANY two ComicVine requests (the shared "
+            "process-global rate limiter, covers included). Politeness budget; "
+            "clamped up to a documented safety floor if set lower."
+        ),
+    )
+    comicvine_page_size: int = Field(
+        default=100,
+        ge=1,
+        le=100,
+        description=(
+            "ComicVine list page size for the offset walk. ComicVine caps this "
+            "at 100 results per page."
+        ),
+    )
+    comicvine_max_pages: int = Field(
+        default=200,
+        ge=1,
+        description=(
+            "Hard cap on pages walked for one ComicVine list endpoint; bounds "
+            "the pagination loop so it can never run unbounded."
+        ),
+    )
+    comicvine_search_result_cap: int = Field(
+        default=1000,
+        ge=1,
+        description=(
+            "Maximum ComicVine series-search candidates returned; results "
+            "beyond this are truncated with a visible warning."
+        ),
+    )
+    comicvine_ignored_publishers: str = Field(
+        default="",
+        description=(
+            "Comma-separated ComicVine publisher names excluded from series "
+            "search (e.g. variant-cover/reprint-only imprints). Case-insensitive."
+        ),
+    )
+    comicvine_image_hosts: str = Field(
+        default="comicvine.gamespot.com,comicvine1.cbsistatic.com,static.comicvine.com",
+        description=(
+            "Comma-separated allowlist of hostnames the cover fetcher may "
+            "download images from. Not hardcoded so operators can adjust it "
+            "when ComicVine's image CDN changes."
+        ),
+    )
     dognzb_api_key: SecretStr = Field(
         default=SecretStr(""),
         description="DogNZB indexer API key (secret; empty by default, supply at runtime).",

@@ -25,35 +25,35 @@ Milestones: `M1` vertical slice · `M2` torrents + streaming/quality clusters ·
 | FRG-PROC-007 | Branch-based integration, green main | dev-process | active | — |
 | FRG-PROC-008 | Worktree isolation for concurrent agents | dev-process | active | — |
 | FRG-PROC-009 | Spec approval gate | dev-process | active | — |
-| FRG-SER-001 | Series entity from ComicVine volume | ser | approved | M1 |
-| FRG-SER-002 | Issue entity | ser | approved | M1 |
-| FRG-SER-003 | Two-level monitored flags | ser | approved | M1 |
-| FRG-SER-004 | Derived wanted state | ser | approved | M1 |
-| FRG-SER-005 | Add flow (add → refresh → scan → optional search) | ser | approved | M1 |
-| FRG-SER-006 | Add-time monitoring strategies | ser | approved | M1 |
-| FRG-SER-007 | Monitor-new-items policy | ser | approved | M1 |
-| FRG-SER-008 | Root folders and series paths | ser | approved | M1 |
-| FRG-SER-009 | Series statistics | ser | approved | M1 |
+| FRG-SER-001 | Series entity from ComicVine volume | ser | implemented | M1 |
+| FRG-SER-002 | Issue entity | ser | implemented | M1 |
+| FRG-SER-003 | Two-level monitored flags | ser | implemented | M1 |
+| FRG-SER-004 | Derived wanted state | ser | implemented | M1 |
+| FRG-SER-005 | Add flow (add → refresh → scan → optional search) | ser | implemented | M1 |
+| FRG-SER-006 | Add-time monitoring strategies | ser | implemented | M1 |
+| FRG-SER-007 | Monitor-new-items policy | ser | implemented | M1 |
+| FRG-SER-008 | Root folders and series paths | ser | implemented | M1 |
+| FRG-SER-009 | Series statistics | ser | implemented | M1 |
 | FRG-SER-010 | Per-series disk rescan | ser | approved | M1 |
 | FRG-SER-011 | Annuals and specials as typed issues | ser | approved | B |
 | FRG-SER-012 | Continuing/Ended status maintenance | ser | approved | B |
 | FRG-SER-013 | Per-series overrides survive refresh | ser | approved | B |
-| FRG-SER-014 | Series edit and delete | ser | approved | M1 |
+| FRG-SER-014 | Series edit and delete | ser | implemented | M1 |
 | FRG-SER-015 | Bulk series operations | ser | approved | B |
-| FRG-META-001 | ComicVine client fundamentals | meta | approved | M1 |
-| FRG-META-002 | API key handling | meta | approved | M1 |
-| FRG-META-003 | Client-side rate limiting with 429 handling | meta | approved | M1 |
-| FRG-META-004 | Pagination with partial-failure tolerance | meta | approved | M1 |
-| FRG-META-005 | Volume-to-series mapping | meta | approved | M1 |
-| FRG-META-006 | Issue mapping | meta | approved | M1 |
-| FRG-META-007 | Series search | meta | approved | M1 |
-| FRG-META-008 | Refresh reconciliation (Sonarr model) | meta | approved | M1 |
+| FRG-META-001 | ComicVine client fundamentals | meta | implemented | M1 |
+| FRG-META-002 | API key handling | meta | implemented | M1 |
+| FRG-META-003 | Client-side rate limiting with 429 handling | meta | implemented | M1 |
+| FRG-META-004 | Pagination with partial-failure tolerance | meta | implemented | M1 |
+| FRG-META-005 | Volume-to-series mapping | meta | implemented | M1 |
+| FRG-META-006 | Issue mapping | meta | implemented | M1 |
+| FRG-META-007 | Series search | meta | implemented | M1 |
+| FRG-META-008 | Refresh reconciliation (Sonarr model) | meta | implemented | M1 |
 | FRG-META-009 | Scheduled refresh with staleness rules | meta | approved | B |
 | FRG-META-010 | Incremental changed-since sync | meta | approved | B |
 | FRG-META-011 | Volume identity-change guard | meta | approved | B |
 | FRG-META-012 | Heuristic fields with provenance and override | meta | approved | B |
-| FRG-META-013 | Cover art download and cache | meta | approved | M1 |
-| FRG-META-014 | ComicVine content is untrusted input | meta | approved | M1 |
+| FRG-META-013 | Cover art download and cache | meta | implemented | M1 |
+| FRG-META-014 | ComicVine content is untrusted input | meta | implemented | M1 |
 | FRG-PULL-001 | Metadata-derived weekly release view | pull | approved | B |
 | FRG-PULL-002 | External pull-source fetch | pull | approved | B |
 | FRG-PULL-003 | Idempotent per-week storage | pull | approved | B |
@@ -182,10 +182,10 @@ Milestones: `M1` vertical slice · `M2` torrents + streaming/quality clusters ·
 | FRG-PP-019 | Permissions and ownership enforcement | pp | approved | B |
 | FRG-API-001 | Versioned, OpenAPI-documented REST API | api | implemented | M1 |
 | FRG-API-002 | Standard error and resource conventions | api | implemented | M1 |
-| FRG-API-003 | Series resources with ComicVine lookup | api | approved | M1 |
-| FRG-API-004 | Issue resources with monitored toggle | api | approved | M1 |
-| FRG-API-005 | Command endpoint for background actions | api | approved | M1 |
-| FRG-API-006 | Paging envelope for list endpoints | api | approved | M1 |
+| FRG-API-003 | Series resources with ComicVine lookup | api | implemented | M1 |
+| FRG-API-004 | Issue resources with monitored toggle | api | implemented | M1 |
+| FRG-API-005 | Command endpoint for background actions | api | implemented | M1 |
+| FRG-API-006 | Paging envelope for list endpoints | api | implemented | M1 |
 | FRG-API-007 | Queue endpoint backed by tracked downloads | api | approved | M1 |
 | FRG-API-008 | Release endpoint: interactive search with cached grab | api | approved | M1 |
 | FRG-API-009 | Provider schema and test endpoints | api | approved | M1 |
@@ -285,7 +285,7 @@ Milestones: `M1` vertical slice · `M2` torrents + streaming/quality clusters ·
 | FRG-NFR-001 | startup time | nfr | approved | M2 |
 | FRG-NFR-002 | library scan throughput | nfr | approved | M2 |
 | FRG-NFR-003 | UI responsiveness at library scale | nfr | approved | M2 |
-| FRG-NFR-004 | ComicVine rate limiting | nfr | approved | M1 |
+| FRG-NFR-004 | ComicVine rate limiting | nfr | implemented | M1 |
 | FRG-NFR-005 | indexer and DDL politeness with failure backoff | nfr | approved | M1 |
 | FRG-NFR-006 | bounded, verified outbound requests | nfr | implemented | M1 |
 | FRG-NFR-007 | crash-safe queues and idempotent work | nfr | approved | M2 |
@@ -293,7 +293,7 @@ Milestones: `M1` vertical slice · `M2` torrents + streaming/quality clusters ·
 | FRG-NFR-009 | configuration validation at startup | nfr | implemented | M1 |
 | FRG-NFR-010 | resilience to external-service failure | nfr | approved | M1 |
 | FRG-NFR-011 | observable component health | nfr | approved | M2 |
-| FRG-NFR-012 | untrusted external content handling | nfr | approved | M1 |
+| FRG-NFR-012 | untrusted external content handling | nfr | implemented | M1 |
 | FRG-NFR-013 | resource footprint | nfr | approved | B |
 | FRG-SEC-001 | SSRF egress controls for server-side fetches | sec | implemented | M1 |
 | FRG-SEC-002 | Hardened XML parsing (XXE / entity-expansion) | sec | approved | M1 |
@@ -301,8 +301,8 @@ Milestones: `M1` vertical slice · `M2` torrents + streaming/quality clusters ·
 | FRG-SEC-004 | Filesystem path confinement (safe-join) | sec | approved | M1 |
 | FRG-SEC-005 | CSRF stance and WebSocket Origin validation | sec | approved | M3 |
 | FRG-NFR-014 | Listener request resource limits | nfr | approved | M2 |
-| FRG-QUAL-001 | Format profile entity | qual | approved | M1 |
-| FRG-QUAL-002 | Default profile seeded on first run | qual | approved | M1 |
+| FRG-QUAL-001 | Format profile entity | qual | implemented | M1 |
+| FRG-QUAL-002 | Default profile seeded on first run | qual | implemented | M1 |
 | FRG-QUAL-003 | Release preferred-term scoring | qual | approved | M2 |
 | FRG-QUAL-004 | Per-profile size bounds | qual | approved | M2 |
 | FRG-QUAL-005 | Profile management UI and API | qual | approved | M2 |
