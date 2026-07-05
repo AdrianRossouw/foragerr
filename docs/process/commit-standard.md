@@ -15,6 +15,22 @@ Governed by **FRG-PROC-001** and **FRG-PROC-002** (message format) and
 - Concurrent file-mutating agents each get their own worktree + branch
   (FRG-PROC-008); the orchestrator performs all merges.
 
+## Merge-gate checklist (per change, before `--no-ff` to main)
+
+1. Full test suite green (FRG-PROC-007).
+2. `tools/trace.py` exit 0 — every implemented requirement has a tagged test
+   (FRG-PROC-004/005).
+3. `tools/soup_check.py` exit 0 — SOUP register matches the dependency manifests
+   (FRG-PROC-012); any dependency add/remove/upgrade updated
+   `docs/security/soup-register.md` in this change.
+4. Manual sync verified (FRG-PROC-011): the change's declared manual impact
+   (a required section of every proposal — sections touched, or "none" with
+   rationale) was carried out in `docs/manual/` / `README.md`.
+5. Security docs updated if the change added attack surface (FRG-PROC-006).
+6. Code review + simplify pass on the branch diff.
+7. Registry rows flipped, matrix regenerated, change archived, branch deleted
+   after merge.
+
 ## Format
 
 ```

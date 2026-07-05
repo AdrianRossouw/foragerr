@@ -24,21 +24,23 @@
 
 ## 3. SOUP register (FRG-PROC-012)
 
-- [ ] 3.1 Create `docs/security/soup-register.md`: runtime table (name, version
+- [x] 3.1 Create `docs/security/soup-register.md`: runtime table (name, version
       constraint, source, purpose, supporting requirements/subsystems, license,
       anomaly-review note) + lighter dev/test tools section
-- [ ] 3.2 Backfill from current `backend/pyproject.toml` and `frontend/package.json`,
-      with a dated initial anomaly review per runtime item
-- [ ] 3.3 Implement `tools/soup_check.py`: parse direct deps from both manifests,
-      verify one-to-one register rows + version-constraint match, exit non-zero on
-      drift; document invocation beside `trace.py` in the gate checklist
+- [x] 3.2 Backfill from current `backend/pyproject.toml` (10 runtime + 2 tooling rows,
+      dated knowledge-based initial anomaly reviews; `frontend/package.json` does not
+      exist yet — frontend rows land with the change that creates it)
+- [x] 3.3 Implement `tools/soup_check.py`: parse direct deps from both manifests
+      (frontend skipped-with-notice until present), verify one-to-one register rows +
+      version-constraint match, exit non-zero on drift; 5 tagged pytest tests
 
 ## 4. Process wiring (FRG-PROC-011, FRG-PROC-012)
 
-- [ ] 4.1 Add the manual-sync and SOUP rules to `CLAUDE.md` non-negotiable process rules
-- [ ] 4.2 Add manual-impact declaration + SOUP check to the merge-gate checklist in
-      `docs/process/` docs
-- [ ] 4.3 Add decision-index rows in `docs/process/decisions.md` (manual-sync + SOUP
+- [x] 4.1 Add the manual-sync and SOUP rules to `CLAUDE.md` non-negotiable process rules
+      (rule 9; layout entry; PROC range updated to 001..012)
+- [x] 4.2 Add merge-gate checklist (suite, trace.py, soup_check.py, manual sync,
+      security docs, review, registry/matrix/archive) to `docs/process/commit-standard.md`
+- [x] 4.3 Add decision-index rows in `docs/process/decisions.md` (manual-sync + SOUP
       adoption; change-8 acceptance-report decision)
 
 ## 5. Merge gate
