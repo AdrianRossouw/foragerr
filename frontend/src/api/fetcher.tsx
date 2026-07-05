@@ -14,6 +14,7 @@ import { createContext, useContext, type ReactNode } from 'react';
 /** Optional init for mutating requests; omitted entirely for plain GETs. */
 export interface FetcherInit {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  /** JSON-serialized as the request body when present. */
   body?: unknown;
 }
 
@@ -48,13 +49,14 @@ export const defaultFetcher: Fetcher = async <T,>(
   path: string,
   init?: FetcherInit,
 ): Promise<T> => {
+  const hasBody = init?.body !== undefined;
   const res = await fetch(path, {
     method: init?.method ?? 'GET',
     headers: {
       Accept: 'application/json',
-      ...(init?.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
     },
-    ...(init?.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
+    ...(hasBody ? { body: JSON.stringify(init?.body) } : {}),
   });
   if (!res.ok) {
     let body: ApiErrorBody | null = null;
@@ -65,6 +67,7 @@ export const defaultFetcher: Fetcher = async <T,>(
     }
     throw new ApiRequestError(res.status, body, path);
   }
+  // 204 No Content (e.g. DELETE /series/{id}) has no JSON body.
   if (res.status === 204) {
     return undefined as T;
   }

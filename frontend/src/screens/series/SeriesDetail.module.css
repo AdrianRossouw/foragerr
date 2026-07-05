@@ -1,0 +1,333 @@
+.content {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.stateNote {
+  padding: var(--spacing-lg);
+  color: var(--text-secondary);
+}
+
+.toolbarActions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+.commandChip {
+  padding: 2px var(--spacing-sm);
+  margin-right: var(--spacing-sm);
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
+  border: 1px solid var(--color-accent);
+  color: var(--color-accent);
+  font-size: var(--font-size-sm);
+}
+
+/* --- hero band ---------------------------------------------------------- */
+
+.hero {
+  display: flex;
+  gap: var(--spacing-lg);
+  padding: var(--spacing-lg);
+  background: linear-gradient(var(--surface-chrome), var(--surface-page));
+  border-bottom: 1px solid var(--surface-border);
+}
+
+.posterFrame {
+  position: relative;
+  flex: 0 0 170px;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--surface-card);
+  box-shadow: var(--shadow-card);
+}
+
+.posterFallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 48px;
+  font-weight: var(--font-weight-bold);
+  color: var(--text-muted);
+}
+
+.poster {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.heroBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  min-width: 0;
+}
+
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.title {
+  margin: 0;
+  font-size: 32px;
+  font-weight: var(--font-weight-bold);
+  line-height: 1.15;
+}
+
+.year {
+  color: var(--text-secondary);
+  font-size: var(--font-size-heading);
+}
+
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-xs);
+}
+
+.chip {
+  padding: 2px var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  border: 1px solid var(--surface-border);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.overview {
+  margin: 0;
+  max-width: 900px;
+  color: var(--text-primary);
+}
+
+.statsRow {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+/* --- issue table ---------------------------------------------------------- */
+
+.table {
+  width: calc(100% - 2 * var(--spacing-lg));
+  margin: var(--spacing-lg);
+  border-collapse: collapse;
+}
+
+.table th {
+  padding: var(--spacing-sm);
+  text-align: left;
+  font-weight: var(--font-weight-bold);
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--surface-border);
+}
+
+.table td {
+  padding: var(--spacing-sm);
+  border-bottom: 1px solid var(--surface-border);
+}
+
+.table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.selectCol {
+  width: 28px;
+}
+
+.iconCol {
+  width: 32px;
+}
+
+.numberCol {
+  width: 64px;
+  font-family: var(--font-family-mono);
+}
+
+.actionsCol {
+  width: 80px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.bulkMonitorButton {
+  display: inline-flex;
+  padding: var(--spacing-xs);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.bulkMonitorButton:hover:not(:disabled) {
+  color: var(--color-accent);
+}
+
+.bulkMonitorButton:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.iconButton {
+  display: inline-flex;
+  padding: var(--spacing-xs);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.iconButton:hover {
+  color: var(--text-primary);
+  background: var(--surface-card);
+}
+
+.fileChip,
+.missingChip,
+.mutedChip {
+  padding: 2px var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+}
+
+.fileChip {
+  background: var(--surface-card);
+  border: 1px solid var(--surface-border);
+  color: var(--text-primary);
+}
+
+.missingChip {
+  background: none;
+  border: 1px solid var(--color-warning);
+  color: var(--color-warning);
+}
+
+.mutedChip {
+  background: none;
+  border: 1px solid var(--surface-border);
+  color: var(--text-muted);
+}
+
+/* --- overlays / dialogs ---------------------------------------------------- */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 10vh;
+  background: var(--surface-overlay);
+}
+
+.dialog {
+  width: min(440px, 90vw);
+  background: var(--surface-chrome);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-overlay);
+}
+
+.searchOverlay {
+  width: min(1100px, 92vw);
+  background: var(--surface-chrome);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-overlay);
+}
+
+.dialogHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-md);
+  border-bottom: 1px solid var(--surface-border);
+}
+
+.dialogBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md);
+}
+
+.dialogFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-md);
+  border-top: 1px solid var(--surface-border);
+}
+
+.checkboxRow {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.formRow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.formRow select {
+  height: 30px;
+  padding: 0 var(--spacing-sm);
+  background: var(--surface-card);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+}
+
+.button {
+  padding: var(--spacing-xs) var(--spacing-md);
+  background: var(--surface-card);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--surface-card-hover);
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.primary {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--text-on-accent);
+}
+
+.primary:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+}
+
+.danger {
+  background: var(--color-danger);
+  border-color: var(--color-danger);
+  color: var(--text-on-accent);
+}
+
+.errorNote {
+  margin: 0;
+  color: var(--color-danger);
+  font-size: var(--font-size-sm);
+}

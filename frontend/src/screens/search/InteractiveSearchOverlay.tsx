@@ -88,11 +88,6 @@ export function InteractiveSearchOverlay({
       title={`Interactive Search${contextTitle ? ` — ${contextTitle}` : ''}`}
       label={`Interactive search${contextTitle ? ` for ${contextTitle}` : ''}`}
       onClose={onClose}
-      footer={
-        <button type="button" className={styles.grabBtn} onClick={onClose}>
-          Close
-        </button>
-      }
     >
       {grabError && (
         <div

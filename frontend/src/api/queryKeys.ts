@@ -29,6 +29,20 @@ export const queryKeys = {
     all: (kind: string) => [kind] as const,
     schema: (kind: string) => [kind, 'schema'] as const,
   },
+  issues: {
+    forSeries: (seriesId: number) => ['issues', seriesId] as const,
+  },
+  command: {
+    detail: (id: number) => ['command', id] as const,
+  },
+  // ComicVine lookup deliberately does NOT live under the ['series'] prefix
+  // (its path is /api/v1/series/lookup): the WebSocketBridge invalidates
+  // ['series'] on every series push, and a prefix-matched lookup query would
+  // refetch against live ComicVine (rate-limited) on each push while the add
+  // screen is open.
+  lookup: {
+    term: (term: string) => ['lookup', term] as const,
+  },
 } as const;
 
 export type SeriesListKey = ReturnType<typeof queryKeys.series.all>;
