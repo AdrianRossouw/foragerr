@@ -169,7 +169,7 @@ class Database:
         """Commit with bounded backoff on residual SQLITE_BUSY (FRG-DB-006)."""
         delay = self._commit_retry_base_delay
         last_exc: BaseException | None = None
-        for _attempt in range(self._commit_retry_attempts):
+        for attempt in range(self._commit_retry_attempts):
             try:
                 await session.commit()
                 return
@@ -181,6 +181,8 @@ class Database:
                     await session.rollback()
                     raise
                 last_exc = exc
+                if attempt + 1 >= self._commit_retry_attempts:
+                    break  # final attempt failed: never sleep before raising
                 logger.warning(
                     "db: commit hit a locked database; retrying in %.2fs", delay
                 )

@@ -17,13 +17,13 @@ import logging
 import shutil
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
 from alembic.script import Script, ScriptDirectory
 
+from foragerr.db.base import utcnow
 from foragerr.db.engine import DB_FILENAME
 
 logger = logging.getLogger("foragerr.db.migrations")
@@ -113,7 +113,7 @@ def backup_before_migration(
     db_path: Path, config_dir: Path, version: str, retention: int
 ) -> Path:
     """WAL-checkpointed consistent copy + retention pruning (FRG-DB-003)."""
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
+    timestamp = utcnow().strftime("%Y%m%d%H%M%S%f")
     backups_root = config_dir / BACKUPS_DIRNAME
     target_dir = backups_root / f"pre-migration-{version}-{timestamp}"
     target_dir.mkdir(parents=True)
@@ -137,6 +137,9 @@ def backup_before_migration(
 
 def prune_backups(backups_root: Path, retention: int) -> list[Path]:
     """Keep the newest ``retention`` pre-migration backups; prune the rest."""
+    # Config enforces ge=1 (db_backup_retention), so the app path never passes
+    # < 1; this floor only guards direct/non-config callers from wiping every
+    # backup with a zero/negative retention.
     if retention < 1:
         retention = 1
     backups = sorted(

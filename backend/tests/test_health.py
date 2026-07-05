@@ -85,3 +85,23 @@ def test_unhealthy_migration_state_flips_endpoint_non_2xx(app, monkeypatch):
         response = client.get("/health")
     assert response.status_code == 503
     assert response.json()["components"]["migrations"]["status"] == "down"
+
+
+@pytest.mark.req("FRG-DEP-007")
+def test_health_probe_does_no_synchronous_alembic_parse_per_request(app, monkeypatch):
+    """The migration head is resolved ONCE at startup; a probe must not parse
+    the Alembic script tree on the event loop. Poison the parser AFTER startup
+    and the endpoint must still answer 200 from the cached head (FRG-DEP-007)."""
+    from alembic.script import ScriptDirectory
+
+    with TestClient(app) as client:
+        assert app.state.migration_head is not None  # cached at startup
+
+        def _boom(*_args, **_kwargs):
+            raise AssertionError("Alembic parsed on the request path")
+
+        monkeypatch.setattr(ScriptDirectory, "from_config", staticmethod(_boom))
+        response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json()["components"]["migrations"]["status"] == "up"

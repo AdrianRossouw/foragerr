@@ -46,6 +46,12 @@ INTERVAL_RANGES: dict[str, tuple[int, int]] = {
     "shutdown_grace_seconds": (1, 29),
 }
 
+#: Range fragments derived from INTERVAL_RANGES so the generated config.yaml
+#: comments (built from Field descriptions) can never drift from the bounds
+#: actually enforced by ``_clamp_intervals``.
+_TICK_LO, _TICK_HI = INTERVAL_RANGES["scheduler_tick_seconds"]
+_GRACE_LO, _GRACE_HI = INTERVAL_RANGES["shutdown_grace_seconds"]
+
 
 class ConfigError(Exception):
     """Effective configuration is invalid — startup must fail (FRG-NFR-009)."""
@@ -97,7 +103,7 @@ class Settings(BaseSettings):
         default=60,
         description=(
             "Scheduler loop tick interval in seconds. Clamped to the safe "
-            "range 5..60 with a warning if set outside it."
+            f"range {_TICK_LO}..{_TICK_HI} with a warning if set outside it."
         ),
     )
     http_connect_timeout_seconds: float = Field(
@@ -183,7 +189,8 @@ class Settings(BaseSettings):
         default=25,
         description=(
             "Grace period in seconds for in-flight commands to finish on "
-            "shutdown. Clamped to the safe range 1..29 (must stay under 30s)."
+            f"shutdown. Clamped to the safe range {_GRACE_LO}..{_GRACE_HI} "
+            "(must stay under 30s)."
         ),
     )
     job_history_retention_days: int = Field(

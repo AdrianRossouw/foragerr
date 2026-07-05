@@ -40,6 +40,19 @@ HOSTILE_FIXTURES = [
     ("http://[fe80::1]/", "link-local", "fe80::1"),
     ("http://[fd00::5]/", "unique-local (ULA)", "fd00::5"),
     ("http://[::ffff:127.0.0.1]/", "loopback", "::ffff:127.0.0.1"),
+    ("http://[::ffff:10.0.0.1]/", "private (RFC 1918)", "::ffff:10.0.0.1"),
+    # IPv4-compatible ::/96 — routes via the embedded IPv4 on Linux yet is
+    # neither is_loopback nor is_private; must be judged as its embedded IPv4.
+    ("http://[::127.0.0.1]/", "loopback", "::7f00:1"),
+    ("http://[::10.0.0.1]/", "private (RFC 1918)", "::a00:1"),
+    # 6to4 (2002::/16) embedding 127.0.0.1.
+    ("http://[2002:7f00:1::]/", "loopback", "2002:7f00:1::"),
+    # Teredo (2001:0::/32) whose client component is a private address.
+    (
+        "http://[2001:0:cb00:7101:8000:ffff:3f57:fecd]/",
+        "private (RFC 1918)",
+        "2001:0:cb00:7101:8000:ffff:3f57:fecd",
+    ),
     ("file:///etc/passwd", "forbidden scheme", None),
     ("ftp://mirror.example/", "forbidden scheme", None),
 ]

@@ -233,3 +233,26 @@ def test_out_of_range_interval_clamped_with_warning(config_dir, caplog):
     text = warning.getMessage()
     assert warning.levelno == logging.WARNING
     assert "1" in text and "5" in text  # names key, supplied and clamped values
+
+
+@pytest.mark.req("FRG-SCHED-005")
+def test_settings_worker_defaults_match_default_pool_sizes(config_dir):
+    """The settings-driven pool mapping and the DEFAULT_POOL_SIZES fallback are
+    single-sourced; their defaults must not drift apart (FRG-SCHED-005)."""
+    from foragerr.commands.service import DEFAULT_POOL_SIZES
+
+    settings = Settings(config_dir=config_dir)
+    assert {
+        cls: getattr(settings, f"workers_{cls}") for cls in DEFAULT_POOL_SIZES
+    } == DEFAULT_POOL_SIZES
+
+
+@pytest.mark.req("FRG-NFR-009")
+def test_interval_range_descriptions_match_enforced_bounds():
+    """The generated config.yaml comments (Field descriptions) are built from
+    INTERVAL_RANGES, so the documented bounds can never drift from the clamp."""
+    from foragerr.config import INTERVAL_RANGES
+
+    for name, (floor, ceiling) in INTERVAL_RANGES.items():
+        description = Settings.model_fields[name].description or ""
+        assert f"{floor}..{ceiling}" in description

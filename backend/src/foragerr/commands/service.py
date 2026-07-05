@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import datetime as dt
 import json
 import logging
+import threading
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
@@ -43,6 +45,53 @@ logger = logging.getLogger("foragerr.commands")
 
 #: Default worker-pool sizes per workload class (design decision 4).
 DEFAULT_POOL_SIZES = {"search": 1, "download": 1, "pp": 1, "default": 2}
+
+#: The command a worker is currently executing, so :func:`daemon_offload` can
+#: name the abandoned thread when a blocking handler outlives the drain grace.
+_current_command: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "foragerr_current_command", default="?"
+)
+
+#: Thread-name prefix for offloaded blocking work; the shutdown path scans for
+#: survivors of this prefix to log the commands abandoned past the drain grace.
+OFFLOAD_THREAD_PREFIX = "cmd-offload:"
+
+
+async def daemon_offload(func: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
+    """``asyncio.to_thread``-compatible offload that runs on a DAEMON thread.
+
+    Unlike ``asyncio.to_thread`` (the shared default executor whose non-daemon
+    threads Python joins at interpreter exit), a handler that blocks here can
+    never wedge shutdown past the drain bound (FRG-DEP-008): the abandoned
+    thread dies with the process, and orphan recovery re-runs the command's
+    row on the next start (FRG-SCHED-002). The thread is named after the
+    running command so the shutdown path can name what it abandoned."""
+    loop = asyncio.get_running_loop()
+    ctx = contextvars.copy_context()
+    future: asyncio.Future[Any] = loop.create_future()
+
+    def _resolve(value: Any) -> None:
+        if not future.done():
+            future.set_result(value)
+
+    def _reject(exc: BaseException) -> None:
+        if not future.done():
+            future.set_exception(exc)
+
+    def _run() -> None:
+        try:
+            result = ctx.run(func, *args, **kwargs)
+        except BaseException as exc:  # deliver back to the awaiting coroutine
+            loop.call_soon_threadsafe(_reject, exc)
+        else:
+            loop.call_soon_threadsafe(_resolve, result)
+
+    threading.Thread(
+        target=_run,
+        name=f"{OFFLOAD_THREAD_PREFIX}{ctx.run(_current_command.get)}",
+        daemon=True,
+    ).start()
+    return await future
 
 
 @dataclass(frozen=True)
@@ -91,7 +140,7 @@ class HandlerContext:
     db: Database
     bus: EventBus | None
     settings: Settings | None
-    offload: Callable[..., Awaitable[Any]]  # asyncio.to_thread-compatible
+    offload: Callable[..., Awaitable[Any]]  # asyncio.to_thread-compatible (daemon)
 
 
 async def prune_job_history(db: Database, retention_days: int) -> int:
@@ -124,11 +173,11 @@ class CommandService:
         self._settings = settings
         if pool_sizes is None:
             if settings is not None:
+                # Single-source the class list off DEFAULT_POOL_SIZES so the
+                # settings-driven mapping can never drift from the fallback.
                 pool_sizes = {
-                    "search": settings.workers_search,
-                    "download": settings.workers_download,
-                    "pp": settings.workers_pp,
-                    "default": settings.workers_default,
+                    cls: getattr(settings, f"workers_{cls}")
+                    for cls in DEFAULT_POOL_SIZES
                 }
             else:
                 pool_sizes = dict(DEFAULT_POOL_SIZES)
@@ -139,7 +188,7 @@ class CommandService:
         self._active_groups: set[str] = set()
         self._workers: list[asyncio.Task[None]] = []
         self.context = HandlerContext(
-            db=db, bus=bus, settings=settings, offload=asyncio.to_thread
+            db=db, bus=bus, settings=settings, offload=daemon_offload
         )
 
     # -- lifecycle -----------------------------------------------------------
@@ -224,9 +273,7 @@ class CommandService:
         """Scheduler-state component health for /health (api area consumes)."""
         return {
             "status": "stopping" if self._stopping else "up",
-            "workers": {
-                cls: count for cls, count in self.pool_sizes.items()
-            },
+            "workers": dict(self.pool_sizes),
             "workers_alive": sum(1 for t in self._workers if not t.done()),
             "active_groups": sorted(self._active_groups),
         }
@@ -291,23 +338,54 @@ class CommandService:
 
     # -- workers ---------------------------------------------------------------
 
+    #: Backoff bounds when a worker iteration raises (e.g. a transient
+    #: DatabaseBusyError from ``_claim``): a worker must SELF-HEAL rather than
+    #: die and permanently shrink the pool (FRG-SCHED-005).
+    _FAILURE_BACKOFF_BASE = 1.0
+    _FAILURE_BACKOFF_CAP = 30.0
+
     async def _worker(self, workload_class: str) -> None:
+        consecutive_failures = 0
         while not self._stopping:
-            record = await self._claim(workload_class)
-            if record is None:
-                if self._stopping:
-                    return
-                with contextlib.suppress(asyncio.TimeoutError, TimeoutError):
-                    await asyncio.wait_for(
-                        self._wake.wait(), timeout=self._poll_interval
-                    )
-                self._wake.clear()
-                continue
             try:
-                await self._execute(record)
-            finally:
-                if record.exclusivity_group:
-                    self._active_groups.discard(record.exclusivity_group)
+                record = await self._claim(workload_class)
+                if record is None:
+                    if self._stopping:
+                        return
+                    with contextlib.suppress(asyncio.TimeoutError, TimeoutError):
+                        await asyncio.wait_for(
+                            self._wake.wait(), timeout=self._poll_interval
+                        )
+                    self._wake.clear()
+                    consecutive_failures = 0
+                    continue
+                try:
+                    await self._execute(record)
+                finally:
+                    if record.exclusivity_group:
+                        self._active_groups.discard(record.exclusivity_group)
+                consecutive_failures = 0
+            except asyncio.CancelledError:
+                raise  # drain/shutdown: never swallow cancellation
+            except Exception:
+                # Any other failure (a busy database in _claim or the terminal
+                # write, a bug) must not kill the worker — the pool would
+                # degrade to zero with no self-heal. Log, back off, carry on.
+                consecutive_failures += 1
+                backoff = min(
+                    self._FAILURE_BACKOFF_BASE * 2 ** (consecutive_failures - 1),
+                    self._FAILURE_BACKOFF_CAP,
+                )
+                logger.exception(
+                    "commands: worker %s hit an unexpected error; backing off "
+                    "%.1fs then continuing (consecutive failures: %d)",
+                    workload_class,
+                    backoff,
+                    consecutive_failures,
+                )
+                with contextlib.suppress(asyncio.TimeoutError, TimeoutError):
+                    await asyncio.wait_for(self._wake.wait(), timeout=backoff)
+                self._wake.clear()
 
     async def _claim(self, workload_class: str) -> CommandRecord | None:
         """Claim the highest-priority eligible queued row for this class.
@@ -318,34 +396,44 @@ class CommandService:
         """
         if self._stopping:  # no new claims after a shutdown signal
             return None
-        async with self._db.write_session() as session:
-            rows = (
-                (
-                    await session.execute(
-                        select(CommandRow)
-                        .where(
-                            CommandRow.status == "queued",
-                            CommandRow.workload_class == workload_class,
+        added_group: str | None = None
+        try:
+            async with self._db.write_session() as session:
+                rows = (
+                    (
+                        await session.execute(
+                            select(CommandRow)
+                            .where(
+                                CommandRow.status == "queued",
+                                CommandRow.workload_class == workload_class,
+                            )
+                            .order_by(
+                                CommandRow.priority.desc(), CommandRow.id.asc()
+                            )
+                            .limit(50)
                         )
-                        .order_by(
-                            CommandRow.priority.desc(), CommandRow.id.asc()
-                        )
-                        .limit(50)
                     )
+                    .scalars()
+                    .all()
                 )
-                .scalars()
-                .all()
-            )
-            for row in rows:
-                group = row.exclusivity_group
-                if group and group in self._active_groups:
-                    continue  # serialized within its group; keep looking
-                if group:
-                    self._active_groups.add(group)
-                row.status = "started"
-                row.started_at = utcnow()
-                return CommandRecord.from_row(row)
-        return None
+                for row in rows:
+                    group = row.exclusivity_group
+                    if group and group in self._active_groups:
+                        continue  # serialized within its group; keep looking
+                    if group:
+                        self._active_groups.add(group)
+                        added_group = group
+                    row.status = "started"
+                    row.started_at = utcnow()
+                    return CommandRecord.from_row(row)
+            return None
+        except BaseException:
+            # If the commit failed AFTER we reserved the group in memory, undo
+            # the reservation so a transient error cannot wedge the group's
+            # commands out of scheduling forever.
+            if added_group is not None:
+                self._active_groups.discard(added_group)
+            raise
 
     async def _execute(self, record: CommandRecord) -> None:
         """Run the handler and persist the terminal state + history row.
@@ -357,6 +445,7 @@ class CommandService:
         outcome = "completed"
         error: str | None = None
         result_text: str | None = None
+        _current_command.set(f"{record.name}#{record.id}")
         try:
             command = parse_command(record.name, record.payload)
             handler = get_handler(record.name)

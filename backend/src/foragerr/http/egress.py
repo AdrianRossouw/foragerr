@@ -103,24 +103,75 @@ def interpret_host_as_ip(host: str) -> _IPAddress | None:
     raise ValueError(f"numeric host is not a valid IPv4 encoding: {host}")
 
 
-def forbidden_reason(address: _IPAddress) -> str | None:
-    """Why this address is refused by the egress policy, or ``None`` if it
-    is acceptable (FRG-SEC-001: loopback, link-local, RFC-1918, IPv6 ULA;
-    IPv4-mapped IPv6 addresses are unwrapped and judged as IPv4)."""
-    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
-        address = address.ipv4_mapped
+def _forbidden_ipv4_reason(address: ipaddress.IPv4Address) -> str | None:
+    """Why an IPv4 address is refused, or ``None`` if it is acceptable."""
     if address.is_unspecified:
         return "unspecified"
     if address.is_loopback:
         return "loopback"
     if address.is_link_local:
         return "link-local"
-    if isinstance(address, ipaddress.IPv4Address):
-        if any(address in net for net in _RFC_1918):
-            return "private (RFC 1918)"
-    elif address in _IPV6_ULA:
-        return "unique-local (ULA)"
+    if any(address in net for net in _RFC_1918):
+        return "private (RFC 1918)"
     return None
+
+
+def _embedded_ipv4_candidates(
+    address: ipaddress.IPv6Address,
+) -> list[ipaddress.IPv4Address]:
+    """Every IPv4 address an IPv6 literal can smuggle past IPv6-only checks.
+
+    Covers the IPv4-mapped (``::ffff:a.b.c.d``), IPv4-compatible ``::/96``
+    (``::a.b.c.d`` — routes via the embedded IPv4 on Linux yet is neither
+    ``is_loopback`` nor ``is_private``), 6to4 (``2002::/16``) and Teredo
+    (``2001:0::/32``) tunnelling forms. Each candidate is judged with the
+    same IPv4 policy so none of these encodings can reach a forbidden host.
+    """
+    candidates: list[ipaddress.IPv4Address] = []
+    mapped = address.ipv4_mapped
+    if mapped is not None:
+        candidates.append(mapped)
+    # IPv4-compatible ::/96: 12 leading zero bytes, IPv4 in the low 32 bits.
+    # :: (unspecified) and ::1 (loopback) are already refused as IPv6 below,
+    # so they are excluded here per FRG-SEC-001.
+    if (
+        address.packed[:12] == b"\x00" * 12
+        and not address.is_unspecified
+        and not address.is_loopback
+    ):
+        candidates.append(ipaddress.IPv4Address(address.packed[12:]))
+    sixtofour = address.sixtofour
+    if sixtofour is not None:
+        candidates.append(sixtofour)
+    teredo = address.teredo
+    if teredo is not None:
+        candidates.append(teredo[1])  # (server, client): the client is embedded
+    return candidates
+
+
+def forbidden_reason(address: _IPAddress) -> str | None:
+    """Why this address is refused by the egress policy, or ``None`` if it
+    is acceptable (FRG-SEC-001: loopback, link-local, RFC-1918, IPv6 ULA).
+
+    IPv6 addresses are additionally screened for any embedded IPv4 they route
+    to — IPv4-mapped, IPv4-compatible ``::/96``, 6to4 and Teredo — and refused
+    when that embedded IPv4 is forbidden, so none of those tunnelling forms
+    can smuggle a request to a loopback/private host past the IPv6 checks."""
+    if isinstance(address, ipaddress.IPv6Address):
+        for candidate in _embedded_ipv4_candidates(address):
+            reason = _forbidden_ipv4_reason(candidate)
+            if reason is not None:
+                return reason
+        if address.is_unspecified:
+            return "unspecified"
+        if address.is_loopback:
+            return "loopback"
+        if address.is_link_local:
+            return "link-local"
+        if address in _IPV6_ULA:
+            return "unique-local (ULA)"
+        return None
+    return _forbidden_ipv4_reason(address)
 
 
 def same_origin(url: httpx.URL, base: httpx.URL) -> bool:

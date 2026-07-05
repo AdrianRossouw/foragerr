@@ -12,7 +12,6 @@ scheduled task's command name is just another ``name`` value to ``POST``.
 from __future__ import annotations
 
 import datetime as dt
-import json
 from typing import Any
 
 from fastapi import APIRouter, Query, Request
@@ -78,24 +77,6 @@ class CommandResource(BaseModel):
             error=record.error,
         )
 
-    @classmethod
-    def from_row(cls, row: CommandRow) -> "CommandResource":
-        return cls(
-            id=row.id,
-            name=row.name,
-            status=row.status,
-            priority=row.priority,
-            workload_class=row.workload_class,
-            exclusivity_group=row.exclusivity_group,
-            payload=json.loads(row.payload),
-            triggered_by=row.triggered_by,
-            queued_at=row.queued_at,
-            started_at=row.started_at,
-            finished_at=row.finished_at,
-            result=row.result,
-            error=row.error,
-        )
-
 
 class CommandPage(BaseModel):
     """Paging envelope (FRG-API-002) specialized for command resources."""
@@ -142,7 +123,10 @@ async def list_commands(
             sort_direction=sortDirection,
             whitelist=_SORT_WHITELIST,
         )
-    result["records"] = [CommandResource.from_row(row) for row in result["records"]]
+    result["records"] = [
+        CommandResource.from_record(CommandRecord.from_row(row))
+        for row in result["records"]
+    ]
     return CommandPage(**result)
 
 
