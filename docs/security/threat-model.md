@@ -416,6 +416,50 @@ No new STRIDE categories; COMP 8/9 sections above remain accurate with the M1
 subset now implemented. Residual/open items for this component are tracked above,
 not re-litigated here.
 
+### 2026-07-05 — m1-search-indexers (change 4 of Phase 3)
+
+New attack surface introduced and its disposition (COMP 4 — indexer clients, plus
+the decision engine and release API built on them):
+
+- **Untrusted indexer XML is live and hardened** (`T-IDX-2`, RISK-024/035, gap
+  G-2's indexer arm CLOSED): every Newznab response is parsed at a single
+  defusedxml site (`indexers/xml.py`) with DTD, external entities, and entity
+  expansion disabled, under the factory's response byte cap; the FRG-SEC-002
+  hostile corpus (billion-laughs, external-entity, quadratic blowup, oversized,
+  junk) is tagged-tested, plus a static guard asserting no other XML-parser
+  construction exists in the package. The CBL reading-list arm of G-2 stays open
+  (backlog milestone).
+- **Indexer-host SSRF instance closed** (`T-IDX-3`, RISK-025 arm): all indexer
+  traffic uses `factory.external()` — the change-1 egress profile (loopback/
+  private/link-local refusal, TLS verify, bounded timeouts, no auto-redirects).
+  SAB/pull-source arms remain for changes 5+.
+- **Hostile/slow provider containment** (`T-IDX-5`, RISK-027 CLOSED for
+  indexers): persisted per-provider back-off ladder (0s→…→24h, Retry-After/auth
+  fast-forward, full reset on success — FRG-NFR-005) honored by every fetch
+  path; per-indexer 2s spacing; per-indexer fan isolation in the search
+  pipeline so one wedged provider cannot stall the pool — proven by the
+  FRG-NFR-010 end-to-end against live hang/drip/junk/429-storm fixture servers
+  with a healthy indexer completing in the same command.
+- **Indexer API keys** (`T-IDX-1`): SecretStr settings fields, write-only in
+  `GET /indexer/schema` responses (never echoed), registered for log redaction
+  at row load. Key-in-query-string to the indexer itself is inherent to the
+  Newznab protocol; redaction covers our logs/errors.
+- **Mislabelled payloads** (`T-IDX-4`, partial): `<error code>` and
+  non-XML/HTML responses map to typed failures feeding the ladder; NZB byte
+  validation before download-client handoff is change 5 (unchanged plan).
+- **New listener surface**: `GET/POST /api/v1/release` (interactive search +
+  cached grab) and the series-alias edit path. Release rows are resolved
+  strictly from the server-side `release_cache` (30-min expiry, housekeeping
+  prune) keyed `(indexer_id, guid)` — a client can only grab something an
+  indexer actually returned to *this* server; expired keys are a deterministic
+  404-class error, never a silent re-search. Alias edits are ORM-parameterized,
+  stored as canonical JSON, and used only via the normalized matching-key path;
+  rejection reasons and release titles rendered to the UI remain untrusted text
+  (output encoding is the UI's job — unchanged `T-API-3` posture).
+- **New assets**: `release_cache` rows (release titles/links from untrusted
+  indexers — treated as untrusted text throughout), `provider_backoff` state,
+  `series.aliases` (operator-supplied).
+
 ## Coverage summary
 
 - **Well covered by the five drafts** (mitigation named, no new requirement needed): OPDS
