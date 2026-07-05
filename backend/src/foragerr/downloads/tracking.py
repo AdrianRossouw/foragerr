@@ -535,7 +535,9 @@ def _write_blocklist_row(
     """Write the multi-field blocklist row for a failed release (FRG-DL-012)."""
     first = grabs[0] if grabs else None
     protocol = first.protocol if first else row.protocol
-    is_ddl = protocol == SOURCE_DDL or (first and first.source == SOURCE_DDL)
+    # Compare protocol against PROTOCOL_DDL and source against SOURCE_DDL — both
+    # equal "ddl" but live in different namespaces (protocol vs provenance).
+    is_ddl = protocol == PROTOCOL_DDL or (first and first.source == SOURCE_DDL)
     session.add(
         BlocklistRow(
             series_id=row.series_id,

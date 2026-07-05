@@ -25,6 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from foragerr.downloads.models import SOURCE_DDL, BlocklistRow, TrackedDownloadRow
+from foragerr.downloads.registry import PROTOCOL_DDL
 from foragerr.downloads.state import TrackedDownloadState
 from foragerr.releases import ReleaseCandidate
 
@@ -95,7 +96,10 @@ class BlocklistEntry:
             and (self.indexer_id is None or self.indexer_id == candidate.indexer_id)
         ):
             return True
-        if self.protocol == SOURCE_DDL or self.source == SOURCE_DDL:
+        # A DDL entry matches by source URL/title, not guid+indexer. Compare the
+        # PROTOCOL against PROTOCOL_DDL and the SOURCE against SOURCE_DDL — they
+        # both equal "ddl" but belong to different namespaces (protocol vs source).
+        if self.protocol == PROTOCOL_DDL or self.source == SOURCE_DDL:
             if self.source_url is not None and self.source_url == candidate.link:
                 return True
             if self.title is not None and self.title == candidate.title:
