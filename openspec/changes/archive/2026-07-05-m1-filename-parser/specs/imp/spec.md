@@ -1,12 +1,5 @@
-# IMP — Import & Filename Parsing Specification
+## MODIFIED Requirements
 
-## Purpose
-
-Baseline requirements for import & filename parsing, mined from the
-Phase 1 reference research (`docs/research/`). Baseline depth per the Phase 2 scope
-decision: SHALL + coarse acceptance; scenario-level elaboration happens in the
-milestone change that implements each requirement (FRG-PROC-003, FRG-PROC-009).
-## Requirements
 ### Requirement: FRG-IMP-001 — Single parser implementation for all consumers
 
 The system SHALL provide exactly one comic-name parsing implementation, and all consumers — library scanning, post-processing/import, indexer release-title evaluation, and series/download folder-name parsing (via an explicit mode flag) — SHALL invoke that single implementation with no per-consumer re-implementations of parsing or issue normalization.
@@ -554,56 +547,3 @@ The parser SHALL be covered by a table-driven regression corpus seeded with the 
 
 - **WHEN** a parser bug is fixed, or the corpus file's history is audited
 - **THEN** the fix's change includes a new corpus row reproducing the bug (added and failing before the fix, passing after), and no existing row has ever been deleted or weakened — expectation corrections are themselves recorded as deliberate pinned-behavior changes citing the governing requirement ID
-
-### Requirement: FRG-IMP-022 — Library scan walk
-
-The library scanner SHALL recursively enumerate comic files under configured root/series paths, recognizing extensions case-insensitively and skipping junk (AppleDouble/`@eaDir` dirs, `._` resource forks, dotfiles, zero-byte files, unpack-temp folders), and SHALL reconcile the database against disk by removing file records whose files have vanished before evaluating unmapped files.
-
-- **Milestone**: M2
-- **Source**: MFP §2.1 (directory walk skips); SA §5.5 (DiskScanService, MediaFileTableCleanupService); MFS capability map IMP (recursive library scan).
-- **Notes**: Per-series rescan is the same walk scoped to one series path (`forceRescan` analogue, MFS §8). Unmapped files feed the shared import pipeline (see PP shared-pipeline requirement) — the scanner itself makes no import decisions.
-
-#### Scenario: Baseline acceptance
-
-- **WHEN** this requirement is verified against the implementation
-- **THEN** A fixture tree containing junk artifacts and an uppercase-extension file scans to exactly the expected file set; deleting a file on disk and rescanning removes its DB record.
-
-### Requirement: FRG-IMP-023 — Existing-library import staging and review
-
-The system SHALL stage library-scan parse results grouped by normalized series name into a reviewable import queue, presenting per-group would-be matches with parse confidence, and SHALL support mass import, per-group selection/override, and re-check before committing files to the library.
-
-- **Milestone**: M2
-- **Source**: MFS §4 Library import (librarysync staging, import UI); SA §5.5 (manual import as the override escape hatch); MFP §5 (structured output powers the review UI).
-- **Notes**: ComicVine identification search for unmatched groups belongs to the metadata AREA; this requirement covers staging/review mechanics. Optional move/rename-on-import reuses the PP renaming engine (IMP_MOVE/IMP_RENAME analogue) — no second file-ops path.
-
-#### Scenario: Baseline acceptance
-
-- **WHEN** this requirement is verified against the implementation
-- **THEN** Importing a fixture library of ≥3 series (with one ambiguous group) via the review UI creates the correct series/issue/file records, with the ambiguous group resolved only after user override.
-
-### Requirement: FRG-IMP-024 — Embedded metadata read during import
-
-During library import, the system SHALL read embedded ComicInfo.xml metadata (and embedded ComicVine issue IDs) from archives where present and SHALL prefer a verified embedded ID over filename-parse results when matching files to series/issues.
-
-- **Milestone**: M2
-- **Source**: MFS §4 Library import (embedded ComicInfo read, direct add-by-ID); MFS capability map IMP.
-- **Notes**: Read-side only here; writing tags is PP. Embedded evidence is one more input to the shared evidence-aggregation model (PP) with highest confidence when verified against ComicVine.
-
-#### Scenario: Baseline acceptance
-
-- **WHEN** this requirement is verified against the implementation
-- **THEN** A fixture cbz with a ComicInfo.xml carrying a CV issue ID imports directly to the right issue even under a misleading filename; a conflicting-ID case surfaces as a review item rather than a silent trust.
-
-### Requirement: FRG-IMP-025 — Story-arc reading-order prefix
-
-The parser SHALL recognize a leading reading-order prefix (`NNN-`, ≤3 digits before the first hyphen) when parsing in arc context, returning the sequence number as a structured field and excluding it from the series title.
-
-- **Milestone**: B
-- **Source**: MFP §2.14, §3 row 63; MFP §5 pass-through metadata bullet 3.
-- **Notes**: Backlogged with story arcs (ARC area) generally; kept in the baseline so the corpus row has an owner and the token grammar reserves the prefix rule.
-
-#### Scenario: Baseline acceptance
-
-- **WHEN** this requirement is verified against the implementation
-- **THEN** Corpus row 63 parses with `reading_order = 023` and an otherwise-normal result; non-arc mode leaves the same name's title untouched.
-
