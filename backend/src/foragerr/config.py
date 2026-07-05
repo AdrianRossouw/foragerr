@@ -308,6 +308,31 @@ class Settings(BaseSettings):
             "different release (FRG-DL-013, the self-healing loop). On by default."
         ),
     )
+    opds_base_path: str = Field(
+        default="/opds",
+        description=(
+            "Base URL path the OPDS 1.2 catalog is mounted at (FRG-OPDS-001). "
+            "Must start with '/'; a trailing slash is stripped. All in-feed "
+            "links are built relative to this base."
+        ),
+    )
+    opds_page_size: int = Field(
+        default=50,
+        ge=1,
+        description=(
+            "Default number of entries per OPDS feed page (FRG-OPDS-006) when "
+            "the client does not request a page size."
+        ),
+    )
+    opds_page_size_cap: int = Field(
+        default=100,
+        ge=1,
+        description=(
+            "Hard upper bound on the OPDS feed page size (FRG-OPDS-006): a "
+            "client requesting a larger page is clamped to this value, never "
+            "served an unbounded page."
+        ),
+    )
 
     @classmethod
     def settings_customise_sources(  # env vars override init kwargs (= file values)
@@ -319,6 +344,17 @@ class Settings(BaseSettings):
         file_secret_settings,
     ):
         return (env_settings, init_settings, dotenv_settings, file_secret_settings)
+
+    @field_validator("opds_base_path")
+    @classmethod
+    def _valid_opds_base_path(cls, value: str) -> str:
+        """Normalize the OPDS mount path: exactly one leading slash, no
+        trailing slash (so ``f"{base}/series"`` never doubles a separator)."""
+        path = value.strip()
+        if not path.startswith("/"):
+            raise ValueError("must start with '/'")
+        path = "/" + path.strip("/")
+        return path
 
     @field_validator("log_level")
     @classmethod

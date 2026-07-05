@@ -219,6 +219,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.state.startup_hooks.append(_register_ddl_tasks)
 
+    # --- opds area (m1-ui-opds-deploy, area: opds): mount the OPDS 1.2
+    #     catalog at the configured base path (default /opds). Unauthenticated
+    #     read surface; id-only file resolution (FRG-OPDS-001..006). ---
+    from foragerr.opds import register_opds
+
+    register_opds(app)
+
     return app
 
 
