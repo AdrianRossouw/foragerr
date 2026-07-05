@@ -4,13 +4,14 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 
 import pytest
 from sqlalchemy import select
 
 from conftest import define_command, eventually
-from foragerr.db import CommandRow, TERMINAL_STATUSES
+from foragerr.db import CommandRow, DatabaseBusyError, TERMINAL_STATUSES
 
 
 async def _statuses(db, name_prefix: str = "") -> dict[int, str]:
@@ -213,3 +214,74 @@ async def test_blocking_work_offload_keeps_event_loop_responsive(db, service):
     final = await eventually(lambda: _terminal(service, record.id))
     assert final.status == "completed"
     assert final.result == "extracted"
+
+
+@pytest.mark.req("FRG-SCHED-005")
+async def test_worker_survives_a_claim_failure_and_keeps_running(
+    db, command_registry, monkeypatch
+):
+    """A transient error out of _claim (e.g. DatabaseBusyError) must NOT kill
+    the worker task and shrink the pool to zero with no self-heal — it logs,
+    backs off, and goes on to run the next command (FRG-SCHED-005)."""
+    from foragerr.commands import CommandService
+    from foragerr.commands.registry import register_handler
+
+    define_command("t_survive")
+    ran = asyncio.Event()
+
+    @register_handler("t_survive")
+    async def _survive(command, ctx):
+        ran.set()
+        return "ok"
+
+    service = CommandService(db, pool_sizes={"default": 1}, poll_interval=0.05)
+    service._FAILURE_BACKOFF_BASE = 0.05  # keep the backoff test-fast
+
+    real_claim = service._claim
+    calls = {"n": 0}
+
+    async def flaky_claim(workload_class):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise DatabaseBusyError("simulated transient lock")
+        return await real_claim(workload_class)
+
+    monkeypatch.setattr(service, "_claim", flaky_claim)
+    await service.start()
+    try:
+        record = await service.enqueue("t_survive", {"token": "after-failure"})
+        await asyncio.wait_for(ran.wait(), timeout=5.0)
+        final = await eventually(lambda: _terminal(service, record.id))
+        assert final.status == "completed"
+        assert calls["n"] >= 2  # kept polling after the first claim raised
+        assert service.health()["workers_alive"] == 1  # the worker did not die
+    finally:
+        await service.drain(1.0)
+
+
+@pytest.mark.req("FRG-SCHED-011")
+@pytest.mark.req("FRG-DEP-008")
+async def test_blocking_offload_runs_on_a_named_daemon_thread(db, service):
+    """Offloaded blocking work runs on a DAEMON thread named after the command:
+    a handler wedged past the drain grace can never join-block interpreter exit
+    (FRG-DEP-008), and the shutdown path can name what it abandoned."""
+    from foragerr.commands.registry import register_handler
+
+    define_command("t_daemon")
+    observed: dict[str, object] = {}
+
+    @register_handler("t_daemon")
+    async def _daemon(command, ctx):
+        def probe():
+            current = threading.current_thread()
+            return current.daemon, current.name
+
+        observed["daemon"], observed["name"] = await ctx.offload(probe)
+        return "ok"
+
+    record = await service.enqueue("t_daemon", {"token": "cbz"})
+    final = await eventually(lambda: _terminal(service, record.id))
+    assert final.status == "completed"
+    assert observed["daemon"] is True
+    assert str(observed["name"]).startswith("cmd-offload:")
+    assert "t_daemon" in str(observed["name"])  # named after the running command

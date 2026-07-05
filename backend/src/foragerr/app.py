@@ -25,14 +25,17 @@ from __future__ import annotations
 import logging
 import signal
 import sys
+import threading
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 import uvicorn
 from fastapi import FastAPI
+from types import FrameType
 
 from foragerr.api import register_api
 from foragerr.commands import register_scheduler
+from foragerr.commands.service import OFFLOAD_THREAD_PREFIX
 from foragerr.config import ConfigError, Settings, load_settings
 from foragerr.db import register_database
 from foragerr.logging import setup_logging
@@ -110,6 +113,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     return app
 
 
+class _ForagerrServer(uvicorn.Server):
+    """Uvicorn server that lets a REPEATED shutdown signal force-exit.
+
+    Uvicorn's own ``handle_exit`` only escalates to ``force_exit`` on a second
+    SIGINT; a second SIGTERM — the docker/systemd restart-then-kill pattern —
+    does nothing once ``should_exit`` is set, so an operator who signals twice
+    cannot cut short a wedged shutdown. Escalate on ANY repeat signal so the
+    ≤30s bound (FRG-DEP-008) can always be forced."""
+
+    def handle_exit(self, sig: int, frame: FrameType | None) -> None:
+        if self.should_exit:
+            self.force_exit = True
+        super().handle_exit(sig, frame)
+
+
 def main() -> None:
     """Console entrypoint: run uvicorn on the configured host/port (8789).
 
@@ -128,13 +146,33 @@ def main() -> None:
     settings = _load_settings_or_exit()
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, signal.SIG_IGN)
-    uvicorn.run(
-        "foragerr.app:create_app",
-        factory=True,
+    app = create_app(settings)
+    config = uvicorn.Config(
+        app,
         host=settings.host,
         port=settings.port,
         log_config=None,  # keep foragerr's structured logging configuration
     )
+    _ForagerrServer(config).run()
+
+    # Shutdown (drain + WAL checkpoint) completed inside run(). A blocking
+    # handler that outlived the drain grace is now an abandoned DAEMON thread
+    # (see commands.service.daemon_offload); it dies with the process and its
+    # command row is recovered on the next start (FRG-SCHED-002). Name it at
+    # CRITICAL so the operator can see WHAT was abandoned past the bound.
+    stuck = [
+        t.name[len(OFFLOAD_THREAD_PREFIX):]
+        for t in threading.enumerate()
+        if t.name.startswith(OFFLOAD_THREAD_PREFIX) and t.is_alive()
+    ]
+    if stuck:
+        logger.critical(
+            "shutdown: %d command handler(s) still running past the drain "
+            "grace were abandoned to daemon threads (orphan recovery re-runs "
+            "them next start): %s",
+            len(stuck),
+            ", ".join(sorted(stuck)),
+        )
 
 
 if __name__ == "__main__":
