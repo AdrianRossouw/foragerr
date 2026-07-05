@@ -36,12 +36,12 @@
 
 ## 5. API skeleton, health, version (worktree area: api)
 
-- [ ] 5.1 Uniform 4xx error shape `{"message", "errors[]"}` with Pydantic validation mapping; no default `{"detail"}` leak (FRG-API-002)
-- [ ] 5.2 Paging-envelope helper with whitelisted sort keys mapped to fixed column expressions; unknown key → 400 (FRG-API-002)
-- [ ] 5.3 `GET /health` (unauthenticated; DB/scheduler/migration component statuses; non-2xx when unhealthy) and version/build info endpoint + startup log line with dev fallbacks (FRG-DEP-007, FRG-DEP-010)
-- [ ] 5.4 `POST /api/v1/command` + `GET /api/v1/command/{id}` transport over the backbone with a no-op test command; OpenAPI accuracy test at `/api/v1/openapi.json` (FRG-API-001, FRG-SCHED-007)
-- [ ] 5.5 AUTH-001 tests: route inventory asserts no auth middleware/dependency; all surfaces respond credential-free; no dormant auth code (FRG-AUTH-001)
-- [ ] 5.6 No-self-update guard test: no update code path, version fixed at build (FRG-DEP-009)
+- [x] 5.1 Uniform 4xx error shape `{"message", "errors[]"}` with Pydantic validation mapping; no default `{"detail"}` leak (FRG-API-002)
+- [x] 5.2 Paging-envelope helper with whitelisted sort keys mapped to fixed column expressions; unknown key → 400 (FRG-API-002)
+- [x] 5.3 `GET /health` (unauthenticated; DB/scheduler/migration component statuses; non-2xx when unhealthy) and version/build info endpoint + startup log line with dev fallbacks (FRG-DEP-007, FRG-DEP-010)
+- [x] 5.4 `POST /api/v1/command` + `GET /api/v1/command/{id}` transport over the backbone with a no-op test command; OpenAPI accuracy test at `/api/v1/openapi.json` (FRG-API-001, FRG-SCHED-007)
+- [x] 5.5 AUTH-001 tests: route inventory asserts no auth middleware/dependency; all surfaces respond credential-free; no dormant auth code (FRG-AUTH-001)
+- [x] 5.6 No-self-update guard test: no update code path, version fixed at build (FRG-DEP-009)
 
 ## 6. Security docs, traceability, merge gate
 
