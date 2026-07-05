@@ -36,6 +36,7 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-PROC-008 | Worktree isolation for concurrent agents | dev-process | active | — |
 | FRG-PROC-009 | Spec approval gate | dev-process | active | — |
 | FRG-PROC-011 | Manual kept in sync with the application | dev-process | proposed | — |
+| FRG-PROC-012 | SOUP register | dev-process | proposed | — |
 | FRG-SER-001 | Series entity from ComicVine volume | ser | implemented | M1 |
 | FRG-SER-002 | Issue entity | ser | implemented | M1 |
 | FRG-SER-003 | Two-level monitored flags | ser | implemented | M1 |
