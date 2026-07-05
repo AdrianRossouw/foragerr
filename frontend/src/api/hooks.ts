@@ -11,11 +11,13 @@ import { toQueueItem } from './queue';
 import type {
   ApiPage,
   CommandResource,
+  FormatProfileResource,
   IssueResource,
   LookupCandidate,
   QueueItem,
   QueuePageResponse,
   ReleaseDecision,
+  RootFolderResource,
   Series,
   SeriesCreatePayload,
   SeriesCreatedResource,
@@ -114,6 +116,24 @@ export function useLookup(term: string): UseQueryResult<LookupCandidate[]> {
     // ComicVine search behind the user's back (live, rate-limited upstream).
     staleTime: Infinity,
     retry: false,
+  });
+}
+
+/** Configured root folders for the add-flow picker (FRG-UI-005). */
+export function useRootFolders(): UseQueryResult<RootFolderResource[]> {
+  const fetcher = useFetcher();
+  return useQuery({
+    queryKey: queryKeys.rootFolder.all(),
+    queryFn: () => fetcher<RootFolderResource[]>('/api/v1/rootfolder'),
+  });
+}
+
+/** Format profiles for the add-flow picker (FRG-UI-005). */
+export function useFormatProfiles(): UseQueryResult<FormatProfileResource[]> {
+  const fetcher = useFetcher();
+  return useQuery({
+    queryKey: queryKeys.formatProfile.all(),
+    queryFn: () => fetcher<FormatProfileResource[]>('/api/v1/formatprofile'),
   });
 }
 

@@ -202,10 +202,29 @@ export interface LookupCandidate {
   publisher: string | null;
   start_year: number | null;
   image_url: string | null;
+  count_of_issues: number | null;
   name_similarity: number;
   year_proximity: number | null;
   target_issue_plausible: boolean | null;
   have_it: boolean;
+}
+
+/**
+ * One `GET /api/v1/rootfolder` row (FRG-SER-008). `free_space` is filesystem
+ * free bytes, or null when the path could not be stat'd.
+ */
+export interface RootFolderResource {
+  id: number;
+  path: string;
+  free_space: number | null;
+}
+
+/** One `GET /api/v1/formatprofile` row (FRG-QUAL-001). */
+export interface FormatProfileResource {
+  id: number;
+  name: string;
+  formats: string[];
+  cutoff: string;
 }
 
 /** Command backbone resource (FRG-API-002) — the fields the UI reads. */

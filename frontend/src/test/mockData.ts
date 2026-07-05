@@ -1,11 +1,13 @@
 import type {
   ApiPage,
   CommandResource,
+  FormatProfileResource,
   IssueResource,
   LookupCandidate,
   QueuePageResponse,
   QueueResourceRaw,
   ReleaseDecision,
+  RootFolderResource,
   Series,
   SeriesCreatedResource,
   SeriesDetail,
@@ -278,6 +280,7 @@ export const mockLookupCandidates: LookupCandidate[] = [
     publisher: 'Image',
     start_year: 2012,
     image_url: 'https://comicvine.gamespot.com/a/uploads/scale_small/saga.jpg',
+    count_of_issues: 63,
     name_similarity: 1.0,
     year_proximity: 0,
     target_issue_plausible: true,
@@ -289,11 +292,25 @@ export const mockLookupCandidates: LookupCandidate[] = [
     publisher: 'DC Comics',
     start_year: 1982,
     image_url: 'https://comicvine.gamespot.com/a/uploads/scale_small/swamp.jpg',
+    // ComicVine did not report a count — the annotation is omitted, not "0".
+    count_of_issues: null,
     name_similarity: 0.42,
     year_proximity: 30,
     target_issue_plausible: false,
     have_it: true,
   },
+];
+
+/** `GET /api/v1/rootfolder` rows; null free_space = unreadable path. */
+export const mockRootFolders: RootFolderResource[] = [
+  { id: 1, path: '/comics', free_space: 250_000_000_000 },
+  { id: 2, path: '/mnt/archive/comics', free_space: null },
+];
+
+/** `GET /api/v1/formatprofile` rows (id 1 is the seeded default). */
+export const mockFormatProfiles: FormatProfileResource[] = [
+  { id: 1, name: 'Standard', formats: ['cbz', 'cbr'], cutoff: 'cbz' },
+  { id: 2, name: 'CBZ Only', formats: ['cbz'], cutoff: 'cbz' },
 ];
 
 export function makeCommand(overrides: Partial<CommandResource> = {}): CommandResource {
