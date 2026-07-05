@@ -124,6 +124,11 @@ class SabnzbdClient:
             remove_completed_downloads=ctx.row.remove_completed_downloads,
         )
 
+    @property
+    def client_id(self) -> int | None:
+        """The ``download_clients`` row id this client serves (FRG-DL-006)."""
+        return self._client_id
+
     # --- test action (FRG-DL-004 note: version + config live here) ----------
 
     async def test(self) -> ClientTestResult:

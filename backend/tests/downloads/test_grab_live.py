@@ -58,11 +58,14 @@ async def _grab_history(db) -> list[GrabHistoryRow]:
 
 
 class _StubClient:
-    _client_id = 3
-
-    def __init__(self, *, download_id="nzo-1", error=None):
+    def __init__(self, *, download_id="nzo-1", error=None, client_id=3):
         self._download_id = download_id
         self._error = error
+        self._client_id = client_id
+
+    @property
+    def client_id(self):
+        return self._client_id
 
     async def download(self, request) -> str:
         if self._error is not None:
@@ -77,13 +80,13 @@ def _patch_resolution(monkeypatch, *, client, protocol="usenet"):
     async def _protocol(db, request):
         return protocol
 
-    async def _resolve(db, request, **kwargs):
+    async def _resolve(db, proto, **kwargs):
         if isinstance(client, Exception):
             raise client
         return client
 
     monkeypatch.setattr(resolver, "protocol_for_grab", _protocol)
-    monkeypatch.setattr(resolver, "resolve_client_for_grab", _resolve)
+    monkeypatch.setattr(resolver, "resolve_client_for", _resolve)
     monkeypatch.setattr(downloads_pkg, "make_download_factory", lambda s: None)
 
 
@@ -145,6 +148,60 @@ async def test_no_enabled_client_is_typed_retryable(db, monkeypatch):
     with pytest.raises(NoDownloadClientError):
         await _handle_grab_release(_command(), _ctx(db))
     assert await _grab_history(db) == []
+
+
+class _CountingClient(_StubClient):
+    """Stub that counts how many times ``download`` is invoked."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.calls = 0
+
+    async def download(self, request) -> str:
+        self.calls += 1
+        return await super().download(request)
+
+
+@pytest.mark.req("FRG-DL-006")
+@pytest.mark.req("FRG-DL-002")
+async def test_orphan_rerun_does_not_redownload_the_same_release(db, monkeypatch):
+    # The side-effecting download() commits before grab_history; an orphan re-run
+    # of the `started` grab command must NOT re-download (the double-grab window).
+    client = _CountingClient(download_id="nzo-once")
+    _patch_resolution(monkeypatch, client=client)
+    command = _command()
+
+    await _handle_grab_release(command, _ctx(db))
+    await _handle_grab_release(command, _ctx(db))  # orphan re-run of same command
+
+    assert client.calls == 1  # downloaded exactly once
+    rows = await _grab_history(db)
+    assert len(rows) == 1 and rows[0].download_id == "nzo-once"
+
+
+@pytest.mark.req("FRG-DL-006")
+@pytest.mark.req("FRG-DDL-001")
+async def test_ddl_grab_triggers_queue_drain_and_stamps_client_id(db, monkeypatch):
+    _patch_resolution(
+        monkeypatch, client=_StubClient(download_id="ddl-1", client_id=9), protocol="ddl"
+    )
+    commands = FakeCommands()
+    await _handle_grab_release(_command(), _ctx(db, commands))
+
+    rows = await _grab_history(db)
+    assert rows[0].client_id == 9  # per the contract, not a silent None
+    names = [c[0] for c in commands.enqueued]
+    assert "track-downloads" in names
+    assert "process-ddl-queue" in names  # DDL starts immediately, not on the timer
+
+
+@pytest.mark.req("FRG-DDL-001")
+async def test_usenet_grab_does_not_trigger_ddl_drain(db, monkeypatch):
+    _patch_resolution(monkeypatch, client=_StubClient(download_id="nzo-1"))
+    commands = FakeCommands()
+    await _handle_grab_release(_command(), _ctx(db, commands))
+    names = [c[0] for c in commands.enqueued]
+    assert "process-ddl-queue" not in names
 
 
 @pytest.mark.req("FRG-DL-006")
