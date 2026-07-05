@@ -16,7 +16,7 @@ client; every download is tracked to "awaiting import" (or failed → blockliste
 re-searched); the queue endpoint reflects tracked state only.
 
 **Non-Goals:** import execution + client cleanup (change 6: FRG-DL-009/010), SAB
-retry passthrough (B), packs/extraction/Cloudflare/mirrors (B), torrents (M2), UI (7).
+retry passthrough (B), packs/extraction/Cloudflare/mirrors (B), torrents (B), UI (7).
 
 ## Decisions
 

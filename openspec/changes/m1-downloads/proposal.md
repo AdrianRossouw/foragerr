@@ -65,7 +65,7 @@ None — all requirements exist in the approved baseline specs.
 - No SABnzbd retry passthrough (FRG-DL-014, B), no pack/booktype recognition
   (FRG-DDL-014, B), no archive extraction (FRG-DDL-015, B — DDL downloads land as
   single files in M1), no Cloudflare/FlareSolverr (FRG-DDL-016, B), no mirror hosts
-  (FRG-DDL-017, B), no torrents (M2).
+  (FRG-DDL-017, B), no torrents (parked to B per the 2026-07-05 milestone reshape).
 - No UI (change 7); queue is API-only here.
 
 ## Impact
