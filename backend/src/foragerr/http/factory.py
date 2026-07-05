@@ -154,11 +154,16 @@ class OutboundClient:
         params: Mapping[str, Any] | None = None,
         content: bytes | str | None = None,
         max_bytes: int | None = None,
+        hop_check: "Callable[[httpx.URL], None] | None" = None,
     ) -> FetchResult:
         """Issue a request with the manual, validated redirect walk.
 
         ``max_bytes`` may LOWER the response byte cap for this call; the
-        configured cap is the ceiling. Raises
+        configured cap is the ceiling. ``hop_check`` is an OPTIONAL per-hop
+        validator (raising to refuse) run on every hop's URL in addition to the
+        always-on SSRF egress policy — the DDL link-resolution fetches pass their
+        per-provider host allowlist here so a scraped page's GET + redirects are
+        confined to allowed hosts (FRG-DDL-012). Raises
         :class:`~foragerr.http.errors.EgressPolicyError`,
         :class:`~foragerr.http.errors.TooManyRedirectsError`,
         :class:`~foragerr.http.errors.ResponseTooLargeError`, or the
@@ -168,7 +173,8 @@ class OutboundClient:
         if max_bytes is not None:
             cap = min(cap, max_bytes)
         response, final_url = await self._open_final(
-            method, url, headers=headers, params=params, content=content
+            method, url, headers=headers, params=params, content=content,
+            hop_check=hop_check,
         )
         try:
             return await self._read_bounded(response, cap, final_url)

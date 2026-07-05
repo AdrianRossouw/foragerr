@@ -24,6 +24,7 @@ tracked-download view — never a second user-facing queue.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass
@@ -172,21 +173,45 @@ class DdlQueueEngine:
         return True
 
     async def _claim_next(self) -> int | None:
+        """Claim the oldest queued row with a status-guarded conditional UPDATE.
+
+        The ``WHERE status='queued'`` guard + rowcount check makes the claim
+        self-defending: two concurrent claimants can never take the same row,
+        regardless of the size-1 pool invariant (pairs with the abort re-checks).
+        """
         now = utcnow()
         async with self._db.write_session() as session:
-            row = (
+            row_id = (
                 await session.execute(
-                    select(DdlQueueRow)
+                    select(DdlQueueRow.id)
                     .where(DdlQueueRow.status == STATUS_QUEUED)
                     .order_by(DdlQueueRow.id.asc())
                     .limit(1)
                 )
             ).scalar_one_or_none()
-            if row is None:
+            if row_id is None:
                 return None
-            row.status = STATUS_DOWNLOADING
-            row.updated_at = now
-            return row.id
+            result = await session.execute(
+                update(DdlQueueRow)
+                .where(
+                    DdlQueueRow.id == row_id,
+                    DdlQueueRow.status == STATUS_QUEUED,
+                )
+                .values(status=STATUS_DOWNLOADING, updated_at=now)
+            )
+            if (result.rowcount or 0) == 0:
+                return None  # a concurrent claimant won the race for this row
+            return row_id
+
+    async def _is_downloading(self, row_id: int) -> bool:
+        """Whether the row is still ``downloading`` (not aborted/removed)."""
+        async with self._db.read_session() as session:
+            status = (
+                await session.execute(
+                    select(DdlQueueRow.status).where(DdlQueueRow.id == row_id)
+                )
+            ).scalar_one_or_none()
+        return status == STATUS_DOWNLOADING
 
     async def _process_item(self, row_id: int) -> None:
         """Run per-host failover for one item until success or exhaustion."""
@@ -199,9 +224,13 @@ class DdlQueueEngine:
 
         # Bound the loop by the number of distinct hosts (failed set grows).
         for _ in range(len(Host) + 1):
+            # Re-check the claim each iteration: a concurrent abort/remove
+            # (FRG-DDL-007) must win and not be clobbered by an in-flight attempt.
+            if not await self._is_downloading(row_id):
+                return
             try:
                 candidates = await self._resolve_candidates(
-                    snapshot.post_url, provider_base, failed
+                    snapshot.post_url, provider_base, failed, allowlist
                 )
             except AdapterDrift as drift:
                 await self._mark_failed(row_id, f"post-page drift: {drift.reason}")
@@ -221,9 +250,13 @@ class DdlQueueEngine:
                     row_id, snapshot, picked, allowlist
                 )
             except DdlDownloadError as exc:
+                if not await self._is_downloading(row_id):
+                    return  # aborted mid-attempt — leave the abort in place
                 failed.add(picked.link_type)
                 await self._record_host_failure(row_id, sorted(failed), str(exc))
                 continue
+            if not await self._is_downloading(row_id):
+                return  # aborted just as the bytes landed — do not mark completed
             await self._complete(row_id, snapshot, picked, verified_path, received)
             return
         await self._mark_failed(row_id, "all hosts exhausted")
@@ -252,7 +285,10 @@ class DdlQueueEngine:
             allowlist=allowlist,
             search_expected=snapshot.expected_size,
         )
-        verified = verify_file(outcome.partial_path)
+        # verify_file opens the archive (zipfile.namelist) — blocking CPU/disk
+        # work that must not stall the shared event loop for a large .cbz
+        # (FRG-DDL-010). Offload it and the final rename to a worker thread.
+        verified = await asyncio.to_thread(verify_file, outcome.partial_path)
         name = dl.safe_output_name(
             series_title=await self._series_title(snapshot.series_id),
             issue_number=await self._issue_number(snapshot.issue_id),
@@ -262,16 +298,20 @@ class DdlQueueEngine:
             fallback_title=snapshot.title,
         )
         final_path = dl.resolve_output_path(self._staging, name)
-        outcome.partial_path.replace(final_path)
+        await asyncio.to_thread(outcome.partial_path.replace, final_path)
         return final_path, outcome.bytes_received
 
     async def _resolve_candidates(
-        self, post_url: str, provider_base: str, failed: set[str]
+        self,
+        post_url: str,
+        provider_base: str,
+        failed: set[str],
+        allowlist: dl.AllowList,
     ) -> list[LinkCandidate]:
         """Fetch the post page LIVE, enumerate links, drop failed/paywall, order
         (FRG-DDL-003/004). Paywall/shortener links are rejected at parse and
         never fetched."""
-        html = await self._fetch_post_page(post_url)
+        html = await self._fetch_post_page(post_url, allowlist)
         candidates: list[LinkCandidate] = []
         for raw in parse_post_page(html, base_url=provider_base):
             host = classify_host(raw.host_label)
@@ -297,10 +337,14 @@ class DdlQueueEngine:
             prefer_upscaled=self._prefer_upscaled,
         )
 
-    async def _fetch_post_page(self, post_url: str) -> str:
+    async def _fetch_post_page(self, post_url: str, allowlist: dl.AllowList) -> str:
         client = self._factory.external()
         try:
-            result = await client.get(post_url, max_bytes=POST_PAGE_MAX_BYTES)
+            result = await client.get(
+                post_url,
+                max_bytes=POST_PAGE_MAX_BYTES,
+                hop_check=dl.build_hop_check(allowlist),
+            )
         except OutboundHttpError as exc:
             raise DdlDownloadError(f"post page fetch refused: {exc}") from exc
         except Exception as exc:  # noqa: BLE001

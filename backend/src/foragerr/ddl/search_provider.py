@@ -141,12 +141,17 @@ class _ProviderBackoffEngaged(Exception):
 
 
 async def _fetch_page(
-    factory: HttpClientFactory, url: str
+    factory: HttpClientFactory, url: str, hop_check=None
 ) -> str:
-    """Fetch one search page, mapping HTTP/transport faults to back-off."""
+    """Fetch one search page, mapping HTTP/transport faults to back-off.
+
+    ``hop_check`` is the per-provider host allowlist validator (FRG-DDL-012): a
+    hostile search-page response cannot steer the GET or its redirects to an
+    off-allowlist public host.
+    """
     client = factory.external()
     try:
-        result = await client.get(url)
+        result = await client.get(url, hop_check=hop_check)
     except OutboundHttpError as exc:
         raise _ProviderBackoffEngaged(f"page fetch refused: {exc}") from exc
     except Exception as exc:  # noqa: BLE001 — httpx types can't be named here
@@ -179,6 +184,7 @@ async def _walk_tier(
     sleep: Callable[[float], Awaitable[None]] | None,
     clock,
     rand,
+    hop_check=None,
 ) -> list[ReleaseCandidate]:
     """Walk one query tier's pages, deduping + skipping roundups."""
     candidates: list[ReleaseCandidate] = []
@@ -190,7 +196,7 @@ async def _walk_tier(
         throttle_kwargs["sleep"] = sleep
     while url is not None and pages < max_pages:
         await politeness.throttle(config_dir, row.id, **throttle_kwargs)
-        html = await _fetch_page(factory, url)
+        html = await _fetch_page(factory, url, hop_check)
         page = parse_search_page(html, base_url=base_url)  # may raise AdapterDrift
         for post in page.posts:
             if post.post_url in seen_urls:
@@ -240,6 +246,11 @@ async def search_getcomics(
     cfg_dir = Path(config_dir) if config_dir is not None else resolve_config_dir()
     rand = rand or _random.random
     seen_urls: set[str] = set()
+    # Confine every search-page GET + redirect hop to the provider's host
+    # allowlist (FRG-DDL-012) — the same gate the file download enforces.
+    from foragerr.ddl.download import build_allowlist, build_hop_check
+
+    hop_check = build_hop_check(build_allowlist(settings.base_url))
 
     try:
         for tier, query in ladder:
@@ -256,6 +267,7 @@ async def search_getcomics(
                 sleep=sleep,
                 clock=clock,
                 rand=rand,
+                hop_check=hop_check,
             )
             outcome.candidates.extend(tier_candidates)
             # Escalate only when a tier produced nothing (FRG-DDL-002).

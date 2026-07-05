@@ -62,10 +62,15 @@ class AllowList:
     scheme: str = "https"
 
     def allows(self, url: str) -> bool:
+        """Whether ``url``'s scheme+host is on the allowlist (parses the URL)."""
         parts = urlsplit(url)
         return self._allows(parts.scheme, (parts.hostname or "").lower())
 
     def allows_parts(self, scheme: str, host: str) -> bool:
+        """Whether a pre-split ``scheme``/``host`` pair is on the allowlist.
+
+        Used by the streaming ``hop_check`` (which is handed the scheme/host off
+        each redirect hop's URL object) so no URL re-parse is needed per hop."""
         return self._allows(scheme, (host or "").lower())
 
     def _allows(self, scheme: str, host: str) -> bool:
@@ -99,6 +104,16 @@ def _hop_check(allowlist: AllowList):
             )
 
     return check
+
+
+def build_hop_check(allowlist: AllowList):
+    """Public per-provider hop validator (FRG-DDL-012).
+
+    Used by the file download (streaming ``hop_check``) AND by the scraped-page
+    link-resolution fetches (post page + search page) so EVERY DDL HTTP fetch —
+    not just the file transfer — enforces the provider scheme+host allowlist on
+    every redirect hop, on top of the always-on SSRF egress policy."""
+    return _hop_check(allowlist)
 
 
 def safe_output_name(
@@ -287,11 +302,19 @@ async def _consume_stream(
         offset = _content_range_offset(resp.headers.get("content-range"))
         if resp.status_code == 206 and offset == existing:
             mode, start = "ab", existing
-        else:
+        elif resp.status_code in (200, 206):
             # 200 full body, or a 206 whose offset does not match: the server
             # did not honor our Range — restart from zero, NEVER append (the
             # resume-trust flaw, mylar-ddl §3.5).
             mode, start = "wb", 0
+        else:
+            # A non-2xx response on resume (403/416/500/…) is an ERROR page, not
+            # file content — never stream its body into the partial. Fail fast so
+            # the queue engine fails over to the next host (FRG-DDL-009).
+            raise DdlDownloadError(
+                f"unexpected HTTP {resp.status_code} on resume "
+                "(Range not honored, error response); failing over"
+            )
     else:
         if resp.status_code != 200:
             raise DdlDownloadError(
@@ -364,6 +387,7 @@ __all__ = [
     "AllowList",
     "DownloadOutcome",
     "build_allowlist",
+    "build_hop_check",
     "download_link",
     "partial_path_for",
     "resolve_output_path",
