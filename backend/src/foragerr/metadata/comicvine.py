@@ -28,7 +28,7 @@ from functools import lru_cache
 from typing import Any, Callable, Mapping
 
 from foragerr.db.migrations import app_version
-from foragerr.http import HttpClientFactory, OutboundHttpError
+from foragerr.http import HttpClientFactory, OutboundHttpError, parse_retry_after
 from foragerr.metadata.errors import (
     ComicVineAuthError,
     ComicVineError,
@@ -296,7 +296,7 @@ class ComicVineClient:
                 f"comicvine authentication failed (HTTP {code})"
             )
         if code in (420, 429):
-            retry_after = _retry_after(result.headers)
+            retry_after = parse_retry_after(result.headers)
             gate().note_rate_limited(retry_after)
             raise ComicVineRateLimited(
                 f"comicvine rate-limited (HTTP {code})", retry_after=retry_after
@@ -335,14 +335,3 @@ class ComicVineClient:
         raise ComicVineMalformedResponse(
             f"comicvine returned error status_code {status}"
         )
-
-
-def _retry_after(headers: Mapping[str, str]) -> float | None:
-    """Parse an integer-seconds ``Retry-After`` header, else ``None``."""
-    raw = headers.get("retry-after")
-    if raw is None:
-        return None
-    raw = raw.strip()
-    if raw.isdigit():
-        return float(raw)
-    return None

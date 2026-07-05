@@ -73,32 +73,32 @@ Milestones: `M1` vertical slice · `M2` torrents + streaming/quality clusters ·
 | FRG-ARC-008 | CBL reading-list import | arc | approved | B |
 | FRG-ARC-009 | Arc directory materialization | arc | approved | B |
 | FRG-ARC-010 | Arcs in OPDS (boundary requirement) | arc | approved | B |
-| FRG-IDX-001 | Indexer configuration model | idx | approved | M1 |
-| FRG-IDX-002 | Per-indexer usage toggles | idx | approved | M1 |
-| FRG-IDX-003 | Connectivity test and dynamic settings schema | idx | approved | M1 |
-| FRG-IDX-004 | Newznab capabilities probe | idx | approved | M1 |
-| FRG-IDX-005 | Newznab query generation | idx | approved | M1 |
-| FRG-IDX-006 | Newznab response parsing and error mapping | idx | approved | M1 |
-| FRG-IDX-007 | Release normalization and de-duplication | idx | approved | M1 |
-| FRG-IDX-008 | Per-indexer request rate limiting | idx | approved | M1 |
-| FRG-IDX-009 | Usenet retention parameter | idx | approved | M1 |
-| FRG-IDX-010 | Indexer failure back-off and recovery | idx | approved | M1 |
+| FRG-IDX-001 | Indexer configuration model | idx | implemented | M1 |
+| FRG-IDX-002 | Per-indexer usage toggles | idx | implemented | M1 |
+| FRG-IDX-003 | Connectivity test and dynamic settings schema | idx | implemented | M1 |
+| FRG-IDX-004 | Newznab capabilities probe | idx | implemented | M1 |
+| FRG-IDX-005 | Newznab query generation | idx | implemented | M1 |
+| FRG-IDX-006 | Newznab response parsing and error mapping | idx | implemented | M1 |
+| FRG-IDX-007 | Release normalization and de-duplication | idx | implemented | M1 |
+| FRG-IDX-008 | Per-indexer request rate limiting | idx | implemented | M1 |
+| FRG-IDX-009 | Usenet retention parameter | idx | implemented | M1 |
+| FRG-IDX-010 | Indexer failure back-off and recovery | idx | implemented | M1 |
 | FRG-IDX-011 | RSS gap detection | idx | approved | B |
 | FRG-IDX-012 | Torznab indexer support | idx | approved | M2 |
-| FRG-SRCH-001 | Unified decision engine with explainable rejections | srch | approved | M1 |
-| FRG-SRCH-002 | Release title parsing | srch | approved | M1 |
-| FRG-SRCH-003 | Release-to-library mapping | srch | approved | M1 |
-| FRG-SRCH-004 | Core specification set | srch | approved | M1 |
+| FRG-SRCH-001 | Unified decision engine with explainable rejections | srch | implemented | M1 |
+| FRG-SRCH-002 | Release title parsing | srch | implemented | M1 |
+| FRG-SRCH-003 | Release-to-library mapping | srch | implemented | M1 |
+| FRG-SRCH-004 | Core specification set | srch | implemented | M1 |
 | FRG-SRCH-005 | RSS-mode specifications | srch | approved | B |
-| FRG-SRCH-006 | Search-match specifications | srch | approved | M1 |
-| FRG-SRCH-007 | Prioritization comparator chain | srch | approved | M1 |
-| FRG-SRCH-008 | Automatic search commands | srch | approved | M1 |
-| FRG-SRCH-009 | Scheduled backlog search with politeness | srch | approved | M1 |
-| FRG-SRCH-010 | Search result de-duplication | srch | approved | M1 |
+| FRG-SRCH-006 | Search-match specifications | srch | implemented | M1 |
+| FRG-SRCH-007 | Prioritization comparator chain | srch | implemented | M1 |
+| FRG-SRCH-008 | Automatic search commands | srch | implemented | M1 |
+| FRG-SRCH-009 | Scheduled backlog search with politeness | srch | implemented | M1 |
+| FRG-SRCH-010 | Search result de-duplication | srch | implemented | M1 |
 | FRG-SRCH-011 | RSS sync | srch | approved | B |
 | FRG-SRCH-012 | Delay profile | srch | approved | B |
 | FRG-SRCH-013 | Pending release queue | srch | approved | B |
-| FRG-SRCH-014 | Interactive search | srch | approved | M1 |
+| FRG-SRCH-014 | Interactive search | srch | implemented | M1 |
 | FRG-DL-001 | Download client abstraction | dl | approved | M1 |
 | FRG-DL-002 | Client configuration and selection | dl | approved | M1 |
 | FRG-DL-003 | SABnzbd add via file upload | dl | approved | M1 |
@@ -187,8 +187,8 @@ Milestones: `M1` vertical slice · `M2` torrents + streaming/quality clusters ·
 | FRG-API-005 | Command endpoint for background actions | api | implemented | M1 |
 | FRG-API-006 | Paging envelope for list endpoints | api | implemented | M1 |
 | FRG-API-007 | Queue endpoint backed by tracked downloads | api | approved | M1 |
-| FRG-API-008 | Release endpoint: interactive search with cached grab | api | approved | M1 |
-| FRG-API-009 | Provider schema and test endpoints | api | approved | M1 |
+| FRG-API-008 | Release endpoint: interactive search with cached grab | api | implemented | M1 |
+| FRG-API-009 | Provider schema and test endpoints | api | implemented | M1 |
 | FRG-API-010 | WebSocket resource-change push | api | approved | M1 |
 | FRG-API-011 | History endpoint | api | approved | M2 |
 | FRG-API-012 | Wanted/missing endpoint | api | approved | M2 |
@@ -286,17 +286,17 @@ Milestones: `M1` vertical slice · `M2` torrents + streaming/quality clusters ·
 | FRG-NFR-002 | library scan throughput | nfr | approved | M2 |
 | FRG-NFR-003 | UI responsiveness at library scale | nfr | approved | M2 |
 | FRG-NFR-004 | ComicVine rate limiting | nfr | implemented | M1 |
-| FRG-NFR-005 | indexer and DDL politeness with failure backoff | nfr | approved | M1 |
+| FRG-NFR-005 | indexer and DDL politeness with failure backoff | nfr | implemented | M1 |
 | FRG-NFR-006 | bounded, verified outbound requests | nfr | implemented | M1 |
 | FRG-NFR-007 | crash-safe queues and idempotent work | nfr | approved | M2 |
 | FRG-NFR-008 | secret redaction in logs and errors | nfr | implemented | M1 |
 | FRG-NFR-009 | configuration validation at startup | nfr | implemented | M1 |
-| FRG-NFR-010 | resilience to external-service failure | nfr | approved | M1 |
+| FRG-NFR-010 | resilience to external-service failure | nfr | implemented | M1 |
 | FRG-NFR-011 | observable component health | nfr | approved | M2 |
 | FRG-NFR-012 | untrusted external content handling | nfr | implemented | M1 |
 | FRG-NFR-013 | resource footprint | nfr | approved | B |
 | FRG-SEC-001 | SSRF egress controls for server-side fetches | sec | implemented | M1 |
-| FRG-SEC-002 | Hardened XML parsing (XXE / entity-expansion) | sec | approved | M1 |
+| FRG-SEC-002 | Hardened XML parsing (XXE / entity-expansion) | sec | implemented | M1 |
 | FRG-SEC-003 | Archive-processing safety (bomb / zip-slip limits) | sec | approved | M1 |
 | FRG-SEC-004 | Filesystem path confinement (safe-join) | sec | approved | M1 |
 | FRG-SEC-005 | CSRF stance and WebSocket Origin validation | sec | approved | M3 |

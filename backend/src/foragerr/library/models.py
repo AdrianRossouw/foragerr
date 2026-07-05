@@ -108,6 +108,12 @@ class SeriesRow(Base):
     #: JSON; cleared once the add chain completes (decision 3, change 3).
     #: Plain `Text`: internally-generated JSON, not external free text.
     add_options: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: User-editable alternate search names / aliases as a canonical-JSON
+    #: array of raw user strings (FRG-SRCH-003). Consumed by the search
+    #: decision engine's release-to-library mapping (normalized at context
+    #: build time). `None` means no aliases. User-maintained only — there is
+    #: no external alias feed. Plain `Text`: internally-serialized JSON.
+    aliases: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     issues: Mapped[list["IssueRow"]] = relationship(
         back_populates="series", cascade="all, delete-orphan", passive_deletes=True

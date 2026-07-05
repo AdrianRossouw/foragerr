@@ -27,6 +27,8 @@ from foragerr.library.flows._common import (
     SeriesNotFoundError,
     SeriesValidationError,
     cover_paths,
+    encode_aliases,
+    validate_aliases,
     validate_monitor_new_items,
 )
 
@@ -42,15 +44,21 @@ async def edit_series(
     format_profile_id: int | None = None,
     root_folder_id: int | None = None,
     path: str | None = None,
+    aliases: list[str] | None = None,
 ) -> SeriesRow:
     """Update only the supplied fields of a series (FRG-SER-014).
 
     A supplied ``path`` must resolve under a registered root folder
     (:class:`SeriesValidationError` otherwise, row unchanged) and triggers a
-    directory rename in the same transaction as the row update.
+    directory rename in the same transaction as the row update. ``aliases``
+    (when supplied) REPLACES the stored alternate search names wholesale — the
+    user-editable alias list the search engine maps releases through
+    (FRG-SRCH-003); pass ``[]`` to clear them.
     """
     if monitor_new_items is not None:
         validate_monitor_new_items(monitor_new_items)
+    if aliases is not None:
+        validate_aliases(aliases)
 
     async with db.write_session() as session:
         series = await repo.get_series(session, series_id)
@@ -111,6 +119,8 @@ async def edit_series(
             series.monitor_new_items = monitor_new_items
         if format_profile_id is not None:
             series.format_profile_id = format_profile_id
+        if aliases is not None:
+            series.aliases = encode_aliases(aliases)
 
     return series
 

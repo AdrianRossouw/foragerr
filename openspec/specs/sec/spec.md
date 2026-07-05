@@ -46,10 +46,25 @@ All parsing of untrusted XML — Newznab/Torznab RSS and error responses, CBL re
 - **Source**: mylar-comicvine.md §4 (minidom/expat entity-expansion note) + STRIDE analysis (Newznab responses are untrusted XML; FRG-IDX response parsing states no hardening; CBL noted only in ARC Notes). Gap G-2; RISK-024, RISK-035, RISK-037.
 - **Notes**: ComicVine moves to JSON (removing that XML surface); the live residual is the indexer RSS/XML parser (M1) and CBL (backlog). Prefer `defusedxml` or an equivalently configured parser project-wide.
 
-#### Scenario: Baseline acceptance
+#### Scenario: Billion-laughs / quadratic-blowup entity expansion is rejected without resource exhaustion
 
-- **WHEN** this requirement is verified against the implementation
-- **THEN** A crafted Newznab RSS response and a crafted CBL file, each containing an external entity reference and a nested-entity bomb, parse to a bounded failure with no outbound entity fetch and no memory blow-up; a static check shows no XML parser constructed with entity resolution enabled.
+- **WHEN** a Newznab RSS response containing a nested-entity bomb (billion-laughs) or a quadratic-blowup entity-expansion payload is fed to the indexer XML parser
+- **THEN** parsing terminates with a typed parse failure (not a crash or hang) and the process does not exhaust memory or CPU beyond bounded limits, and no partial result is returned to the caller
+
+#### Scenario: External entity (file / URL) resolution is disabled — no exfiltration
+
+- **WHEN** a Newznab RSS response references an external entity pointing at a local file path (e.g. `file:///etc/passwd`) or an outbound URL
+- **THEN** the parser resolves no external entity: no file is read and no outbound network fetch is issued, and the document is rejected as a typed parse failure
+
+#### Scenario: Oversized document and junk bytes fail as typed parse errors
+
+- **WHEN** an indexer response exceeds the outbound HTTP client factory's byte cap, or the body is non-XML junk bytes
+- **THEN** the read is bounded at the factory byte cap and the parse fails with a typed error, with no memory blow-up, no crash, and no network fetch or file read
+
+#### Scenario: No XML parser is constructed with entity resolution enabled
+
+- **WHEN** the codebase is statically checked for XML parser construction
+- **THEN** every untrusted-XML parse site is routed through the hardened (defusedxml-configured) parser with DTD/DOCTYPE processing and external-entity resolution disabled, and no parser is constructed with entity resolution enabled
 
 ### Requirement: FRG-SEC-003 — Archive-processing safety (bomb / zip-slip limits)
 

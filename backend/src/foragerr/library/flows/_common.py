@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, Literal
@@ -24,6 +25,8 @@ from foragerr.commands.registry import BaseCommand, register_command
 from foragerr.config import Settings
 from foragerr.http import HttpClientFactory
 from foragerr.library.models import MONITOR_NEW_ITEMS_POLICIES
+
+logger = logging.getLogger("foragerr.library.flows")
 
 # --- exceptions -------------------------------------------------------------
 
@@ -85,6 +88,82 @@ def encode_add_options(
         },
         sort_keys=True,
     )
+
+
+# --- alias codec (FRG-SRCH-003) ---------------------------------------------
+
+#: Cap on the number of user aliases stored per series — a small, sane bound so
+#: the JSON column can never grow unbounded from a bad edit.
+MAX_SERIES_ALIASES = 50
+
+#: Cap on the length of a single alias — a matching key is short; a multi-KB
+#: "alias" is a bad edit, not a search name, so it is rejected before storage.
+MAX_ALIAS_LENGTH = 200
+
+
+def encode_aliases(aliases: list[str] | tuple[str, ...] | None) -> str | None:
+    """Canonical-JSON encoding of user aliases for ``series.aliases``.
+
+    Strips whitespace, drops blank entries, and de-duplicates while preserving
+    first-seen order. Returns ``None`` (SQL NULL) for an empty result so an
+    aliasless series stores nothing rather than an empty array.
+    """
+    if not aliases:
+        return None
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for raw in aliases:
+        text = (raw or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        cleaned.append(text)
+    if not cleaned:
+        return None
+    return json.dumps(cleaned, ensure_ascii=False)
+
+
+def decode_aliases(
+    raw: str | None, *, series_id: int | None = None
+) -> tuple[str, ...]:
+    """Decode ``series.aliases`` into the raw user strings (empty when unset).
+
+    A corrupt ``aliases`` value (invalid JSON) degrades to ``()`` — the same
+    path a non-list value already takes — with a warning, so one bad row can
+    never wedge the series list or a search that reads aliases (FRG-SRCH-003).
+    """
+    if not raw:
+        return ()
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        logger.warning(
+            "malformed series aliases JSON; treating as no aliases",
+            extra={"series_id": series_id},
+        )
+        return ()
+    if not isinstance(data, list):
+        return ()
+    return tuple(str(item) for item in data)
+
+
+def validate_aliases(aliases: list[str]) -> None:
+    """Reject an alias edit that exceeds the stored caps (FRG-SRCH-003).
+
+    Two bounds: the number of aliases, and the length of any single alias — a
+    matching key is short, so a multi-KB entry is a bad edit, not a name.
+    """
+    if len(aliases) > MAX_SERIES_ALIASES:
+        raise SeriesValidationError(
+            f"too many aliases ({len(aliases)}); at most "
+            f"{MAX_SERIES_ALIASES} alternate search names are allowed"
+        )
+    for alias in aliases:
+        if len(alias) > MAX_ALIAS_LENGTH:
+            raise SeriesValidationError(
+                f"alias too long ({len(alias)} chars); at most "
+                f"{MAX_ALIAS_LENGTH} characters are allowed per alias"
+            )
 
 
 @dataclass(frozen=True)
@@ -196,11 +275,13 @@ class ScanSeriesCommand(BaseCommand):
 
 @register_command
 class SeriesSearchCommand(BaseCommand):
-    """Search for missing monitored issues (FRG-SER-005).
+    """Search every wanted issue of one series (FRG-SER-005 / FRG-SRCH-008).
 
-    Runs on the ``search`` workload pool. The actual search logic lands in
-    change 4 (m1-search-indexers); until then the handler is an inert stub so
-    dedup/priority/job-history semantics are already real."""
+    Runs on the ``search`` workload pool. The handler (registered in
+    :mod:`foragerr.search_ops.commands`, change 4) fans each wanted issue
+    through the shared search pipeline and records a grab hand-off for the best
+    approved release per issue; the ``search`` pool size of 1 serializes indexer
+    politeness across the walk."""
 
     name: Literal["series-search"] = "series-search"
     workload_class: ClassVar[str] = "search"

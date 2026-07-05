@@ -1,10 +1,12 @@
-"""Inert ``series-search`` handler (FRG-SER-005).
+"""The ``series-search`` command handler (FRG-SER-005, FRG-SRCH-008).
 
-The add flow can enqueue a search for missing monitored issues, but the
-actual indexer/DDL search lands in change 4 (m1-search-indexers). Registering
-the command + a recognised, inert handler now means the enqueue/dedup/priority
-and job-history semantics are already real and observable through the command
-API — only the search body is deferred.
+The add flow enqueues ``series-search`` for a series' missing monitored issues.
+The handler is registered here — the single registration site the app already
+imports via ``foragerr.library.flows`` — but the live search body lives in the
+integration area ``foragerr.search_ops`` (change 4). It is imported lazily
+inside the handler so the library-flows package carries no import-time
+dependency on ``search_ops`` (which itself reads library flows), keeping the two
+packages free of an import cycle.
 """
 
 from __future__ import annotations
@@ -19,4 +21,8 @@ from foragerr.library.flows._common import SeriesSearchCommand
 async def _handle_series_search(
     command: SeriesSearchCommand, ctx: HandlerContext
 ) -> str:
-    return "search deferred to change 4 (m1-search-indexers)"
+    # Lazy import: search_ops depends on library.flows, so importing it at
+    # module load would form a cycle. Deferring to call time breaks it.
+    from foragerr.search_ops.commands import run_series_search
+
+    return await run_series_search(command, ctx)
