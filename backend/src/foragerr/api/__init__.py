@@ -1,16 +1,17 @@
 """foragerr API area: uniform error handling, paging, health, version, and
-command transport (FRG-API-001, FRG-API-002, FRG-DEP-007, FRG-DEP-010,
+command/series/issues transport (FRG-API-001..006, FRG-DEP-007, FRG-DEP-010,
 FRG-AUTH-001).
 
 :func:`register_api` is the app factory's extension point (mirrors
 ``register_database``/``register_scheduler``): it installs the uniform-shape
-exception handlers, mounts ``/api/v1/system/status`` and
-``/api/v1/command*``, mounts root-level ``/health``, and logs the version
-line at startup.
+exception handlers, mounts ``/api/v1/system/status``, ``/api/v1/command*``,
+``/api/v1/series*`` and ``/api/v1/issues*``, mounts root-level ``/health``,
+and logs the version line at startup.
 
 No auth (FRG-AUTH-001, M1 accepted risk): this module registers no
 middleware and no auth dependency on the app or on any router — every route
-mounted here responds credential-free by construction.
+mounted here (including the series/issues routers) responds credential-free
+by construction.
 """
 
 from __future__ import annotations
@@ -21,6 +22,8 @@ from foragerr.api.command import router as command_router
 from foragerr.api.errors import ApiError, register_error_handlers
 from foragerr.api.health import cache_migration_head
 from foragerr.api.health import router as health_router
+from foragerr.api.issues import router as issues_router
+from foragerr.api.series import router as series_router
 from foragerr.api.system import log_startup_version
 from foragerr.api.system import router as system_router
 
@@ -33,6 +36,8 @@ def register_api(app: FastAPI) -> None:
     api_router = APIRouter()
     api_router.include_router(system_router)
     api_router.include_router(command_router)
+    api_router.include_router(series_router)
+    api_router.include_router(issues_router)
     app.include_router(api_router, prefix="/api/v1")
 
     app.include_router(health_router)  # root level, NOT under /api/v1
