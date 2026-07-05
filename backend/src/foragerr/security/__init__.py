@@ -16,6 +16,12 @@ on:
 
 from __future__ import annotations
 
+from foragerr.security.archives import (
+    DEFAULT_ARCHIVE_LIMITS,
+    ArchiveLimits,
+    ArchiveReport,
+    inspect_archive,
+)
 from foragerr.security.paths import (
     PathConfinementError,
     safe_join,
@@ -23,7 +29,11 @@ from foragerr.security.paths import (
 )
 
 __all__ = [
+    "DEFAULT_ARCHIVE_LIMITS",
+    "ArchiveLimits",
+    "ArchiveReport",
     "PathConfinementError",
+    "inspect_archive",
     "safe_join",
     "safe_path_component",
 ]
