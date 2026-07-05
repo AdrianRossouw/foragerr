@@ -206,7 +206,7 @@ The parser SHALL recognize decimal issues (`15.5`, `.5`, `000.0000½` composites
 
 ### Requirement: FRG-IMP-009 — Alphanumeric issue suffixes and named issues
 
-The parser SHALL recognize issue numbers with alphanumeric suffixes from a configurable exception vocabulary (at minimum AU, AI, INH, NOW, BEY, MU, HU, LR, DEATHS, ALPHA, OMEGA, seasonal names, Director's Cut) in glued (`15A`, `027AU`), space-separated (`10 AI`), and dotted (`008.NOW`, incl. trailing `!`) forms, requiring a `#` anchor for pure-alpha issue names, while guarding single-letter suffixes against cover-variant and mid-title false positives.
+The parser SHALL recognize issue numbers with alphanumeric suffixes from a configurable exception vocabulary (at minimum AU, AI, INH, NOW, BEY, MU, HU, LR, DEATHS, ALPHA, OMEGA, seasonal names) in glued (`15A`, `027AU`), space-separated (`10 AI`), and dotted (`008.NOW`, incl. trailing `!`) forms, requiring a `#` anchor for pure-alpha issue names, while guarding single-letter suffixes against cover-variant and mid-title false positives. Multi-word designators such as Director's Cut SHALL be recognized from the vocabulary and classified as edition designators, not issue suffixes.
 
 - **Milestone**: M1
 - **Source**: MFP §2.3; MFP §4 item 5 (single-letter false positives); MFP §5 Issue numbers bullet 1.
