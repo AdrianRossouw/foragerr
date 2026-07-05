@@ -18,9 +18,10 @@ from sqlalchemy import select
 
 from foragerr.commands.registry import BaseCommand, register_command, register_handler
 from foragerr.commands.service import HandlerContext
-from foragerr.ddl.client import make_ddl_factory, staging_dir_for
+from foragerr.ddl.client import staging_dir_for
 from foragerr.ddl.links import parse_host_priority
 from foragerr.ddl.queue import DdlQueueEngine
+from foragerr.downloads import make_download_factory
 from foragerr.downloads.models import DownloadClientRow
 from foragerr.downloads.settings import BuiltinDdlSettings
 
@@ -71,7 +72,7 @@ def build_engine(ctx: HandlerContext, settings: BuiltinDdlSettings) -> DdlQueueE
     """Construct the queue engine from a handler context + DDL settings."""
     if ctx.settings is None:
         raise RuntimeError("process-ddl-queue requires a settings-bearing service")
-    factory = make_ddl_factory(ctx.settings)
+    factory = make_download_factory(ctx.settings)
     return DdlQueueEngine(
         ctx.db,
         http_factory=factory,

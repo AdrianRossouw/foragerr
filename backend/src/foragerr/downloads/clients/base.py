@@ -90,6 +90,17 @@ class DownloadClient(Protocol):
     client-side download id that becomes the tracking join key.
     """
 
+    @property
+    def client_id(self) -> int | None:
+        """The ``download_clients`` row id this client is bound to (FRG-DL-006).
+
+        Stamped onto every ``grab_history`` / ``tracked_downloads`` row so the
+        tracking loop can attribute a download to its owning client. Part of the
+        contract so a caller never reaches a private attribute; a client not
+        backed by a persisted row returns ``None``.
+        """
+        ...
+
     async def test(self) -> ClientTestResult:
         """Probe connectivity + credentials without changing any state."""
         ...

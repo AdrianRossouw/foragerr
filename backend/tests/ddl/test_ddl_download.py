@@ -136,6 +136,25 @@ async def test_content_range_offset_mismatch_forces_restart(tmp_path):
     assert outcome.bytes_received == len(body)
 
 
+@pytest.mark.req("FRG-DDL-009")
+async def test_resume_error_status_fails_fast_without_writing_body(tmp_path):
+    body = make_cbz()
+    prefix = len(body) // 3
+    partial = partial_path_for(_staging(tmp_path), 16)
+    partial.write_bytes(body[:prefix])  # a pre-existing partial → Range request
+    # The server answers the Range request with a 403 error page.
+    error_page = b"<html>403 Forbidden</html>" + b"\x00" * 40_000
+    factory, _ = make_factory(
+        tmp_path, lambda req: httpx.Response(403, content=error_page)
+    )
+    with pytest.raises(DdlDownloadError):
+        await download_link(
+            factory=factory, url=DL_URL, partial_path=partial, allowlist=ALLOW
+        )
+    # The partial is untouched — the error body was never streamed into it.
+    assert partial.read_bytes() == body[:prefix]
+
+
 @pytest.mark.req("FRG-DDL-012")
 async def test_redirect_to_private_address_is_refused_ssrf(tmp_path):
     # A scraped link 302-redirecting to an internal address is refused by the

@@ -27,10 +27,10 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import ClassVar, Literal
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from foragerr.commands.registry import BaseCommand, register_command, register_handler
@@ -57,6 +57,7 @@ from foragerr.downloads.repo import (
     load_settings,
 )
 from foragerr.downloads.state import (
+    CHANGE5_DRIVEN_STATES,
     TRACKED_STATUS_ERROR,
     TRACKED_STATUS_OK,
     TRACKED_STATUS_WARNING,
@@ -267,6 +268,7 @@ async def reconcile_downloads(
     db,
     observations: list[ClientObservation],
     *,
+    polled_client_ids: set[int | None] | None = None,
     now: dt.datetime | None = None,
 ) -> None:
     """Upsert ``tracked_downloads`` from the current client observations.
@@ -274,15 +276,40 @@ async def reconcile_downloads(
     Matches each observation to its ``grab_history`` row by download id, drives
     the state machine (persisting transitions + ok/warning/error status + human
     messages, emitting a :class:`TrackedStateChanged` per change), and marks a
-    download that has vanished from every client (while still ``downloading``) as
-    ``failed_pending``. Restart-safe: all state lives in the row. The failure
-    loop runs separately in :func:`process_failures`.
+    download that has vanished from a SUCCESSFULLY-POLLED client (while still
+    ``downloading``) as ``failed_pending``. Restart-safe: all state lives in the
+    row. The failure loop runs separately in :func:`process_failures`.
+
+    ``polled_client_ids`` names the clients whose ``get_items()`` succeeded this
+    cycle (from :func:`collect_observations`). A ``downloading`` row is only
+    treated as vanished when its OWNING client was polled — a transient client
+    outage (SAB unreachable for one cycle) must NOT promote its whole in-flight
+    queue to ``failed`` and trigger a blocklist + re-search storm (FRG-DL-011).
+    ``None`` disables the gate (legacy callers that pass observations directly).
     """
     now = now or utcnow()
     seen: set[str] = {obs.item.download_id for obs in observations}
     async with db.write_session() as session:
+        # Bounded load (never the whole, unpruned table): the only rows this
+        # reconcile touches are those matching an observation (to update) and
+        # still-``downloading`` rows (for the vanished scan). A terminal row that
+        # is neither observed nor downloading was never mutated anyway, so
+        # skipping it is behaviour-identical. Backed by ix_tracked_downloads_state
+        # / _download_id.
         existing = (
-            (await session.execute(select(TrackedDownloadRow))).scalars().all()
+            (
+                await session.execute(
+                    select(TrackedDownloadRow).where(
+                        or_(
+                            TrackedDownloadRow.state
+                            == TrackedDownloadState.DOWNLOADING.value,
+                            TrackedDownloadRow.download_id.in_(seen),
+                        )
+                    )
+                )
+            )
+            .scalars()
+            .all()
         )
         by_key = {(r.client_id, r.download_id): r for r in existing}
 
@@ -290,6 +317,10 @@ async def reconcile_downloads(
             item = obs.item
             row = by_key.get((obs.client_id, item.download_id))
             target, status, messages = _classify_item(item)
+            # Change 5 owns only the download → import_pending|import_blocked|
+            # failed_pending subset; it must never drive a row to importing/
+            # imported (change 6's seam). CHANGE5_DRIVEN_STATES documents that.
+            assert target in CHANGE5_DRIVEN_STATES
             is_new = row is None
             if row is None:
                 row = await _create_tracked_row(session, obs, now)
@@ -320,12 +351,15 @@ async def reconcile_downloads(
                         ),
                     )
 
-        # Vanished-before-completion: a still-downloading row absent from every
-        # client this cycle is a failure (FRG-DL-011).
+        # Vanished-before-completion: a still-downloading row absent from its
+        # (successfully-polled) client this cycle is a failure (FRG-DL-011). A row
+        # whose owning client was NOT polled this cycle is skipped — an unreachable
+        # client's in-flight downloads are not "vanished", they are just unseen.
         for row in existing:
             if (
                 row.download_id not in seen
                 and row.state == TrackedDownloadState.DOWNLOADING.value
+                and (polled_client_ids is None or row.client_id in polled_client_ids)
             ):
                 row.state = TrackedDownloadState.FAILED_PENDING.value
                 row.status = TRACKED_STATUS_ERROR
@@ -372,6 +406,9 @@ async def _create_tracked_row(
         source = SOURCE_DDL if obs.protocol == PROTOCOL_DDL else SOURCE_INDEXER
         indexer_name = None
         messages = [message]
+    # Identity + state only; the caller's single _refresh_mutable_fields call
+    # (which runs for new and existing rows alike) owns the mutable per-poll
+    # fields (title/sizes/eta/path/encrypted), so they are not set twice here.
     row = TrackedDownloadRow(
         download_id=item.download_id,
         client_id=obs.client_id,
@@ -384,13 +421,7 @@ async def _create_tracked_row(
         series_id=series_id,
         issue_id=issue_id,
         indexer_name=indexer_name,
-        title=item.title,
-        category=item.category,
-        total_size=item.total_size,
-        remaining_size=item.remaining_size,
-        estimated_time=_estimated_seconds(item.estimated_time),
-        output_path=item.output_path,
-        encrypted=item.encrypted,
+        encrypted=False,
         added_at=now,
         updated_at=now,
     )
@@ -472,7 +503,13 @@ async def process_failures(
                 .all()
             )
             issues = _affected_issues(row, grabs)
-            _write_blocklist_row(session, row, grabs, now)
+            write_blocklist_row(
+                session,
+                row=row,
+                grabs=grabs,
+                now=now,
+                message="; ".join(decode_messages(row.status_messages)) or None,
+            )
             row.state = TrackedDownloadState.FAILED.value
             row.status = TRACKED_STATUS_ERROR
             row.updated_at = now
@@ -515,16 +552,28 @@ def _affected_issues(
     return tuple(pairs)
 
 
-def _write_blocklist_row(
+def write_blocklist_row(
     session: AsyncSession,
+    *,
     row: TrackedDownloadRow,
     grabs: list[GrabHistoryRow],
     now: dt.datetime,
+    message: str | None,
 ) -> None:
-    """Write the multi-field blocklist row for a failed release (FRG-DL-012)."""
+    """Write the multi-field blocklist row for a release (FRG-DL-012).
+
+    The ONE place the blocklist match key is built — shared by the automatic
+    failure loop (:func:`process_failures`) and the manual queue-remove path
+    (``api.queue``) so the key (guid+indexer+title+size+pub_date for usenet;
+    source URL/title for DDL) can never drift between them. ``grabs`` is the
+    download's ``grab_history`` rows (empty for an adopted/unknown download);
+    ``message`` is the caller's human explanation.
+    """
     first = grabs[0] if grabs else None
     protocol = first.protocol if first else row.protocol
-    is_ddl = protocol == SOURCE_DDL or (first and first.source == SOURCE_DDL)
+    # Compare protocol against PROTOCOL_DDL and source against SOURCE_DDL — both
+    # equal "ddl" but live in different namespaces (protocol vs provenance).
+    is_ddl = protocol == PROTOCOL_DDL or (first and first.source == SOURCE_DDL)
     session.add(
         BlocklistRow(
             series_id=row.series_id,
@@ -539,7 +588,7 @@ def _write_blocklist_row(
             source=(first.source if first else row.source),
             source_url=(first.link if (first and is_ddl) else None),
             download_id=row.download_id,
-            message="; ".join(decode_messages(row.status_messages)) or None,
+            message=message,
             created_at=now,
         )
     )
@@ -623,12 +672,17 @@ async def build_client_for_id(
 
 async def collect_observations(
     clients: list[tuple[DownloadClientRow, DownloadClient]],
-) -> list[ClientObservation]:
+) -> tuple[set[int | None], list[ClientObservation]]:
     """Poll ``get_items()`` on every client, isolating each (FRG-DL-007).
 
     A client that is unreachable (or otherwise raises) is logged and skipped —
-    one downed client never crashes the whole refresh.
+    one downed client never crashes the whole refresh. Returns
+    ``(polled_client_ids, observations)`` where ``polled_client_ids`` are the
+    clients whose poll SUCCEEDED — the vanished-download check in
+    :func:`reconcile_downloads` must only fire for a client that was actually
+    reachable this cycle, never for one that raised (FRG-DL-011).
     """
+    polled_ids: set[int | None] = set()
     observations: list[ClientObservation] = []
     for row, client in clients:
         try:
@@ -645,6 +699,7 @@ async def collect_observations(
                 extra={"client_id": row.id, "client_name": row.name},
             )
             continue
+        polled_ids.add(row.id)
         for item in items:
             observations.append(
                 ClientObservation(
@@ -654,15 +709,17 @@ async def collect_observations(
                     item=item,
                 )
             )
-    return observations
+    return polled_ids, observations
 
 
 async def run_tracking(ctx: HandlerContext) -> str:
     """One full tracking refresh: collect → reconcile → process failures."""
     now = utcnow()
     clients = await load_enabled_clients(ctx.db, settings=ctx.settings)
-    observations = await collect_observations(clients)
-    await reconcile_downloads(ctx.db, observations, now=now)
+    polled_ids, observations = await collect_observations(clients)
+    await reconcile_downloads(
+        ctx.db, observations, polled_client_ids=polled_ids, now=now
+    )
     infos = await process_failures(
         ctx.db, commands=ctx.commands, settings=ctx.settings, now=now
     )
@@ -708,4 +765,5 @@ __all__ = [
     "process_failures",
     "reconcile_downloads",
     "run_tracking",
+    "write_blocklist_row",
 ]

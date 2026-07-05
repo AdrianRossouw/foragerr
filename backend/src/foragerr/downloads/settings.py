@@ -118,16 +118,12 @@ class BuiltinDdlSettings(BaseModel):
             "advanced": True,
         },
     )
-    min_interval_seconds: int = Field(
-        default=15,
-        ge=1,
-        json_schema_extra={
-            "label": "Minimum Fetch Interval (s)",
-            "help": "Minimum seconds between GetComics page fetches, plus "
-            "jitter (FRG-DDL-006). Clamped to a safe floor.",
-            "advanced": True,
-        },
-    )
+    # NOTE: there is deliberately no download-client fetch-interval knob here. The
+    # queue engine is single-flight (one download at a time), so it never rapidly
+    # hammers GetComics; the FRG-DDL-006 page-fetch politeness interval lives on
+    # the SEARCH provider (GetComicsSettings.effective_min_interval). An unused
+    # "minimum interval" field on the client would be a footgun (looks wired, is
+    # not), so it is intentionally omitted.
 
 
 __all__ = [

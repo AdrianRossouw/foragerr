@@ -150,3 +150,20 @@ async def test_backing_off_provider_is_skipped_without_fetching(tmp_path, db):
     )
     assert outcome.backing_off is True
     assert transport.requests == []  # no page fetched while backing off
+
+
+@pytest.mark.req("FRG-DDL-012")
+async def test_search_page_off_allowlist_redirect_is_refused(tmp_path, db):
+    # A search-page response that 302s to an off-allowlist public host must be
+    # refused by the per-provider allowlist — the hostile host is never fetched.
+    from ddl_support import redirect
+
+    factory, transport = make_factory(
+        tmp_path, lambda req: redirect("https://evil.example/malware")
+    )
+    outcome = await search_getcomics(
+        _provider_row(), TARGET, factory=factory, backoff=ProviderBackoff(db),
+        config_dir=None, sleep=_noop_sleep, clock=utcnow, rand=lambda: 0.0,
+    )
+    assert outcome.candidates == []  # degraded to zero results
+    assert not any(r.url.host == "evil.example" for r in transport.requests)

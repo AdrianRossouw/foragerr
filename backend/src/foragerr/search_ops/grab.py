@@ -49,6 +49,11 @@ class GrabReleaseCommand(BaseCommand):
     link: str
     title: str
     size_bytes: int | None = None
+    #: The release's publish date (FRG-DL-006): persisted on ``grab_history`` and
+    #: carried onto the blocklist so the usenet multi-field match (Sonarr SameNzb)
+    #: can catch the SAME bad post resurfacing under a new guid (FRG-DL-012).
+    #: Optional + additive, so no change-4 grab enqueue site had to move.
+    pub_date: dt.datetime | None = None
     #: The library entities this release satisfies (resolved by the engine).
     series_id: int | None = None
     issue_id: int | None = None
@@ -73,6 +78,7 @@ def handoff_from_decision(decision: Decision) -> GrabReleaseCommand:
         link=candidate.link,
         title=candidate.title,
         size_bytes=candidate.size_bytes,
+        pub_date=candidate.pub_date,
         series_id=decision.mapped_series_id,
         issue_id=decision.mapped_issue_id,
         indexer_name=candidate.indexer_name,
@@ -82,7 +88,7 @@ def handoff_from_decision(decision: Decision) -> GrabReleaseCommand:
 async def enqueue_grab(ctx: HandlerContext, handoff: GrabReleaseCommand) -> int:
     """Enqueue the grab hand-off command and return its id (dedup-aware)."""
     record = await ctx.commands.enqueue(
-        "grab-release", handoff.model_dump(), triggered_by="search"
+        "grab-release", handoff.model_dump(mode="json"), triggered_by="search"
     )
     return record.id
 
@@ -101,7 +107,6 @@ async def write_grab_history_rows(
     protocol: str,
     source: str,
     pub_date: dt.datetime | None = None,
-    score: int | None = None,
     client_id: int | None = None,
     now: dt.datetime,
 ) -> int:
@@ -131,12 +136,29 @@ async def write_grab_history_rows(
                 pub_date=pub_date,
                 protocol=protocol,
                 source=source,
-                score=score,
                 created_at=now,
             )
         )
         count += 1
     return count
+
+
+async def _enqueue_grab_followups(ctx: HandlerContext, protocol: str) -> None:
+    """Event-trigger the post-grab commands (dedup-safe on the command backbone).
+
+    Always refreshes tracking so the grab surfaces in the queue without waiting a
+    scheduled interval. A DDL grab additionally triggers ``process-ddl-queue`` so
+    the built-in downloader starts immediately (FRG-DDL-001/007) — usenet begins
+    the moment ``client.download()`` uploads the NZB, but a DDL grab only enqueues
+    a ``ddl_queue`` row and would otherwise idle until the scheduled drain.
+    """
+    from foragerr.downloads.registry import PROTOCOL_DDL
+
+    if ctx.commands is None:
+        return
+    await ctx.commands.enqueue("track-downloads", {}, triggered_by="grab")
+    if protocol == PROTOCOL_DDL:
+        await ctx.commands.enqueue("process-ddl-queue", {}, triggered_by="grab")
 
 
 @register_handler("grab-release")
@@ -157,20 +179,57 @@ async def _handle_grab_release(
     """
     # Lazily imported so this pinned module keeps its lean import graph and the
     # downloads.resolver -> search_ops.grab dependency never becomes a cycle.
+    from sqlalchemy import select
+
     from foragerr.db import utcnow
     from foragerr.downloads import make_download_factory
-    from foragerr.downloads.models import SOURCE_DDL, SOURCE_INDEXER
+    from foragerr.downloads.models import SOURCE_DDL, SOURCE_INDEXER, GrabHistoryRow
     from foragerr.downloads.registry import PROTOCOL_DDL
-    from foragerr.downloads.resolver import protocol_for_grab, resolve_client_for_grab
+    from foragerr.downloads.resolver import protocol_for_grab, resolve_client_for
     from foragerr.providers.backoff import ProviderBackoff
 
     factory = make_download_factory(ctx.settings)
     backoff = ProviderBackoff(ctx.db)
 
+    # Resolve the protocol ONCE and hand it to resolve_client_for (rather than
+    # resolve_client_for_grab, which would re-derive it) — one indexer read, no
+    # TOCTOU on the stamped source.
     protocol = await protocol_for_grab(ctx.db, command)
-    client = await resolve_client_for_grab(
+
+    # Idempotency guard (FRG-DL-002/006): the side-effecting client.download()
+    # runs before the grab_history commit, so a crash + orphan re-run of this
+    # `started` command could re-download the same release. If a grab_history row
+    # already exists for this command's (indexer_id, guid) identity, the download
+    # already happened — resume to the tracking hand-off without re-downloading.
+    async with ctx.db.read_session() as session:
+        prior_download_id = (
+            await session.execute(
+                select(GrabHistoryRow.download_id)
+                .where(
+                    GrabHistoryRow.indexer_id == command.indexer_id,
+                    GrabHistoryRow.guid == command.guid,
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+    if prior_download_id is not None:
+        logger.info(
+            "grab already handed off; skipping re-download (orphan re-run?)",
+            extra={
+                "download_id": prior_download_id,
+                "indexer_id": command.indexer_id,
+                "guid": command.guid,
+            },
+        )
+        await _enqueue_grab_followups(ctx, protocol)
+        return (
+            f"grab already handed off: indexer={command.indexer_id} "
+            f"guid={command.guid} download_id={prior_download_id}"
+        )
+
+    client = await resolve_client_for(
         ctx.db,
-        command,
+        protocol,
         http_factory=factory,
         backoff=backoff,
         app_settings=ctx.settings,
@@ -179,7 +238,7 @@ async def _handle_grab_release(
 
     now = utcnow()
     source = SOURCE_DDL if protocol == PROTOCOL_DDL else SOURCE_INDEXER
-    client_id = getattr(client, "_client_id", None)
+    client_id = client.client_id
     async with ctx.db.write_session() as session:
         await write_grab_history_rows(
             session,
@@ -191,16 +250,16 @@ async def _handle_grab_release(
             title=command.title,
             link=command.link,
             size_bytes=command.size_bytes,
+            pub_date=command.pub_date,
             protocol=protocol,
             source=source,
             client_id=client_id,
             now=now,
         )
 
-    # Event-trigger a tracking refresh so the grab surfaces in the queue without
-    # waiting a full scheduled interval (dedup-safe on the command backbone).
-    if ctx.commands is not None:
-        await ctx.commands.enqueue("track-downloads", {}, triggered_by="grab")
+    # Event-trigger the follow-up refresh/drain so the grab surfaces (and a DDL
+    # grab starts) without waiting a full scheduled interval.
+    await _enqueue_grab_followups(ctx, protocol)
 
     logger.info(
         "grab handed to download client",

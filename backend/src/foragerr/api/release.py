@@ -144,6 +144,6 @@ async def grab_release(body: ReleaseGrabRequest, request: Request) -> CommandRes
             "before grabbing",
         )
     record = await request.app.state.commands.enqueue(
-        "grab-release", handoff.model_dump(), triggered_by="interactive"
+        "grab-release", handoff.model_dump(mode="json"), triggered_by="interactive"
     )
     return CommandResource.from_record(record)

@@ -47,6 +47,7 @@ from foragerr.downloads.settings import SabnzbdSettings
 from foragerr.http import HttpClientFactory, OutboundHttpError
 from foragerr.indexers.errors import IndexerMalformedError
 from foragerr.indexers.xml import parse_indexer_xml
+from foragerr.library.paths import safe_path_component
 from foragerr.logging import register_secret
 from foragerr.providers.backoff import (
     PROVIDER_DOWNLOAD_CLIENT,
@@ -73,8 +74,9 @@ _HISTORY_DOWNLOADING = frozenset(
     {"extracting", "verifying", "repairing", "running", "queued", "downloading"}
 )
 #: fail_message fragments that make a SAB failure a WARNING, not a FAILED
-#: (disk-full unpack — recoverable operator condition, FRG-DL-004).
-_DISK_FULL_FRAGMENTS = ("space", "disk full", "no space left")
+#: (disk-full unpack — recoverable operator condition, FRG-DL-004). Fragments are
+#: specific ("no space", not a bare "space" that would also match "namespace").
+_DISK_FULL_FRAGMENTS = ("no space", "disk full", "not enough space")
 #: fail_message / name fragments marking an encrypted / password-protected item.
 _ENCRYPTED_PREFIX = "ENCRYPTED/"
 _PASSWORD_FRAGMENTS = ("encrypted", "password")
@@ -123,6 +125,11 @@ class SabnzbdClient:
             mappings=ctx.mappings,
             remove_completed_downloads=ctx.row.remove_completed_downloads,
         )
+
+    @property
+    def client_id(self) -> int | None:
+        """The ``download_clients`` row id this client serves (FRG-DL-006)."""
+        return self._client_id
 
     # --- test action (FRG-DL-004 note: version + config live here) ----------
 
@@ -253,10 +260,13 @@ class SabnzbdClient:
         category = str(slot.get("cat") or "")
         if not _category_matches(category, self._category):
             return None
+        download_id = str(slot.get("nzo_id") or "")
+        if not download_id:
+            return None  # a slot with no id has no tracking join key — skip it
         total = _mb_to_bytes(slot.get("mb"))
         remaining = _mb_to_bytes(slot.get("mbleft"))
         return ClientItem(
-            download_id=str(slot.get("nzo_id") or ""),
+            download_id=download_id,
             title=str(slot.get("filename") or slot.get("nzo_id") or ""),
             category=category,
             total_size=total,
@@ -270,6 +280,9 @@ class SabnzbdClient:
         category = str(slot.get("category") or "")
         if not _category_matches(category, self._category):
             return None
+        download_id = str(slot.get("nzo_id") or "")
+        if not download_id:
+            return None  # a slot with no id has no tracking join key — skip it
         name = str(slot.get("name") or slot.get("nzo_id") or "")
         fail_message = str(slot.get("fail_message") or "")
         total = _int_or_zero(slot.get("bytes"))
@@ -288,7 +301,7 @@ class SabnzbdClient:
         elif storage:
             output_path = storage
         return ClientItem(
-            download_id=str(slot.get("nzo_id") or ""),
+            download_id=download_id,
             title=name,
             category=category,
             total_size=total,
@@ -424,10 +437,12 @@ def _validate_nzb(nzb_bytes: bytes, *, title: str) -> None:
 
 
 def _nzb_filename(title: str) -> str:
-    """A safe, system-generated NZB upload filename (never remote-derived)."""
-    safe = "".join(c for c in title if c.isalnum() or c in " ._-").strip()
-    safe = safe or "release"
-    return f"{safe[:180]}.nzb"
+    """A safe, system-generated NZB upload filename (never remote-derived).
+
+    Reuses the one shared :func:`safe_path_component` (as the DDL downloader does)
+    rather than hand-rolling sanitization, so path-separator/traversal/reserved
+    handling stays in a single audited place (FRG-NFR-012)."""
+    return f"{safe_path_component(title, fallback='release')[:180]}.nzb"
 
 
 def _multipart_body(boundary: str, filename: str, nzb_bytes: bytes) -> bytes:
@@ -466,10 +481,16 @@ def _config_categories(doc: Mapping[str, Any]) -> set[str]:
 
 
 def _category_matches(item_category: str, configured: str) -> bool:
-    """Category filter (FRG-DL-004): case-insensitive, ``*`` wildcard allowed."""
+    """Category filter (FRG-DL-004): case-insensitive, ``*`` wildcard allowed.
+
+    The wildcard is on the CONFIGURED side: ``category="*"`` claims every item.
+    A SAB item whose own category is ``*`` (SAB's default/uncategorized) is NOT
+    claimed unless foragerr is itself configured for ``*`` — otherwise foragerr
+    would hijack uncategorized downloads other apps queued.
+    """
     item = item_category.strip().lower()
     want = configured.strip().lower()
-    return item == want or item == "*"
+    return want == "*" or item == want
 
 
 def _mb_to_bytes(value: Any) -> int:

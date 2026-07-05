@@ -82,7 +82,6 @@ class GrabHistoryRow(Base):
     protocol: Mapped[str] = mapped_column(Text, nullable=False, default="usenet")
     #: Provenance ``indexer`` | ``ddl`` (FRG-DL-006 / FRG-DDL-001).
     source: Mapped[str] = mapped_column(Text, nullable=False, default=SOURCE_INDEXER)
-    score: Mapped[int | None] = mapped_column(StrictInteger, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(StrictDateTime, nullable=False)
 
     __table_args__ = (
@@ -210,12 +209,10 @@ class DdlQueueRow(Base):
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
     expected_size: Mapped[int | None] = mapped_column(StrictInteger, nullable=True)
     bytes_received: Mapped[int] = mapped_column(StrictInteger, nullable=False, default=0)
-    links_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     current_host: Mapped[str | None] = mapped_column(Text, nullable=True)
     current_link: Mapped[str | None] = mapped_column(Text, nullable=True)
     selected_link_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     failed_hosts_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    staging_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     output_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     attempts: Mapped[int] = mapped_column(StrictInteger, nullable=False, default=0)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)

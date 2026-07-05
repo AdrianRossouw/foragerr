@@ -30,15 +30,13 @@ class DdlDownloadError(DdlError):
     """A single download/verification attempt failed (FRG-DDL-008..010).
 
     Non-terminal by itself: the queue engine records the failed link type and
-    fails over to the next untried host (FRG-DDL-005). ``retryable_other_host``
-    distinguishes a host-specific failure (try the next host) from a
-    non-recoverable one.
+    fails over to the next untried host (FRG-DDL-005); host exhaustion is what
+    makes the item terminally failed.
     """
 
-    def __init__(self, reason: str, *, retryable_other_host: bool = True) -> None:
+    def __init__(self, reason: str) -> None:
         super().__init__(reason)
         self.reason = reason
-        self.retryable_other_host = retryable_other_host
 
 
 class OutboundNotAllowedError(DdlDownloadError):

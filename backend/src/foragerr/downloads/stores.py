@@ -25,6 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from foragerr.downloads.models import SOURCE_DDL, BlocklistRow, TrackedDownloadRow
+from foragerr.downloads.registry import PROTOCOL_DDL
 from foragerr.downloads.state import TrackedDownloadState
 from foragerr.releases import ReleaseCandidate
 
@@ -82,9 +83,12 @@ class BlocklistEntry:
           literal cached release.
         - **DDL** (``source``/``protocol`` = ``ddl``): the same source URL or
           title, since a GetComics post has no stable guid.
-        - **Usenet**: the same title + indexer + size + publish date, so the same
-          bad post is caught even when it resurfaces under a NEW guid (Sonarr's
-          ``SameNzb`` match, the reason a multi-field key beats Mylar's id-only).
+        - **Usenet**: the same title + indexer + size, so the same bad post is
+          caught even when it resurfaces under a NEW guid (Sonarr's ``SameNzb``
+          match, the reason a multi-field key beats Mylar's id-only). Publish
+          date is a TIE-CHECKER, not a mandatory key: it may only VETO a match
+          when it is present on BOTH sides and differs — a missing pub_date on
+          either side never vetoes an otherwise-strong title+indexer+size match.
         """
         if (
             self.guid is not None
@@ -92,7 +96,10 @@ class BlocklistEntry:
             and (self.indexer_id is None or self.indexer_id == candidate.indexer_id)
         ):
             return True
-        if self.protocol == SOURCE_DDL or self.source == SOURCE_DDL:
+        # A DDL entry matches by source URL/title, not guid+indexer. Compare the
+        # PROTOCOL against PROTOCOL_DDL and the SOURCE against SOURCE_DDL — they
+        # both equal "ddl" but belong to different namespaces (protocol vs source).
+        if self.protocol == PROTOCOL_DDL or self.source == SOURCE_DDL:
             if self.source_url is not None and self.source_url == candidate.link:
                 return True
             if self.title is not None and self.title == candidate.title:
@@ -105,8 +112,11 @@ class BlocklistEntry:
             and self.indexer_name == candidate.indexer_name
             and self.size_bytes is not None
             and self.size_bytes == candidate.size_bytes
-            and self.publish_date is not None
-            and self.publish_date == candidate.pub_date
+            and (
+                self.publish_date is None
+                or candidate.pub_date is None
+                or self.publish_date == candidate.pub_date
+            )
         )
 
 

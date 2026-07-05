@@ -3,6 +3,7 @@ provenance handoff, manual actions (FRG-DDL-001/005/007/013)."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import httpx
@@ -10,7 +11,10 @@ import pytest
 from sqlalchemy import select
 
 from foragerr.db.base import utcnow
+from foragerr.ddl.download import build_allowlist
+from foragerr.ddl.errors import DdlDownloadError
 from foragerr.ddl.queue import (
+    STATUS_ABORTED,
     STATUS_COMPLETED,
     STATUS_DOWNLOADING,
     STATUS_FAILED,
@@ -19,7 +23,7 @@ from foragerr.ddl.queue import (
     EnqueueRequest,
 )
 from foragerr.downloads.models import DdlQueueRow
-from ddl_support import make_cbz, make_factory
+from ddl_support import make_cbz, make_factory, redirect
 
 POST_URL = "https://getcomics.org/comic/example-1-2024/"
 
@@ -195,6 +199,53 @@ async def test_manual_actions_retry_abort_remove(tmp_path, db):
             )
         ).scalar_one_or_none()
     assert remaining is None
+
+
+@pytest.mark.req("FRG-DDL-007")
+async def test_abort_mid_attempt_is_not_clobbered_by_completion(tmp_path, db):
+    # An in-flight attempt that finishes AFTER a user abort must not overwrite
+    # the abort with COMPLETED (the abort race).
+    def handler(req: httpx.Request) -> httpx.Response:
+        if _post_page(req):
+            return httpx.Response(200, text=_read("post_page.html"))
+        return httpx.Response(200, content=make_cbz())
+
+    engine, _ = _engine(tmp_path, db, handler)
+    await _enqueue(engine, download_id="ddl-abrt")
+
+    async def racing_attempt(row_id, snapshot, picked, allowlist):
+        # The user aborts while the bytes are still transferring.
+        await engine.abort("ddl-abrt")
+        return tmp_path / "done.cbz", 4242
+
+    engine._attempt = racing_attempt  # type: ignore[method-assign]
+    assert await engine.process_next() is True
+
+    row = await _row(db, "ddl-abrt")
+    assert row.status == STATUS_ABORTED  # NOT clobbered to completed
+
+
+@pytest.mark.req("FRG-DDL-007")
+async def test_concurrent_claim_never_double_claims_a_row(tmp_path, db):
+    engine, _ = _engine(tmp_path, db, lambda req: httpx.Response(200))
+    await _enqueue(engine, download_id="ddl-solo")
+    # Two claimants race for the single queued row; the status-guarded UPDATE
+    # ensures exactly one wins.
+    a, b = await asyncio.gather(engine._claim_next(), engine._claim_next())
+    claimed = [x for x in (a, b) if x is not None]
+    assert len(claimed) == 1  # never double-claimed
+
+
+@pytest.mark.req("FRG-DDL-012")
+async def test_post_page_off_allowlist_redirect_is_refused(tmp_path, db):
+    # A hostile post-page response that 302s to an off-allowlist public host must
+    # be refused by the per-provider allowlist, not followed.
+    engine, _ = _engine(
+        tmp_path, db, lambda req: redirect("https://evil.example/steal")
+    )
+    allowlist = build_allowlist("https://getcomics.org")
+    with pytest.raises(DdlDownloadError):
+        await engine._fetch_post_page("https://getcomics.org/comic/x/", allowlist)
 
 
 def _read(name: str) -> str:

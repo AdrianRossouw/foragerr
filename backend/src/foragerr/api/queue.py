@@ -25,12 +25,15 @@ from foragerr.api.errors import ApiError
 from foragerr.api.paging import paginate
 from foragerr.db import utcnow
 from foragerr.downloads.models import (
-    BlocklistRow,
     GrabHistoryRow,
     TrackedDownloadRow,
 )
 from foragerr.downloads.state import TrackedDownloadState
-from foragerr.downloads.tracking import build_client_for_id, decode_messages
+from foragerr.downloads.tracking import (
+    build_client_for_id,
+    decode_messages,
+    write_blocklist_row,
+)
 from foragerr.library.models import IssueRow, SeriesRow
 
 router = APIRouter(prefix="/queue", tags=["queue"])
@@ -262,7 +265,10 @@ async def _instruct_client_remove(
 async def _write_manual_blocklist(
     session, row: TrackedDownloadRow, now: dt.datetime
 ) -> None:
-    """Blocklist a manually-removed release using its grab data (FRG-DL-012)."""
+    """Blocklist a manually-removed release using its grab data (FRG-DL-012).
+
+    Delegates to the shared :func:`write_blocklist_row` so the manual-remove and
+    automatic-failure paths build the identical multi-field match key."""
     grabs = (
         (
             await session.execute(
@@ -274,24 +280,12 @@ async def _write_manual_blocklist(
         .scalars()
         .all()
     )
-    first = grabs[0] if grabs else None
-    session.add(
-        BlocklistRow(
-            series_id=row.series_id,
-            issue_id=row.issue_id,
-            source_title=(first.title if first else row.title),
-            guid=first.guid if first else None,
-            indexer_id=first.indexer_id if first else None,
-            indexer_name=(first.indexer_name if first else row.indexer_name),
-            size_bytes=(first.size_bytes if first else row.total_size),
-            publish_date=first.pub_date if first else None,
-            protocol=(first.protocol if first else row.protocol),
-            source=(first.source if first else row.source),
-            source_url=first.link if first else None,
-            download_id=row.download_id,
-            message="manually removed from the queue and blocklisted",
-            created_at=now,
-        )
+    write_blocklist_row(
+        session,
+        row=row,
+        grabs=grabs,
+        now=now,
+        message="manually removed from the queue and blocklisted",
     )
 
 

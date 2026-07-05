@@ -20,14 +20,12 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 
-from foragerr.config import Settings
 from foragerr.ddl.links import parse_host_priority
 from foragerr.ddl.queue import (
     STATUS_ABORTED,
     STATUS_COMPLETED,
     STATUS_DOWNLOADING,
     STATUS_FAILED,
-    STATUS_PAUSED,
     STATUS_QUEUED,
     DdlQueueEngine,
     EnqueueRequest,
@@ -54,15 +52,8 @@ _STATUS_MAP: dict[str, ClientItemStatus] = {
     STATUS_DOWNLOADING: ClientItemStatus.DOWNLOADING,
     STATUS_COMPLETED: ClientItemStatus.COMPLETED,
     STATUS_FAILED: ClientItemStatus.FAILED,
-    STATUS_PAUSED: ClientItemStatus.PAUSED,
     STATUS_ABORTED: ClientItemStatus.FAILED,
 }
-
-
-def make_ddl_factory(settings: Settings) -> HttpClientFactory:
-    """Build the outbound factory for DDL traffic (tests monkeypatch this to
-    route at an injected transport, mirroring the indexer factory indirection)."""
-    return HttpClientFactory(settings)
 
 
 def staging_dir_for(config_dir: Path) -> Path:
@@ -80,11 +71,19 @@ class DdlClient:
         *,
         db,
         config_dir: Path,
+        client_id: int | None = None,
     ) -> None:
         self._settings = settings
         self._factory = http_factory
         self._db = db
         self._staging = staging_dir_for(config_dir)
+        self._client_id = client_id
+
+    @property
+    def client_id(self) -> int | None:
+        """The ``download_clients`` row id this client serves (FRG-DL-006), or
+        ``None`` when built without one (e.g. a bare test construction)."""
+        return self._client_id
 
     @classmethod
     def from_context(cls, ctx: "ClientBuildContext") -> "DdlClient":
@@ -101,6 +100,7 @@ class DdlClient:
             ctx.http_factory,
             db=ctx.db,
             config_dir=config_dir,
+            client_id=ctx.row.id,
         )
 
     def _engine(self) -> DdlQueueEngine:
@@ -190,4 +190,4 @@ class DdlClient:
         await self._engine().remove(item.download_id, delete_data=True)
 
 
-__all__ = ["DdlClient", "make_ddl_factory", "staging_dir_for"]
+__all__ = ["DdlClient", "staging_dir_for"]
