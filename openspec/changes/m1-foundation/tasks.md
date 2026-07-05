@@ -45,6 +45,6 @@
 
 ## 6. Security docs, traceability, merge gate
 
-- [ ] 6.1 Update `docs/security/risk-register.md`: RISK-020 restated with compensating control; RISK-025 DNS-rebinding TOCTOU accepted-residual note; RISK-012/013/036 mitigation status → implemented-by FRG-NFR-006/008 + FRG-SEC-001; matching STRIDE threat-model deltas (FRG-PROC-006, FRG-AUTH-001, FRG-SEC-001)
-- [ ] 6.2 Verify every in-scope FRG ID has ≥1 passing tagged test; flip the 33 registry rows to `implemented`; regenerate matrix via `tools/trace.py` (exit 0) (FRG-PROC-004, FRG-PROC-005)
-- [ ] 6.3 Full suite green; demo run via uvicorn with temp config dir (health, command round-trip, graceful shutdown); `--no-ff` merge to main; archive change; delete branch (FRG-PROC-007)
+- [x] 6.1 Update `docs/security/risk-register.md`: RISK-020 restated with compensating control; RISK-025 DNS-rebinding TOCTOU accepted-residual note; RISK-012/013/036 mitigation status → implemented-by FRG-NFR-006/008 + FRG-SEC-001; matching STRIDE threat-model deltas (FRG-PROC-006, FRG-AUTH-001, FRG-SEC-001)
+- [x] 6.2 Verify every in-scope FRG ID has ≥1 passing tagged test; flip the 33 registry rows to `implemented`; regenerate matrix via `tools/trace.py` (exit 0) (FRG-PROC-004, FRG-PROC-005)
+- [x] 6.3 Full suite green; demo run via uvicorn with temp config dir (health, command round-trip, graceful shutdown); `--no-ff` merge to main; archive change; delete branch (FRG-PROC-007)
