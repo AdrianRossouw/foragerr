@@ -219,6 +219,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.state.startup_hooks.append(_register_ddl_tasks)
 
+    # --- ws area (m1-ui-opds-deploy, area: ws): mount /api/v1/ws and, at
+    #     startup, subscribe the broadcaster to app.state.events (created by
+    #     register_scheduler above, so this MUST follow it) (FRG-API-010). ---
+    from foragerr.ws import register_ws
+
+    register_ws(app)
+
     return app
 
 
