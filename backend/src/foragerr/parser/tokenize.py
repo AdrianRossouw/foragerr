@@ -35,10 +35,7 @@ class Token:
     start: int  # character offset in the (extension-stripped) name
     index: int  # stable stream index
     kind: TokenKind
-
-    @property
-    def folded(self) -> str:
-        return fold(self.inner)
+    folded: str  # fold(inner), computed once at construction (FRG-IMP-001)
 
 
 def is_dot_dominant(name: str) -> bool:
@@ -122,6 +119,6 @@ def tokenize(name: str) -> list[Token]:
         else:
             raw.append((word, word, start, TokenKind.WORD))
     return [
-        Token(text=t, inner=inner, start=s, index=idx, kind=k)
+        Token(text=t, inner=inner, start=s, index=idx, kind=k, folded=fold(inner))
         for idx, (t, inner, s, k) in enumerate(raw)
     ]

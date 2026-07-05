@@ -23,7 +23,6 @@ from fractions import Fraction
 from . import grammar
 from .classify import (
     GroupInfo,
-    booktype_for,
     classify_group,
     edition_match,
     is_page_tag,
@@ -44,7 +43,15 @@ from .result import (
     TraceEntry,
 )
 from .tokenize import Token, TokenKind, tokenize
-from .vocab import DEFAULT_OPTIONS, MONTH_NAMES, ParseOptions
+from .vocab import (
+    DEFAULT_OPTIONS,
+    MONTH_NAMES,
+    ParseOptions,
+    booktype_cue_phrases,
+    edition_phrases,
+    extension_re,
+    issue_suffix_set,
+)
 
 __all__ = [
     "parse",
@@ -65,6 +72,9 @@ __all__ = [
 ]
 
 _ISSUE_ID_RE = re.compile(r"\[__(.{1,64}?)__\]")
+
+#: Trade formats whose trailing number reads as a volume (FRG-IMP-016).
+_TRADE_BOOKTYPES = (Booktype.TPB, Booktype.GN, Booktype.HC)
 
 
 def parse(
@@ -91,13 +101,6 @@ def parse(
 # implementation
 
 
-def _extension_re(options: ParseOptions) -> re.Pattern[str]:
-    return re.compile(
-        r"\.(" + "|".join(re.escape(e) for e in options.extensions) + r")$",
-        re.IGNORECASE,
-    )
-
-
 def _failure(
     reason: FailureReason, mode: ParseMode, confidence: float = 0.05, **fields
 ) -> ParseResult:
@@ -117,7 +120,7 @@ def _parse_impl(
     # (FRG-IMP-006); release titles / folder names simply have none.
     ext: str | None = None
     if mode is ParseMode.FILENAME:
-        m = _extension_re(options).search(work)
+        m = extension_re(options).search(work)
         if m:
             ext = m.group(1).lower()
             work = work[: m.start()]
@@ -168,7 +171,6 @@ class _State:
         self.roles: dict[int, str] = {}
         self.ginfo: dict[int, GroupInfo] = {}
         self.booktype: Booktype | None = None
-        self.booktype_explicit_trade = False
         self.volume_ordinal: int | None = None
         self.volume_year: int | None = None
         self.classification = IssueClassification.REGULAR
@@ -229,11 +231,6 @@ class _State:
                     self.miniseries_total = gi.total
             if gi.booktype is not None and self.booktype is None:
                 self.booktype = gi.booktype
-                self.booktype_explicit_trade = gi.booktype in (
-                    Booktype.TPB,
-                    Booktype.GN,
-                    Booktype.HC,
-                )
             if gi.kind not in (AnnotationKind.DATE, AnnotationKind.YEAR_RANGE) and t.inner:
                 self.annotate(t.index, t.inner, gi.kind)
 
@@ -247,43 +244,38 @@ class _State:
                 return False
         return True
 
-    def scan_multiword_editions(self) -> None:
-        phrases = [
-            tuple(fold(e).split()) for e in self.options.edition_tags if " " in e
-        ]
-        for i in range(self.n):
-            for phrase in phrases:
-                if len(phrase) > 1 and self._match_phrase(i, phrase):
-                    text = " ".join(self.tokens[i + k].text for k in range(len(phrase)))
-                    for k in range(len(phrase)):
-                        self.consume(i + k, "edition")
-                    self.annotate(i, text, AnnotationKind.EDITION)
-                    bt = booktype_for(" ".join(phrase), self.options)
-                    if bt is not None and self.booktype is None:
-                        self.booktype = bt
-                        self.booktype_explicit_trade = True
-                    break
-
-    def scan_booktype_cues(self) -> None:
-        cues = sorted(
-            ((tuple(fold(c).split()), bt) for c, bt in self.options.booktype_cues),
-            key=lambda p: -len(p[0]),
-        )
+    def _scan_phrase_vocab(
+        self,
+        pairs: tuple[tuple[tuple[str, ...], Booktype | None], ...],
+        role: str,
+        annotate_kind: AnnotationKind | None = None,
+    ) -> None:
+        """Match multi-word vocabulary phrases (longest first), consuming each
+        hit under ``role``, optionally recording an annotation, and adopting the
+        paired booktype. Shared by the edition and booktype-cue scans."""
         for i in range(self.n):
             if self.consumed[i] or self.tokens[i].kind is not TokenKind.WORD:
                 continue
-            for phrase, bt in cues:
+            for phrase, bt in pairs:
                 if self._match_phrase(i, phrase):
-                    for k in range(len(phrase)):
-                        self.consume(i + k, "booktype")
-                    if self.booktype is None:
-                        self.booktype = bt
-                        self.booktype_explicit_trade = bt in (
-                            Booktype.TPB,
-                            Booktype.GN,
-                            Booktype.HC,
+                    if annotate_kind is not None:
+                        text = " ".join(
+                            self.tokens[i + k].text for k in range(len(phrase))
                         )
+                        self.annotate(i, text, annotate_kind)
+                    for k in range(len(phrase)):
+                        self.consume(i + k, role)
+                    if bt is not None and self.booktype is None:
+                        self.booktype = bt
                     break
+
+    def scan_multiword_editions(self) -> None:
+        self._scan_phrase_vocab(
+            edition_phrases(self.options), "edition", AnnotationKind.EDITION
+        )
+
+    def scan_booktype_cues(self) -> None:
+        self._scan_phrase_vocab(booktype_cue_phrases(self.options), "booktype")
 
     def scan_volumes(self) -> None:
         vol_words = frozenset({"vol", "vol.", "volume"})
@@ -591,7 +583,7 @@ class _State:
 
     def apply_trade_volume_rule(self) -> None:
         """Trade formats read the trailing number as the volume (FRG-IMP-016)."""
-        if not self.booktype_explicit_trade:
+        if self.booktype not in _TRADE_BOOKTYPES:
             return
         if self.volume_ordinal is None and self.volume_year is None:
             c = self.selected
@@ -787,7 +779,7 @@ class _State:
         if nxt.kind is not TokenKind.WORD or self.consumed[j]:
             return
         canonical = fold(nxt.inner).upper().rstrip("!")
-        if canonical in {s.upper() for s in self.options.issue_suffixes}:
+        if canonical in issue_suffix_set(self.options):
             c.suffix = canonical
             c.display = f"{c.display} {nxt.inner.rstrip('!')}"
             self.consume(j, "issue-suffix")

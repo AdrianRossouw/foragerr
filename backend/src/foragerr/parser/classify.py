@@ -14,7 +14,7 @@ from fractions import Fraction
 from . import grammar
 from .normalize import fold
 from .result import AnnotationKind, Booktype
-from .vocab import ParseOptions
+from .vocab import ParseOptions, folded_edition_tags
 
 
 @dataclass(slots=True)
@@ -30,7 +30,7 @@ class GroupInfo:
 
 def edition_match(folded: str, options: ParseOptions) -> bool:
     """Whole-text match against the edition-tag vocabulary (folded)."""
-    return folded in {fold(tag) for tag in options.edition_tags}
+    return folded in folded_edition_tags(options)
 
 
 def booktype_for(folded: str, options: ParseOptions) -> Booktype | None:

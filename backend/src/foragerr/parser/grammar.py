@@ -15,7 +15,12 @@ from fractions import Fraction
 
 from .normalize import fold
 from .tokenize import Token
-from .vocab import MONTH_NAMES, ParseOptions
+from .vocab import (
+    MONTH_NAMES,
+    ParseOptions,
+    issue_suffix_set,
+    single_letter_suffix_set,
+)
 
 _MAX_DIGITS = 12  # numeric tokens longer than this stay title content
 
@@ -130,9 +135,9 @@ class Candidate:
 
 def _suffix_lookup(alpha: str, options: ParseOptions, *, glued: bool) -> str | None:
     up = fold(alpha).upper().rstrip("!")
-    if up in {s.upper() for s in options.issue_suffixes}:
+    if up in issue_suffix_set(options):
         return up
-    if glued and up in {s.upper() for s in options.single_letter_suffixes} and len(up) == 1:
+    if glued and up in single_letter_suffix_set(options) and len(up) == 1:
         return up
     return None
 
