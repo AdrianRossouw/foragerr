@@ -12,7 +12,7 @@ guard alongside.
 
 ## 1. HTTP listener request limits + config keys (owns config.py, api/limits.py, api/__init__.py)
 
-- [ ] 1.1 Add the new documented config keys to `foragerr/config.py` `Settings`
+- [x] 1.1 Add the new documented config keys to `foragerr/config.py` `Settings`
       (each a `Field` with a description so `render_documented_config` emits it):
       `listener_max_body_bytes` (default 8 MiB, floor 64 KiB),
       `listener_max_header_bytes` (default 16 KiB),
@@ -25,7 +25,7 @@ guard alongside.
       the keys appear in `render_documented_config` output with defaults;
       out-of-range interval values clamp with a warning (FRG-NFR-009 path).
       [FRG-NFR-014]
-- [ ] 1.2 `foragerr/api/limits.py`: listener middleware on the HTTP scope only.
+- [x] 1.2 `foragerr/api/limits.py`: listener middleware on the HTTP scope only.
       Body-size cap — 413 on `Content-Length` over cap AND streaming byte-count
       abort for chunked/absent/lying `Content-Length` (no whole-body buffer);
       header-size cap → bounded 4xx; request timeout via `asyncio.wait_for` →
@@ -36,7 +36,7 @@ guard alongside.
       headers rejected; a hung handler aborts at the timeout; a burst 429s and
       the client table stays bounded; a normal small-JSON request is unaffected;
       the WS route is not subject to the request timeout. [FRG-NFR-014]
-- [ ] 1.3 Request-field log sanitization: ensure any request-sourced value the
+- [x] 1.3 Request-field log sanitization: ensure any request-sourced value the
       listener writes to structured logs (incl. the middleware's own 413/429
       warnings) passes the FRG-NFR-012 control-character stripper. Tests: a
       request path/header carrying CR/LF appears in captured logs as one escaped
@@ -44,13 +44,13 @@ guard alongside.
 
 ## 2. WebSocket connection cap + inbound limits (owns ws/broadcast.py, ws/router.py, ws/__init__.py)
 
-- [ ] 2.1 `ws/broadcast.py`: add `max_connections` to `WsBroadcaster` and a
+- [x] 2.1 `ws/broadcast.py`: add `max_connections` to `WsBroadcaster` and a
       `try_connect()` returning `None` when `connection_count >= max_connections`
       (no lock — single event-loop thread), else registering exactly as
       `connect()` does. Tests: `try_connect` refuses at the cap and admits below
       it; refusal does not mutate the registry or drop any live connection.
       [FRG-NFR-014]
-- [ ] 2.2 `ws/router.py`: refuse the over-cap handshake — `try_connect()` → on
+- [x] 2.2 `ws/router.py`: refuse the over-cap handshake — `try_connect()` → on
       `None`, `await websocket.close(code=1013)` **before** `accept()` and return
       (no registration); the accepted-connection path (register-before-accept,
       pump, drain, existing teardown) is otherwise byte-identical. Enforce the
@@ -64,7 +64,7 @@ guard alongside.
       receiving broadcasts; an oversize inbound frame closes only that socket
       (others unaffected); a `WebSocketDisconnect` still suppresses the server
       close (no regression / no double close). [FRG-NFR-014]
-- [ ] 2.3 `ws/__init__.py`: pass the configured `ws_max_connections` /
+- [x] 2.3 `ws/__init__.py`: pass the configured `ws_max_connections` /
       `ws_max_inbound_bytes` / `ws_max_inbound_messages_per_second` from settings
       into the `WsBroadcaster` and the endpoint. Tests: the broadcaster is
       constructed with the configured cap; default config yields the documented
@@ -72,7 +72,7 @@ guard alongside.
 
 ## 3. NFR budgets + import-cycle guard (owns new test modules + importer seam)
 
-- [ ] 3.1 (subtle) Startup budget + import guard [FRG-NFR-001]:
+- [x] 3.1 (subtle) Startup budget + import guard [FRG-NFR-001]:
       (a) timed ready-to-serve test against a seeded 5,000-issue DB at head
       schema — `/health` 200 + scheduler running within 15 s p95 (marked
       soak/perf); (b) a no-outbound-HTTP-during-startup guard (startup with
@@ -85,20 +85,20 @@ guard alongside.
       `IMPORT_FILE_MUTATION_GROUP` into a neutral importer leaf and re-export it
       unchanged from `foragerr.importer.__init__` (byte-identical public API);
       keep the deferred `foragerr.downloads` import in `sources.py`. [FRG-NFR-001]
-- [ ] 3.2 (mechanical) Scan-throughput [FRG-NFR-002]: seeded 5,000-file
+- [x] 3.2 (mechanical) Scan-throughput [FRG-NFR-002]: seeded 5,000-file
       benchmark (~200 series) completing the parse/reconcile/stage phase under
       10 min with a concurrent API smoke inside the NFR-003 budget (marked
       soak/perf); plus an always-on structural guard asserting the scan command
       is `workload_class == "pp"`, the walk/existence-sweep run through `offload`
       (not the event loop) with no read-blocking exclusivity, and the measured
       phase issues no outbound HTTP. [FRG-NFR-002]
-- [ ] 3.3 (mechanical) UI-latency [FRG-NFR-003]: load-test benchmark asserting
+- [x] 3.3 (mechanical) UI-latency [FRG-NFR-003]: load-test benchmark asserting
       p95 < 500 ms for the series-list, series-detail, queue, history, and wanted
       read endpoints against the seeded library (marked perf); plus an always-on
       cap audit — each returns a paged envelope with the page size clamped to the
       server-side cap (never unbounded) and stats come from a SQL aggregate.
       [FRG-NFR-003]
-- [ ] 3.4 (subtle) Crash-safety fault-injection [FRG-NFR-007]: staged
+- [x] 3.4 (subtle) Crash-safety fault-injection [FRG-NFR-007]: staged
       kill/restart acceptance — (a) a `queued`/`started` command is recovered on
       restart (no acknowledged item lost); (b) re-snatching the same release
       guid / download id creates no duplicate grab/tracked-download row; (c)
@@ -108,7 +108,7 @@ guard alongside.
 
 ## 4. Docs, security, traceability, gate
 
-- [ ] 4.1 Security (FRG-PROC-006): flip **RISK-021** in
+- [x] 4.1 Security (FRG-PROC-006): flip **RISK-021** in
       `docs/security/risk-register.md` to **Mitigate (implemented)** with an
       m2-hardening status note (WS concurrent-connection cap + inbound-frame
       size/rate limits landed; HTTP body/header/timeout + per-client rate caps
@@ -118,7 +118,7 @@ guard alongside.
       unchanged, still tracked). Update `docs/security/threat-model.md`: the G-1
       listener note (§interfaces) and the COMP 2 WebSocket documented-latent move
       to their mitigated state. [FRG-PROC-006]
-- [ ] 4.2 Manual (FRG-PROC-011): `docs/manual/admin/configuration.md` — document
+- [x] 4.2 Manual (FRG-PROC-011): `docs/manual/admin/configuration.md` — document
       the new listener/WS limit settings (max body size, header size, request
       timeout, per-client rate cap + its 0-disables safety-valve note; WS max
       connections + inbound-frame size/rate), with defaults and floors. No other
