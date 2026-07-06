@@ -86,7 +86,7 @@ A crash or power loss at any point SHALL NOT lose acknowledged work items or cor
 
 ### Requirement: FRG-NFR-014 — Listener request resource limits
 
-The HTTP/WebSocket listener SHALL enforce configurable limits on inbound requests — maximum request body size, maximum header size, request timeout, and a basic per-client request rate/concurrency cap — rejecting over-limit requests with an appropriate 4xx (413/429) rather than consuming unbounded memory or wedging workers; SHALL enforce, for the WebSocket listener specifically, a configurable cap on concurrent connections (excess connections refused cleanly at the handshake without disturbing existing connections) and inbound-frame size and rate limits (an over-limit inbound frame closes that socket cleanly rather than buffering unbounded memory); and SHALL bound and sanitize any request value written into structured logs (no CR/LF log-forging).
+The HTTP/WebSocket listener SHALL enforce configurable limits on inbound requests — maximum request body size, maximum header size, request timeout, and a basic per-client request rate/concurrency cap — rejecting over-limit requests with an appropriate bounded status (e.g. 413/429/431, or 503 for a timed-out request) rather than consuming unbounded memory or wedging workers; SHALL enforce, for the WebSocket listener specifically, a configurable cap on concurrent connections (excess connections refused cleanly at the handshake without disturbing existing connections) and inbound-frame size and rate limits (an over-limit inbound frame closes that socket cleanly rather than buffering unbounded memory); and SHALL bound and sanitize any request value written into structured logs (no CR/LF log-forging).
 
 - **Milestone**: M2
 - **Source**: STRIDE analysis (no listener-level body/rate cap in the domain drafts; log-forging residual of FRG-NFR-012). Gap G-1; RISK-021, RISK-014.
@@ -99,8 +99,8 @@ The HTTP/WebSocket listener SHALL enforce configurable limits on inbound request
 
 #### Scenario: Oversize headers and slow requests are bounded
 
-- **WHEN** a request presents headers exceeding the configured header-size cap, or a request that does not complete within the configured request timeout
-- **THEN** the oversized-header request is rejected with a bounded 4xx and the timed-out request is aborted with a bounded response, in both cases releasing the worker rather than consuming unbounded resources — and the WebSocket connection is unaffected by the request timeout (enforced on the HTTP scope only)
+- **WHEN** a request presents headers exceeding the configured header-size cap, or a request whose handler produces no first response byte within the configured request timeout
+- **THEN** the oversized-header request is rejected with a bounded 4xx and the first-byte-timed-out request is aborted with a bounded response, in both cases releasing the worker rather than consuming unbounded resources — the timeout bounds time-to-first-response-byte only, so an already-streaming response (e.g. an OPDS file download) is never truncated by it, and the WebSocket connection is unaffected (enforced on the HTTP scope only)
 
 #### Scenario: A burst of requests from one client is rate-limited
 

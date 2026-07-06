@@ -156,7 +156,7 @@ implementation for the one that needs code (FRG-NFR-014).
   the note that the rate cap is a safety valve for the single-user tailnet
   (0 disables it). The NFR *budgets* (startup/scan/latency/crash) are internal
   quality gates with no user- or admin-facing behavior change, so no other
-  manual section is touched.
+  manual section is touched (plus the one-line docs/manual/index.md currency-statement update every change carries).
 - **Dependencies / SOUP (FRG-PROC-012)**: none anticipated — the middleware uses
   Starlette (already present via FastAPI) + stdlib + the existing sanitizer;
   benchmarks use the existing test stack. `tools/soup_check.py` is expected to

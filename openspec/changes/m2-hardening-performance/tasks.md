@@ -95,7 +95,7 @@ guard alongside.
 - [x] 3.3 (mechanical) UI-latency [FRG-NFR-003]: load-test benchmark asserting
       p95 < 500 ms for the series-list, series-detail, queue, history, and wanted
       read endpoints against the seeded library (marked perf); plus an always-on
-      cap audit — each returns a paged envelope with the page size clamped to the
+      cap audit — each returns a paged envelope and refuses an above-cap page size with a
       server-side cap (never unbounded) and stats come from a SQL aggregate.
       [FRG-NFR-003]
 - [x] 3.4 (subtle) Crash-safety fault-injection [FRG-NFR-007]: staged

@@ -150,10 +150,15 @@ here's what each one means and where to look:
   `listener_rate_max_requests` to `0` to disable this cap entirely if it ever
   interferes with legitimate UI traffic (e.g. a busy React-Query fan-out on a
   slow link).
-- **WebSocket close code 1013 (Try Again Later)** — the live-updates socket
-  (`/api/v1/ws`) refused a new connection because `ws_max_connections`
-  (default 32) concurrent sockets were already open. Existing connections are
-  completely unaffected; refresh or retry once another tab/client disconnects.
+- **A refused WebSocket handshake** — the live-updates socket (`/api/v1/ws`)
+  refused a new connection because `ws_max_connections` (default 32)
+  concurrent sockets were already open. The server refuses before accepting
+  the handshake, so the browser observes a failed connection (HTTP 403 /
+  close code 1006), not a readable close code. Existing connections are
+  completely unaffected; refresh or retry once another tab/client
+  disconnects. Note: the listener and WebSocket limit keys are read at
+  startup — changing them requires a container restart (unlike the
+  ComicVine key, which applies immediately).
 - **A WebSocket connection closing unexpectedly** — if a client sends an
   inbound frame larger than `ws_max_inbound_bytes` (default 4 KiB) or more than
   `ws_max_inbound_messages_per_second` (default 10) frames per second, that
