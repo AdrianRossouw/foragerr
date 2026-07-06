@@ -66,6 +66,30 @@ def _entry_hrefs(feed) -> list[str]:
 
 
 @pytest.mark.req("FRG-OPDS-007")
+def test_descriptor_template_is_absolute_under_a_non_default_base_path(tmp_path):
+    """Gate fix: the OpenSearch template must be an ABSOLUTE URL that respects
+    the catalog's mount base path (a root-relative one breaks behind a
+    path-prefix proxy / some readers). A non-default ``opds_base_path`` yields
+    an absolute template carrying that base, and it round-trips."""
+    cfg = tmp_path / "cfg"
+    cfg.mkdir()
+    app = create_app(opds_settings(cfg, opds_base_path="/comics/opds"))
+    with TestClient(app) as client:
+        resp = client.get("/comics/opds/opensearch.xml")
+        assert resp.status_code == 200
+        desc = ET.fromstring(resp.text)
+        (url_el,) = desc.findall(f"{OS}Url")
+        template = url_el.get("template")
+        assert template == "http://testserver/comics/opds/search?q={searchTerms}"
+
+        # The absolute template still reaches the (empty-but-valid) search feed.
+        feed_url = template.replace("{searchTerms}", "anything")
+        follow = client.get(feed_url)
+        assert follow.status_code == 200
+        assert follow.headers["content-type"].startswith("application/atom+xml")
+
+
+@pytest.mark.req("FRG-OPDS-007")
 def test_descriptor_and_templated_search_round_trip(client, tmp_path):
     """rel=search -> valid opensearchdescription+xml -> template substitution
     -> matching series as navigation entries into their acquisition feeds."""
@@ -90,7 +114,10 @@ def test_descriptor_and_templated_search_round_trip(client, tmp_path):
     assert desc.tag == f"{OS}OpenSearchDescription"
     (url_el,) = desc.findall(f"{OS}Url")
     template = url_el.get("template")
-    assert template == "/opds/search?q={searchTerms}"
+    # The template is ABSOLUTE (gate fix): a root-relative one breaks behind a
+    # path-prefix proxy and some readers reject it. Built from the request base
+    # URL joined with the catalog's own mount.
+    assert template == "http://testserver/opds/search?q={searchTerms}"
 
     # 3. Substituting a term into the template reaches the search feed.
     feed_url = template.replace("{searchTerms}", "saga")

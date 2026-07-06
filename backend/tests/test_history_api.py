@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
 
+from conftest import seed_series_issue
 from foragerr.app import create_app
 from foragerr.config import Settings
 from foragerr.importer import history
@@ -28,48 +28,9 @@ def client(settings):
         yield c
 
 
-async def _seed_series_issue(db, tmp_path) -> tuple[int, int]:
-    from foragerr.library import repo
-    from foragerr.quality.models import DEFAULT_PROFILE_NAME, FormatProfileRow
-
-    root = tmp_path / "lib-root"
-    root.mkdir(exist_ok=True)
-    async with db.read_session() as session:
-        profile_id = (
-            await session.execute(
-                select(FormatProfileRow.id).where(
-                    FormatProfileRow.name == DEFAULT_PROFILE_NAME
-                )
-            )
-        ).scalar_one()
-    async with db.write_session() as session:
-        rf = await repo.create_root_folder(session, str(root))
-        series = await repo.create_series(
-            session,
-            cv_volume_id=987654,
-            title="Spawn",
-            start_year=2024,
-            format_profile_id=profile_id,
-            root_folder_id=rf.id,
-            path=str(root / "Spawn"),
-            monitored=True,
-        )
-        await session.flush()
-        issue = await repo.create_issue(
-            session,
-            series_id=series.id,
-            cv_issue_id=123456,
-            issue_number="1",
-            cover_date=dt.date(2024, 1, 1),
-            monitored=True,
-        )
-        await session.flush()
-        return series.id, issue.id
-
-
 async def _seed_events(db, tmp_path) -> tuple[int, int]:
     """A grabbed+imported pair for one series plus an unrelated blocked event."""
-    series_id, issue_id = await _seed_series_issue(db, tmp_path)
+    series_id, issue_id = await seed_series_issue(db, tmp_path)
     base = dt.datetime(2026, 7, 1, 12, 0, 0)
     async with db.write_session() as session:
         history.record_event(
@@ -196,3 +157,47 @@ def test_history_pages_are_stable_slices(client, tmp_path):
     assert len(page1["records"]) == 2 and len(page2["records"]) == 1
     ids = [r["id"] for r in page1["records"] + page2["records"]]
     assert len(set(ids)) == 3  # no overlap between pages
+
+
+async def _seed_same_timestamp_batch(db, tmp_path, n: int) -> int:
+    """``n`` history rows sharing ONE ``created_at`` (an import batch stamps
+    every row with the single ctx.now)."""
+    series_id, issue_id = await seed_series_issue(db, tmp_path)
+    ts = dt.datetime(2026, 7, 1, 12, 0, 0)
+    async with db.write_session() as session:
+        for i in range(n):
+            history.record_event(
+                session,
+                event_type=history.EVENT_IMPORTED,
+                series_id=series_id,
+                issue_id=issue_id,
+                source_title=f"Spawn {i:03d}",
+                source=history.SOURCE_LIBRARY,
+                data={"i": i},
+                now=ts,  # identical timestamp for the whole batch
+            )
+    return series_id
+
+
+@pytest.mark.req("FRG-API-011")
+def test_history_same_timestamp_rows_are_stable_across_pages(client, tmp_path):
+    """The id tiebreak (gate fix): rows sharing one created_at — the common
+    case, a whole import batch on one ctx.now — must partition cleanly across
+    pages. Without the deterministic secondary sort the DB may order tied rows
+    differently per query, duplicating some and skipping others as the client
+    walks the pages."""
+    client.portal.call(
+        _seed_same_timestamp_batch, client.app.state.db, tmp_path, 7
+    )
+    seen: list[int] = []
+    for page in range(1, 5):
+        body = client.get(
+            f"/api/v1/history?page={page}&pageSize=2"
+        ).json()
+        assert body["totalRecords"] == 7
+        seen.extend(r["id"] for r in body["records"])
+    # Every row seen exactly once: no overlap, no skip across the four pages.
+    assert len(seen) == 7
+    assert len(set(seen)) == 7
+    # Default desc sort with the id tiebreak: ids strictly descending overall.
+    assert seen == sorted(seen, reverse=True)

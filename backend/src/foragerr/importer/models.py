@@ -52,6 +52,9 @@ class ImportHistoryRow(Base):
         Index("ix_import_history_issue_id", "issue_id"),
         Index("ix_import_history_series_id", "series_id"),
         Index("ix_import_history_event_type", "event_type"),
+        # The default sort of GET /api/v1/history (FRG-API-011); added by
+        # migration 0009 (m2-daily-surfaces gate fix).
+        Index("ix_import_history_created_at", "created_at"),
     )
 
 

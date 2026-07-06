@@ -19,16 +19,19 @@ management remains a separate concern (out of scope for this change).
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from starlette.concurrency import run_in_threadpool
 
 from foragerr.api.errors import ApiError
+from foragerr.db import CommandRow
 from foragerr.library import repo
+from foragerr.library.models import LibraryImportGroupRow
 from foragerr.quality.models import FormatProfileRow, decode_formats
 
 router = APIRouter(tags=["config"])
@@ -100,7 +103,12 @@ async def delete_root_folder_endpoint(root_folder_id: int, request: Request) -> 
     """Remove a root folder (FRG-SER-008), files on disk untouched.
 
     404 when the id is unknown; 409 (naming the count) while any series still
-    references it — deleting it would dangle those series' stored paths."""
+    references it — deleting it would dangle those series' stored paths. Two
+    further 409 guards protect the library-import staging this root owns (whose
+    ``library_import_groups`` rows CASCADE-delete with the root, silently
+    discarding a pending review): the delete is refused while any staged group
+    exists for the root, and while a ``library-import-scan`` or
+    ``library-import`` command for it is queued or running."""
     db = request.app.state.db
     async with db.write_session() as session:
         row = await repo.get_root_folder(session, root_folder_id)
@@ -113,8 +121,78 @@ async def delete_root_folder_endpoint(root_folder_id: int, request: Request) -> 
                 f"root folder {root_folder_id} is still used by {referencing} "
                 f"series — remove or relocate them first",
             )
+        # Command guard first: an in-flight execute references still-present
+        # group rows, so it would also trip the staged-group guard below —
+        # naming the command is the more actionable 409, so it wins.
+        await _fail_if_import_command_pending(session, root_folder_id)
+        staged = await session.scalar(
+            select(func.count())
+            .select_from(LibraryImportGroupRow)
+            .where(LibraryImportGroupRow.root_folder_id == root_folder_id)
+        )
+        if staged:
+            raise ApiError(
+                409,
+                f"root folder {root_folder_id} has {staged} staged library-import "
+                f"group(s) — clear the import review first (deleting the root "
+                f"would discard them)",
+            )
         await repo.delete_root_folder(session, root_folder_id)
     return None
+
+
+async def _fail_if_import_command_pending(session, root_folder_id: int) -> None:
+    """Refuse (409) the root delete while a ``library-import-scan`` or
+    ``library-import`` command for this root is queued/started.
+
+    A scan is matched by its ``root_folder_id`` payload; an execute by whether
+    any group id it holds belongs to this root (the ``_fail_if_execute_pending``
+    pattern in ``library.flows.library_import``). Deleting the root mid-command
+    would pull its rows out from under the running import."""
+    rows = (
+        (
+            await session.execute(
+                select(CommandRow).where(
+                    CommandRow.name.in_(("library-import-scan", "library-import")),
+                    CommandRow.status.in_(("queued", "started")),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for row in rows:
+        try:
+            payload = json.loads(row.payload)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if row.name == "library-import-scan":
+            if payload.get("root_folder_id") == root_folder_id:
+                raise ApiError(
+                    409,
+                    f"a library-import scan (command {row.id}, {row.status}) is "
+                    f"running for root folder {root_folder_id} — wait for it to "
+                    f"finish before removing the root",
+                )
+            continue
+        group_ids = list(payload.get("group_ids") or [])
+        if not group_ids:
+            continue
+        hit = await session.scalar(
+            select(LibraryImportGroupRow.id)
+            .where(
+                LibraryImportGroupRow.id.in_(group_ids),
+                LibraryImportGroupRow.root_folder_id == root_folder_id,
+            )
+            .limit(1)
+        )
+        if hit is not None:
+            raise ApiError(
+                409,
+                f"a library-import execute (command {row.id}, {row.status}) is "
+                f"importing groups of root folder {root_folder_id} — wait for it "
+                f"to finish before removing the root",
+            )
 
 
 def _validate_new_root(path: str, existing: list) -> None:

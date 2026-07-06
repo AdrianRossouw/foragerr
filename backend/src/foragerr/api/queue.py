@@ -22,7 +22,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from foragerr.api.errors import ApiError
-from foragerr.api.paging import paginate
+from foragerr.api.paging import load_issue_map, load_series_map, paginate
 from foragerr.db import utcnow
 from foragerr.downloads.models import (
     GrabHistoryRow,
@@ -164,10 +164,13 @@ async def list_queue(
             sort_key=sortKey,
             sort_direction=sortDirection,
             whitelist=_SORT_WHITELIST,
+            # The default added_at sort ties for downloads grabbed in one
+            # cycle; the id tiebreak keeps the pages a stable partition.
+            tiebreak=TrackedDownloadRow.id,
         )
         rows: list[TrackedDownloadRow] = result["records"]
-        series_by_id = await _load_series(session, {r.series_id for r in rows})
-        issue_by_id = await _load_issues(session, {r.issue_id for r in rows})
+        series_by_id = await load_series_map(session, {r.series_id for r in rows})
+        issue_by_id = await load_issue_map(session, {r.issue_id for r in rows})
     result["records"] = [
         _to_resource(
             row, series_by_id.get(row.series_id), issue_by_id.get(row.issue_id), now
@@ -175,30 +178,6 @@ async def list_queue(
         for row in rows
     ]
     return QueuePage(**result)
-
-
-async def _load_series(session, ids: set[int | None]) -> dict[int, SeriesRow]:
-    real = [i for i in ids if i is not None]
-    if not real:
-        return {}
-    rows = (
-        (await session.execute(select(SeriesRow).where(SeriesRow.id.in_(real))))
-        .scalars()
-        .all()
-    )
-    return {row.id: row for row in rows}
-
-
-async def _load_issues(session, ids: set[int | None]) -> dict[int, IssueRow]:
-    real = [i for i in ids if i is not None]
-    if not real:
-        return {}
-    rows = (
-        (await session.execute(select(IssueRow).where(IssueRow.id.in_(real))))
-        .scalars()
-        .all()
-    )
-    return {row.id: row for row in rows}
 
 
 @router.delete("/{queue_id}", status_code=200)

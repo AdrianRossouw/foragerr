@@ -16,12 +16,15 @@ from __future__ import annotations
 import datetime as dt
 import logging
 import os
+from typing import ClassVar, Literal
 
 from sqlalchemy import select
 
+from foragerr.commands.registry import BaseCommand, register_command, register_handler
+from foragerr.commands.service import HandlerContext
 from foragerr.config import Settings
 from foragerr.db import Database, utcnow
-from foragerr.importer import fileops, history
+from foragerr.importer import IMPORT_FILE_MUTATION_GROUP, fileops, history
 from foragerr.library import paths, repo
 from foragerr.library.models import IssueFileRow, IssueRow, RootFolderRow, SeriesRow
 from foragerr.library.paths import PathNotUnderRootError, validate_under_root
@@ -41,6 +44,25 @@ logger = logging.getLogger("foragerr.library.flows.edit_delete")
 
 class IssueFileNotFoundError(LookupError):
     """No ``issue_files`` row exists for the requested id (FRG-PP-013)."""
+
+
+@register_command
+class DeleteSeriesFilesCommand(BaseCommand):
+    """Delete a series AND recycle its files (FRG-API-003 delete-files scenario).
+
+    ``DELETE /api/v1/series/{id}?deleteFiles=true`` enqueues this rather than
+    running inline: the per-file recycle moves are blocking syscalls that, on a
+    big series over a slow mount, would freeze the event loop for the whole
+    request — and sharing ``IMPORT_FILE_MUTATION_GROUP`` (the manual-import /
+    rescan / rename / drain group) serializes it against any concurrent import
+    so a rescan cannot add a file into the series after the delete snapshotted
+    its file list (which would strand an orphan file with no row/history). Runs
+    on the ``pp`` pool with the real ``daemon_offload`` seam for the FS work."""
+
+    name: Literal["delete-series-files"] = "delete-series-files"
+    workload_class: ClassVar[str] = "pp"
+    exclusivity_group: ClassVar[str | None] = IMPORT_FILE_MUTATION_GROUP
+    series_id: int
 
 
 async def edit_series(
@@ -141,7 +163,7 @@ async def delete_series(
     settings: Settings | None = None,
     now: dt.datetime | None = None,
     offload=None,
-) -> None:
+) -> str:
     """Delete a series (FRG-SER-014, FRG-API-003 delete-files scenario).
 
     ``delete_files=False`` (default) removes the series row — cascading to its
@@ -170,15 +192,24 @@ async def delete_series(
     (e.g. some tests); the API layer always supplies it (``delete_files=True``
     without settings falls back to permanent deletion, like
     :func:`delete_issue_file`).
+
+    Returns a one-line summary (``imported``-style, FRG-API-003 finding 6) the
+    ``delete-series-files`` command surfaces as its terminal result: how many
+    files were deleted and how many of those were routed to the recycle bin
+    (per-file destinations already live in the ``file_deleted`` history events).
     """
     if delete_files:
-        await _delete_series_and_files(db, series_id, settings, now or utcnow(), offload)
+        total, binned = await _delete_series_and_files(
+            db, series_id, settings, now or utcnow(), offload
+        )
+        summary = f"series {series_id} deleted; files={total} binned={binned}"
     else:
         async with db.write_session() as session:
             series = await repo.get_series(session, series_id)
             if series is None:
                 raise SeriesNotFoundError(f"no series {series_id}")
             await session.delete(series)
+        summary = f"series {series_id} deleted; files=0 binned=0 (rows only)"
 
     if settings is not None:
         cover_path, url_path = cover_paths(settings, series_id)
@@ -190,6 +221,7 @@ async def delete_series(
                     "cover cache cleanup for deleted series %d failed (%s): %s",
                     series_id, stale, exc,
                 )
+    return summary
 
 
 async def _delete_series_and_files(
@@ -198,12 +230,12 @@ async def _delete_series_and_files(
     settings: Settings | None,
     now: dt.datetime,
     offload,
-) -> None:
+) -> tuple[int, int]:
     """The ``delete_files=True`` arm of :func:`delete_series`: same per-file
     recycle routing and ordering discipline as :func:`delete_issue_file`, but
     all files move BEFORE one row-removal transaction, and every move is
     compensated on any failure (see ``delete_series``'s docstring for the
-    exact guarantee)."""
+    exact guarantee). Returns ``(total_files, binned)``."""
     async with db.read_session() as session:
         series = await repo.get_series(session, series_id)
         if series is None:
@@ -216,6 +248,7 @@ async def _delete_series_and_files(
         )
         files = [(row.id, row.path, row.issue_id) for row in result.scalars().all()]
 
+    issue_by_path = {path: issue_id for _fid, path, issue_id in files}
     use_bin = bool(settings is not None and settings.recycle_bin_path)
 
     if use_bin:
@@ -239,7 +272,10 @@ async def _delete_series_and_files(
             # 2. ...then remove the rows + write the events in ONE transaction.
             await _commit_series_deletion(db, series_id, files, recycled, now)
         except BaseException:
-            # Compensation: restore every file already moved, newest first.
+            # Compensation: restore every file already moved, newest first. A
+            # file that ALSO fails to restore is stranded in the bin — record
+            # its location durably (below) so it is recoverable from the DB.
+            stranded: list[tuple[int | None, str, str]] = []
             for path, dest in reversed(moved):
                 try:
                     await _offloaded(
@@ -255,8 +291,11 @@ async def _delete_series_and_files(
                         "%s from the recycle bin (%s); file preserved in the bin",
                         path, dest,
                     )
+                    stranded.append((issue_by_path.get(path), path, dest))
+            if stranded:
+                await _record_stranded_bin_files(db, series_id, stranded, now)
             raise
-        return
+        return len(files), len(moved)
 
     # Permanent-delete: commit the row removals + events FIRST, then unlink
     # after the commit so a crash never orphans rows (delete_issue_file's
@@ -272,6 +311,53 @@ async def _delete_series_and_files(
                     "delete_series: rows removed but unlinking %s failed (%s); "
                     "file orphaned on disk (recoverable)", path, exc,
                 )
+    return len(files), 0
+
+
+async def _record_stranded_bin_files(
+    db: Database,
+    series_id: int,
+    stranded: list[tuple[int | None, str, str]],
+    now: dt.datetime,
+) -> None:
+    """Durably record files left in the recycle bin after BOTH the row-removal
+    commit and the restore-compensation failed (FRG-API-003 finding 5).
+
+    Without this the bin location survives only in a WARNING log — irrecoverable
+    from the DB. Each stranded file gets its own ``file_deleted`` history event
+    (``source=manual``) carrying the ``quarantine_path`` and a message marking
+    it a compensation leftover, written in its OWN transaction so it lands even
+    though the deletion transaction rolled back (the series row still exists).
+    A failure to write these is logged and swallowed — it must never mask the
+    original error that triggered compensation."""
+    try:
+        async with db.write_session() as session:
+            for issue_id, path, dest in stranded:
+                history.record_event(
+                    session,
+                    event_type=history.EVENT_FILE_DELETED,
+                    series_id=series_id,
+                    issue_id=issue_id,
+                    source=history.SOURCE_MANUAL,
+                    data={
+                        "path": path,
+                        "recycle_path": dest,
+                        "compensation_leftover": True,
+                        "message": (
+                            "file left in the recycle bin after a failed "
+                            "delete-series compensation; recover it from "
+                            "recycle_path"
+                        ),
+                    },
+                    quarantine_path=dest,
+                    now=now,
+                )
+    except Exception:  # pragma: no cover - never mask the original failure
+        logger.error(
+            "delete_series: could not durably record %d stranded bin file(s) "
+            "for series %d; their locations remain only in the warning log",
+            len(stranded), series_id,
+        )
 
 
 async def _commit_series_deletion(
@@ -442,3 +528,18 @@ async def _require_root_folder(session, root_folder_id: int) -> RootFolderRow:
     if root is None:
         raise SeriesValidationError(f"root folder {root_folder_id} is not registered")
     return root
+
+
+@register_handler("delete-series-files")
+async def _handle_delete_series_files(
+    command: DeleteSeriesFilesCommand, ctx: HandlerContext
+) -> str:
+    """Run the file-deleting series delete off the request path, with the real
+    ``daemon_offload`` seam so the per-file recycle moves never block the loop."""
+    return await delete_series(
+        ctx.db,
+        command.series_id,
+        delete_files=True,
+        settings=ctx.settings,
+        offload=ctx.offload,
+    )

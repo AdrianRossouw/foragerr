@@ -111,6 +111,39 @@ async def test_event_type_flip_for_the_same_download_writes(db):
 
 
 @pytest.mark.req("FRG-API-011")
+async def test_intervening_import_breaks_the_block_adjacency(db):
+    """block(X) -> imported -> block(X) must write BOTH blocks (gate fix): the
+    dedup consults the newest row of ANY type for the download, so an
+    intervening `imported` (or upgrade/grab) means the second identical block is
+    no longer adjacent to the first and is a REAL re-block, recorded — not
+    collapsed into the earlier one. The plain retry-loop dedup (no intervening
+    event) still suppresses (asserted by the sibling tests)."""
+    async with db.write_session() as session:
+        first = await history.record_event_deduped(session, **_blocked_kwargs())
+        assert first is not None
+    # An import lands for the same download between the two blocks.
+    async with db.write_session() as session:
+        imported = await history.record_event_deduped(
+            session,
+            event_type=history.EVENT_IMPORTED,
+            download_id="d1",
+            source_title="Spawn 001",
+            source=history.SOURCE_DOWNLOAD,
+            data={"size": 1},
+        )
+        assert imported is not None
+    # The SAME block payload recurs — a genuine second block, not a retry echo.
+    async with db.write_session() as session:
+        reblock = await history.record_event_deduped(session, **_blocked_kwargs())
+        assert reblock is not None  # NOT swallowed: newest row was `imported`
+
+    events = await _all_events(db)
+    blocked = [e for e in events if e.event_type == history.EVENT_IMPORT_BLOCKED]
+    assert len(blocked) == 2  # both real blocks recorded
+    assert len(events) == 3
+
+
+@pytest.mark.req("FRG-API-011")
 async def test_events_without_a_download_id_are_never_deduped(db):
     """Rescan-shaped blocked events carry no download_id — the dedup key does
     not exist, so identical payloads all write (unchanged M1 behavior)."""

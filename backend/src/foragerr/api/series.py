@@ -25,12 +25,14 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Query, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
+from foragerr.api.command import CommandResource
 from foragerr.api.errors import ApiError
 from foragerr.api.paging import paginate
+from foragerr.commands import CommandValidationError
 from foragerr.library import repo
 from foragerr.library.flows import (
     MAX_ALIAS_LENGTH,
@@ -427,22 +429,46 @@ async def update_series(
     return SeriesResource.from_row_and_stats(row, stats)
 
 
-@router.delete("/{series_id}", status_code=204)
+@router.delete("/{series_id}")
 async def remove_series(
     series_id: int,
     request: Request,
+    response: Response,
     deleteFiles: bool = Query(False),
-) -> None:
-    """Row-only delete by default; ``deleteFiles=true`` routes every issue
-    file through the recycle bin BEFORE the rows are removed (FRG-SER-014,
-    FRG-API-003 delete-files scenario — implemented in m2-daily-surfaces)."""
+):
+    """Delete a series (FRG-SER-014, FRG-API-003 delete-files scenario).
+
+    Plain ``DELETE`` (no files) is bounded, synchronous work: it removes the
+    rows and returns ``204``. ``?deleteFiles=true`` instead ENQUEUES a
+    ``delete-series-files`` command (the manual-import precedent) and returns
+    ``202`` with the ``CommandResource``: the per-file recycle moves are
+    blocking syscalls that would freeze the loop for a big series on a slow
+    mount if run inline, and the command shares ``IMPORT_FILE_MUTATION_GROUP``
+    so a concurrent import/rescan cannot add a file after the delete snapshots
+    the file list (which would orphan it). A 404 is still returned up front
+    when the series does not exist, in both modes."""
     db = request.app.state.db
     settings = request.app.state.settings
+
+    if deleteFiles:
+        async with db.read_session() as session:
+            if await repo.get_series(session, series_id) is None:
+                raise ApiError(404, f"series {series_id} not found")
+        service = request.app.state.commands
+        try:
+            record = await service.enqueue(
+                "delete-series-files", {"series_id": series_id}
+            )
+        except CommandValidationError as exc:  # pragma: no cover - defensive
+            raise ApiError(400, str(exc)) from exc
+        response.status_code = 202
+        return CommandResource.from_record(record)
+
     try:
-        await delete_series(db, series_id, delete_files=deleteFiles, settings=settings)
+        await delete_series(db, series_id, delete_files=False, settings=settings)
     except SeriesNotFoundError as exc:
         raise ApiError(404, str(exc)) from exc
-    return None
+    return Response(status_code=204)
 
 
 @router.get("/{series_id}/cover")
