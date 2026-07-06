@@ -52,7 +52,7 @@ under the top level of `config.yaml`.
 | `usenet_retention_days` | `FORAGERR_USENET_RETENTION_DAYS` | `0` | Global usenet retention; 0 disables. Per-indexer override always wins. |
 | `backlog_search_interval_seconds` | `FORAGERR_BACKLOG_SEARCH_INTERVAL_SECONDS` | `21600` (6h) | Minimum 1 hour. |
 | `backlog_search_delay_seconds` | `FORAGERR_BACKLOG_SEARCH_DELAY_SECONDS` | `30` | Clamped **up** to a 30s floor if set lower. |
-| `comicvine_api_key` | `FORAGERR_COMICVINE_API_KEY` | *(empty, secret)* | See `secrets.md`. |
+| `comicvine_api_key` | `FORAGERR_COMICVINE_API_KEY` | *(empty, secret)* | See `secrets.md`. Settable in the UI (Settings → General) as well as here — see "Setting the ComicVine key" below. |
 | `comicvine_base_url` | `FORAGERR_COMICVINE_BASE_URL` | `https://comicvine.gamespot.com/api` | ComicVine API base. Leave at the default; overridden only to point the metadata client at a fixture server (the e2e harness). Every request carries your API key, so the scheme **must be https** — a plain-http value is refused at startup unless `comicvine_insecure_base` opts in. The egress policy additionally applies to the resolved host. |
 | `comicvine_insecure_base` | `FORAGERR_COMICVINE_INSECURE_BASE` | `false` | Test affordance only: permits a plain-http `comicvine_base_url` on a fixture network. Never set in production. |
 | `comicvine_min_interval_seconds` | `FORAGERR_COMICVINE_MIN_INTERVAL_SECONDS` | `2.0` | Minimum seconds between any two ComicVine requests, process-wide. |
@@ -61,9 +61,6 @@ under the top level of `config.yaml`.
 | `comicvine_search_result_cap` | `FORAGERR_COMICVINE_SEARCH_RESULT_CAP` | `1000` | Series-search candidates cap; truncation is visible. |
 | `comicvine_ignored_publishers` | `FORAGERR_COMICVINE_IGNORED_PUBLISHERS` | *(empty)* | Comma-separated, case-insensitive. |
 | `comicvine_image_hosts` | `FORAGERR_COMICVINE_IMAGE_HOSTS` | `comicvine.gamespot.com,comicvine1.cbsistatic.com,static.comicvine.com` | Allowlisted cover-image hostnames. |
-| `dognzb_api_key` | `FORAGERR_DOGNZB_API_KEY` | *(empty, secret)* | See `secrets.md`. |
-| `nzbsu_api_key` | `FORAGERR_NZBSU_API_KEY` | *(empty, secret)* | See `secrets.md`. |
-| `sabnzbd_api_key` | `FORAGERR_SABNZBD_API_KEY` | *(empty, secret)* | See `secrets.md`. |
 | `track_downloads_interval_seconds` | `FORAGERR_TRACK_DOWNLOADS_INTERVAL_SECONDS` | `60` | Minimum 60s (download pool is serialized). |
 | `auto_redownload_failed` | `FORAGERR_AUTO_REDOWNLOAD_FAILED` | `true` | Self-healing re-search after a failed download. |
 | `opds_base_path` | `FORAGERR_OPDS_BASE_PATH` | `/opds` | Base URL path the OPDS catalog is mounted at. Must start with `/`; trailing slash stripped; in-feed links are built relative to it. |
@@ -86,7 +83,36 @@ under the top level of `config.yaml`.
 
 Unknown keys found in `config.yaml` are ignored with a logged warning rather than
 failing startup, so a config file from a slightly different version doesn't brick
-the instance.
+the instance — this is how an older `config.yaml` carrying the now-removed
+`dognzb_api_key`/`nzbsu_api_key`/`sabnzbd_api_key` placeholders keeps loading
+cleanly (see "Setting the ComicVine key" below for why those three were never
+actually global settings).
+
+## Setting the ComicVine key
+
+`comicvine_api_key` is the only global credential foragerr has. It can be supplied
+two ways, in the same precedence order as every other setting:
+
+1. The `FORAGERR_COMICVINE_API_KEY` environment variable (wins if set).
+2. Settings → General in the web UI — see `../user/web-ui.md` → "Settings" →
+   "General". Saving there writes the key into `config.yaml` through the same
+   documented-config writer as every other file-persisted setting; it applies
+   immediately, no restart needed. If the environment variable is set, the
+   General screen shows the field read-only with a note that it is
+   environment-managed, rather than a save button that would have no effect.
+
+The key is write-only everywhere it can be set: the General screen and the
+`GET /api/v1/config/general` API report only whether a key is configured and its
+source (unset / file / environment), never the value itself.
+
+DogNZB, NZB.su, and SABnzbd credentials are **not** global settings — each is
+entered per-provider in Settings → Indexers / Download Clients (a provider's own
+JSON settings, stored with that provider's row), which is also where DDL provider
+tuning lives. Earlier versions of this manual listed
+`dognzb_api_key`/`nzbsu_api_key`/`sabnzbd_api_key` as global `config.yaml` settings;
+they were never consumed by anything and have been removed from the `Settings`
+model (`m2-first-run-defaults`) — a stale `config.yaml` that still carries them
+keeps loading fine (see the unknown-key note above), the keys are just ignored.
 
 ## Config-file precedence in practice
 

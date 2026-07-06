@@ -23,10 +23,12 @@ A genuinely empty result only appears when ComicVine completed the search and
 matched nothing. Other outcomes are reported distinctly:
 
 - **"ComicVine API key missing or invalid"** — the lookup was rejected outright
-  (HTTP 401/403 upstream). Set `comicvine_api_key` (or the
-  `FORAGERR_COMICVINE_API_KEY` environment variable — see the admin manual,
-  `secrets.md`) and search again. An invalid key fails every request, so foragerr
-  reports it as an error instead of pretending the search found nothing.
+  (HTTP 401/403 upstream). The message links straight to Settings → General
+  (`web-ui.md`), where you can set the key from the UI; it is also settable as
+  `comicvine_api_key` in `config.yaml` or the `FORAGERR_COMICVINE_API_KEY`
+  environment variable (see the admin manual, `secrets.md`). Set it and search
+  again — an invalid key fails every request, so foragerr reports it as an error
+  instead of pretending the search found nothing.
 - **"Results may be incomplete"** — the search degraded part-way (rate limiting,
   a ComicVine outage, a malformed page). Whatever candidates were retrieved are
   shown; re-run the same search in a moment for the full list. If the degrade

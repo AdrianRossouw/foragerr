@@ -919,6 +919,80 @@ COMP 13), and two additive endpoint groups on the existing authenticated
   arm — it composes existing hardened scheduler infrastructure exactly as
   m2-search-autosuggest composed the existing ComicVine client.
 
+### 2026-07-06 — m2-first-run-defaults (M2 change 5.5)
+
+Two deltas, both documentation-only over existing hardened surfaces — no new
+listener, no new parser of untrusted input, and no new credential handling
+primitive. Disposition:
+
+- **ComicVine key-write path (COMP 11 — Secrets/configuration, T-CFG-1/T-CFG-2)**:
+  `PUT /api/v1/config/general` (FRG-API-018) is the first endpoint that accepts a
+  plaintext secret value from the UI and writes it to `config.yaml`. It reuses the
+  EXISTING documented-config writer verbatim (`_apply`: validate → render →
+  `atomic_write_text`) — the same at-rest posture `config.yaml` already has for an
+  env/file-supplied key (RISK-013 unchanged), on the same no-auth tailnet-only
+  trust boundary as every other `/api/v1` write (RISK-020 unchanged, T-CFG-1
+  applies unchanged: the value never lands in the image or repository, only the
+  operator-writable config volume). The key is never echoed back: `GET
+  /config/general` and the PUT's own response report only `{configured, source}`,
+  never the value (see FRG-API-018 for the write-only contract) — no new
+  disclosure surface. On a successful write the new value is immediately
+  re-registered with the log-redaction filter (`register_secret`, the same
+  `_apply` step every other config PUT already performs), so T-CFG-2 (secret in
+  logs/diagnostics) is covered identically to the pre-existing env/file path — a
+  key typed into the UI is redaction-covered from the moment it is accepted, not
+  just after a restart. No new `RISK-` row: this composes the existing config-write
+  and redaction machinery exactly as `m2-search-autosuggest` composed the existing
+  ComicVine client, rather than introducing a new secret-handling code path.
+- **Default-on DDL seeding (COMP 6 — DDL scraper + downloader)**: a genuinely
+  fresh install now seeds one **enabled** GetComics indexer + one **enabled**
+  built-in DDL client (FRG-DEP-013) instead of starting with an empty,
+  operator-must-opt-in provider list. This shifts the RISK-015 (single hardcoded
+  getcomics.org upstream — a domain takeover becomes a malware-delivery channel)
+  and RISK-016 (Cloudflare-evasion/ToS-sensitive scraping automation) postures
+  from **opt-in** to **default-enabled** for fresh installs. No new code attack
+  surface is added — the DDL scraper/downloader code paths (COMP 6, already
+  threat-modeled) are unchanged, `getcomics.org` was already on the hardcoded
+  `KNOWN_DDL_HOSTS` allowlist (RISK-007's per-provider allowlist), and the
+  default `base_url` is a public HTTPS host, so no egress/allowlist change was
+  needed to make the seed safe to run automatically. Mitigations, unchanged from
+  the existing RISK-015/016 acceptances but now doing more work because the
+  provider is on by default rather than opt-in:
+  - the seeded provider pair is **documented** (`docs/manual/user/downloads.md`)
+    and **deletable** — deleting either row is permanent, the persisted first-run
+    seed marker (`db/first_run.py`, migration `0010_first_run_marker`) ensures a
+    user-deleted default is never resurrected on restart, and an **established**
+    database (any pre-existing indexer/download-client/series row at migration
+    time) is marked already-seeded WITHOUT injecting anything, so an upgrading
+    operator is never surprised by a newly-appearing provider;
+  - provider rate limits still apply unchanged: `min_interval_seconds=15` between
+    GetComics page fetches and `max_pages=3` per search (`GetComicsSettings`
+    defaults) — the same politeness ladder (RISK-027) that governs every DDL
+    fetch, not a relaxed default-seeded configuration;
+  - content verification before import (RISK-015's `Mitigate (partial)` arm) and
+    the per-provider outbound allowlist (RISK-007) apply to the seeded provider
+    identically to a manually-added one — nothing about being seeded bypasses any
+    existing check.
+  Review trigger for the shifted posture (recorded in the risk register): any
+  exposure of the instance beyond the tailnet, a GetComics ToS change, or a
+  malware incident — same triggers RISK-015/016 already carried, now explicitly
+  covering the default-enabled state. See `docs/security/risk-register.md`
+  RISK-015/RISK-016 for the amended wording.
+- **Dead credential fields removed (COMP 11)**: `dognzb_api_key`, `nzbsu_api_key`,
+  `sabnzbd_api_key` are deleted from the `Settings` model (FRG-DEP-003 modified) —
+  they had zero consumers, so removing them shrinks the documented-config surface
+  (asset list in COMP 11 above) without changing behavior; per-provider DogNZB/
+  NZB.su/SAB credentials are unaffected (they were always stored per-row, never
+  read through these fields).
+- **LibraryImport credential-error link (FRG-UI-020, client-only)**:
+  `frontend/src/screens/library-import/LibraryImport.tsx`'s inline ComicVine
+  lookup (`GroupLookup`) now renders the same `<Link to="/settings/general">`
+  credential-error guidance as Add Series, reusing the exported
+  `OutcomeErrorText` component wholesale rather than a parallel copy. Routing
+  only — no new endpoint, no new trust boundary; the underlying classification
+  (`isComicVineAuthError`, the structural `errors[].field` discriminator) and
+  the 503 it reacts to are unchanged.
+
 ## Coverage summary
 
 - **Well covered by the five drafts** (mitigation named, no new requirement needed): OPDS

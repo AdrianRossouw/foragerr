@@ -37,9 +37,10 @@ real, and re-submitting an identical term after an error or a degraded/capped
 result retries instead of doing nothing.
 
 A search that can't be completed is never presented as "no results": if ComicVine
-rejects the API key (unset or invalid) the screen says so and points you at
-Settings — the autosuggest dropdown shows the same guidance if it hits a
-rejected key; if the search degraded mid-way (rate limiting, a ComicVine outage)
+rejects the API key (unset or invalid) the screen says so and links straight into
+Settings → General, where the key is actually set — the autosuggest dropdown
+shows the same guidance if it hits a rejected key; if the search degraded mid-way
+(rate limiting, a ComicVine outage)
 any candidates found so far render with a "results may be incomplete" notice —
 or, when nothing at all was retrieved, an explicit failure message; and a search
 that hit the result cap says so and advises a narrower term. Re-searching the
@@ -72,9 +73,10 @@ match with the inline ComicVine search, then execute with batch add options
 (format profile, monitoring, search-on-add). Each group reports its outcome —
 imported, or blocked with the pipeline's verbatim reasons. Groups without a
 plausible match are never importable on a guess, an unconfigured-roots state
-points you at Settings, and a scan that finds nothing to import says so. See
-`import.md` for how the scan, in-place registration, and re-scan semantics
-work.
+points you at Settings, and a scan that finds nothing to import says so. The
+inline ComicVine search used to correct a match shows the same rejected-key
+guidance (linking to Settings → General) as Add Series. See `import.md` for how
+the scan, in-place registration, and re-scan semantics work.
 
 ## Queue
 
@@ -123,14 +125,43 @@ any listed release can be grabbed manually.
 
 ## Settings
 
-Settings covers indexers, download clients, and Media Management. Indexers and
-download clients use the same schema-driven
+Settings covers General, indexers, download clients, and Media Management.
+Indexers and download clients use the same schema-driven
 form: the server describes each provider implementation's fields and the UI
-renders them, so a new provider type needs no UI change; Media Management is its
-own dedicated screen (naming, transfer mode, recycle bin). Secret fields (API keys)
-are write-only — the form shows that a value is stored but never displays it back.
-Every provider has a Test button that performs a live connectivity check before
-you save.
+renders them, so a new provider type needs no UI change; General and Media
+Management are each their own dedicated single-form screen. Secret fields (API
+keys) are write-only — the form shows that a value is stored but never displays
+it back. Every provider has a Test button that performs a live connectivity
+check before you save.
+
+On a fresh install, Indexers and Download Clients are not empty: foragerr seeds
+one enabled **GetComics** DDL indexer and one enabled **built-in DDL** download
+client automatically, so search and download work out of the box with no
+credentials at all. Both are ordinary provider rows — delete either (or both) if
+you don't want them, and they are never re-created; only a genuinely first-run
+database gets seeded. See `downloads.md` for what the DDL pipeline does and the
+security note on it being enabled by default.
+
+### General
+
+The General screen holds the one truly global credential: the ComicVine API
+key. Its field is masked and write-only like every other secret field — it
+shows a "key is set" hint, never the value, and saving a blank field leaves the
+stored key untouched. A **Test** button checks the currently-saved (or
+environment-supplied) key against ComicVine and reports success or failure; it
+is disabled while you have an unsaved edit in the field, since testing then
+would silently check the *old* key and misreport it as belonging to what you
+just typed.
+
+If `FORAGERR_COMICVINE_API_KEY` is set in the environment, the field renders
+read-only with a note that it is environment-managed — the environment variable
+always outranks a UI-saved value, so editing here would have no effect until the
+variable is unset. Otherwise, saving here writes the key into `config.yaml` (the
+same file `configuration.md` documents) and applies it immediately, without a
+restart.
+
+A rejected-ComicVine-key error anywhere in the app (Add Series, autosuggest, the
+Library Import inline search) links straight here.
 
 ### Media Management
 

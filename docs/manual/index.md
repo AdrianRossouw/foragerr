@@ -45,9 +45,10 @@ filename parser, library + metadata, search + indexers, downloads, import pipeli
 UI + OPDS + deployment, integration/e2e) and the M2 changes merged so far (v0.2.x:
 settings/naming/recycle-bin configuration, manual import + ComicInfo tagging,
 lookup error surfacing, existing-library import, delete/OpenSearch/quick-search
-daily-use surfaces, search autosuggest, and scheduled backups + restore + the
-System status/health/tasks screens). It does not describe behavior that exists
-only in an open change branch or an unmerged proposal.
+daily-use surfaces, search autosuggest, scheduled backups + restore + the
+System status/health/tasks screens, and the Settings → General ComicVine-key UI
++ first-run default GetComics/DDL provider seeding). It does not describe
+behavior that exists only in an open change branch or an unmerged proposal.
 
 Per `FRG-PROC-011`, every OpenSpec change proposal declares its manual impact
 (sections it adds or updates, or an explicit "no manual impact" with rationale), and
