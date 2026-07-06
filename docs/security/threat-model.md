@@ -628,6 +628,78 @@ change path); each failed retry writes a fresh `import_blocked` history event, s
 permanently stuck item accretes history rows until the user acts. Accepted for M1
 (loudly visible in the queue; slow growth); dedup/pruning at the M2 history UI.
 
+### 2026-07-06 — m1-ui-opds-deploy (change 7 of Phase 3)
+
+M1's faces go live: the React SPA (served by the backend), the OPDS 1.2 catalog
+(COMP 3), the WebSocket push channel (COMP 2), provider CRUD on the API (COMP 1),
+and the Docker/Tailscale deployment boundary (COMP 13). Every COMP 1/2/3 threat now
+has running code behind it. Disposition:
+
+**COMP 3 — OPDS catalog (the headline surface, now live)**
+
+- **`T-OPDS` traversal (RISK-001) closed by construction**: downloads are addressed
+  only by integer `issue_files.id`; the stored path must pass
+  `security.paths.validate_under_root` (the change-6 canonical containment check —
+  the OPDS route was swapped onto it at integration) against registered roots
+  before a byte streams; out-of-root → 404 indistinguishable from a bad id. No
+  parameter anywhere on the surface can carry a path.
+- **SQLi (RISK-002)**: all ORM `select` with bound parameters; typed int
+  page/count with a server-side page-size cap; no request string reaches SQL.
+- **Feed injection**: every untrusted value (series/issue titles, filenames) passes
+  the escaping Atom builder; the gate review found and fixed the well-formedness
+  gap — XML-1.0-illegal control characters are now stripped, so one poisoned title
+  can no longer make a strict reader reject an entire feed page (stored-data DoS).
+- **No archive I/O at feed time (RISK-005 arm)**: feeds render from DB rows + the
+  change-3 local cover cache only; whole-file downloads stream original bytes with
+  comic MIME types. Page streaming (and its resource limits) is M3 and must adopt
+  `inspect_archive`.
+- **Covers (RISK-023)**: feed image/thumbnail links point at foragerr's own cover
+  cache — reader traffic never reaches a third-party CDN. (Thumbnail rel serves the
+  full-size cover: bandwidth inefficiency, recorded, not a leak.)
+
+**COMP 2 — WebSocket channel**
+
+- Gate fixes: the connection now registers with the broadcaster BEFORE the
+  handshake accept (an event published in the accept window was silently lost);
+  debounce coalescing keys on resource identity (two downloads progressing in one
+  ~100 ms window both broadcast — the old (name, action) key dropped one row's
+  update, which the UI patches by id).
+- Per-socket outbound queues are bounded (depth 64; slow client dropped, never
+  stalls the bus). **Documented latent (RISK-021)**: no cap on concurrent
+  connections and no inbound frame-rate limit — the WS surface is live one
+  milestone ahead of FRG-NFR-014 (M2 hardening), accepted for the single-user
+  tailnet. Origin validation (`T-WS`/RISK-022, CSWSH) stays deferred to M5 auth as
+  recorded. The shipped server can actually speak WebSocket: `websockets` became an
+  explicit dependency after Codex found plain uvicorn (click+h11 only) would fail
+  every upgrade in the container while the in-process TestClient stayed green.
+- Broadcast contents remain `{name, action, resource}` envelopes carrying ids and
+  states only — no titles, paths, or secrets ride the channel.
+
+**COMP 1 — API/UI**
+
+- Provider CRUD (indexers, download clients) keeps secrets write-only: GET/list
+  never echo stored secret fields; the schema-driven settings UI shows only a
+  value-is-stored marker (RISK-013 arm). The SPA static mount serves the built
+  bundle; the gate fixed its catch-all to keep real 404s for reserved backend
+  prefixes (`/api`, `/opds`, `/health`) instead of masking unrouted paths with
+  200 index.html, and `opds_base_path` now rejects reserved mounts.
+- One hardening fix behind the API: the root-folder free-space stat runs off the
+  event loop, so a hung network mount can no longer stall every listener surface.
+
+**COMP 13 — Docker / Tailscale boundary**
+
+- linuxserver.io conventions: PUID/PGID drop-root, `/config` volume, HEALTHCHECK
+  on `/health`, single port 8789. The build script secret-scans the context and
+  refuses `.env`-shaped material; the gate widened `.dockerignore` to nested
+  `.env` files (a `frontend/.env` with `VITE_*` values would otherwise be inlined
+  into the served bundle by a direct `docker build`).
+- RISK-020 (no auth) now covers the full live surface — UI, API, OPDS, WS — with
+  Tailscale-only exposure as the sole compensating control, made operational by
+  the deployment manual: every port-mapping example binds to the tailnet address,
+  the do-not-port-forward warning is explicit, and FRG-DEP-011 labelling-control
+  tests pin both documents so an edit cannot silently reintroduce an
+  all-interfaces example.
+
 ## Coverage summary
 
 - **Well covered by the five drafts** (mitigation named, no new requirement needed): OPDS
