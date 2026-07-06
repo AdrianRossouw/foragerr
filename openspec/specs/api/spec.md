@@ -59,7 +59,7 @@ The API SHALL provide series endpoints: `GET /series` (library index), `GET/POST
 
 - **Milestone**: M1
 - **Source**: sonarr-architecture.md §7.1 (Series + lookup), §7.3 SeriesResource shape, §1.2 add flow.
-- **Notes**: Series add *behavior* (refresh chain, monitoring) is SER/META area; this requirement owns only the HTTP surface. Dedup hint: statistics aggregation mirrors Sonarr `SeriesStats/`. Outcome-class distinction added in m2-lookup-error-surfacing (a missing/invalid key previously surfaced as `200 []`).
+- **Notes**: Series add *behavior* (refresh chain, monitoring) is SER/META area; this requirement owns only the HTTP surface. Dedup hint: statistics aggregation mirrors Sonarr `SeriesStats/`. Outcome-class distinction added in m2-lookup-error-surfacing. `deleteFiles=true` implemented in m2-daily-surfaces (was 501): files route through the recycle bin before rows are removed.
 
 #### Scenario: Series index returns a paged envelope with whitelisted sort
 
@@ -86,10 +86,10 @@ The API SHALL provide series endpoints: `GET /series` (library index), `GET/POST
 - **WHEN** a valid `POST /api/v1/series` supplies a ComicVine volume, root folder, monitoring strategy, and format profile as write-only add options
 - **THEN** the response creates the series and includes the command id of the queued refresh; an invalid volume, missing/invalid root folder, or a duplicate of an existing series is rejected with a structured 400 naming the offending field
 
-#### Scenario: DELETE removes the row only; file deletion is not yet supported
+#### Scenario: DELETE removes the row; deleteFiles routes files through the recycle bin
 
 - **WHEN** `DELETE /api/v1/series/{id}` is called
-- **THEN** the series row is removed without touching files, and `DELETE /api/v1/series/{id}?deleteFiles=true` returns 501 (not implemented in M1) rather than silently ignoring the flag
+- **THEN** the series row is removed without touching files (204); with `?deleteFiles=true` the request enqueues a file-deleting command (202 with the command resource) that holds the import-mutation exclusivity and runs off the event loop: every issue file is first moved to the recycle bin (or permanently deleted only when no bin is configured), each recorded as a `file_deleted` history event with `source=manual`, and only then are the rows removed — a mid-operation failure never leaves rows deleted while files were untouched, and a stranded compensation leftover is durably recorded with its bin path
 
 ### Requirement: FRG-API-004 — Issue resources with monitored toggle
 
@@ -279,29 +279,49 @@ The backend SHALL expose a WebSocket endpoint broadcasting resource-change messa
 
 ### Requirement: FRG-API-011 — History endpoint
 
-The API SHALL expose a paged `GET /history` of pipeline events (grabbed, imported, download failed, deleted, renamed) each carrying eventType, sourceTitle, quality/format, date, downloadId, a per-event data dict, and nested series/issue, filterable by series and event type.
+The API SHALL expose a paged `GET /history` of pipeline events (grabbed, imported, upgrade-replaced, import-blocked/failed, download-failed, deleted, renamed) each carrying eventType, sourceTitle, date, downloadId, a per-event data dict, and nested series/issue, filterable by series and event type. The `import_history` table is the single feed source: grab and download-failure writers land their events there (the operational `grab_history` match-key table is unchanged), and an identical blocked outcome for the same download never duplicates its history row.
 
 - **Milestone**: M2
 - **Source**: sonarr-architecture.md §7.1 History (paged), §7.3 HistoryResource, §4.3 (downloadId as join key).
-- **Notes**: The history *records* are written in M1 (the DL pipeline depends on grab history); only the read API + screen are M2. Flag to orchestrator: if slice debugging wants it earlier, promoting to M1 is cheap.
+- **Notes**: The M1 note "history records are written in M1" was true only across three tables (grab_history, import_history, blocklist); this change backfills the two writerless event types (`grabbed`, `download_failed`) so the feed is single-source going forward. Dedup (RISK-040): the blocked→pending retry-on-evidence loop is deliberate and untouched — only the duplicate row write is suppressed, keyed on identical event type + canonical data payload for the same downloadId.
 
-#### Scenario: Baseline acceptance
+#### Scenario: Grab-and-import cycle shares a downloadId
 
-- **WHEN** this requirement is verified against the implementation
-- **THEN** After a grab-and-import cycle, history contains a grabbed row and an imported row sharing the same downloadId.
+- **WHEN** a release is grabbed and later imports
+- **THEN** `GET /api/v1/history` contains a `grabbed` row and an `imported` row sharing the same downloadId, each with nested series/issue, newest first
+
+#### Scenario: Paged envelope with filters
+
+- **WHEN** `GET /api/v1/history?eventType=import_blocked&seriesId=N&page=2` is requested
+- **THEN** the response is the standard paging envelope filtered to that event type and series, sorted by date descending with a whitelisted sortKey (unknown keys 400)
+
+#### Scenario: Identical blocked retries do not accrete rows
+
+- **WHEN** a permanently blocked download is re-fed by the tracking cycle and re-blocks with a byte-identical reasons payload N times
+- **THEN** exactly one `import_blocked` row exists for that outcome; a retry whose reasons/data CHANGE writes a new row
+
+#### Scenario: Download failure is a history event
+
+- **WHEN** a tracked download fails and is blocklisted
+- **THEN** a `download_failed` history row is written carrying the downloadId and failure message
 
 ### Requirement: FRG-API-012 — Wanted/missing endpoint
 
-The API SHALL expose paged wanted endpoints listing monitored, published issues without files (missing) and, once format profiles have a cutoff, issues below cutoff — both derived at query time, not from a stored wanted status.
+The API SHALL expose a paged `GET /wanted/missing` listing monitored, published issues without files, derived at query time from the canonical wanted query — never from a stored wanted status. (The former cutoff-unmet half of this requirement is REMOVED: quality cutoffs are parked outside M2/M3, so plain missing is the whole surface.)
 
 - **Milestone**: M2
-- **Source**: sonarr-architecture.md §1.1 ("wanted is derived"), §7.1 Wanted/Missing + Wanted/Cutoff; mylar-feature-surface.md §3 (Mylar's stored Wanted status — divergence).
-- **Notes**: Deliberate divergence from Mylar: no stored per-issue Wanted status; adopt Sonarr's derived model. Cutoff-unmet half may lag to B if format profiles land late.
+- **Source**: sonarr-architecture.md §1.1 ("wanted is derived"), §7.1 Wanted/Missing; mylar-feature-surface.md §3 (Mylar's stored Wanted status — divergence).
+- **Notes**: Deliberate divergence from Mylar: no stored per-issue Wanted status. Cutoff-unmet dropped per the 2026-07-06 M2 reshape (QUAL-003/004/005 parked to B; API-012 narrowed accordingly). Reuses `repo.wanted_issues` — the same SELECT the backlog search walks, so screen and search can never disagree.
 
-#### Scenario: Baseline acceptance
+#### Scenario: Derived missing list
 
-- **WHEN** this requirement is verified against the implementation
-- **THEN** Unmonitoring an issue removes it from `GET /wanted/missing` without any explicit status write.
+- **WHEN** an issue is monitored, its series monitored, its release date passed, and it has no file
+- **THEN** it appears in `GET /api/v1/wanted/missing` (paged envelope, nested series); importing a file removes it with no status write, deleting the file returns it
+
+#### Scenario: No stored status, no cutoff surface
+
+- **WHEN** the API surface is inspected
+- **THEN** there is no wanted-status write path and no cutoff-unmet endpoint — the missing list is exactly the backlog search's target set
 
 ### Requirement: FRG-API-013 — Config resource endpoints
 
