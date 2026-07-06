@@ -14,7 +14,6 @@ via ``asyncio.to_thread``.
 from __future__ import annotations
 
 import logging
-import shutil
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -23,13 +22,18 @@ from alembic import command
 from alembic.config import Config
 from alembic.script import Script, ScriptDirectory
 
+from foragerr.db.backup import (
+    BACKUPS_DIRNAME,
+    PRE_MIGRATION_PREFIX,
+    prune_backup_pool,
+    write_consistent_backup,
+)
 from foragerr.db.base import utcnow
 from foragerr.db.engine import DB_FILENAME
 
 logger = logging.getLogger("foragerr.db.migrations")
 
 ALEMBIC_DIR = Path(__file__).resolve().parent / "alembic"
-BACKUPS_DIRNAME = "backups"
 
 
 class MigrationError(RuntimeError):
@@ -112,23 +116,19 @@ def _pending_revisions(
 def backup_before_migration(
     db_path: Path, config_dir: Path, version: str, retention: int
 ) -> Path:
-    """WAL-checkpointed consistent copy + retention pruning (FRG-DB-003)."""
+    """WAL-checkpointed consistent copy + retention pruning (FRG-DB-003).
+
+    Reuses the shared ``write_consistent_backup`` primitive (SQLite backup API
+    after a WAL checkpoint) and the prefix-scoped ``prune_backup_pool`` — the
+    same building blocks the scheduled backup (FRG-DB-009) uses, with the
+    distinct ``pre-migration-`` prefix so the two pools retain independently.
+    """
     timestamp = utcnow().strftime("%Y%m%d%H%M%S%f")
     backups_root = config_dir / BACKUPS_DIRNAME
-    target_dir = backups_root / f"pre-migration-{version}-{timestamp}"
+    target_dir = backups_root / f"{PRE_MIGRATION_PREFIX}{version}-{timestamp}"
     target_dir.mkdir(parents=True)
 
-    source = sqlite3.connect(db_path)
-    try:
-        source.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        destination = sqlite3.connect(target_dir / db_path.name)
-        try:
-            with destination:
-                source.backup(destination)
-        finally:
-            destination.close()
-    finally:
-        source.close()
+    write_consistent_backup(db_path, target_dir)
 
     prune_backups(backups_root, retention)
     logger.info("db: pre-migration backup written to %s", target_dir)
@@ -136,21 +136,13 @@ def backup_before_migration(
 
 
 def prune_backups(backups_root: Path, retention: int) -> list[Path]:
-    """Keep the newest ``retention`` pre-migration backups; prune the rest."""
-    # Config enforces ge=1 (db_backup_retention), so the app path never passes
-    # < 1; this floor only guards direct/non-config callers from wiping every
-    # backup with a zero/negative retention.
-    if retention < 1:
-        retention = 1
-    backups = sorted(
-        (d for d in backups_root.glob("pre-migration-*") if d.is_dir()),
-        key=lambda d: d.stat().st_mtime,
-    )
-    pruned = backups[: max(0, len(backups) - retention)]
-    for stale in pruned:
-        shutil.rmtree(stale)
-        logger.info("db: pruned pre-migration backup %s", stale)
-    return pruned
+    """Keep the newest ``retention`` pre-migration backups; prune the rest.
+
+    Thin wrapper over the shared, prefix-scoped ``prune_backup_pool`` for the
+    ``pre-migration-`` pool (FRG-DB-003); the scheduled pool is pruned by the
+    same primitive under its own prefix.
+    """
+    return prune_backup_pool(backups_root, PRE_MIGRATION_PREFIX, retention)
 
 
 def prepare_database(
