@@ -18,6 +18,7 @@ import type {
   SeriesDetail,
   SeriesResource,
   SeriesStatisticsResource,
+  SuggestCandidate,
   WantedIssueRecord,
 } from '../api/types';
 
@@ -304,6 +305,22 @@ export const mockLookupCandidates: LookupCandidate[] = [
     year_proximity: 30,
     target_issue_plausible: false,
     have_it: true,
+  },
+];
+
+/**
+ * ComicVine SUGGEST candidates (FRG-API-017) — the bounded, no-plausibility
+ * shape the Add Series autosuggest dropdown renders (FRG-UI-005).
+ */
+export const mockSuggestCandidates: SuggestCandidate[] = [
+  {
+    cv_volume_id: 40501234,
+    name: 'Saga',
+    publisher: 'Image',
+    start_year: 2012,
+    image_url: 'https://comicvine.gamespot.com/a/uploads/scale_small/saga.jpg',
+    count_of_issues: 63,
+    have_it: false,
   },
 ];
 

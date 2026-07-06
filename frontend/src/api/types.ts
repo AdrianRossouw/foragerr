@@ -225,6 +225,34 @@ export interface LookupCandidate {
 }
 
 /**
+ * Suggest envelope (FRG-API-017): the bounded, first-page-only accelerator
+ * behind the Add Series autosuggest dropdown (FRG-UI-005). Carries `complete`
+ * (a clean single-page fetch vs. one degraded by a mid-fetch upstream
+ * failure) but deliberately carries NO `truncated` flag — a suggest result is
+ * definitionally partial, so a cap is not a signal-worthy truncation.
+ */
+export interface SuggestResponse {
+  records: SuggestCandidate[];
+  complete: boolean;
+}
+
+/**
+ * ComicVine suggest candidate (FRG-API-017) — the cheap first-page shape.
+ * Unlike `LookupCandidate` it carries no plausibility annotations (the
+ * suggest endpoint MAY omit that scoring to stay cheap); `have_it` is
+ * retained so an already-owned volume can still be marked in the dropdown.
+ */
+export interface SuggestCandidate {
+  cv_volume_id: number;
+  name: string | null;
+  publisher: string | null;
+  start_year: number | null;
+  image_url: string | null;
+  count_of_issues: number | null;
+  have_it: boolean;
+}
+
+/**
  * One `GET /api/v1/rootfolder` row (FRG-SER-008). `free_space` is filesystem
  * free bytes, or null when the path could not be stat'd.
  */
