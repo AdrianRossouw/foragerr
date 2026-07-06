@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Toolbar } from '../../components/Toolbar';
 import { Poster } from '../../components/Poster';
@@ -12,9 +12,9 @@ import {
 } from '../../api/hooks';
 import { isComicVineAuthError } from '../../api/fetcher';
 import type {
+  AddSeriesNavigationState,
   LookupCandidate,
   LookupResponse,
-  SuggestCandidate,
 } from '../../api/types';
 import { MONITOR_STRATEGIES } from '../../api/types';
 import { formatBytes } from '../../lib/format';
@@ -88,15 +88,6 @@ export function lookupOutcomeNote(
 }
 
 /**
- * Router navigation-state contract for arriving at Add Series with a
- * prefilled term (FRG-UI-005 / FRG-UI-019) — the header quick-search
- * fall-through (`HeaderQuickSearch`) navigates here with this shape.
- */
-export interface AddSeriesNavigationState {
-  prefillTerm?: string;
-}
-
-/**
  * The minimal shape `AddOptionsPanel`/`add()` need, satisfied structurally by
  * BOTH a full-lookup `LookupCandidate` and a bounded `SuggestCandidate`
  * (FRG-UI-005): selecting a suggestion opens the exact same add panel and
@@ -147,6 +138,72 @@ function PlausibilityChips({ candidate }: { candidate: LookupCandidate }) {
         <span className={`${styles.chip} ${styles.chipHave}`}>In library</span>
       )}
     </span>
+  );
+}
+
+/**
+ * One ComicVine candidate card (FRG-UI-005) — the shared visual shell used by
+ * BOTH the suggest dropdown and the full-lookup results so the two render
+ * identically. `chips` fills the annotation slot (the suggest dropdown passes
+ * inline count/have_it chips; the full lookup passes `PlausibilityChips`) and
+ * `panel` is the add-options panel, mounted inline only while this card is the
+ * selected one and the volume is not already owned.
+ */
+function CandidateCard({
+  candidate,
+  testId,
+  selectLabel,
+  selected,
+  onToggle,
+  chips,
+  panel,
+}: {
+  candidate: Pick<
+    LookupCandidate,
+    'cv_volume_id' | 'name' | 'publisher' | 'start_year' | 'image_url' | 'have_it'
+  >;
+  testId: string;
+  selectLabel: string;
+  selected: boolean;
+  onToggle: () => void;
+  chips: ReactNode;
+  panel: ReactNode;
+}) {
+  return (
+    <div className={styles.candidateCard} data-testid={testId}>
+      <button
+        type="button"
+        className={styles.candidateBody}
+        aria-label={selectLabel}
+        disabled={candidate.have_it}
+        onClick={onToggle}
+      >
+        <Poster
+          initial={(candidate.name ?? '?').charAt(0)}
+          src={candidate.image_url}
+          alt={`${candidate.name ?? 'volume'} cover`}
+          frameClassName={styles.posterFrame}
+          fallbackClassName={styles.posterFallback}
+          lazy
+        />
+        <span className={styles.candidateInfo}>
+          <span className={styles.candidateTitle}>
+            {candidate.name ?? 'Unnamed volume'}
+            {candidate.start_year !== null && (
+              <span className={styles.candidateYear}>
+                {' '}
+                ({candidate.start_year})
+              </span>
+            )}
+          </span>
+          {candidate.publisher && (
+            <span className={styles.publisher}>{candidate.publisher}</span>
+          )}
+          {chips}
+        </span>
+      </button>
+      {selected && !candidate.have_it && panel}
+    </div>
   );
 }
 
@@ -271,12 +328,7 @@ function AddOptionsPanel({
 export function AddSeries() {
   const navigate = useNavigate();
   const location = useLocation();
-  // Prefill from the header quick-search fall-through (FRG-UI-019 ->
-  // FRG-UI-005): read once on mount so both the input AND the debounced
-  // autosuggest below are seeded immediately, without an artificial delay.
-  const prefillTerm =
-    (location.state as AddSeriesNavigationState | null)?.prefillTerm ?? '';
-  const [input, setInput] = useState(prefillTerm);
+  const [input, setInput] = useState('');
   const [term, setTerm] = useState('');
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [selectedSuggestionId, setSelectedSuggestionId] = useState<
@@ -285,6 +337,27 @@ export function AddSeries() {
   const lookup = useLookup(term);
   const suggest = useSuggest(input);
   const addSeries = useAddSeries();
+
+  // Consume a prefilled term (FRG-UI-019 -> FRG-UI-005) via an effect rather
+  // than a mount-time initializer: a SECOND navigation to the already-mounted
+  // /add with a new term does not remount, so an initializer would silently
+  // drop it. On each new prefill we seed the input and reset the search and
+  // selection state so the debounced autosuggest fires for the new term, then
+  // strip the consumed navigation state (replace) so browser Back/refresh does
+  // not re-seed a stale prefill over the user's since-edited term.
+  useEffect(() => {
+    const prefill = (location.state as AddSeriesNavigationState | null)
+      ?.prefillTerm;
+    if (!prefill) return;
+    setInput(prefill);
+    setTerm('');
+    setSelectedId(null);
+    setSelectedSuggestionId(null);
+    navigate(`${location.pathname}${location.search}`, {
+      replace: true,
+      state: null,
+    });
+  }, [location, navigate]);
 
   // A lookup error must never leak stale candidates from a previous outcome:
   // the results list and the outcome note both derive from this one value.
@@ -298,7 +371,24 @@ export function AddSeries() {
   // FULL-LOOKUP candidate is selected instead, so the two add panels never
   // show at once.
   const suggestTerm = input.trim();
-  const showSuggest = suggestTerm.length >= 3 && selectedId === null;
+  // Once a full-lookup submission exists for EXACTLY the current input, the
+  // authoritative results replace the passive suggest accelerator (design.md):
+  // suppress the whole suggest surface so it cannot duplicate the lookup's
+  // candidate list or its alert, nor leave a stale suggest error hanging under
+  // a fresh same-term retry. It reappears the moment the input diverges from
+  // the submitted term.
+  const lookupSubmittedForInput = term.length > 0 && suggestTerm === term;
+  // The dropdown lags the raw input by the debounce, so `suggest.data`/error
+  // can still describe a superseded term for ~250ms after a keystroke. Render
+  // the suggest surface only when the hook's settled (debounced) term matches
+  // what is typed now — otherwise show nothing, never the old term's rows or a
+  // still-open panel from a candidate that no longer belongs to the input.
+  const suggestSettledForInput = suggest.settledTerm === suggestTerm;
+  const showSuggest =
+    suggestTerm.length >= 3 &&
+    selectedId === null &&
+    !lookupSubmittedForInput &&
+    suggestSettledForInput;
   // Reuses the full lookup's outcome classifier verbatim (isComicVineAuthError
   // under the hood) so a suggest credential failure renders the SAME
   // actionable Settings-guidance text, structurally discriminated — never by
@@ -306,7 +396,8 @@ export function AddSeries() {
   const suggestNote = showSuggest
     ? lookupOutcomeNote(suggest.isError, suggest.error, undefined, suggestTerm)
     : null;
-  const suggestCandidates = suggest.isError ? [] : suggest.data?.records ?? [];
+  const suggestCandidates =
+    showSuggest && !suggest.isError ? suggest.data?.records ?? [] : [];
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -394,71 +485,44 @@ export function AddSeries() {
               </p>
             )}
             {!suggestNote &&
-              suggestCandidates.map((candidate: SuggestCandidate) => (
-                <div
+              suggestCandidates.map((candidate) => (
+                <CandidateCard
                   key={candidate.cv_volume_id}
-                  className={styles.candidateCard}
-                  data-testid={`suggest-${candidate.cv_volume_id}`}
-                >
-                  <button
-                    type="button"
-                    className={styles.candidateBody}
-                    aria-label={`Select suggestion ${candidate.name ?? 'unnamed volume'}`}
-                    disabled={candidate.have_it}
-                    onClick={() =>
-                      setSelectedSuggestionId(
-                        selectedSuggestionId === candidate.cv_volume_id
-                          ? null
-                          : candidate.cv_volume_id,
-                      )
-                    }
-                  >
-                    <Poster
-                      initial={(candidate.name ?? '?').charAt(0)}
-                      src={candidate.image_url}
-                      alt={`${candidate.name ?? 'volume'} cover`}
-                      frameClassName={styles.posterFrame}
-                      fallbackClassName={styles.posterFallback}
-                      lazy
-                    />
-                    <span className={styles.candidateInfo}>
-                      <span className={styles.candidateTitle}>
-                        {candidate.name ?? 'Unnamed volume'}
-                        {candidate.start_year !== null && (
-                          <span className={styles.candidateYear}>
-                            {' '}
-                            ({candidate.start_year})
-                          </span>
-                        )}
-                      </span>
-                      {candidate.publisher && (
-                        <span className={styles.publisher}>{candidate.publisher}</span>
+                  candidate={candidate}
+                  testId={`suggest-${candidate.cv_volume_id}`}
+                  selectLabel={`Select suggestion ${candidate.name ?? 'unnamed volume'}`}
+                  selected={selectedSuggestionId === candidate.cv_volume_id}
+                  onToggle={() =>
+                    setSelectedSuggestionId(
+                      selectedSuggestionId === candidate.cv_volume_id
+                        ? null
+                        : candidate.cv_volume_id,
+                    )
+                  }
+                  chips={
+                    <span className={styles.chipRow}>
+                      {candidate.count_of_issues !== null && (
+                        <span className={styles.chip}>
+                          {candidate.count_of_issues} issue
+                          {candidate.count_of_issues === 1 ? '' : 's'}
+                        </span>
                       )}
-                      <span className={styles.chipRow}>
-                        {candidate.count_of_issues !== null && (
-                          <span className={styles.chip}>
-                            {candidate.count_of_issues} issue
-                            {candidate.count_of_issues === 1 ? '' : 's'}
-                          </span>
-                        )}
-                        {candidate.have_it && (
-                          <span className={`${styles.chip} ${styles.chipHave}`}>
-                            In library
-                          </span>
-                        )}
-                      </span>
+                      {candidate.have_it && (
+                        <span className={`${styles.chip} ${styles.chipHave}`}>
+                          In library
+                        </span>
+                      )}
                     </span>
-                  </button>
-                  {selectedSuggestionId === candidate.cv_volume_id &&
-                    !candidate.have_it && (
-                      <AddOptionsPanel
-                        candidate={candidate}
-                        busy={addSeries.isPending}
-                        error={addSeries.error ? addSeries.error.message : null}
-                        onAdd={(options) => add(candidate, options)}
-                      />
-                    )}
-                </div>
+                  }
+                  panel={
+                    <AddOptionsPanel
+                      candidate={candidate}
+                      busy={addSeries.isPending}
+                      error={addSeries.error ? addSeries.error.message : null}
+                      onAdd={(options) => add(candidate, options)}
+                    />
+                  }
+                />
               ))}
           </div>
         )}
@@ -478,58 +542,30 @@ export function AddSeries() {
 
         <div className={styles.results}>
           {results?.records.map((candidate) => (
-            <div
+            <CandidateCard
               key={candidate.cv_volume_id}
-              className={styles.candidateCard}
-              data-testid={`candidate-${candidate.cv_volume_id}`}
-            >
-              <button
-                type="button"
-                className={styles.candidateBody}
-                aria-label={`Select ${candidate.name ?? 'unnamed volume'}`}
-                disabled={candidate.have_it}
-                onClick={() => {
-                  setSelectedSuggestionId(null);
-                  setSelectedId(
-                    selectedId === candidate.cv_volume_id
-                      ? null
-                      : candidate.cv_volume_id,
-                  );
-                }}
-              >
-                <Poster
-                  initial={(candidate.name ?? '?').charAt(0)}
-                  src={candidate.image_url}
-                  alt={`${candidate.name ?? 'volume'} cover`}
-                  frameClassName={styles.posterFrame}
-                  fallbackClassName={styles.posterFallback}
-                  lazy
-                />
-                <span className={styles.candidateInfo}>
-                  <span className={styles.candidateTitle}>
-                    {candidate.name ?? 'Unnamed volume'}
-                    {candidate.start_year !== null && (
-                      <span className={styles.candidateYear}>
-                        {' '}
-                        ({candidate.start_year})
-                      </span>
-                    )}
-                  </span>
-                  {candidate.publisher && (
-                    <span className={styles.publisher}>{candidate.publisher}</span>
-                  )}
-                  <PlausibilityChips candidate={candidate} />
-                </span>
-              </button>
-              {selectedId === candidate.cv_volume_id && !candidate.have_it && (
+              candidate={candidate}
+              testId={`candidate-${candidate.cv_volume_id}`}
+              selectLabel={`Select ${candidate.name ?? 'unnamed volume'}`}
+              selected={selectedId === candidate.cv_volume_id}
+              onToggle={() => {
+                setSelectedSuggestionId(null);
+                setSelectedId(
+                  selectedId === candidate.cv_volume_id
+                    ? null
+                    : candidate.cv_volume_id,
+                );
+              }}
+              chips={<PlausibilityChips candidate={candidate} />}
+              panel={
                 <AddOptionsPanel
                   candidate={candidate}
                   busy={addSeries.isPending}
                   error={addSeries.error ? addSeries.error.message : null}
                   onAdd={(options) => add(candidate, options)}
                 />
-              )}
-            </div>
+              }
+            />
           ))}
         </div>
       </div>

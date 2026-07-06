@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import { renderWithProviders, type RouteEntry } from '../../test/renderWithProviders';
 import { fakeFetcher } from '../../test/fakeFetcher';
 import {
@@ -713,5 +713,187 @@ describe('FRG-UI-005: add series autosuggest (m2-search-autosuggest)', () => {
     await waitFor(() =>
       expect(screen.getByTestId('suggest-40501234')).toBeInTheDocument(),
     );
+  });
+});
+
+/**
+ * FRG-UI-005 / FRG-UI-019 — gate-review fixes for the autosuggest / header
+ * quick-search seam: prefill is consumed via an effect (so a SECOND navigation
+ * to an already-mounted Add Series re-seeds it) with the consumed state
+ * stripped afterwards; and the debounced suggest surface never renders under a
+ * newer input, nor alongside / duplicating a full-lookup submission for the
+ * same term. The full-lookup outcome-state precedence (above) is untouched.
+ */
+function ReSeedButton({ term }: { term: string }) {
+  const navigate = useNavigate();
+  return (
+    <button onClick={() => navigate('/add', { state: { prefillTerm: term } })}>
+      reseed
+    </button>
+  );
+}
+
+function LocationStateProbe() {
+  const location = useLocation();
+  return <div data-testid="loc-state">{JSON.stringify(location.state)}</div>;
+}
+
+const BATMAN_SUGGEST = {
+  records: [
+    {
+      cv_volume_id: 70701,
+      name: 'Batman',
+      publisher: 'DC Comics',
+      start_year: 1940,
+      image_url: null,
+      count_of_issues: null,
+      have_it: false,
+    },
+  ],
+  complete: true,
+};
+
+describe('FRG-UI-005 / FRG-UI-019: autosuggest / quick-search seam (gate review)', () => {
+  it('FRG-UI-019 — a second navigation to the already-mounted Add Series re-seeds the input and fires autosuggest for the new term', async () => {
+    const { spy, fetcher } = addFetcher({
+      suggest: (path) =>
+        path === '/api/v1/series/lookup/suggest?term=batman'
+          ? BATMAN_SUGGEST
+          : { records: [], complete: true },
+    });
+    renderWithProviders(
+      <>
+        <ReSeedButton term="batman" />
+        <Routes>
+          <Route path="/add" element={<AddSeries />} />
+          <Route path="/series/:id" element={<SeriesDetail />} />
+        </Routes>
+      </>,
+      { fetcher, route: { pathname: '/add', state: { prefillTerm: 'saga' } } },
+    );
+    const user = userEvent.setup();
+
+    // The first prefill seeds 'saga' on mount.
+    expect(
+      screen.getByRole('searchbox', { name: 'Search ComicVine' }),
+    ).toHaveValue('saga');
+
+    // A SECOND navigation to the same, still-mounted /add must re-seed the
+    // input (same-route navigation does not remount) and drive the autosuggest
+    // for the new term — a mount-time initializer would silently drop it.
+    await user.click(screen.getByRole('button', { name: 'reseed' }));
+    expect(
+      screen.getByRole('searchbox', { name: 'Search ComicVine' }),
+    ).toHaveValue('batman');
+    await waitFor(() =>
+      expect(screen.getByTestId('suggest-70701')).toBeInTheDocument(),
+    );
+    expect(
+      spy.mock.calls.some(
+        ([path]) => path === '/api/v1/series/lookup/suggest?term=batman',
+      ),
+    ).toBe(true);
+  });
+
+  it('FRG-UI-005 — a consumed prefill is stripped from navigation state so Back/refresh cannot re-seed a stale term', async () => {
+    const { fetcher } = addFetcher();
+    renderWithProviders(
+      <Routes>
+        <Route
+          path="/add"
+          element={
+            <>
+              <AddSeries />
+              <LocationStateProbe />
+            </>
+          }
+        />
+      </Routes>,
+      { fetcher, route: { pathname: '/add', state: { prefillTerm: 'saga' } } },
+    );
+
+    // The prefill still seeds the input on arrival...
+    expect(
+      screen.getByRole('searchbox', { name: 'Search ComicVine' }),
+    ).toHaveValue('saga');
+    // ...but the navigation state no longer carries it once consumed.
+    await waitFor(() =>
+      expect(screen.getByTestId('loc-state')).not.toHaveTextContent('saga'),
+    );
+  });
+
+  it('FRG-UI-005 — typing past a settled suggestion immediately hides the stale candidates and its open add panel, before the debounce resolves the newer term', async () => {
+    renderAdd({
+      suggest: (path) =>
+        path === '/api/v1/series/lookup/suggest?term=sag'
+          ? { records: mockSuggestCandidates, complete: true }
+          : // The newer term's request never resolves: this proves the old rows
+            // are hidden by the input/settled-term mismatch, not by a new load.
+            new Promise(() => {}),
+    });
+    const user = userEvent.setup();
+    const input = screen.getByRole('searchbox', { name: 'Search ComicVine' });
+
+    await user.type(input, 'sag');
+    await waitFor(() =>
+      expect(screen.getByTestId('suggest-40501234')).toBeInTheDocument(),
+    );
+    await user.click(
+      screen.getByRole('button', { name: 'Select suggestion Saga' }),
+    );
+    expect(screen.getByTestId('add-options-panel')).toBeInTheDocument();
+
+    // One more character supersedes the settled term; the stale candidate AND
+    // its open panel must vanish at once, without waiting out the debounce.
+    await user.type(input, 'a');
+    expect(screen.queryByTestId('suggest-40501234')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('add-options-panel')).not.toBeInTheDocument();
+  });
+
+  it('FRG-UI-005 — a full-lookup submission suppresses the passive suggest surface for that term, which returns once the input diverges', async () => {
+    renderAdd({
+      suggest: () => ({ records: mockSuggestCandidates, complete: true }),
+    });
+    const user = await searchFor('saga');
+
+    // The authoritative lookup results render for the submitted term...
+    await waitFor(() =>
+      expect(screen.getByTestId('candidate-40501234')).toBeInTheDocument(),
+    );
+    // ...and the passive suggest dropdown is suppressed — no duplicate list.
+    expect(screen.queryByTestId('suggest-dropdown')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('suggest-40501234')).not.toBeInTheDocument();
+
+    // Diverging the input from the submitted term brings the accelerator back.
+    await user.type(
+      screen.getByRole('searchbox', { name: 'Search ComicVine' }),
+      'x',
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('suggest-dropdown')).toBeInTheDocument(),
+    );
+  });
+
+  it('FRG-UI-005 — a credential failure on both lookup and suggest for a submitted term renders exactly one alert', async () => {
+    renderAdd({
+      lookup: () => {
+        throw cvAuthError();
+      },
+      suggest: () => {
+        throw cvAuthError();
+      },
+    });
+    await searchFor('saga');
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          'ComicVine API key missing or invalid — check Settings.',
+        ),
+      ).toBeInTheDocument(),
+    );
+    // Suggest is suppressed post-submit, so the lookup's alert is not
+    // duplicated by an identical suggest credential alert.
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
   });
 });

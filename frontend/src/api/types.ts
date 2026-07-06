@@ -253,6 +253,19 @@ export interface SuggestCandidate {
 }
 
 /**
+ * Router navigation-state contract for arriving at the Add Series screen with a
+ * prefilled term (FRG-UI-005 / FRG-UI-019) — the header quick-search
+ * fall-through (`HeaderQuickSearch`) navigates to `/add` carrying this shape,
+ * which `AddSeries` consumes to seed its input and debounced autosuggest. Lives
+ * in this neutral shared-types module rather than a screen module so both the
+ * producer (`HeaderQuickSearch`) and the consumer (`AddSeries`) import it
+ * without a cross-screen dependency.
+ */
+export interface AddSeriesNavigationState {
+  prefillTerm?: string;
+}
+
+/**
  * One `GET /api/v1/rootfolder` row (FRG-SER-008). `free_space` is filesystem
  * free bytes, or null when the path could not be stat'd.
  */
