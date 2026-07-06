@@ -370,9 +370,8 @@ export const mockManualCandidates: ManualImportEntry[] = [
 ];
 
 /**
- * One staged library-import group as GET /api/v1/library-import serializes it
- * (already in the UI's normalized camelCase shape; the snake_case tolerance is
- * covered by a dedicated test feeding raw snake_case keys).
+ * One staged library-import group exactly as GET /api/v1/library-import
+ * serializes it (the pinned camelCase wire contract).
  */
 export function makeLibraryImportGroup(
   overrides: Partial<LibraryImportGroup> & Pick<LibraryImportGroup, 'id'>,
@@ -402,6 +401,7 @@ export function makeLibraryImportGroup(
     publisher: 'Image',
     imageUrl: null,
     rejections: [],
+    message: null,
     ...overrides,
   };
 }

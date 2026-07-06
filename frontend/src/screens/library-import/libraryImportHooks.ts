@@ -8,11 +8,7 @@ import {
 import { queryKeys } from '../../api/queryKeys';
 import { useFetcher } from '../../api/fetcher';
 import { fetchAllPages, MAX_PAGE_SIZE } from '../../api/hooks';
-import type {
-  CommandResource,
-  LibraryImportGroup,
-  LibraryImportGroupState,
-} from '../../api/types';
+import type { CommandResource, LibraryImportGroup } from '../../api/types';
 
 /*
  * Data access for the library-import screen (FRG-UI-015 / FRG-IMP-023),
@@ -25,68 +21,20 @@ import type {
  *   PATCH /api/v1/library-import/groups/{id} {state}|{cvVolumeId}
  *   POST  /api/v1/library-import/execute     {groupIds, addOptions} -> CommandResource
  *
- * Staging is persisted server-side (survives restarts), so the list is
- * fetched on mount and recomputed ONLY on explicit invalidation — after a
- * scan/execute command completes or a group PATCH lands — never behind the
- * user's back while a review session is open.
+ * Staging is persisted server-side (survives restarts). The list refetches on
+ * every mount (a command can finish while the screen is unmounted) and on the
+ * explicit invalidations after scan/PATCH/execute — never behind the user's
+ * back while the screen stays open.
  */
-
-/** One group exactly as the wire carries it — key spelling not yet pinned. */
-type LibraryImportGroupRaw = Record<string, unknown>;
-
-/** Read a raw field tolerating camelCase or snake_case spellings. */
-function field<T>(
-  raw: LibraryImportGroupRaw,
-  camel: string,
-  snake: string,
-  fallback: T,
-): T {
-  const value = raw[camel] !== undefined ? raw[camel] : raw[snake];
-  return value === undefined || value === null ? fallback : (value as T);
-}
 
 /**
- * Normalize one wire group into the UI's `LibraryImportGroup`. Tolerant on
- * purpose: the backend lands in parallel and its serializer may follow the
- * snake_case series resources OR the camelCase manual-import resources; either
- * spelling maps onto the same normalized shape (like `toQueueItem` does for
- * the queue's naming seam). `confidence` accepts a 0..1 fraction or a 0..100
- * percentage and always yields 0..1.
+ * One group exactly as GET /api/v1/library-import serializes it: the camelCase
+ * `LibraryImportGroup` contract verbatim (no spelling tolerance — the wire
+ * shape is pinned). Only `confidence` gets touched: contractually 0..1, it is
+ * clamped so display math (`Math.round(c * 100)%`) can never overflow.
  */
-export function toLibraryImportGroup(
-  raw: LibraryImportGroupRaw,
-): LibraryImportGroup {
-  const confidence = field<number>(raw, 'confidence', 'confidence', 0);
-  return {
-    id: field<number>(raw, 'id', 'id', 0),
-    matchingKey: field<string>(raw, 'matchingKey', 'matching_key', ''),
-    folder: field<string>(raw, 'folder', 'folder', ''),
-    files: field<{ path: string; name: string; size: number }[]>(
-      raw,
-      'files',
-      'files',
-      [],
-    ),
-    confidence: confidence > 1 ? confidence / 100 : confidence,
-    proposedCvVolumeId: field<number | null>(
-      raw,
-      'proposedCvVolumeId',
-      'proposed_cv_volume_id',
-      null,
-    ),
-    confirmedCvVolumeId: field<number | null>(
-      raw,
-      'confirmedCvVolumeId',
-      'confirmed_cv_volume_id',
-      null,
-    ),
-    state: field<LibraryImportGroupState>(raw, 'state', 'state', 'proposed'),
-    name: field<string | null>(raw, 'name', 'name', null),
-    startYear: field<number | null>(raw, 'startYear', 'start_year', null),
-    publisher: field<string | null>(raw, 'publisher', 'publisher', null),
-    imageUrl: field<string | null>(raw, 'imageUrl', 'image_url', null),
-    rejections: field<string[]>(raw, 'rejections', 'blocked_reasons', []),
-  };
+export function toLibraryImportGroup(raw: LibraryImportGroup): LibraryImportGroup {
+  return { ...raw, confidence: Math.min(1, Math.max(0, raw.confidence)) };
 }
 
 /** The query key mirroring GET /api/v1/library-import?rootFolderId=. */
@@ -96,10 +44,13 @@ export function libraryImportKey(rootFolderId: number) {
 
 /**
  * Staged groups for one root folder (FRG-UI-015), walking the paged envelope
- * like `useSeriesIndex` (a big library stages more than one page). Never
- * refetched behind the user's back (staleTime Infinity): recomputed only on
- * the explicit invalidations after scan/PATCH/execute, so in-flight selection
- * and correction state survive the review session.
+ * like `useSeriesIndex` (a big library stages more than one page). While the
+ * screen stays mounted the list only recomputes on the explicit invalidations
+ * after scan/PATCH/execute (staleTime Infinity — no focus refetch clobbers a
+ * review session), but EVERY mount refetches: a scan/execute command that
+ * finished while the screen was unmounted must show its results on return
+ * (staging is small and local, and the cached rows render while the refetch
+ * runs, so there is no flicker).
  */
 export function useLibraryImportGroups(
   rootFolderId: number | null,
@@ -112,7 +63,7 @@ export function useLibraryImportGroups(
         ? libraryImportKey(rootFolderId)
         : queryKeys.libraryImport.all(),
     queryFn: async () => {
-      const rows = await fetchAllPages<LibraryImportGroupRaw>(
+      const rows = await fetchAllPages<LibraryImportGroup>(
         fetcher,
         (page) =>
           `/api/v1/library-import?rootFolderId=${rootFolderId}&page=${page}&pageSize=${MAX_PAGE_SIZE}`,
@@ -121,6 +72,7 @@ export function useLibraryImportGroups(
     },
     enabled: rootFolderId !== null,
     staleTime: Infinity,
+    refetchOnMount: 'always',
     retry: false,
   });
 }
@@ -145,7 +97,12 @@ export function useStartLibraryScan(): UseMutationResult<
   });
 }
 
-/** The PATCH body: a state change XOR a ComicVine match override. */
+/**
+ * The PATCH body: a state change XOR a ComicVine match override (combining
+ * `cvVolumeId` with a state is a backend 400). `state: 'proposed'` puts a
+ * group back into review; a `cvVolumeId` override sets BOTH the proposed and
+ * confirmed ids server-side, so the display fields always match what imports.
+ */
 export type LibraryImportGroupPatch =
   | { state: 'confirmed' | 'skipped' | 'proposed' }
   | { cvVolumeId: number };
