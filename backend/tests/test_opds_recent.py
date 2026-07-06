@@ -139,7 +139,7 @@ def test_recent_root_entry_and_page_size_clamp(client, tmp_path):
     assert link.get("href") == "/opds/recent"
     assert link.get("type") == ACQ_KIND
 
-    # Page-size clamping applies as on every feed (FRG-OPDS-006 shared cap).
+    # Page-size clamping applies as on every feed (the shared pagination requirement shared cap).
     feed = ET.fromstring(
         client.get("/opds/recent", params={"page": 1, "count": 99999}).text
     )

@@ -128,7 +128,7 @@ def test_matching_is_case_folded_containment_over_title_and_aliases(client, tmp_
     # Containment: a fragment of the title matches too.
     assert _entry_hrefs(_search(client, "girls")) == [f"/opds/series/{paper}"]
 
-    # Aliases match with the same folding (FRG-SRCH-003 alias surface).
+    # Aliases match with the same folding (the alias-mapping search requirement alias surface).
     client.portal.call(_set_aliases, client.app, paper, ["Papergirls Deluxe"])
     assert _entry_hrefs(_search(client, "PAPERGIRLS")) == [f"/opds/series/{paper}"]
 

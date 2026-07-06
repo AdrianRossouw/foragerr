@@ -393,9 +393,10 @@ export const ARCHIVE_FORMATS = ['cbz', 'cbr', 'cb7', 'cbt', 'pdf'] as const;
 
 /*
  * Daily-surfaces resource shapes (m2-daily-surfaces: FRG-API-011/012 +
- * blocklist read API). All three ride the shared ApiPage envelope and use the
- * queue resource's camelCase field convention with nested series/issue
- * display objects.
+ * blocklist read API). All three ride the shared ApiPage envelope with nested
+ * series/issue display objects; history and blocklist use the queue
+ * resource's camelCase convention, while wanted records are snake_case per
+ * the issues-API convention.
  */
 
 /** The backend's import_history event vocabulary (importer/history.py). */
@@ -430,8 +431,9 @@ export interface HistoryRecord {
 
 /**
  * One GET /api/v1/wanted/missing record (FRG-API-012): issue-shaped with a
- * nested series. The release-date field is tolerated in any of the shapes the
- * backend may serve (`releaseDate`, or the issue's own `storeDate`/`coverDate`).
+ * nested series, snake_case per the issues-API resource convention (unlike
+ * the camelCase history/blocklist records). Release date is derived
+ * client-side as store_date ?? cover_date.
  */
 export interface WantedIssueRecord {
   id: number;

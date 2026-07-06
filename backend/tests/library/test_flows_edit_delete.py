@@ -196,7 +196,7 @@ async def test_delete_keeps_files_and_cascades_rows(
     assert on_disk.exists()  # the comic file stays on disk
 
 
-# --- delete_files=True (FRG-API-003 delete-files scenario, FRG-PP-013) -------
+# --- delete_files=True (FRG-API-003 delete-files scenario, the recycle-bin requirement) -------
 
 
 async def _make_with_files(

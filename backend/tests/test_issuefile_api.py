@@ -1,5 +1,5 @@
 """HTTP contract tests for the issue-file router (FRG-API-003, FRG-UI-004,
-FRG-PP-013): DELETE /api/v1/issuefile/{id} rides the delete_issue_file flow —
+the recycle-bin requirement): DELETE /api/v1/issuefile/{id} rides the delete_issue_file flow —
 recycle-bin routing, 404 mapping, the {recycled} response shape, and the
 ``source=manual`` provenance on the history event (a user action). Flow
 ordering/compensation guarantees live in tests/importer/test_recycle_bin.py.
