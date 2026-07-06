@@ -5,7 +5,9 @@ journey talks to (FRG-PROC-010):
 
 * **ComicVine** metadata API over **http** on :8080 (``/api/*``) — the add /
   refresh flow's series + issue source. The real base is hardcoded https; the
-  harness points the app here via ``FORAGERR_COMICVINE_BASE_URL``.
+  harness points the app here via ``FORAGERR_COMICVINE_BASE_URL``. Serves TWO
+  volumes: Saga (the spine's download journey) and Fables (the library-import
+  scenario's in-place import of pre-existing files, FRG-UI-015/FRG-IMP-023).
 * **Newznab** indexer over **http** on :8080 (``/newznab/api``) — supplies a
   deliberately *rejected* release so the interactive-search overlay has a
   verbatim rejection reason to render. Never grabbed.
@@ -40,6 +42,38 @@ ISSUES = [
     {"id": 340001, "number": "1", "cover_date": "2012-03-14"},
     {"id": 340002, "number": "2", "cover_date": "2012-04-11"},
 ]
+
+# A SECOND volume for the library-import scenario (y-library-import.spec.ts):
+# pre-existing "Fables" folders seeded on disk are scanned, matched to THIS
+# volume and imported in place. It must be distinct from Saga — the spine has
+# already added 18166, and the library-import execute creates a NEW series.
+LI_VOLUME_ID = 4977
+LI_VOLUME_NAME = "Fables"
+LI_START_YEAR = "2002"
+LI_PUBLISHER = "Vertigo"
+LI_ISSUES = [
+    {"id": 350001, "number": "1", "cover_date": "2002-07-10"},
+    {"id": 350002, "number": "2", "cover_date": "2002-08-14"},
+]
+
+#: Every volume the fixture ComicVine knows, keyed by cv volume id. A search
+#: term matches a volume when the volume's name appears in the parsed term
+#: (case-insensitive); any other term returns an EMPTY result set, which is
+#: what stages the library-import no-match group.
+VOLUMES: dict[int, dict] = {
+    CV_VOLUME_ID: {
+        "name": CV_VOLUME_NAME,
+        "start_year": CV_START_YEAR,
+        "publisher": CV_PUBLISHER,
+        "issues": ISSUES,
+    },
+    LI_VOLUME_ID: {
+        "name": LI_VOLUME_NAME,
+        "start_year": LI_START_YEAR,
+        "publisher": LI_PUBLISHER,
+        "issues": LI_ISSUES,
+    },
+}
 
 # The mock is handed the exact cbz bytes at start (mounted at /data) so the
 # harness on the host and the app in the container share one source of truth for
@@ -91,34 +125,39 @@ def _image_obj(name: str) -> dict:
     return {"original_url": url, "super_url": url, "medium_url": url, "small_url": url}
 
 
-def _volume_object(*, with_issue_stubs: bool) -> dict:
+def _volume_object(volume_id: int, *, with_issue_stubs: bool) -> dict:
+    volume = VOLUMES[volume_id]
     obj = {
-        "id": CV_VOLUME_ID,
-        "name": CV_VOLUME_NAME,
-        "publisher": {"id": 1, "name": CV_PUBLISHER},
+        "id": volume_id,
+        "name": volume["name"],
+        "publisher": {"id": 1, "name": volume["publisher"]},
         "imprint": None,
-        "start_year": CV_START_YEAR,
-        "count_of_issues": len(ISSUES),
+        "start_year": volume["start_year"],
+        "count_of_issues": len(volume["issues"]),
         "aliases": None,
         "description": "<p>A fixture volume for the foragerr e2e harness.</p>",
-        "site_detail_url": "http://mockhub:8080/volume/4050-18166/",
-        "first_issue": {"id": ISSUES[0]["id"], "name": None, "issue_number": "1"},
-        "image": _image_obj("cover.jpg"),
+        "site_detail_url": f"http://mockhub:8080/volume/4050-{volume_id}/",
+        "first_issue": {
+            "id": volume["issues"][0]["id"],
+            "name": None,
+            "issue_number": "1",
+        },
+        "image": _image_obj(f"cover-{volume_id}.jpg"),
     }
     if with_issue_stubs:
-        obj["issues"] = [{"id": issue["id"]} for issue in ISSUES]
+        obj["issues"] = [{"id": issue["id"]} for issue in volume["issues"]]
     return obj
 
 
-def _issue_object(issue: dict) -> dict:
+def _issue_object(volume_id: int, issue: dict) -> dict:
     return {
         "id": issue["id"],
         "name": None,
         "issue_number": issue["number"],
         "cover_date": issue["cover_date"],
         "store_date": issue["cover_date"],
-        "image": _image_obj(f"issue-{issue['number']}.jpg"),
-        "volume": {"id": CV_VOLUME_ID, "name": CV_VOLUME_NAME},
+        "image": _image_obj(f"issue-{volume_id}-{issue['number']}.jpg"),
+        "volume": {"id": volume_id, "name": VOLUMES[volume_id]["name"]},
     }
 
 
@@ -243,10 +282,11 @@ def build_app() -> FastAPI:
         # Exercise the REAL client query construction (foragerr.metadata.comicvine
         # ComicVineClient.search_series): it sends ``api_key`` + a
         # ``filter=name:<term>`` param (plus field_list/sort/offset/limit). A
-        # keyless request is rejected 401; the Saga volume is returned ONLY when
-        # the parsed name term matches "saga" (case-insensitive), else an empty
+        # keyless request is rejected 401; a volume is returned ONLY when the
+        # parsed name term contains its name (case-insensitive), else an empty
         # result set — so a malformed client query fails the add-series scenario
-        # instead of silently passing.
+        # instead of silently passing, and an unknown series folder stages as
+        # the library-import no-match group.
         if not request.query_params.get("api_key"):
             return JSONResponse(
                 {"error": "Invalid API Key", "status_code": 100, "results": []},
@@ -258,19 +298,40 @@ def build_app() -> FastAPI:
             if sep and field.strip().casefold() == "name":
                 term = value.strip()
                 break
-        if "saga" in term.casefold():
-            return JSONResponse(
-                _list_envelope([_volume_object(with_issue_stubs=False)])
-            )
-        return JSONResponse(_list_envelope([]))
+        matches = [
+            _volume_object(volume_id, with_issue_stubs=False)
+            for volume_id, volume in VOLUMES.items()
+            if volume["name"].casefold() in term.casefold()
+        ]
+        return JSONResponse(_list_envelope(matches))
 
     @app.get("/api/volume/4050-{volume_id}/")
     async def cv_volume(volume_id: int) -> JSONResponse:
-        return JSONResponse(_single_envelope(_volume_object(with_issue_stubs=True)))
+        # Tolerant fallback to the Saga volume for ids the fixture never minted
+        # (preserves the pre-multi-volume behavior for hand-poked requests).
+        known = volume_id if volume_id in VOLUMES else CV_VOLUME_ID
+        return JSONResponse(
+            _single_envelope(_volume_object(known, with_issue_stubs=True))
+        )
 
     @app.get("/api/issues/")
     async def cv_issues(request: Request) -> JSONResponse:
-        return JSONResponse(_list_envelope([_issue_object(i) for i in ISSUES]))
+        # The real client fetches per volume via ``filter=volume:<id>``
+        # (foragerr.metadata.comicvine); honor it so a Fables refresh never
+        # receives Saga issues. No/unknown filter keeps the Saga default.
+        volume_id = CV_VOLUME_ID
+        for clause in request.query_params.get("filter", "").split(","):
+            field, sep, value = clause.partition(":")
+            if sep and field.strip().casefold() == "volume":
+                requested = value.strip()
+                if requested.isdigit() and int(requested) in VOLUMES:
+                    volume_id = int(requested)
+                break
+        return JSONResponse(
+            _list_envelope(
+                [_issue_object(volume_id, i) for i in VOLUMES[volume_id]["issues"]]
+            )
+        )
 
     @app.get("/img/{name}")
     async def cv_image(name: str) -> Response:
