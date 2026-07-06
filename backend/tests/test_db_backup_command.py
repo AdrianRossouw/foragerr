@@ -65,6 +65,7 @@ async def test_handler_writes_a_scheduled_backup(tmp_path):
     await ctx.db.close()
 
 
+@pytest.mark.req("FRG-DB-009")
 @pytest.mark.req("FRG-DB-012")
 async def test_corrupt_database_aborts_the_backup(tmp_path):
     cfg = _prepared_config(tmp_path)

@@ -52,13 +52,21 @@ class IntegrityResult:
         return f"{self.check}: {head}{more}"
 
 
-def _run(db_path: Path, pragma: str, check: str) -> IntegrityResult:
+def _run(
+    db_path: Path, pragma: str, check: str, *, immutable: bool = False
+) -> IntegrityResult:
     if not Path(db_path).exists():
         return IntegrityResult(
             ok=False, check=check, errors=(f"database file {db_path} does not exist",)
         )
+    # ``immutable=1`` tells SQLite the file has no concurrent writers, so it skips
+    # creating the ``-wal``/``-shm`` side files (``mode=ro`` alone still creates a
+    # ``-shm``) and never bumps the file's mtime — used when checking a BACKUP
+    # copy, which is quiescent. The LIVE database is checked WITHOUT immutable
+    # because it may legitimately carry an active WAL that must be read.
+    params = "mode=ro&immutable=1" if immutable else "mode=ro"
     try:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        conn = sqlite3.connect(f"file:{db_path}?{params}", uri=True)
     except sqlite3.Error as exc:
         return IntegrityResult(
             ok=False, check=check, errors=(f"cannot open {db_path}: {exc}",)
@@ -83,9 +91,20 @@ def run_quick_check(db_path: Path) -> IntegrityResult:
     return _run(Path(db_path), "PRAGMA quick_check", "quick_check")
 
 
-def run_full_integrity_check(db_path: Path) -> IntegrityResult:
-    """``PRAGMA integrity_check`` — the thorough pre-backup check (FRG-DB-012)."""
-    return _run(Path(db_path), "PRAGMA integrity_check", "integrity_check")
+def run_full_integrity_check(
+    db_path: Path, *, immutable: bool = False
+) -> IntegrityResult:
+    """``PRAGMA integrity_check`` — the thorough pre-backup check (FRG-DB-012).
+
+    Pass ``immutable=True`` when checking a BACKUP file (no concurrent writers):
+    it opens the file with the ``immutable=1`` URI parameter so the check leaves
+    no ``-wal``/``-shm`` sidecar behind and never bumps the file's mtime. Leave
+    it ``False`` (the default) for the LIVE database, which may carry an active
+    WAL that the check must read.
+    """
+    return _run(
+        Path(db_path), "PRAGMA integrity_check", "integrity_check", immutable=immutable
+    )
 
 
 __all__ = [

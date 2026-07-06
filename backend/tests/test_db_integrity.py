@@ -69,6 +69,38 @@ async def test_startup_quick_check_marks_database_error_on_corruption(tmp_path):
     assert state.detail  # names the integrity failure
 
 
+@pytest.mark.req("FRG-DB-010")
+def test_immutable_integrity_check_of_backup_leaves_no_sidecar(tmp_path):
+    """A read-only integrity check of a quiescent BACKUP file opened with
+    ``immutable=1`` creates no ``-wal``/``-shm`` sidecar in the backup dir and
+    never bumps its listing (``mode=ro`` alone would create a ``-shm``)."""
+    import sqlite3
+
+    backup_dir = tmp_path / "scheduled-x"
+    backup_dir.mkdir()
+    db = backup_dir / DB_FILENAME
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("CREATE TABLE t (v)")
+        conn.commit()
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    finally:
+        conn.close()
+    # Start from a clean listing (checkpoint may leave a 0-byte side file).
+    for side in ("-wal", "-shm"):
+        p = backup_dir / f"{DB_FILENAME}{side}"
+        if p.exists():
+            p.unlink()
+    before = sorted(p.name for p in backup_dir.iterdir())
+
+    result = run_full_integrity_check(db, immutable=True)
+
+    assert result.ok
+    after = sorted(p.name for p in backup_dir.iterdir())
+    assert before == after  # no sidecar left behind by the check
+
+
 @pytest.mark.req("FRG-DB-012")
 async def test_startup_quick_check_reports_ok_for_a_clean_db(tmp_path):
     cfg = tmp_path / "cfg"

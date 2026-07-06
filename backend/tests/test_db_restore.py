@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from foragerr.config import Settings
 from foragerr.db import DB_FILENAME, prepare_database
 from foragerr.db.backup import write_scheduled_backup
+from foragerr.db.backup_command import restore_marker_startup_hook
 from foragerr.db.restore import RESTORE_MARKER_NAME, apply_restore_marker
 
 
@@ -104,6 +106,82 @@ def test_corrupt_backup_is_refused(tmp_path):
 
     assert result is not None and result.status == "refused"
     assert _read_probe(live_db) == "live"  # untouched
+
+
+@pytest.mark.req("FRG-DB-010")
+def test_copy_failure_leaves_live_db_byte_identical(tmp_path, monkeypatch):
+    """An operational failure during the swap copy leaves the live DB byte-for-
+    byte unchanged (staged temp + atomic rename, never a torn overwrite) and
+    KEEPS the marker for a retry."""
+    import foragerr.db.restore as restore_mod
+
+    cfg = _prepared(tmp_path)
+    live_db = cfg / DB_FILENAME
+    _set_probe(live_db, "live", create=True)
+    backup = write_scheduled_backup(live_db, cfg / "config.yaml", cfg, retention=7)
+    _set_probe(live_db, "diverged")  # live now differs from the backup point
+    before = live_db.read_bytes()
+    (cfg / RESTORE_MARKER_NAME).write_text(backup.name, encoding="utf-8")
+
+    # Snapshot succeeds; the swap copy fails.
+    def boom(_src, _dst):
+        raise OSError("disk full during swap")
+
+    monkeypatch.setattr(restore_mod, "_stage_copy", boom)
+
+    result = apply_restore_marker(cfg)
+
+    assert result is not None and result.status == "failed"
+    assert live_db.read_bytes() == before  # byte-identical — no torn write
+    assert (cfg / RESTORE_MARKER_NAME).exists()  # marker KEPT for a retry
+
+
+@pytest.mark.req("FRG-DB-010")
+async def test_startup_hook_survives_operational_restore_failure(tmp_path, monkeypatch):
+    """A disk-full-style snapshot/swap failure does not raise out of the startup
+    hook (no boot loop): the hook returns, the live DB is intact, marker kept."""
+    import foragerr.db.restore as restore_mod
+
+    cfg = _prepared(tmp_path)
+    live_db = cfg / DB_FILENAME
+    _set_probe(live_db, "live", create=True)
+    backup = write_scheduled_backup(live_db, cfg / "config.yaml", cfg, retention=7)
+    _set_probe(live_db, "live2")
+    before = live_db.read_bytes()
+    (cfg / RESTORE_MARKER_NAME).write_text(backup.name, encoding="utf-8")
+
+    def boom(_src, _dst):
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(restore_mod, "_stage_copy", boom)
+
+    app = SimpleNamespace(state=SimpleNamespace(settings=Settings(config_dir=cfg)))
+    await restore_marker_startup_hook(app)  # returns normally — no raise
+
+    assert live_db.read_bytes() == before  # live DB intact
+    assert (cfg / RESTORE_MARKER_NAME).exists()  # marker kept for a retry
+
+
+@pytest.mark.req("FRG-DB-010")
+def test_symlinked_backup_file_escaping_root_is_refused(tmp_path):
+    """A backup dir inside the root whose DB file is a symlink escaping the root
+    is refused (the resolved FILE, not just the dir, is confined)."""
+    cfg = _prepared(tmp_path)
+    live_db = cfg / DB_FILENAME
+    _set_probe(live_db, "live", create=True)
+    before = live_db.read_bytes()
+
+    outside = tmp_path / "outside.db"
+    _set_probe(outside, "evil", create=True)
+    bad = cfg / "backups" / "scheduled-symlinkescape"
+    bad.mkdir(parents=True)
+    (bad / DB_FILENAME).symlink_to(outside)
+    (cfg / RESTORE_MARKER_NAME).write_text("scheduled-symlinkescape", encoding="utf-8")
+
+    result = apply_restore_marker(cfg)
+
+    assert result is not None and result.status == "refused"
+    assert live_db.read_bytes() == before  # untouched, no swap
 
 
 @pytest.mark.req("FRG-DB-010")

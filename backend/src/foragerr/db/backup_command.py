@@ -105,6 +105,12 @@ async def restore_marker_startup_hook(app: FastAPI) -> None:
     MUST be registered as the FIRST startup hook — before ``register_database``
     opens the engine / runs migrations — so the swap happens while the DB is
     closed. A no-op when no marker is present.
+
+    A refused target (hostile/corrupt) or an operational failure (disk full, I/O
+    while snapshotting/swapping) does NOT raise out of this hook — both are
+    logged and startup proceeds against the untouched live database. On an
+    operational failure the marker is deliberately kept so a later retry can
+    still restore; only a successful restore clears it.
     """
     settings = app.state.settings
     result = await asyncio.to_thread(apply_restore_marker, settings.config_dir)
@@ -118,7 +124,8 @@ async def restore_marker_startup_hook(app: FastAPI) -> None:
         )
     else:
         logger.error(
-            "db: startup restore refused (%s); booting against the live database",
+            "db: startup restore %s (%s); booting against the live database",
+            result.status,
             result.reason,
         )
 
@@ -127,9 +134,13 @@ async def quick_check_startup_hook(app: FastAPI) -> None:
     """Run ``PRAGMA quick_check`` at startup and record it (FRG-DB-012).
 
     Registered AFTER ``register_database`` so it checks the prepared database.
-    A failure is logged loudly and marks the ``database`` component as an error
-    in the health surface; the app still boots so the admin can reach the System
-    screen and restore.
+    The guarantee this hook makes is narrow: it never itself aborts startup — it
+    records the reading and logs. A failure marks the ``database`` component as
+    an error in the health surface so the admin can act. (It cannot promise the
+    app always reaches a serving state: ``register_database`` runs migrations
+    first, and pending migrations against a corrupt DB may already have failed
+    before this hook runs. When startup does complete, the error is visible on
+    the System screen for a restore.)
     """
     settings = app.state.settings
     db_path = database_path(settings.config_dir)
@@ -139,9 +150,10 @@ async def quick_check_startup_hook(app: FastAPI) -> None:
     )
     if not result.ok:
         logger.error(
-            "db: startup integrity quick_check FAILED — %s. The application will "
-            "still boot so you can restore from a backup (System screen); the "
-            "database health component reports an error until a clean check.",
+            "db: startup integrity quick_check FAILED — %s. This check does not "
+            "abort startup; the database health component reports an error until "
+            "a clean check, surfacing the failure on the System screen for a "
+            "restore.",
             result.detail,
         )
     else:

@@ -70,21 +70,50 @@ def write_consistent_backup(db_path: Path, dest_dir: Path) -> Path:
     return dest_db
 
 
+def _backup_sort_key(directory: Path) -> tuple[int, str, float]:
+    """Order a backup dir by the timestamp embedded in its NAME, not its mtime.
+
+    An integrity check or a restore snapshot can bump a directory's mtime long
+    after it was written, and clock skew can make mtimes misorder; the trailing
+    ``<timestamp>`` in the name is the true creation order. We sort on the name
+    first (unparseable names fall to an mtime tie-break) so pruning always
+    deletes the genuinely-oldest backups.
+    """
+    name = directory.name
+    ts = name.rsplit("-", 1)[-1]
+    if ts.isdigit():
+        return (0, ts.zfill(20), 0.0)
+    # Unparseable name: order it AFTER all parsed ones, tie-broken by mtime, so a
+    # stray directory never displaces a correctly-named backup from the pool.
+    try:
+        mtime = directory.stat().st_mtime
+    except OSError:  # pragma: no cover - defensive
+        mtime = 0.0
+    return (1, name, mtime)
+
+
 def prune_backup_pool(backups_root: Path, prefix: str, retention: int) -> list[Path]:
     """Keep the newest ``retention`` backups whose name starts with ``prefix``.
 
-    Prunes ONLY directories matching ``{prefix}*`` (mtime-sorted, oldest first),
-    so the pre-migration and scheduled pools retain independently — pruning one
-    never touches the other. A ``retention`` below 1 is floored to 1 to guard a
-    direct caller from wiping an entire pool.
+    Prunes ONLY directories matching ``{prefix}*``, ordered by the timestamp
+    embedded in the directory NAME (oldest first; unparseable names fall back to
+    mtime), so the pre-migration and scheduled pools retain independently —
+    pruning one never touches the other. Symlinks are skipped defensively (a
+    ``scheduled-*`` symlink would otherwise make ``rmtree`` raise and crash the
+    prune). A ``retention`` below 1 is floored to 1 to guard a direct caller from
+    wiping an entire pool.
     """
     if retention < 1:
         retention = 1
     if not backups_root.exists():
         return []
     backups = sorted(
-        (d for d in backups_root.glob(f"{prefix}*") if d.is_dir()),
-        key=lambda d: d.stat().st_mtime,
+        (
+            d
+            for d in backups_root.glob(f"{prefix}*")
+            if d.is_dir() and not d.is_symlink()
+        ),
+        key=_backup_sort_key,
     )
     pruned = backups[: max(0, len(backups) - retention)]
     for stale in pruned:
@@ -109,14 +138,28 @@ def write_scheduled_backup(
     this function assumes the source is sound.
     """
     backups_root = config_dir / BACKUPS_DIRNAME
-    target_dir = backups_root / f"{SCHEDULED_PREFIX}{_timestamp()}"
-    target_dir.mkdir(parents=True)
-
-    write_consistent_backup(db_path, target_dir)
-    if config_path.exists():
-        shutil.copy2(config_path, target_dir / config_path.name)
-    else:  # pragma: no cover - config file always present in the running app
-        logger.warning("db: scheduled backup: config file %s absent", config_path)
+    timestamp = _timestamp()
+    target_dir = backups_root / f"{SCHEDULED_PREFIX}{timestamp}"
+    # Stage into a dot-prefixed ``.partial`` dir that the ``scheduled-*`` glob
+    # (used by prune + latest_scheduled_backup) never matches, so a half-written
+    # backup can neither be counted as a pool member nor be mistaken for the
+    # freshest backup. Only after BOTH copies succeed do we atomically rename it
+    # to its final ``scheduled-<ts>`` name; a failure removes the staging dir and
+    # re-raises, leaving the pool untouched.
+    staging_dir = backups_root / f".{SCHEDULED_PREFIX}{timestamp}.partial"
+    if staging_dir.exists():  # pragma: no cover - sub-microsecond timestamp collision
+        shutil.rmtree(staging_dir)
+    staging_dir.mkdir(parents=True)
+    try:
+        write_consistent_backup(db_path, staging_dir)
+        if config_path.exists():
+            shutil.copy2(config_path, staging_dir / config_path.name)
+        else:  # pragma: no cover - config file always present in the running app
+            logger.warning("db: scheduled backup: config file %s absent", config_path)
+        staging_dir.rename(target_dir)
+    except BaseException:
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        raise
 
     prune_backup_pool(backups_root, SCHEDULED_PREFIX, retention)
     logger.info("db: scheduled backup written to %s", target_dir)
@@ -132,7 +175,11 @@ def latest_scheduled_backup(config_dir: Path) -> Path | None:
     backups_root = config_dir / BACKUPS_DIRNAME
     if not backups_root.exists():
         return None
-    dirs = [d for d in backups_root.glob(f"{SCHEDULED_PREFIX}*") if d.is_dir()]
+    dirs = [
+        d
+        for d in backups_root.glob(f"{SCHEDULED_PREFIX}*")
+        if d.is_dir() and not d.is_symlink()
+    ]
     if not dirs:
         return None
     return max(dirs, key=lambda d: d.stat().st_mtime)
