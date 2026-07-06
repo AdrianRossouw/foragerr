@@ -66,6 +66,7 @@ PAGED_ENDPOINTS: dict[str, dict[str, object]] = {
     "/api/v1/wanted/missing": {},
     "/api/v1/blocklist": {},
     "/api/v1/command": {},
+    "/api/v1/pull": {},
     "/api/v1/library-import": {"rootFolderId": None},  # filled with a seeded id
 }
 
