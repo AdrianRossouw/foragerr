@@ -40,6 +40,15 @@ from foragerr.library.flows.edit_delete import (
     delete_series,
     edit_series,
 )
+from foragerr.library.flows.library_import import (
+    LIBRARY_IMPORT_PROPOSAL_CAP,
+    LibraryImportCommand,
+    LibraryImportScanCommand,
+    decode_group_files,
+    encode_group_files,
+    execute_library_import,
+    scan_library_root,
+)
 from foragerr.library.flows.refresh import refresh_series
 from foragerr.library.flows.rename import (
     RenameSeriesCommand,
@@ -61,6 +70,9 @@ __all__ = [
     "AddSeriesResult",
     "DeleteFilesNotSupportedError",
     "IssueFileNotFoundError",
+    "LIBRARY_IMPORT_PROPOSAL_CAP",
+    "LibraryImportCommand",
+    "LibraryImportScanCommand",
     "MAX_ALIAS_LENGTH",
     "MONITOR_STRATEGIES",
     "RefreshSeriesCommand",
@@ -76,14 +88,18 @@ __all__ = [
     "comicvine_factory",
     "decode_add_options",
     "decode_aliases",
+    "decode_group_files",
     "delete_issue_file",
     "delete_series",
     "edit_series",
     "encode_add_options",
     "encode_aliases",
+    "encode_group_files",
+    "execute_library_import",
     "preview_series_renames",
     "refresh_series",
     "rename_series",
     "rescan_series",
+    "scan_library_root",
     "scan_series",
 ]
