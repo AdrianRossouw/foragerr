@@ -171,6 +171,37 @@
   background: rgba(240, 80, 80, 0.12);
 }
 
+/* --- Row actions + toolbar path picker --- */
+
+.actionsCell {
+  display: flex;
+  gap: var(--spacing-xs);
+  justify-content: flex-end;
+  white-space: nowrap;
+}
+
+.pathPicker {
+  display: flex;
+  gap: var(--spacing-xs);
+  align-items: center;
+}
+
+.pathInput {
+  font: inherit;
+  font-size: var(--font-size-sm);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--surface-border);
+  background: var(--surface-input, var(--surface-card));
+  color: var(--text-primary);
+  min-width: 16rem;
+}
+
+.pathInput:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
 /* --- Remove dialog --- */
 
 .dialogIntro {

@@ -59,6 +59,14 @@ export const queryKeys = {
   rename: {
     forSeries: (seriesId: number) => ['rename', seriesId] as const,
   },
+  // Manual-import candidate list (FRG-UI-014), mirroring the mutually-exclusive
+  // GET /api/v1/manual-import?path= XOR ?downloadId=. Keyed by its single source
+  // so the overlay refetches exactly that source after a manual-import command.
+  manualImport: {
+    forPath: (path: string) => ['manual-import', 'path', path] as const,
+    forDownload: (downloadId: string) =>
+      ['manual-import', 'download', downloadId] as const,
+  },
   formatProfile: {
     all: () => ['formatprofile'] as const,
   },
