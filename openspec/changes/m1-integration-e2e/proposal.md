@@ -83,6 +83,24 @@ working tree is normal; key-shaped material in shipping files stays fatal).
 Everything else in the change is development/verification tooling with no
 user- or administrator-facing behavior.
 
+## Acceptance
+
+The M1 acceptance evidence is the **generated** report at
+`e2e/acceptance-report.md` (produced mechanically by
+`e2e/scripts/acceptance-report.mjs` from the Playwright JSON results; no
+hand-authored criteria matrix), from the final gate run against the merged
+change-8 tree: **GREEN — 8 passed, 0 failed, 1 skipped (live-SABnzbd tier,
+no credentials), 0 flaky, 0 not-run**, covering 19 FRG requirement roll-ups
+across the full slice journey (first-run health → add series → interactive
+search with verbatim rejection reasons → grab → DDL download → automatic
+import with rename → library browse → OPDS navigation and byte-identical
+download → restart persistence). Coverage limits are documented in
+`e2e/README.md` and referenced from the report footer.
+
+- **Owner sign-off:** _pending Adrian's check-in_ (per the 2026-07-06
+  standing grant, merging proceeds; the milestone is acceptance-certified
+  when this line is signed).
+
 ## Approval
 
 - **Approver:** Adrian
