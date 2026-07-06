@@ -20,6 +20,7 @@ stable even when several rows share a timestamp (FRG-PP-011 scenario 2).
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import json
 from typing import Any
@@ -27,7 +28,9 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from foragerr.db import queue_event
 from foragerr.db.base import utcnow
+from foragerr.events import Event
 from foragerr.importer.models import ImportHistoryRow
 
 # --- event vocabulary (mirrors the migration's documented set) --------------
@@ -59,6 +62,52 @@ IMPORT_EVENT_TYPES: frozenset[str] = frozenset(
         EVENT_COMICINFO_TAG_FAILED,
     }
 )
+
+#: Event types whose write CHANGES an issue's file presence, so the derived
+#: wanted/missing list (FRG-API-012) must be re-fetched too, not just history.
+#: ``imported`` / ``upgrade_replaced`` add a file; ``file_deleted`` removes one.
+_FILE_PRESENCE_EVENT_TYPES: frozenset[str] = frozenset(
+    {EVENT_IMPORTED, EVENT_UPGRADE_REPLACED, EVENT_FILE_DELETED}
+)
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class HistoryEventRecorded(Event):
+    """A history row was written (FRG-API-010 WS-push source).
+
+    Queued post-commit inside the writing transaction so a WS client can
+    invalidate the history feed without polling. ``event_type``/``series_id``
+    let the frontend scope the refresh; coalescing collapses an import burst
+    to one frame."""
+
+    event_type: str
+    series_id: int | None
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class WantedInvalidated(Event):
+    """A file-presence change (import / upgrade / delete) moved an issue in or
+    out of the derived wanted/missing list (FRG-API-010/FRG-API-012). Queued
+    alongside :class:`HistoryEventRecorded` only for the file-presence events."""
+
+    series_id: int | None
+
+
+def _queue_history_events(
+    session: AsyncSession, event_type: str, series_id: int | None
+) -> None:
+    """Queue the post-commit WS invalidation events for a history write.
+
+    Always a ``history`` invalidation; ADDITIONALLY a ``wanted`` invalidation
+    when the event changed a file's presence. Only fires inside a
+    ``write_session`` (where post-commit delivery is wired); a bare session
+    (some unit tests) is a silent no-op, never an error."""
+    if session.info.get("post_commit_events") is None:
+        return
+    queue_event(session, HistoryEventRecorded(event_type=event_type, series_id=series_id))
+    if event_type in _FILE_PRESENCE_EVENT_TYPES:
+        queue_event(session, WantedInvalidated(series_id=series_id))
+
 
 #: Provenance discriminators for the ``source`` column.
 SOURCE_DOWNLOAD = "download"
@@ -106,6 +155,10 @@ def record_event(
         created_at=now or utcnow(),
     )
     session.add(row)
+    # WS invalidation (FRG-API-010): manual/library imports and file deletes
+    # emit no queue push, so without this the history/wanted screens never
+    # refresh on those. Queued post-commit; discarded if the txn rolls back.
+    _queue_history_events(session, event_type, series_id)
     return row
 
 
@@ -136,22 +189,25 @@ async def record_event_deduped(
     RISK-040 (FRG-API-011): the retry loop re-runs a permanently blocked
     download through the pipeline every tracking cycle, and each run used to
     accrete one more identical ``import_blocked`` row. For ``import_blocked`` /
-    ``import_failed`` events carrying a ``download_id``, the newest such row for
-    that download is consulted first: when its ``event_type`` AND its canonical
-    ``data`` string (sorted-keys JSON, so string equality is byte equality)
-    match this event exactly, the write is skipped and ``None`` is returned.
-    Any change in the payload — new reasons, new evidence — writes normally, as
-    do events without a ``download_id`` and every other event type.
+    ``import_failed`` events carrying a ``download_id``, the newest history row
+    for that download OF ANY TYPE is consulted first: the write is skipped only
+    when THAT newest row is itself a deduped-type row with an ``event_type`` AND
+    canonical ``data`` string (sorted-keys JSON, so string equality is byte
+    equality) matching this event exactly. Consulting the newest row of any
+    type — not just the newest deduped row — is what lets an intervening
+    ``imported`` / ``upgrade_replaced`` / ``grabbed`` for the same download
+    break the adjacency: a real re-block AFTER an import writes a fresh row
+    (``block(X) → imported → block(X)`` keeps both blocks) instead of collapsing
+    into the earlier identical block. Any change in the payload — new reasons,
+    new evidence — writes normally, as do events without a ``download_id`` and
+    every other event type.
     """
     if download_id is not None and event_type in _DEDUPED_EVENT_TYPES:
         serialized = None if data is None else json.dumps(data, sort_keys=True)
         newest = (
             await session.execute(
                 select(ImportHistoryRow)
-                .where(
-                    ImportHistoryRow.download_id == download_id,
-                    ImportHistoryRow.event_type.in_(_DEDUPED_EVENT_TYPES),
-                )
+                .where(ImportHistoryRow.download_id == download_id)
                 .order_by(
                     ImportHistoryRow.created_at.desc(), ImportHistoryRow.id.desc()
                 )
@@ -160,6 +216,7 @@ async def record_event_deduped(
         ).scalar_one_or_none()
         if (
             newest is not None
+            and newest.event_type in _DEDUPED_EVENT_TYPES
             and newest.event_type == event_type
             and newest.data == serialized
         ):
@@ -236,11 +293,13 @@ __all__ = [
     "EVENT_IMPORT_BLOCKED",
     "EVENT_IMPORT_FAILED",
     "EVENT_UPGRADE_REPLACED",
+    "HistoryEventRecorded",
     "IMPORT_EVENT_TYPES",
     "SOURCE_DOWNLOAD",
     "SOURCE_LIBRARY",
     "SOURCE_MANUAL",
     "SOURCE_RESCAN",
+    "WantedInvalidated",
     "all_events",
     "decode_data",
     "events_for_download",

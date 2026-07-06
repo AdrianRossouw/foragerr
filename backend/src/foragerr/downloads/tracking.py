@@ -99,6 +99,15 @@ class TrackedStateChanged(Event):
 
 
 @dataclass(frozen=True, slots=True)
+class BlocklistChanged(Event):
+    """A blocklist row was written (FRG-API-010/FRG-UI-017 WS-push source).
+
+    Emitted by both writers — the automatic failure loop and the manual
+    queue-remove — so a WS client invalidates the blocklist screen without
+    polling. Payload-free: the screen re-fetches its current page."""
+
+
+@dataclass(frozen=True, slots=True)
 class DownloadFailedEvent(Event):
     """A tracked download failed; carries what the blocklist + re-search need.
 
@@ -617,6 +626,11 @@ def write_blocklist_row(
             created_at=now,
         )
     )
+    # WS invalidation (FRG-UI-017): the blocklist screen has no queue push to
+    # infer from, so both writers announce a change here. Post-commit; a bare
+    # session (no post-commit wiring) is a silent no-op.
+    if session.info.get("post_commit_events") is not None:
+        queue_event(session, BlocklistChanged())
 
 
 async def _enqueue_research(commands, settings, infos: list[_FailureInfo]) -> None:
@@ -779,6 +793,7 @@ async def _handle_track_downloads(
 
 
 __all__ = [
+    "BlocklistChanged",
     "ClientObservation",
     "DownloadFailedEvent",
     "TrackDownloadsCommand",

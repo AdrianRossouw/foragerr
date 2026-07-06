@@ -15,11 +15,10 @@ import datetime as dt
 
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from foragerr.api.errors import ApiError
-from foragerr.api.history import load_issue_map, load_series_map
-from foragerr.api.paging import paginate
+from foragerr.api.paging import load_issue_map, load_series_map, paginate
 from foragerr.downloads.models import BlocklistRow
 from foragerr.library.models import IssueRow, SeriesRow
 
@@ -123,6 +122,9 @@ async def list_blocklist(
             sort_key=sortKey,
             sort_direction=sortDirection,
             whitelist=_SORT_WHITELIST,
+            # Failure storms write many rows at one `created_at`; the id
+            # tiebreak keeps the default newest-first pages from overlapping.
+            tiebreak=BlocklistRow.id,
         )
         rows: list[BlocklistRow] = result["records"]
         series_by_id = await load_series_map(session, {r.series_id for r in rows})
@@ -171,8 +173,12 @@ async def bulk_delete_blocklist(
             .all()
         )
         found_ids = {row.id for row in found}
-        for row in found:
-            await session.delete(row)
+        if found_ids:
+            # One set-based DELETE instead of a delete() per row (the ORM would
+            # otherwise issue N statements for a large stale selection).
+            await session.execute(
+                delete(BlocklistRow).where(BlocklistRow.id.in_(found_ids))
+            )
     return {
         "deleted": [i for i in requested if i in found_ids],
         "missing": [i for i in requested if i not in found_ids],

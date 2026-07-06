@@ -263,6 +263,106 @@ def test_rootfolder_delete_refuses_while_a_series_references_it(client, tmp_path
     assert len(client.get("/api/v1/rootfolder").json()) == 1
 
 
+async def _stage_group(app, root_folder_id: int) -> int:
+    """One library-import staging group under ``root_folder_id``."""
+    from foragerr.library.models import LibraryImportGroupRow
+    from foragerr.db import utcnow
+
+    async with app.state.db.write_session() as session:
+        row = LibraryImportGroupRow(
+            matching_key="spawn",
+            root_folder_id=root_folder_id,
+            folder="/lib/Spawn",
+            files="[]",
+            state="proposed",
+            scanned_at=utcnow(),
+        )
+        session.add(row)
+        await session.flush()
+        return row.id
+
+
+async def _insert_started_command(app, name: str, payload: dict) -> int:
+    """Insert a ``started`` command row directly (the pp worker only CLAIMS
+    ``queued`` rows, so a ``started`` row stays put for the test) — a
+    deterministic stand-in for a command running mid-delete."""
+    import json as _json
+
+    from foragerr.db import CommandRow, utcnow
+
+    async with app.state.db.write_session() as session:
+        row = CommandRow(
+            name=name,
+            status="started",
+            priority=0,
+            workload_class="pp",
+            exclusivity_group=None,
+            payload=_json.dumps(payload),
+            payload_hash=f"test-{name}-{utcnow().timestamp()}",
+            triggered_by="test",
+            queued_at=utcnow(),
+            started_at=utcnow(),
+        )
+        session.add(row)
+        await session.flush()
+        return row.id
+
+
+@pytest.mark.req("FRG-SER-008")
+def test_rootfolder_delete_refuses_while_staged_import_groups_exist(client, tmp_path):
+    """Staged ``library_import_groups`` CASCADE-delete with the root, silently
+    discarding a pending review — refuse (409) while any exist (gate fix)."""
+    root = tmp_path / "library"
+    root.mkdir()
+    rid = client.post("/api/v1/rootfolder", json={"path": str(root)}).json()["id"]
+    client.portal.call(_stage_group, client.app, rid)
+
+    resp = client.delete(f"/api/v1/rootfolder/{rid}")
+    assert resp.status_code == 409
+    assert "staged library-import" in resp.json()["message"]
+    assert len(client.get("/api/v1/rootfolder").json()) == 1  # still registered
+
+
+@pytest.mark.req("FRG-SER-008")
+def test_rootfolder_delete_refuses_while_a_scan_command_is_pending(client, tmp_path):
+    """A queued/started library-import-scan for this root pins it: deleting the
+    root mid-command would pull its rows out from under the import (gate fix)."""
+    root = tmp_path / "library"
+    root.mkdir()
+    rid = client.post("/api/v1/rootfolder", json={"path": str(root)}).json()["id"]
+    client.portal.call(
+        _insert_started_command,
+        client.app,
+        "library-import-scan",
+        {"root_folder_id": rid},
+    )
+
+    resp = client.delete(f"/api/v1/rootfolder/{rid}")
+    assert resp.status_code == 409
+    assert "library-import scan" in resp.json()["message"]
+    assert len(client.get("/api/v1/rootfolder").json()) == 1
+
+
+@pytest.mark.req("FRG-SER-008")
+def test_rootfolder_delete_refuses_while_an_execute_holds_its_group(
+    client, tmp_path
+):
+    """A library-import execute whose group_ids include a group of this root
+    pins it too (the group-id intersection guard, gate fix). The staged group
+    is deleted first so ONLY the command guard can produce the 409."""
+    root = tmp_path / "library"
+    root.mkdir()
+    rid = client.post("/api/v1/rootfolder", json={"path": str(root)}).json()["id"]
+    gid = client.portal.call(_stage_group, client.app, rid)
+    client.portal.call(
+        _insert_started_command, client.app, "library-import", {"group_ids": [gid]}
+    )
+
+    resp = client.delete(f"/api/v1/rootfolder/{rid}")
+    assert resp.status_code == 409
+    assert "library-import execute" in resp.json()["message"]
+
+
 # --- format profiles ---------------------------------------------------------
 
 

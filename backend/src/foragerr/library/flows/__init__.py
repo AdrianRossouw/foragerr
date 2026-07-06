@@ -34,6 +34,7 @@ from foragerr.library.flows._common import (
 )
 from foragerr.library.flows.add import AddSeriesResult, add_series
 from foragerr.library.flows.edit_delete import (
+    DeleteSeriesFilesCommand,
     IssueFileNotFoundError,
     delete_issue_file,
     delete_series,
@@ -71,6 +72,7 @@ from foragerr.library.flows import search as _search  # noqa: F401
 __all__ = [
     "AddOptions",
     "AddSeriesResult",
+    "DeleteSeriesFilesCommand",
     "IssueFileNotFoundError",
     "LIBRARY_IMPORT_PROPOSAL_CAP",
     "LibraryImportCommand",

@@ -33,12 +33,15 @@ Tailscale-only deployment, so every request value is treated as hostile):
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import math
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urljoin
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import FileResponse, Response
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
+
+logger = logging.getLogger("foragerr.opds")
 
 from foragerr.api.errors import ApiError
 from foragerr.db.base import utcnow
@@ -75,6 +78,16 @@ SEARCH_TITLE = "Search"
 #: beyond it is TRIMMED (never an error): the spec requires oversized input to
 #: be bounded while the response stays a normal, possibly empty, feed.
 MAX_SEARCH_QUERY_LEN = 256
+
+#: Bound on how many alias-bearing series the search loads for the Python-side
+#: fold+contain pass (FRG-OPDS-007). Title matches use ``matching_key`` (already
+#: the folded form) as an exact SQL superset and are NOT capped; only aliases —
+#: stored as raw user strings whose folded form cannot be expressed in SQL —
+#: are candidate-scanned, so this caps that scan alone. A single-user library
+#: stays far under it; if it is ever hit a WARNING flags that alias matches
+#: beyond the cap could be missed (correctness inside the cap is preserved —
+#: matches are never silently dropped from the fetched candidates).
+OPDS_ALIAS_SCAN_CAP = 2000
 
 
 def _feed_response(feed: Feed, kind: str) -> Response:
@@ -347,14 +360,29 @@ def build_opds_router(base_path: str) -> APIRouter:
         return _feed_response(feed, ACQ_KIND)
 
     @router.get("/opensearch.xml")
-    async def opensearch_description() -> Response:
+    async def opensearch_description(request: Request) -> Response:
         """The OpenSearch description document the root feed's ``rel="search"``
-        link advertises (FRG-OPDS-007 option a). Static: the template carries
-        the literal ``{searchTerms}`` placeholder a reader substitutes."""
+        link advertises (FRG-OPDS-007 option a). The template MUST be an
+        absolute URL: a root-relative one (``/opds/search?...``) breaks behind a
+        path-prefix reverse proxy (the reader resolves it against the wrong
+        base) and some readers reject it outright. It is built from the incoming
+        request's base URL — which respects the proxy ``root_path`` /
+        forwarded-prefix the ASGI stack set, exactly as ``request.base_url``
+        does — joined with this catalog's own ``{base_path}/search`` mount, so
+        the advertised template points where the reader actually reached us.
+        The literal ``{searchTerms}`` placeholder is preserved for the reader to
+        substitute. (In-feed links stay relative — a browsing reader resolves
+        them against the feed URL it fetched.)"""
+        # base_url ends with "/" and already carries any proxy root_path;
+        # search_url is the app-relative mount ("/opds/search"), so strip its
+        # leading slash for a correct urljoin against that base.
+        template = urljoin(
+            str(request.base_url), f"{search_url.lstrip('/')}?q={{searchTerms}}"
+        )
         document = render_opensearch_description(
             short_name=CATALOG_TITLE,
             description="Search series in the foragerr comic catalog",
-            template=f"{search_url}?q={{searchTerms}}",
+            template=template,
             results_type=NAV_KIND,
         )
         return Response(content=document, media_type=OPENSEARCH_DESC_KIND)
@@ -378,35 +406,75 @@ def build_opds_router(base_path: str) -> APIRouter:
         Python containment pass over the (folded) alias lists, and reflected
         nowhere except URL-encoded into this feed's own pagination links,
         which the escaping builder quotes. No match — or an empty/fold-empty
-        term — yields an empty but valid feed, never an error."""
+        term — yields an empty but valid feed, never an error.
+
+        Fetch is bounded WITHOUT loading every aliased series (the pre-fix cost):
+        title matches use ``matching_key`` (already the folded form), so a folded
+        substring is an EXACT SQL superset — those rows are fetched unbounded and
+        are guaranteed matches. Only alias-bearing series (whose folded form is
+        not expressible in SQL) are candidate-scanned, and that scan is capped at
+        ``OPDS_ALIAS_SCAN_CAP`` with a WARNING if the cap is reached; matches are
+        never silently dropped from the fetched candidates."""
         settings = request.app.state.settings
         page_size = _effective_page_size(count, settings)
         term = q[:MAX_SEARCH_QUERY_LEN]
         folded = matching_key(term)
 
-        rows: list[SeriesRow] = []
+        matched: dict[int, SeriesRow] = {}
         if folded:
             db = request.app.state.db
             async with db.read_session() as session:
-                # Bound parameters only: `.contains(..., autoescape=True)`
-                # binds the folded term as a LIKE parameter with `%`/`_`
-                # escaped. Alias containment cannot be expressed against the
-                # folded form in SQL (aliases are stored as raw user strings),
-                # so alias-bearing series are candidates and the fold+contain
-                # check runs in Python below — still zero SQL from input.
-                result = await session.execute(
-                    select(SeriesRow)
-                    .where(
-                        or_(
-                            SeriesRow.matching_key.contains(folded, autoescape=True),
-                            SeriesRow.aliases.is_not(None),
+                # 1. Title matches: `matching_key` IS the folded form, so a
+                #    folded-substring LIKE (bound, autoescaped) is an exact
+                #    superset — every returned row genuinely matches, no cap.
+                title_rows = (
+                    (
+                        await session.execute(
+                            select(SeriesRow)
+                            .where(
+                                SeriesRow.matching_key.contains(
+                                    folded, autoescape=True
+                                )
+                            )
+                            .order_by(SeriesRow.sort_title, SeriesRow.id)
                         )
                     )
-                    .order_by(SeriesRow.sort_title, SeriesRow.id)
+                    .scalars()
+                    .all()
                 )
-                candidates = result.scalars().all()
-            rows = [row for row in candidates if _series_matches(row, folded)]
+                for row in title_rows:
+                    matched[row.id] = row
 
+                # 2. Alias matches: a raw user string whose folded form cannot be
+                #    expressed in SQL, so alias-bearing series are candidates
+                #    filtered in Python. Bound the candidate fetch so a huge
+                #    library cannot load every aliased series; order it so the
+                #    cap is deterministic, and WARN (never silently truncate a
+                #    match inside the fetched set) if the cap is reached.
+                alias_candidates = (
+                    (
+                        await session.execute(
+                            select(SeriesRow)
+                            .where(SeriesRow.aliases.is_not(None))
+                            .order_by(SeriesRow.sort_title, SeriesRow.id)
+                            .limit(OPDS_ALIAS_SCAN_CAP + 1)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                if len(alias_candidates) > OPDS_ALIAS_SCAN_CAP:
+                    logger.warning(
+                        "opds search: alias candidate scan hit the %d cap; alias "
+                        "matches beyond it may be missed for this query",
+                        OPDS_ALIAS_SCAN_CAP,
+                    )
+                    alias_candidates = alias_candidates[:OPDS_ALIAS_SCAN_CAP]
+                for row in alias_candidates:
+                    if row.id not in matched and _series_matches(row, folded):
+                        matched[row.id] = row
+
+        rows = sorted(matched.values(), key=lambda r: (r.sort_title, r.id))
         total = len(rows)
         start = (page - 1) * page_size
         entries = tuple(

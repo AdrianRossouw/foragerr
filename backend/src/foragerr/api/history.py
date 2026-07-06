@@ -18,7 +18,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from foragerr.api.errors import ApiError
-from foragerr.api.paging import paginate
+from foragerr.api.paging import load_issue_map, load_series_map, paginate
 from foragerr.importer.history import IMPORT_EVENT_TYPES, decode_data
 from foragerr.importer.models import ImportHistoryRow
 from foragerr.library.models import IssueRow, SeriesRow
@@ -65,32 +65,6 @@ class HistoryPage(BaseModel):
     sortDirection: str
     totalRecords: int
     records: list[HistoryResource]
-
-
-async def load_series_map(session, ids: set[int | None]) -> dict[int, SeriesRow]:
-    """Batch-load the series display rows for one page (queue pattern)."""
-    real = [i for i in ids if i is not None]
-    if not real:
-        return {}
-    rows = (
-        (await session.execute(select(SeriesRow).where(SeriesRow.id.in_(real))))
-        .scalars()
-        .all()
-    )
-    return {row.id: row for row in rows}
-
-
-async def load_issue_map(session, ids: set[int | None]) -> dict[int, IssueRow]:
-    """Batch-load the issue display rows for one page (queue pattern)."""
-    real = [i for i in ids if i is not None]
-    if not real:
-        return {}
-    rows = (
-        (await session.execute(select(IssueRow).where(IssueRow.id.in_(real))))
-        .scalars()
-        .all()
-    )
-    return {row.id: row for row in rows}
 
 
 def _to_resource(
@@ -154,6 +128,11 @@ async def list_history(
             sort_key=sortKey,
             sort_direction=sortDirection,
             whitelist=_SORT_WHITELIST,
+            # Deterministic id tiebreak: a whole import batch shares one
+            # ctx.now `created_at`, so without it those tied rows could
+            # duplicate/skip across page boundaries (the created_at-then-id
+            # order guarantee this feed documents).
+            tiebreak=ImportHistoryRow.id,
         )
         rows: list[ImportHistoryRow] = result["records"]
         series_by_id = await load_series_map(session, {r.series_id for r in rows})

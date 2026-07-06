@@ -356,6 +356,76 @@ async def test_delete_files_commit_failure_compensates_all_moves(
     assert list(bin_root.rglob("*.cbz")) == []
 
 
+@pytest.mark.req("FRG-API-003")
+async def test_delete_files_summary_reports_binned_count(
+    db, root_folder_id, root_folder_path, format_profile_id, tmp_path
+):
+    """The command surfaces a recycled-paths summary (finding 6): delete_series
+    returns an `imported`-style one-liner naming how many files were deleted and
+    how many of those were binned (per-file paths already live in the events)."""
+    series_id, files = await _make_with_files(
+        db, root_folder_id, format_profile_id, root_folder_path / "Saga", 2
+    )
+    bin_root = tmp_path / "recycle"
+    bin_root.mkdir()
+    (tmp_path / "cfg").mkdir(exist_ok=True)
+    settings = make_settings(tmp_path / "cfg", recycle_bin_path=str(bin_root))
+
+    summary = await delete_series(
+        db, series_id, delete_files=True, settings=settings
+    )
+    assert "files=2" in summary and "binned=2" in summary
+
+
+@pytest.mark.req("FRG-API-003")
+async def test_stranded_bin_file_on_failed_compensation_is_recorded(
+    db, root_folder_id, root_folder_path, format_profile_id, tmp_path, monkeypatch
+):
+    """Finding 5: when the row-removal commit fails AND the compensating restore
+    ALSO fails, the file is stranded in the bin. Its location must be recoverable
+    from the DB — a durable `file_deleted` event (source=manual) carrying the
+    quarantine_path and a compensation-leftover marker — not only a warning log.
+    The series rows stay intact (the deletion rolled back)."""
+    from foragerr.importer import fileops
+    from foragerr.library.flows import edit_delete
+
+    series_id, files = await _make_with_files(
+        db, root_folder_id, format_profile_id, root_folder_path / "Saga", 2
+    )
+    bin_root = tmp_path / "recycle"
+    bin_root.mkdir()
+    (tmp_path / "cfg").mkdir(exist_ok=True)
+    settings = make_settings(tmp_path / "cfg", recycle_bin_path=str(bin_root))
+
+    async def boom(db_, series_id_, files_, recycled_, now_):
+        raise RuntimeError("row removal failed mid-commit")
+
+    def failing_restore(*args, **kwargs):
+        raise OSError("cannot restore from the bin")
+
+    monkeypatch.setattr(edit_delete, "_commit_series_deletion", boom)
+    monkeypatch.setattr(fileops, "place_file", failing_restore)
+
+    with pytest.raises(RuntimeError):
+        await delete_series(db, series_id, delete_files=True, settings=settings)
+
+    # Rows intact: the deletion transaction rolled back.
+    assert await _row_counts(db) == (1, 2, 2)
+    # The files are stranded in the bin (restore failed), not at their origin.
+    assert len(list(bin_root.rglob("*.cbz"))) == 2
+    for path in files:
+        assert not path.exists()
+
+    # Durable, DB-recoverable record of each stranded file's bin location.
+    deleted = await _file_deleted_events(db)
+    assert len(deleted) == 2
+    for event in deleted:
+        assert event.source == history.SOURCE_MANUAL
+        assert event.quarantine_path is not None
+        assert str(bin_root) in event.quarantine_path
+        assert history.decode_data(event.data).get("compensation_leftover") is True
+
+
 @pytest.mark.req("FRG-SER-014")
 async def test_edit_and_delete_unknown_series_raise_not_found(db):
     with pytest.raises(SeriesNotFoundError):

@@ -304,14 +304,17 @@ async def _add_issue_with_file(app, series_id: int, path) -> None:
 
 
 @pytest.mark.req("FRG-API-003")
-def test_delete_series_with_delete_files_true_removes_files_and_rows(
+def test_delete_series_with_delete_files_true_enqueues_command_then_removes(
     client, tmp_path, monkeypatch
 ):
-    """`deleteFiles=true` is implemented (m2-daily-surfaces — was the M1 501):
-    the on-disk file is disposed of BEFORE the rows are removed (permanently
-    here — this app has no recycle bin configured; bin routing and the
+    """`deleteFiles=true` no longer runs inline (gate fix): the per-file recycle
+    moves are blocking syscalls that would freeze the loop for a big series on a
+    slow mount, and running inline ignored the import exclusivity group. It now
+    ENQUEUES a `delete-series-files` command and returns 202 with the
+    CommandResource; the command (pp pool, import-file-mutation group) disposes
+    of the file BEFORE removing the rows. Bin routing and the
     ordering/compensation guarantees are pinned in
-    tests/library/test_flows_edit_delete.py)."""
+    tests/library/test_flows_edit_delete.py."""
     root_id = make_root_folder(client, tmp_path)
     factory = build_factory(
         settings=client.app.state.settings, handler=FakeCV().volume(1, name="Saga").handler()
@@ -328,7 +331,24 @@ def test_delete_series_with_delete_files_true_removes_files_and_rows(
     response = client.delete(
         f"/api/v1/series/{created['id']}", params={"deleteFiles": "true"}
     )
-    assert response.status_code == 204
+    assert response.status_code == 202
+    body = response.json()
+    assert body["name"] == "delete-series-files"
+    command_id = body["id"]
+
+    # The command runs on the pp worker; poll it to a terminal state.
+    def _finished() -> bool:
+        status = client.get(f"/api/v1/command/{command_id}").json()["status"]
+        return status in ("completed", "failed")
+
+    for _ in range(200):
+        if _finished():
+            break
+        time.sleep(0.05)
+    final = client.get(f"/api/v1/command/{command_id}").json()
+    assert final["status"] == "completed", final
+    assert "binned=0" in (final["result"] or "")  # no bin configured here
+
     assert client.get(f"/api/v1/series/{created['id']}").status_code == 404
     assert not on_disk.exists()  # the file went with the rows
 

@@ -17,8 +17,7 @@ from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import func
 
-from foragerr.api.history import load_series_map
-from foragerr.api.paging import paginate
+from foragerr.api.paging import load_series_map, paginate
 from foragerr.library.models import IssueRow, SeriesRow
 from foragerr.library.repo import wanted_issues
 
@@ -26,6 +25,11 @@ router = APIRouter(prefix="/wanted", tags=["wanted"])
 
 #: Release date prefers the actual on-sale date and falls back to the cover
 #: date — the same preference the wanted query's "released" predicate uses.
+#: The coalesce expression is unindexed (no stored column to index — a wanted
+#: issue's release date is computed), so this ORDER BY is an in-database sort
+#: over the derived-missing set with no supporting index; accepted at
+#: single-user scale (the missing set is bounded by the library's monitored,
+#: released, fileless issues), not a column added to the schema for it.
 _RELEASE_DATE = func.coalesce(IssueRow.store_date, IssueRow.cover_date)
 
 _SORT_WHITELIST = {
@@ -104,6 +108,9 @@ async def list_missing(
             sort_key=sortKey,
             sort_direction=sortDirection,
             whitelist=_SORT_WHITELIST,
+            # Many missing issues share a release date (a whole month's
+            # on-sale batch); the id tiebreak keeps the paged slices disjoint.
+            tiebreak=IssueRow.id,
         )
         rows: list[IssueRow] = result["records"]
         series_by_id = await load_series_map(session, {r.series_id for r in rows})

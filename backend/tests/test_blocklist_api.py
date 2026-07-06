@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
 
+from conftest import seed_series_issue
 from foragerr.app import create_app
 from foragerr.config import Settings
 from foragerr.downloads.models import BlocklistRow
@@ -28,45 +28,6 @@ def client(settings):
     app = create_app(settings)
     with TestClient(app) as c:
         yield c
-
-
-async def _seed_series_issue(db, tmp_path) -> tuple[int, int]:
-    from foragerr.library import repo
-    from foragerr.quality.models import DEFAULT_PROFILE_NAME, FormatProfileRow
-
-    root = tmp_path / "lib-root"
-    root.mkdir(exist_ok=True)
-    async with db.read_session() as session:
-        profile_id = (
-            await session.execute(
-                select(FormatProfileRow.id).where(
-                    FormatProfileRow.name == DEFAULT_PROFILE_NAME
-                )
-            )
-        ).scalar_one()
-    async with db.write_session() as session:
-        rf = await repo.create_root_folder(session, str(root))
-        series = await repo.create_series(
-            session,
-            cv_volume_id=987654,
-            title="Spawn",
-            start_year=2024,
-            format_profile_id=profile_id,
-            root_folder_id=rf.id,
-            path=str(root / "Spawn"),
-            monitored=True,
-        )
-        await session.flush()
-        issue = await repo.create_issue(
-            session,
-            series_id=series.id,
-            cv_issue_id=123456,
-            issue_number="1",
-            cover_date=dt.date(2024, 1, 1),
-            monitored=True,
-        )
-        await session.flush()
-        return series.id, issue.id
 
 
 async def _insert_block(
@@ -104,7 +65,7 @@ def test_blocklist_paged_envelope_newest_first_with_nested_resources(
     client, tmp_path
 ):
     db = client.app.state.db
-    series_id, issue_id = client.portal.call(_seed_series_issue, db, tmp_path)
+    series_id, issue_id = client.portal.call(seed_series_issue, db, tmp_path)
     older = client.portal.call(
         lambda: _insert_block(
             db,
