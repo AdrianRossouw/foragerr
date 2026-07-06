@@ -18,12 +18,24 @@ tagged coverage elsewhere:
   ``importer/test_library_source.py`` (FRG-IMP-023).
 
 What is new here is the end-to-end **crash property tagged to FRG-NFR-007**:
-each invariant is re-asserted across a genuine process-restart boundary (engine
-dispose → fresh ``Database``/handler context on the persisted file), which is
-what "a crash or power loss at any point" means. The heavy real-process
-``kill -9`` matrix is the opt-in soak variant of this same staged shape; the
-CI-default re-invokes the handler at the staged point after the restart, and the
-idempotency is exactly what makes the two equivalent (per the delta).
+each invariant is exercised as idempotent re-execution over committed
+intermediate states across a fresh-``Database`` restart (engine dispose → fresh
+``Database``/handler context on the persisted file), re-invoking the handler at
+the staged point after the restart. That is what these tests actually drive —
+not a real ``kill -9`` of a live OS process (no such soak matrix exists here).
+
+FRG-NFR-007 is worded as *at-least-once execution and idempotent handlers (no
+duplicate snatches or double imports)*, and its "re-snatching is idempotent"
+scenario pins the invariant on durable state — *no duplicate grab or
+tracked-download row*. Crucially the grab handler calls the side-effecting
+``client.download()`` BEFORE its ``grab_history`` row commits, so a crash in
+that window re-downloads on restart: the external snatch is genuinely
+**at-least-once**. That duplicate snatch is the accepted, safe failure direction
+(a marker-first ordering would instead LOSE grabs when a crash lands between the
+marker write and the download). The tests below cover both the
+already-committed window (the guard skips the re-download) and the real
+pre-commit window (the re-download happens, but still exactly one durable
+``grab_history`` row).
 """
 
 from __future__ import annotations
@@ -229,6 +241,105 @@ async def test_staged_download_crash_resnatch_is_idempotent(
         assert len(after) == 1
         assert after[0].id == before[0].id
         assert after[0].download_id == "nzo-crash"
+    finally:
+        await second_db.close()
+
+
+@pytest.mark.req("FRG-NFR-007")
+async def test_staged_download_crash_before_commit_resnatches_at_least_once(
+    migrated_dir, monkeypatch
+):
+    """The REAL duplicate-snatch window: a crash AFTER ``client.download()``
+    returns but BEFORE the ``grab_history`` row commits. On restart the
+    idempotency guard finds NO persisted ``(indexer_id, guid)`` row (it never
+    committed), so it re-downloads — the external snatch is genuinely
+    **at-least-once**.
+
+    This is the ACCEPTED, safe failure mode. A marker-first ordering (write
+    ``grab_history`` before downloading) would instead LOSE a grab when a crash
+    lands between the marker and the download; the current ordering can only
+    duplicate a snatch, never drop one. FRG-NFR-007 pins the invariant on
+    durable state — *no duplicate grab / tracked-download row* — and that holds:
+    exactly one ``grab_history`` row survives, written by the restart run."""
+    from foragerr.commands.service import HandlerContext, daemon_offload
+    from foragerr.config import Settings
+    from foragerr.downloads.models import GrabHistoryRow
+    import foragerr.search_ops.grab as grab_mod
+    from foragerr.search_ops.grab import GrabReleaseCommand, _handle_grab_release
+
+    db_path = migrated_dir / "foragerr.db"
+    command = GrabReleaseCommand(
+        indexer_id=7,
+        guid="G-window",
+        link="https://idx.test/nzb/2",
+        title="Spawn 002 (2024)",
+        size_bytes=2222,
+        series_id=1,
+        issue_id=11,
+        indexer_name="DogNZB",
+    )
+
+    class _Commands:  # records follow-up enqueues; no dedup needed here
+        def __init__(self):
+            self.enqueued = []
+
+        async def enqueue(self, name, payload=None, *, priority=None, triggered_by="manual"):
+            self.enqueued.append(name)
+            return type("_Rec", (), {"id": len(self.enqueued)})()
+
+    def _ctx(db):
+        return HandlerContext(
+            db=db,
+            bus=None,
+            settings=Settings(config_dir="/tmp"),
+            offload=daemon_offload,
+            commands=_Commands(),
+        )
+
+    async def _grab_history(db):
+        async with db.read_session() as session:
+            rows = (await session.execute(select(GrabHistoryRow))).scalars().all()
+            for r in rows:
+                session.expunge(r)
+            return list(rows)
+
+    client = _CountingClient(download_id="nzo-window")
+    _patch_resolution(monkeypatch, client=client)
+
+    # Stage the crash INSIDE the write window: the first grab_history write
+    # raises after download() has already returned, so the write_session rolls
+    # back and nothing commits. The real write is restored for the restart.
+    real_write = grab_mod.write_grab_history_rows
+    state = {"n": 0}
+
+    async def _flaky_write(*args, **kwargs):
+        state["n"] += 1
+        if state["n"] == 1:
+            raise RuntimeError("simulated crash: after download(), before commit")
+        return await real_write(*args, **kwargs)
+
+    monkeypatch.setattr(grab_mod, "write_grab_history_rows", _flaky_write)
+
+    # First process lifetime: download happens, then the crash lands before the
+    # grab_history commit — so no join-key row is persisted (the real window).
+    first_db = Database(db_path=db_path)
+    with pytest.raises(RuntimeError):
+        await _handle_grab_release(command, _ctx(first_db))
+    assert client.calls == 1  # downloaded once before the crash
+    assert await _grab_history(first_db) == []  # nothing committed: the window
+    await first_db.engine.dispose()  # simulated kill
+
+    # Restarted process: with no persisted row the guard cannot short-circuit,
+    # so the release is downloaded AGAIN — at-least-once, the accepted duplicate
+    # snatch (the safe direction vs a marker-first LOST grab).
+    second_db = Database(db_path=db_path)
+    try:
+        await _handle_grab_release(command, _ctx(second_db))
+        assert client.calls == 2  # re-downloaded after the restart
+        after = await _grab_history(second_db)
+        # Durable state stays single: exactly one grab_history row.
+        assert len(after) == 1
+        assert after[0].download_id == "nzo-window"
     finally:
         await second_db.close()
 

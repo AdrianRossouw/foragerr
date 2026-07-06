@@ -423,3 +423,126 @@ def test_middleware_refusal_logs_a_clean_single_line_path(caplog):
     assert refusals, "the 431 refusal should be logged"
     assert all("\n" not in r.getMessage() for r in refusals)
     assert any("path=/ok" in r.getMessage() for r in refusals)
+
+
+# --------------------------------------------------------------------------
+# Middleware coroutine teardown / ASGI-completeness (gate fixes)
+# --------------------------------------------------------------------------
+
+
+def _http_scope() -> dict:
+    return {
+        "type": "http",
+        "method": "GET",
+        "path": "/",
+        "query_string": b"",
+        "headers": [],
+        "client": ("1.2.3.4", 9),
+    }
+
+
+@pytest.mark.req("FRG-NFR-014")
+async def test_external_cancel_does_not_orphan_the_app_task():
+    """If the middleware coroutine is cancelled externally (client disconnect
+    before the first response byte, or shutdown) while parked in asyncio.wait,
+    the spawned downstream app_task must not be orphaned — the middleware's
+    outer finally cancels and awaits it, so no handler keeps running."""
+    app_running = asyncio.Event()
+    app_finished = asyncio.Event()
+
+    async def hanging_app(scope, receive, send):
+        app_running.set()
+        try:
+            await asyncio.sleep(3600)  # never produces a response
+        finally:
+            app_finished.set()
+
+    mw = RequestLimitsMiddleware(
+        hanging_app,
+        max_body_bytes=1024,
+        max_header_bytes=16 * 1024,
+        request_timeout_seconds=30,  # parks in asyncio.wait, not a fast timeout
+        rate_max_requests=0,
+        rate_window_seconds=1,
+    )
+
+    async def receive():
+        await asyncio.sleep(3600)
+        return {"type": "http.request", "body": b""}
+
+    async def send(_message):
+        return None
+
+    task = asyncio.ensure_future(mw(_http_scope(), receive, send))
+    await asyncio.wait_for(app_running.wait(), 1.0)
+    await asyncio.sleep(0.02)  # let the middleware settle inside asyncio.wait
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    # The orphan would never finish; the finally cancels+awaits it.
+    await asyncio.wait_for(app_finished.wait(), 1.0)
+
+
+@pytest.mark.req("FRG-NFR-014")
+async def test_cancel_of_an_already_cancelled_task_does_not_raise():
+    """``_cancel`` probing a task the caller already cancelled must not re-raise
+    the CancelledError that ``.exception()`` would surface on a cancelled task."""
+    async def sleeper():
+        await asyncio.sleep(3600)
+
+    task = asyncio.ensure_future(sleeper())
+    await asyncio.sleep(0)  # let it start
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert task.cancelled()
+    # The guarded done-branch returns cleanly instead of raising.
+    await RequestLimitsMiddleware._cancel(task)
+
+
+@pytest.mark.req("FRG-NFR-014")
+async def test_body_cap_after_response_start_propagates_no_silent_hang():
+    """A body-cap violation AFTER the response has started cannot be answered
+    with a 413 (the response is committed); the middleware must re-raise so the
+    server tears the connection down, rather than returning silently and leaving
+    an incomplete ASGI response (a protocol hang)."""
+    started = asyncio.Event()
+
+    async def start_then_read_app(scope, receive, send):
+        await send(
+            {"type": "http.response.start", "status": 200, "headers": []}
+        )
+        started.set()
+        # Now read the (over-cap) body: the wrapped receive aborts at the cap.
+        while True:
+            await receive()
+
+    mw = RequestLimitsMiddleware(
+        start_then_read_app,
+        max_body_bytes=8,
+        max_header_bytes=16 * 1024,
+        request_timeout_seconds=0,  # timeout disabled -> straight to await app
+        rate_max_requests=0,
+        rate_window_seconds=1,
+    )
+
+    chunks = iter([{"type": "http.request", "body": b"x" * 100, "more_body": False}])
+
+    async def receive():
+        try:
+            return next(chunks)
+        except StopIteration:
+            await asyncio.sleep(3600)
+            return {"type": "http.request", "body": b""}
+
+    sent: list[dict] = []
+
+    async def send(message):
+        sent.append(message)
+
+    # The over-cap body after start propagates rather than hanging silently.
+    with pytest.raises(_RequestBodyTooLarge):
+        await mw(_http_scope(), receive, send)
+    # The response had started; no second (413) response.start was emitted.
+    assert sent[0]["type"] == "http.response.start"
+    assert sum(1 for m in sent if m["type"] == "http.response.start") == 1

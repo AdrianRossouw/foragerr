@@ -40,7 +40,11 @@ async def _drain_incoming(
     disconnect detector, so any real inbound payload is anomalous. Two limits
     bound it (FRG-NFR-014): an inbound frame larger than ``max_bytes``, or a
     sustained burst exceeding ``max_messages_per_second`` (sliding 1-second
-    window), is logged once and ends the loop.
+    window), is logged once and ends the loop. The drain reads raw frames via
+    ``websocket.receive()`` (not ``receive_text``) so a **binary** frame is
+    capped and disconnect-handled on the same path as text — ``receive_text``
+    would raise ``KeyError('text')`` on a binary frame, escaping this loop and
+    dirtying teardown, yet design.md promises binary frames are capped too.
 
     Returns ``True`` when the CLIENT disconnected (the socket is gone, so the
     caller must not close it again — the ``0e0456a`` client-gone guard), and
@@ -51,8 +55,23 @@ async def _drain_incoming(
     arrivals: deque[float] = deque()
     try:
         while True:
-            text = await websocket.receive_text()
-            if len(text.encode("utf-8")) > max_bytes:
+            message = await websocket.receive()
+            # A disconnect surfaces as a message (receive() does not raise the
+            # typed WebSocketDisconnect that receive_text would); treat it as the
+            # client-gone signal so the caller must not re-close the socket.
+            if message["type"] == "websocket.disconnect":
+                return True
+            # Uniform text/binary handling: measure whichever payload is present
+            # by its byte length, so a binary frame is capped exactly like text.
+            payload = message.get("text")
+            if payload is None:
+                payload = message.get("bytes") or b""
+            frame_bytes = (
+                len(payload.encode("utf-8"))
+                if isinstance(payload, str)
+                else len(payload)
+            )
+            if frame_bytes > max_bytes:
                 logger.warning(
                     "ws: closing client — inbound frame over the %d-byte cap",
                     max_bytes,
@@ -61,7 +80,10 @@ async def _drain_incoming(
             now = time.monotonic()
             arrivals.append(now)
             cutoff = now - 1.0
-            while arrivals and arrivals[0] < cutoff:
+            # Half-open window (``<=`` expiry), consistent with the HTTP limiter:
+            # a frame exactly 1.0s old has left the window, so exactly-at-rate
+            # traffic is not closed.
+            while arrivals and arrivals[0] <= cutoff:
                 arrivals.popleft()
             if len(arrivals) > max_messages_per_second:
                 logger.warning(

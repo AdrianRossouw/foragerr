@@ -209,6 +209,7 @@ class RequestLimitsMiddleware:
         started_event = asyncio.Event()
         wrapped_receive = self._body_capped_receive(receive)
         app_task = asyncio.ensure_future(self.app(scope, wrapped_receive, send_wrapper))
+        start_waiter: "asyncio.Future[bool] | None" = None
 
         try:
             if self.request_timeout and self.request_timeout > 0:
@@ -234,8 +235,24 @@ class RequestLimitsMiddleware:
             await app_task
         except _RequestBodyTooLarge:
             await self._cancel(app_task)
-            if not started:
-                await self._reject(send, 413, "request body too large", scope)
+            if started:
+                # The response was already committed, so we cannot answer 413 —
+                # a silent return here would leave the ASGI response incomplete
+                # (protocol hang). Re-raise so the server tears the connection
+                # down; the not-started case below is the clean 413.
+                raise
+            await self._reject(send, 413, "request body too large", scope)
+        finally:
+            # If this middleware coroutine is cancelled externally (client
+            # disconnect before the first response byte, or shutdown) while
+            # parked in ``asyncio.wait`` / ``await app_task``, the spawned
+            # app_task (and start_waiter) would otherwise be ORPHANED and keep
+            # running — asyncio.wait does not cancel its awaitables. Cancel and
+            # await anything still live on every exit path.
+            if start_waiter is not None and not start_waiter.done():
+                await self._cancel(start_waiter)
+            if not app_task.done():
+                await self._cancel(app_task)
 
     def _body_capped_receive(self, receive: Receive) -> Receive:
         """Wrap ``receive`` so the cumulative streamed body is aborted at the
@@ -258,10 +275,15 @@ class RequestLimitsMiddleware:
         return wrapped
 
     @staticmethod
-    async def _cancel(task: "asyncio.Future[None]") -> None:
+    async def _cancel(task: "asyncio.Future[object]") -> None:
         """Cancel ``task`` and absorb the cancellation / any stored error so a
         timed-out or aborted handler releases its worker cleanly."""
         if task.done():
+            # A task cancelled by the caller (e.g. our own finally re-entering
+            # here after start_waiter.cancel()) raises CancelledError from
+            # .exception(); guard that so probing a cancelled task never raises.
+            if task.cancelled():
+                return
             # Drain a stored exception so it is not reported as never-retrieved;
             # a genuine error surfacing here was already handled by the caller.
             task.exception()
