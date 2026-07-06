@@ -44,17 +44,28 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from foragerr.importer import fileops, history
 from foragerr.importer.context import ImportContext
 from foragerr.importer.decisions import ImportDecision, ImportEvaluation, decide
-from foragerr.importer.evidence import Evidence, aggregate
+from foragerr.importer.evidence import (
+    PROV_COMICINFO,
+    PROV_COMICINFO_CONFLICT,
+    PROV_MANUAL_OVERRIDE,
+    Evidence,
+    aggregate,
+)
 from foragerr.importer.models import ImportHistoryRow
 from foragerr.naming import RenameFields, render_filename
 from foragerr.importer.sources import (
     SOURCE_DOWNLOAD,
+    SOURCE_MANUAL,
+    SOURCE_RESCAN,
     CompletedDownloadSource,
     ImportCandidate,
+    ManualImportSource,
+    ManualOverride,
     RescanSource,
 )
 from foragerr.library import matching, repo
 from foragerr.library.models import IssueFileRow, IssueRow, SeriesRow
+from foragerr.metadata.comicinfo import read_embedded_metadata
 from foragerr.parser.result import Booktype, IssueClassification
 from foragerr.quality.models import FormatProfileRow, decode_formats
 from foragerr.security.archives import inspect_archive
@@ -115,12 +126,12 @@ async def _run_fs(ctx: ImportContext, func, *args, **kwargs):
 
 
 async def gather(
-    source: CompletedDownloadSource | RescanSource,
+    source: CompletedDownloadSource | RescanSource | ManualImportSource,
     session: AsyncSession,
     ctx: ImportContext,
 ) -> list[ImportCandidate]:
     """Run a source's intake (FRG-PP-001). The source is data; this dispatch is
-    the only place the two M1 intakes differ."""
+    the only place the intakes differ."""
     return await source.gather(session, ctx)
 
 
@@ -164,18 +175,140 @@ async def _match_issue_in_series(
     )
 
 
+async def _resolve_override(
+    session: AsyncSession, candidate: ImportCandidate, override: ManualOverride
+) -> tuple[int, int] | None:
+    """Validate a manual override against real rows (FRG-PP-016, decision 2).
+
+    Returns the pinned ``(series_id, issue_id)`` only when the override names a
+    real issue that (when a series is also named) belongs to it AND — in a scoped
+    context — is in scope. An override naming a non-existent or mismatched entity
+    returns ``None`` (dropped, not trusted) so the file falls back to the
+    heuristic rather than fabricating a mapping. A series-only override cannot
+    resolve a concrete issue, so it too is ignored.
+    """
+    if override.issue_id is None:
+        return None
+    issue_row = await session.get(IssueRow, override.issue_id)
+    if issue_row is None:
+        return None
+    if override.series_id is not None and issue_row.series_id != override.series_id:
+        return None  # issue does not belong to the named series → not trusted
+    if (
+        candidate.series_scope_id is not None
+        and issue_row.series_id != candidate.series_scope_id
+    ):
+        return None  # out of scope for a series-pinned manual folder
+    return issue_row.series_id, issue_row.id
+
+
+async def _embedded_issue(session: AsyncSession, embedded) -> IssueRow | None:
+    """The library issue an embedded ComicVine id resolves to, or ``None``.
+
+    Looks up the ``cv_issue_id`` namespace (distinct from the internal
+    ``[__issueid__]`` tag). A parse-degraded or id-less embedded read resolves to
+    nothing (FRG-IMP-024)."""
+    if embedded is None or embedded.parse_error or embedded.cv_issue_id is None:
+        return None
+    return (
+        await session.execute(
+            select(IssueRow).where(IssueRow.cv_issue_id == embedded.cv_issue_id)
+        )
+    ).scalars().first()
+
+
+async def _filename_series_match(
+    session: AsyncSession, candidate: ImportCandidate, evidence: Evidence
+) -> int | None:
+    """The series the pure filename heuristic strongly matches, or ``None``.
+
+    Used only for embedded-id conflict detection (FRG-IMP-024): a strong filename
+    match to a *different* series than a resolvable embedded id is a conflict, so
+    the embedded id does not silently win."""
+    if candidate.series_scope_id is not None:
+        series = await session.get(SeriesRow, candidate.series_scope_id)
+        if series is not None and matching.series_title_matches(
+            evidence.matching_key, series.matching_key
+        ):
+            return series.id
+        return None
+    if evidence.matching_key is None:
+        return None
+    series = (
+        await session.execute(
+            select(SeriesRow).where(SeriesRow.matching_key == evidence.matching_key)
+        )
+    ).scalars().first()
+    return series.id if series is not None else None
+
+
 async def reconcile(
     session: AsyncSession,
     candidate: ImportCandidate,
     evidence: Evidence,
     ctx: ImportContext,
+    *,
+    override: ManualOverride | None = None,
+    embedded=None,
 ) -> tuple[int | None, int | None]:
-    """Resolve (series_id, issue_id) for a candidate (FRG-PP-003).
+    """Resolve (series_id, issue_id) for a candidate (FRG-PP-003, FRG-PP-016,
+    FRG-IMP-024).
 
-    Priority: embedded ``[__issueid__]`` tag (direct lookup, DDL handshake) >
-    grab-history reconciliation by download id > parser heuristic (matching key +
-    issue number, scoped to the rescan series when present).
+    Confidence order::
+
+        manual override > verified embedded CV id > [__issueid__] tag
+                        > grab hints > filename heuristic
+
+    A manual override (validated against real rows) is top priority — human intent
+    beats any parse. A *verified* embedded ComicVine id (resolves to a library
+    issue, is in scope, and does not conflict with a strong filename series match)
+    beats the filename heuristic. An embedded id that is present but does not win
+    (unverified / conflicting) does NOT silently override — the conflict is
+    recorded on the evidence provenance so it surfaces as a review/blocked item —
+    and resolution falls to the base heuristic below.
     """
+    # 1. manual override — top priority (validated, or dropped and fall through).
+    if override is not None:
+        resolved = await _resolve_override(session, candidate, override)
+        if resolved is not None:
+            evidence.provenance["series"] = PROV_MANUAL_OVERRIDE
+            evidence.provenance["issue"] = PROV_MANUAL_OVERRIDE
+            return resolved
+
+    base_series, base_issue = await _reconcile_base(session, candidate, evidence, ctx)
+
+    # 2. verified embedded ComicVine id — beats the filename heuristic (and the
+    #    tag/grab base) unless it conflicts with a strong filename series match.
+    issue_row = await _embedded_issue(session, embedded)
+    if issue_row is not None:
+        scope_ok = (
+            candidate.series_scope_id is None
+            or issue_row.series_id == candidate.series_scope_id
+        )
+        filename_series = await _filename_series_match(session, candidate, evidence)
+        filename_conflict = (
+            filename_series is not None and filename_series != issue_row.series_id
+        )
+        if scope_ok and not filename_conflict:
+            evidence.provenance["series"] = PROV_COMICINFO
+            evidence.provenance["issue"] = PROV_COMICINFO
+            return issue_row.series_id, issue_row.id
+        # Present and resolvable, but not trusted to win (out of scope, or a
+        # strong filename points elsewhere): record the conflict so the file
+        # surfaces as a review/blocked item rather than a silent mis-file.
+        evidence.provenance[PROV_COMICINFO_CONFLICT] = str(embedded.cv_issue_id)
+
+    return base_series, base_issue
+
+
+async def _reconcile_base(
+    session: AsyncSession,
+    candidate: ImportCandidate,
+    evidence: Evidence,
+    ctx: ImportContext,
+) -> tuple[int | None, int | None]:
+    """The M1 base resolution: ``[__issueid__]`` tag > grab hints > filename
+    heuristic (FRG-PP-003). The override/embedded layers sit above this."""
     # 1. issue-id tag short-circuit.
     if evidence.issue_id:
         try:
@@ -266,13 +399,28 @@ async def build_evaluation(
             junk_size_floor=ctx.junk_size_floor_bytes,
         )
 
-    series_id, issue_id = await reconcile(session, candidate, evidence, ctx)
-
+    # Archive I/O first: inspection and the embedded ComicInfo read (FRG-IMP-024)
+    # both need the archive on disk, and reconcile() consumes the embedded read.
     archive = None
+    embedded = None
     if os.path.exists(candidate.local_path):
         # Archive inspection reads the whole central directory off disk; run it
         # off the event loop when an offload seam is wired (FRG-PP-006).
         archive = await _run_fs(ctx, inspect_archive, candidate.local_path)
+        # Embedded ComicInfo read is always active (not gated by the tagging
+        # toggle); it degrades to None on an unlisted/failed archive.
+        embedded = await _run_fs(
+            ctx, read_embedded_metadata, candidate.local_path, archive
+        )
+
+    series_id, issue_id = await reconcile(
+        session,
+        candidate,
+        evidence,
+        ctx,
+        override=candidate.override,
+        embedded=embedded,
+    )
 
     existing_path: str | None = None
     existing_format: str | None = None
@@ -299,6 +447,12 @@ async def build_evaluation(
 
     free = ctx.free_space_probe(dest_dir or ctx.library_root)
 
+    # A manual format override feeds the upgrade check only (design decision 2).
+    override_format = (
+        candidate.override.format if candidate.override is not None else None
+    )
+    new_format = override_format or _ext(candidate.file_name)
+
     return ImportEvaluation(
         evidence=evidence,
         size=candidate.size,
@@ -307,13 +461,17 @@ async def build_evaluation(
         archive=archive,
         existing_file_path=existing_path,
         existing_format=existing_format,
-        new_format=_ext(candidate.file_name),
+        new_format=new_format,
         format_ladder=ladder,
         free_bytes=free,
         needed_bytes=candidate.size,
         margin_bytes=ctx.free_space_margin_bytes,
         already_imported=await _already_imported(session, candidate.download_id, issue_id),
         junk_size_floor=ctx.junk_size_floor_bytes,
+        comic_info_present=embedded is not None and embedded.comic_info_present,
+        embedded_cv_issue_id=embedded.cv_issue_id if embedded is not None else None,
+        embedded_verified=evidence.provenance.get("issue") == PROV_COMICINFO,
+        comicinfo_conflict=PROV_COMICINFO_CONFLICT in evidence.provenance,
     )
 
 
@@ -476,12 +634,17 @@ async def execute(
 # --- the driven whole: aggregate -> decide -> execute ------------------------
 
 
+#: Provenance ``source`` column value per candidate kind — a data lookup, so the
+#: decision and file-op logic never branch on ``source_kind`` (FRG-PP-001).
+_PROVENANCE_BY_KIND: dict[str, str] = {
+    SOURCE_DOWNLOAD: history.SOURCE_DOWNLOAD,
+    SOURCE_RESCAN: history.SOURCE_RESCAN,
+    SOURCE_MANUAL: history.SOURCE_MANUAL,
+}
+
+
 def _source_provenance(candidate: ImportCandidate) -> str:
-    return (
-        history.SOURCE_DOWNLOAD
-        if candidate.source_kind == SOURCE_DOWNLOAD
-        else history.SOURCE_RESCAN
-    )
+    return _PROVENANCE_BY_KIND.get(candidate.source_kind, history.SOURCE_DOWNLOAD)
 
 
 def _source_title(candidate: ImportCandidate) -> str:

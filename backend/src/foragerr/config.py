@@ -488,6 +488,15 @@ class Settings(BaseSettings):
             "removes them (FRG-PP-013). 0 keeps them forever."
         ),
     )
+    comicinfo_tag_on_import: bool = Field(
+        default=False,
+        description=(
+            "Write a ComicInfo.xml tag into cbz archives on import, built from the "
+            "matched ComicVine issue record (FRG-PP-017). Off by default; the "
+            "embedded-metadata READ during import (FRG-IMP-024) is always active "
+            "and is not gated by this toggle."
+        ),
+    )
     config_backup_retention: int = Field(
         default=3,
         ge=1,

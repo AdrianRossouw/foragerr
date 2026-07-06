@@ -55,6 +55,11 @@ class ImportContext:
     #: Days recycle-bin entries are retained before housekeeping prunes them
     #: (``0`` = keep forever). Carried for the housekeeping prune, not execute.
     recycle_bin_retention_days: int = 0
+    #: Whether the import pipeline writes a ComicInfo.xml tag into cbz archives on
+    #: import (FRG-PP-017). OFF by default; consumed by the ComicInfo write half
+    #: (defined by the tagging area). The embedded-metadata READ (FRG-IMP-024) is
+    #: always active and is NOT gated by this flag.
+    comicinfo_tag_enabled: bool = False
     now: dt.datetime | None = None
     #: Free-space probe seam (path → free bytes); default is the real probe.
     free_space_probe: Callable[[str], int] = field(default=fileops.free_bytes)
@@ -80,6 +85,7 @@ _SETTINGS_TO_CTX: dict[str, str] = {
     "folder_naming_template": "folder_template",
     "recycle_bin_path": "recycle_bin_path",
     "recycle_bin_retention_days": "recycle_bin_retention_days",
+    "comicinfo_tag_on_import": "comicinfo_tag_enabled",
 }
 
 
