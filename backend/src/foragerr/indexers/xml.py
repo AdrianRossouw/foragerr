@@ -1,8 +1,9 @@
 """The single hardened XML parse site for untrusted indexer responses
 (FRG-SEC-002).
 
-Every byte of Newznab/Torznab RSS and error XML foragerr parses flows through
-:func:`parse_indexer_xml`. It is the ONLY place in ``backend/src`` that
+Every byte of untrusted XML foragerr parses — Newznab/Torznab RSS and error XML,
+and (from M2) embedded ComicInfo.xml read out of comic archives — flows through
+:func:`parse_untrusted_xml`. It is the ONLY place in ``backend/src`` that
 constructs an XML parser, and it is configured so that:
 
 - **DTD/DOCTYPE processing is disabled** (``forbid_dtd=True``) — this alone
@@ -18,6 +19,13 @@ Any hostile or malformed document terminates as a typed
 :class:`~foragerr.indexers.errors.IndexerMalformedError` — never a crash, hang,
 resource-exhaustion, or partial result. A static guard test asserts no other
 XML parser is constructed anywhere in ``backend/src``.
+
+:func:`parse_untrusted_xml` is the neutral, content-agnostic entry point;
+:func:`parse_indexer_xml` is kept as a thin alias so the indexer callers and
+their tests are undisturbed. New untrusted-XML callers (e.g. the ComicInfo read
+in :mod:`foragerr.metadata.comicinfo`) call :func:`parse_untrusted_xml` directly
+so the DTD/entity/external hardening is inherited unchanged and this stays the
+one sanctioned parser-construction site.
 """
 
 from __future__ import annotations
@@ -34,19 +42,20 @@ from foragerr.indexers.errors import IndexerMalformedError
 DEFAULT_MAX_BYTES = 26_214_400
 
 
-def parse_indexer_xml(
+def parse_untrusted_xml(
     data: bytes | str, *, max_bytes: int | None = DEFAULT_MAX_BYTES
 ) -> Element:
-    """Parse untrusted indexer XML with all entity/DTD/external vectors off.
+    """Parse untrusted XML with all entity/DTD/external vectors off.
 
-    Raises :class:`IndexerMalformedError` for an oversized body, non-XML junk,
-    or any hostile entity/DTD/external payload — a typed failure, no partial
-    result returned.
+    The single hardened parse site for every untrusted-XML caller (indexer RSS,
+    embedded ComicInfo). Raises :class:`IndexerMalformedError` for an oversized
+    body, non-XML junk, or any hostile entity/DTD/external payload — a typed
+    failure, no partial result returned.
     """
     raw = data.encode("utf-8") if isinstance(data, str) else data
     if max_bytes is not None and len(raw) > max_bytes:
         raise IndexerMalformedError(
-            f"indexer XML exceeded the {max_bytes}-byte parse cap "
+            f"untrusted XML exceeded the {max_bytes}-byte parse cap "
             f"({len(raw)} bytes); refused"
         )
     try:
@@ -59,7 +68,14 @@ def parse_indexer_xml(
     except DefusedXmlException as exc:
         # billion-laughs, quadratic-blowup, external-entity, or a bare DOCTYPE.
         raise IndexerMalformedError(
-            f"indexer XML rejected by hardening: {type(exc).__name__}"
+            f"untrusted XML rejected by hardening: {type(exc).__name__}"
         ) from exc
     except ParseError as exc:
-        raise IndexerMalformedError(f"indexer XML is not well-formed: {exc}") from exc
+        raise IndexerMalformedError(f"untrusted XML is not well-formed: {exc}") from exc
+
+
+def parse_indexer_xml(
+    data: bytes | str, *, max_bytes: int | None = DEFAULT_MAX_BYTES
+) -> Element:
+    """Thin alias of :func:`parse_untrusted_xml` for the indexer call sites."""
+    return parse_untrusted_xml(data, max_bytes=max_bytes)
