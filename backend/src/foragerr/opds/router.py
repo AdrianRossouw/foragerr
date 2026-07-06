@@ -37,13 +37,7 @@ from foragerr.db.base import utcnow
 from foragerr.library import repo
 from foragerr.library.models import IssueFileRow, IssueRow, SeriesRow
 
-# NOTE(change-6 integration): change 6 introduces ``foragerr.security.paths``
-# with a ``safe_join`` primitive that is the project-wide confinement check.
-# That module is NOT on this branch yet, so the file route below uses
-# ``foragerr.library.paths.validate_under_root`` (same resolve-then-
-# containment semantics) as a stand-in. The orchestrator must swap it at
-# integration — the exact call site carries a matching TODO.
-from foragerr.library.paths import PathNotUnderRootError, validate_under_root
+from foragerr.security.paths import PathConfinementError, validate_under_root
 from foragerr.opds.atom import (
     ACQ_KIND,
     NAV_KIND,
@@ -273,12 +267,9 @@ def build_opds_router(base_path: str) -> APIRouter:
             stored_path = row.path
             roots = [rf.path for rf in await repo.list_root_folders(session)]
 
-        # TODO(change-6 integration): swap to security.paths.safe_join — this
-        # validate_under_root call is the library.paths stand-in for change
-        # 6's project-wide confinement primitive (see module header).
         try:
             resolved = validate_under_root(stored_path, roots)
-        except PathNotUnderRootError as exc:
+        except PathConfinementError as exc:
             # A row whose path escaped every managed root is treated as
             # "not found" — the client cannot distinguish it from a bad id
             # and no bytes outside the library are ever served.

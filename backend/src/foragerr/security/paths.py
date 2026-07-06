@@ -116,8 +116,32 @@ def safe_join(root: str | os.PathLike[str], *parts: str) -> Path:
     return candidate
 
 
+def validate_under_root(
+    path: str | os.PathLike[str],
+    root_folders: "list[str | Path] | tuple[str | Path, ...]",
+) -> Path:
+    """Resolve ``path`` and confirm it sits at or under one of ``root_folders``.
+
+    The canonical containment check for an already-stored full path (FRG-SEC-004)
+    — the read-side counterpart to :func:`safe_join`'s write-side construction.
+    Used wherever a persisted path (an ``issue_files`` row served by OPDS, a
+    series path override) must be proven to live inside a managed root before it
+    is trusted. Resolution follows symlinks, so a row pointing through a link
+    that escapes every root is rejected. Raises :class:`PathConfinementError`;
+    returns the resolved path so callers can persist a normalized form.
+    """
+    candidate = Path(os.path.realpath(Path(path)))
+    for root in root_folders:
+        if _is_within(os.path.realpath(Path(root)), str(candidate)):
+            return candidate
+    raise PathConfinementError(
+        f"{candidate} is not under any registered root folder"
+    )
+
+
 __all__ = [
     "PathConfinementError",
     "safe_join",
     "safe_path_component",
+    "validate_under_root",
 ]
