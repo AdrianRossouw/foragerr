@@ -62,6 +62,32 @@ Import-blocked rows carry a **Manual import** action that opens the resolution
 overlay (`import.md`), and the toolbar's path picker runs the same overlay over
 any folder.
 
+## History
+
+Activity → History is the paged feed of everything the pipeline did: grabs,
+imports, upgrades, blocked/failed imports, failed downloads, deletions, and
+renames — each linked to its series/issue, filterable by event type, with
+expandable details carrying the verbatim reasons for blocked and failed events.
+A grab and its import share a download id, so one acquisition reads as one
+story. Identical blocked retries are recorded once — a permanently stuck item
+shows its blocked state live in the queue rather than re-writing the same
+history row every minute.
+
+## Wanted
+
+Wanted lists every missing issue — monitored, published, and file-less —
+computed live from the library (there is no stored "wanted" flag to drift).
+Each row offers automatic search and the interactive search overlay, and
+**Search all** runs one backlog search over the listed set with its command
+status visible. Importing a file removes a row instantly; deleting a file
+returns it.
+
+## Blocklist
+
+Activity → Blocklist shows every release banned by a failed download — source
+title, series/issue, indexer, date, and the verbatim reason. Removing an entry
+(singly or in bulk) makes that release grabbable again.
+
 ## Interactive search
 
 The interactive search overlay shows **every** candidate release the decision
