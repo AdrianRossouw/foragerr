@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { screen, act, within } from '@testing-library/react';
+import { screen, act, fireEvent, within } from '@testing-library/react';
 import { renderWithProviders } from '../../test/renderWithProviders';
 import { fakeFetcher } from '../../test/fakeFetcher';
 import {
@@ -8,6 +8,7 @@ import {
   mockHealthyComponents,
 } from '../../test/mockData';
 import { HEALTH_POLL_INTERVAL_MS } from '../../api/hooks';
+import { ApiRequestError } from '../../api/fetcher';
 import { HealthScreen } from './HealthScreen';
 
 /**
@@ -135,5 +136,78 @@ describe('FRG-UI-016: system health screen', () => {
 
     expect(screen.getByTestId('health-all-healthy')).toBeInTheDocument();
     expect(screen.queryByTestId('health-warning-indexer:3')).not.toBeInTheDocument();
+  });
+
+  it('FRG-UI-016 — a sustained poll failure keeps the stale table rendered with a dismissable banner, not a blank error state', async () => {
+    let shouldFail = false;
+    const { fetcher } = fakeFetcher((path) => {
+      if (shouldFail) throw new ApiRequestError(500, null, path);
+      if (path === '/api/v1/health') return [];
+      if (path === '/api/v1/system/health') return mockHealthyComponents;
+      throw new Error(`unexpected request: ${path}`);
+    });
+
+    vi.useFakeTimers();
+    try {
+      renderWithProviders(<HealthScreen />, { fetcher });
+      // Flush the initial (promise-based) fetch — both queries succeed once.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(screen.getByTestId('health-all-healthy')).toBeInTheDocument();
+
+      shouldFail = true;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(HEALTH_POLL_INTERVAL_MS * 2);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    // The retained (stale) data stays up — NOT the blank "Could not load"
+    // state, since there is data to show.
+    expect(screen.queryByTestId('health-all-healthy')).toBeInTheDocument();
+    expect(
+      screen.queryByText('Could not load system health.'),
+    ).not.toBeInTheDocument();
+
+    const banner = screen.getByTestId('health-stale-banner');
+    expect(banner).toHaveTextContent(/stale/i);
+    expect(banner).toHaveTextContent(/last update failed/i);
+
+    fireEvent.click(within(banner).getByRole('button', { name: 'Dismiss' }));
+    expect(screen.queryByTestId('health-stale-banner')).not.toBeInTheDocument();
+    // Dismissing the banner must not also hide the still-valid stale data.
+    expect(screen.getByTestId('health-all-healthy')).toBeInTheDocument();
+  });
+
+  it('FRG-UI-016 / FRG-API-014 — Last Success / Last Failure render formatted dates, not raw ISO strings', async () => {
+    const components = [
+      makeHealthComponent({
+        component: 'database',
+        label: 'Database',
+        // Deliberately one offset-less (real wire shape) and one Z-suffixed
+        // timestamp — both must render as the same formatted date, never
+        // the raw ISO string.
+        last_success: '2026-07-06T12:00:00',
+        last_failure: '2026-07-05T09:00:00Z',
+      }),
+    ];
+    const { fetcher } = fakeFetcher((path) => {
+      if (path === '/api/v1/health') return [];
+      if (path === '/api/v1/system/health') return components;
+      throw new Error(`unexpected request: ${path}`);
+    });
+    renderWithProviders(<HealthScreen />, { fetcher });
+
+    const row = await screen.findByTestId('health-component-database');
+    expect(within(row).getByText('Jul 6, 2026')).toBeInTheDocument();
+    expect(within(row).getByText('Jul 5, 2026')).toBeInTheDocument();
+    expect(
+      within(row).queryByText('2026-07-06T12:00:00'),
+    ).not.toBeInTheDocument();
+    expect(
+      within(row).queryByText('2026-07-05T09:00:00Z'),
+    ).not.toBeInTheDocument();
   });
 });

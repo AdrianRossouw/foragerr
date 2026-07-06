@@ -562,6 +562,13 @@ export function makeHealthWarning(
  * a hyphenated `kind:numeric-id` machine id (e.g. "indexer:3") alongside a
  * distinct human-readable label (e.g. "Indexer: DogNZB"), and a mock that
  * defaulted `label` risks silently drifting back to the machine id.
+ *
+ * `last_success` is deliberately offset-LESS ("...T12:00:00", no 'Z') —
+ * that is the REAL wire shape: `HealthService`/`ComponentHealth` timestamps
+ * come from the app's naive-UTC `utcnow()` (backend/src/foragerr/db/base.py),
+ * and Pydantic v2 serializes a naive datetime without a trailing 'Z' or
+ * offset. A mock that added 'Z' would hide the FRG-API-014 UTC-parsing bug
+ * the fixed `asUtcIso` helper in lib/format.ts exists to handle.
  */
 export function makeHealthComponent(
   overrides: Partial<SystemHealthComponent> &
@@ -570,7 +577,7 @@ export function makeHealthComponent(
   return {
     state: 'ok',
     message: null,
-    last_success: '2026-07-06T12:00:00Z',
+    last_success: '2026-07-06T12:00:00',
     last_failure: null,
     disabled_until: null,
     ...overrides,
@@ -596,7 +603,13 @@ export const mockHealthyComponents: SystemHealthComponent[] = [
   makeHealthComponent({ component: 'disk-space', label: 'Config volume free space' }),
 ];
 
-/** One GET /api/v1/system/task row. */
+/**
+ * One GET /api/v1/system/task row. `last_run`/`next_run` are deliberately
+ * offset-LESS ("...T03:00:00", no 'Z') — the real `ScheduledTask` timestamps
+ * come from the naive-UTC `utcnow()` (backend/src/foragerr/db/base.py), and
+ * Pydantic v2 serializes a naive datetime without a trailing 'Z' or offset.
+ * See `makeHealthComponent` for the same rationale.
+ */
 export function makeScheduledTask(
   overrides: Partial<ScheduledTaskResource> & Pick<ScheduledTaskResource, 'name'>,
 ): ScheduledTaskResource {
@@ -604,8 +617,8 @@ export function makeScheduledTask(
     command_name: overrides.name,
     label: overrides.name,
     interval_seconds: 86_400,
-    last_run: '2026-07-05T03:00:00Z',
-    next_run: '2026-07-06T03:00:00Z',
+    last_run: '2026-07-05T03:00:00',
+    next_run: '2026-07-06T03:00:00',
     ...overrides,
   };
 }

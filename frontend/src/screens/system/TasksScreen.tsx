@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Toolbar } from '../../components/Toolbar';
 import {
@@ -62,6 +63,10 @@ function TaskRow({ task }: { task: ScheduledTaskResource }) {
   const queryClient = useQueryClient();
   const forceRun = useForceRunTask();
   const isBackup = task.name === BACKUP_TASK_NAME;
+  // Surfaces a POST /system/task/{name} failure (e.g. 404/500) inline against
+  // the row instead of silently re-enabling the button with no feedback.
+  // Cleared the moment a subsequent force-run of THIS row succeeds.
+  const [runError, setRunError] = useState<string | null>(null);
 
   // One watcher per row: each task's force-run tracks its OWN command to
   // terminal (unlike the shared-watcher screens elsewhere) so two different
@@ -72,7 +77,11 @@ function TaskRow({ task }: { task: ScheduledTaskResource }) {
 
   const onRun = () => {
     forceRun.mutate(task.name, {
-      onSuccess: (record) => command.start(record.id),
+      onSuccess: (record) => {
+        setRunError(null);
+        command.start(record.id);
+      },
+      onError: (error) => setRunError(error.message),
     });
   };
 
@@ -101,6 +110,11 @@ function TaskRow({ task }: { task: ScheduledTaskResource }) {
         >
           {command.running ? 'Running…' : isBackup ? 'Back up now' : 'Run Now'}
         </button>
+        {runError && (
+          <p className={styles.errorNote} data-testid={`task-error-${task.name}`}>
+            {runError}
+          </p>
+        )}
       </td>
     </tr>
   );
