@@ -1,0 +1,74 @@
+"""Library business-logic flows (change 3: FRG-SER-005/006/007/014, FRG-META-008).
+
+The layer between the (frozen) ``foragerr.library`` domain/repo and
+``foragerr.metadata`` ComicVine client on one side, and the future FastAPI
+routers on the other. Public entrypoints the API layer calls directly:
+
+- :func:`add_series` -> :class:`AddSeriesResult` (validate, persist, enqueue
+  the ``refresh-series`` chain);
+- :func:`edit_series` / :func:`delete_series`.
+
+Importing this package registers the three chained commands and their
+handlers as a side effect (``refresh-series`` -> ``scan-series`` -> optional
+``series-search``), so ``foragerr.app`` need only import it once for the
+decorators to take effect.
+"""
+
+from __future__ import annotations
+
+from foragerr.library.flows._common import (
+    AddOptions,
+    DeleteFilesNotSupportedError,
+    MAX_ALIAS_LENGTH,
+    MONITOR_STRATEGIES,
+    RefreshSeriesCommand,
+    ScanSeriesCommand,
+    SeriesNotFoundError,
+    SeriesRefreshed,
+    SeriesSearchCommand,
+    SeriesValidationError,
+    comicvine_factory,
+    decode_add_options,
+    decode_aliases,
+    encode_add_options,
+    encode_aliases,
+)
+from foragerr.library.flows.add import AddSeriesResult, add_series
+from foragerr.library.flows.edit_delete import delete_series, edit_series
+from foragerr.library.flows.refresh import refresh_series
+from foragerr.library.flows.rescan import (
+    RescanReport,
+    RescanSeriesCommand,
+    rescan_series,
+)
+from foragerr.library.flows.scan import scan_series
+
+# Import for the handler-registration side effect (``@register_handler``).
+from foragerr.library.flows import search as _search  # noqa: F401
+
+__all__ = [
+    "AddOptions",
+    "AddSeriesResult",
+    "DeleteFilesNotSupportedError",
+    "MAX_ALIAS_LENGTH",
+    "MONITOR_STRATEGIES",
+    "RefreshSeriesCommand",
+    "RescanReport",
+    "RescanSeriesCommand",
+    "ScanSeriesCommand",
+    "SeriesNotFoundError",
+    "SeriesRefreshed",
+    "SeriesSearchCommand",
+    "SeriesValidationError",
+    "add_series",
+    "comicvine_factory",
+    "decode_add_options",
+    "decode_aliases",
+    "delete_series",
+    "edit_series",
+    "encode_add_options",
+    "encode_aliases",
+    "refresh_series",
+    "rescan_series",
+    "scan_series",
+]

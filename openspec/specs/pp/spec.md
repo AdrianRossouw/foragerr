@@ -6,9 +6,7 @@ Baseline requirements for post-processing, mined from the
 Phase 1 reference research (`docs/research/`). Baseline depth per the Phase 2 scope
 decision: SHALL + coarse acceptance; scenario-level elaboration happens in the
 milestone change that implements each requirement (FRG-PROC-003, FRG-PROC-009).
-
 ## Requirements
-
 ### Requirement: FRG-PP-001 — Single shared import pipeline
 
 Completed-download import, existing-library scan import, and manual import SHALL execute one shared import pipeline (evidence aggregation → import decisions → import execution), differing only in input source and a new-download flag — with no per-path forks of decision or file-op logic.
@@ -17,10 +15,20 @@ Completed-download import, existing-library scan import, and manual import SHALL
 - **Source**: SA §5.5 ("library import and download import share one pipeline — major simplification worth copying"); SA §8 Import/files bullet 1.
 - **Notes**: This is the structural keystone of the AREA; every following requirement hangs off it. Deliberate divergence from Mylar's four separately-coded intake paths (MFS §4).
 
-#### Scenario: Baseline acceptance
+#### Scenario: Both M1 sources drive the same stages
 
-- **WHEN** this requirement is verified against the implementation
-- **THEN** Pipeline tests drive the same entry point with a completed-download fixture, a library-rescan fixture, and a manual-import fixture, and a code audit shows a single decision/execution implementation.
+- **WHEN** a CompletedDownloadSource supplies tracked_downloads from import_pending and a RescanSource supplies files from a series-path walk
+- **THEN** both are consumed as data by the identical gather → aggregate(Evidence) → decide → execute stages, running the same ordered specs and writing the same import_history rows.
+
+#### Scenario: Single decision/execution implementation
+
+- **WHEN** a code audit inspects the pipeline for the two M1 sources
+- **THEN** there is exactly one decide() and one execute() implementation, with the source (CompletedDownloadSource vs RescanSource) represented as data and no per-source fork of decision logic or file operations.
+
+#### Scenario: Reasons visible regardless of source
+
+- **WHEN** the decision stage runs for either source
+- **THEN** every ordered spec runs and each accept/reject carries a user-visible reason attached to the candidate file.
 
 ### Requirement: FRG-PP-002 — Completed-download handling state machine
 
@@ -30,10 +38,20 @@ The system SHALL poll download clients (SABnzbd, built-in DDL) on a ~1-minute tr
 - **Source**: SA §4.4–4.5 (DownloadMonitoringService, CompletedDownloadService, TrackedDownload states); MFS §4 pickup path 2 (CDH); SA §8 Downloading bullets 2–3.
 - **Notes**: Deliberate divergence: Mylar's ComicRN.py external-script path and watched-folder monitor are dropped — CDH polling is the only automatic intake (plus manual import). Post-import removal from the client is gated by a per-client remove-completed flag (SA §4.5). Check (fast) vs process (slow) separation is a design hint, not a requirement.
 
-#### Scenario: Baseline acceptance
+#### Scenario: ProcessImportsCommand drains import_pending
 
-- **WHEN** this requirement is verified against the implementation
-- **THEN** An end-to-end test (mock SAB) drives one download through grab → downloading → imported with queue states observable at each step, and an unresolvable download lands in import-blocked with a user-visible message instead of failing silently.
+- **WHEN** ProcessImportsCommand runs on the pp pool on its ~1-minute cadence
+- **THEN** it drains items in import_pending, advancing each per-download through downloading → import pending → importing → imported with the queue state observable at each step, and requires no external client-side completion script.
+
+#### Scenario: Unresolvable download blocks, never lost
+
+- **WHEN** a completed download cannot be resolved by the pipeline
+- **THEN** it enters the import-blocked (manual interaction required) branch with a user-visible message, and is neither auto-deleted nor silently dropped.
+
+#### Scenario: Corrupt/failed archive takes the failed branch
+
+- **WHEN** a tracked download's file fails verification during processing
+- **THEN** it transitions failed-pending → failed rather than importing.
 
 ### Requirement: FRG-PP-003 — Grab reconciliation by download ID
 
@@ -43,10 +61,20 @@ Every grab SHALL record a history row keyed by the download-client ID, and compl
 - **Source**: SA §4.3 ("DownloadId is the join key for the entire rest of the pipeline"); MFS §4 snatch↔download handshake (nzblog analogue); SA §8 Downloading bullet 2.
 - **Notes**: Replaces Mylar's name-normalized `nzblog` matching (AltNZBName fragility) with Sonarr's ID join; the parse fallback covers Mylar's `mode='outside'` case.
 
-#### Scenario: Baseline acceptance
+#### Scenario: Download-ID match survives an unparseable name
 
-- **WHEN** this requirement is verified against the implementation
-- **THEN** A completed item whose folder name is unparseable still imports correctly via its download-ID history match; a history-less folder falls back to parse-based matching or import-blocked.
+- **WHEN** a completed download has a grab_history row for its download_id but its folder/title is unparseable
+- **THEN** it reconciles to the grabbed issue via the download_id join and imports correctly.
+
+#### Scenario: Parser fallback when no history match
+
+- **WHEN** a completed download has no grab_history match for its download_id
+- **THEN** the pipeline falls back to parsing the title/folder name via the single change-2 parser, and lands the item in import_blocked if that too fails to resolve.
+
+#### Scenario: Issue-id tag short-circuits to direct lookup
+
+- **WHEN** a download name carries a `[__issueid__]` tag (DDL convention)
+- **THEN** reconciliation short-circuits to a direct issue lookup by that id.
 
 ### Requirement: FRG-PP-004 — Import evidence aggregation
 
@@ -56,10 +84,15 @@ For each candidate file, the import pipeline SHALL aggregate parse evidence from
 - **Source**: SA §5.1 (AggregationService: file/folder/client-title evidence, grab record by DownloadId); MFP §5 (folder-vs-filename provenance); SA §8 Import bullet 1.
 - **Notes**: All evidence parsing goes through the single IMP parser. Confidence signals from the parser (IMP structured-result requirement) are the aggregation inputs.
 
-#### Scenario: Baseline acceptance
+#### Scenario: Single parser and defined source order
 
-- **WHEN** this requirement is verified against the implementation
-- **THEN** A fixture where the file name is junk but the folder name and grab record are good imports to the correct issue, and the decision trace shows per-field provenance.
+- **WHEN** evidence is aggregated for a candidate file
+- **THEN** every layer is parsed only through the single change-2 parser, and per-field values are selected by the order grab record > `[__issueid__]` tag > file name > folder name (folder mode) > client title.
+
+#### Scenario: Junk filename overridden by better sources with recorded provenance
+
+- **WHEN** the file name is junk but the folder name and grab record are good
+- **THEN** aggregation resolves to the correct issue and the decision trace records, per field, which source supplied the value.
 
 ### Requirement: FRG-PP-005 — Import decision specifications with visible reasons
 
@@ -69,10 +102,20 @@ Each candidate file SHALL pass through an ordered set of accept/reject import sp
 - **Source**: SA §5.2 (import specifications incl. MatchesGrabSpecification, NotUnpackingSpecification, FreeSpaceSpecification); SA §8 Import bullet 1; MFS §4 (CRC/ file-condition verification).
 - **Notes**: Same spec pattern as the release decision engine (different AREA) — reuse the shape, not necessarily the code. Upgrade comparison uses the format-profile order from the quality area; at M1 with a trivial profile it degrades to "no file exists yet".
 
-#### Scenario: Baseline acceptance
+#### Scenario: All specs run and each yields a reason
 
-- **WHEN** this requirement is verified against the implementation
-- **THEN** One fixture per specification produces the expected rejection with its reason string surfaced through the manual-import listing; an all-pass fixture imports.
+- **WHEN** a candidate file is evaluated
+- **THEN** the mapped-to-issue, archive-valid, free-space-with-margin, junk/sample-filter, and upgrade-allowed-vs-existing-file-per-format-profile specs all run (all-run, not short-circuited) and each contributes an accept/reject with a visible reason.
+
+#### Scenario: Rejections persist as import_blocked with reasons
+
+- **WHEN** one or more specs reject a candidate
+- **THEN** the item persists as import_blocked with its reasons attached — never lost and never auto-deleted.
+
+#### Scenario: All-pass imports
+
+- **WHEN** every spec accepts a candidate
+- **THEN** the file proceeds to import execution.
 
 ### Requirement: FRG-PP-006 — Archive validity verification
 
@@ -82,10 +125,20 @@ Before accepting a file, the import pipeline SHALL verify archive integrity — 
 - **Source**: SA §5.1 ("a cbz is a zip: verify archive opens and contains images" — the ffprobe analogue); MFS §4 (CRC check, ComicTagger corrupt-archive detection).
 - **Notes**: This is the comic replacement for Sonarr's media-stream specs. Password-protected archives count as invalid here (pairs with the failed/blocklist requirement).
 
-#### Scenario: Baseline acceptance
+#### Scenario: cbz validated via shared utility
 
-- **WHEN** this requirement is verified against the implementation
-- **THEN** A truncated cbz and a zip-with-no-images are both rejected with distinct reasons and (for download-sourced files) trigger the failed path; a valid fixture passes.
+- **WHEN** a cbz is verified through the shared security/archives.py utility
+- **THEN** it is accepted only if it opens as a valid zip containing at least one image entry, and rejected otherwise.
+
+#### Scenario: cbr checked by listing only in M1
+
+- **WHEN** a cbr is verified
+- **THEN** it passes on RAR magic via a listing-only container check, with no extraction performed in M1.
+
+#### Scenario: Corrupt/password archive fails to blocklist and re-search
+
+- **WHEN** an archive is corrupt or password-protected
+- **THEN** it routes into the failed pipeline, which blocklists the release and triggers a re-search, rather than importing the file.
 
 ### Requirement: FRG-PP-007 — Safe file operations
 
@@ -95,10 +148,20 @@ Import execution SHALL place files by move (default for usenet/DDL), copy, or ha
 - **Source**: SA §5.3 (move vs copy vs hardlink, CanMoveFiles); MFS §4 Moving/renaming (FILE_OPTS incl. cross-device fallback, free-space guard); SA §8 Import bullet 2.
 - **Notes**: Softlinks deliberately dropped (Mylar offers them but they disable tagging and add fragility); hardlink retained for same-volume dedupe. Never delete the source until the destination is verified (size/checksum).
 
-#### Scenario: Baseline acceptance
+#### Scenario: Same-device rename, cross-device copy-verify-delete
 
-- **WHEN** this requirement is verified against the implementation
-- **THEN** Move across a filesystem boundary (tmpfs fixture) completes via the fallback with source removed only after a verified copy; an insufficient-space destination aborts cleanly before transfer with the source intact.
+- **WHEN** the destination is on the same device as the source
+- **THEN** the file is placed by rename; when it crosses a filesystem boundary the pipeline instead copies to a temp path, fsyncs, verifies size, atomically renames into place, and only then deletes the source.
+
+#### Scenario: Free-space check with margin aborts before copy
+
+- **WHEN** the destination volume lacks free space plus the configured margin
+- **THEN** the transfer aborts before any copy begins, leaving the source intact.
+
+#### Scenario: No partial files at final paths
+
+- **WHEN** a transfer is interrupted before verification completes
+- **THEN** no partial file remains at the final destination path and the source is retained (source removed only after the destination is verified).
 
 ### Requirement: FRG-PP-008 — Remote path mapping
 
@@ -108,10 +171,15 @@ The system SHALL support per-download-client remote-path mappings that translate
 - **Source**: SA §4.2 (RemotePathMappings on SAB history Storage), §4.5 (foreign-OS path ⇒ warn); MFS §4 (cdh_mapping.CDH_MAP).
 - **Notes**: M1-relevant because the deployment target is Docker where SAB and foragerr see different container paths for the same volume.
 
-#### Scenario: Baseline acceptance
+#### Scenario: Mapped path translated before import
 
-- **WHEN** this requirement is verified against the implementation
-- **THEN** With SAB reporting `/downloads/complete/x` mapped to a local mount, import succeeds; with no mapping and a nonexistent path, the queue item shows a "check remote path mapping" style warning instead of a crash.
+- **WHEN** a client-reported completed path matches an entry in the change-5 remote-path mapping table
+- **THEN** it is translated to the locally valid path before import and the file imports.
+
+#### Scenario: Unmapped path blocks, never guessed
+
+- **WHEN** a completed path has no matching mapping and is not locally reachable
+- **THEN** the item becomes import_blocked with a reason naming remote-path mapping as the likely fix, and no local path is guessed.
 
 ### Requirement: FRG-PP-009 — Token-based renaming engine
 
@@ -121,10 +189,25 @@ File naming SHALL be driven by a configurable token template supporting at minim
 - **Source**: SA §5.4 (FileNameBuilder token system, comic token list); MFS §4 Moving/renaming (FILE_FORMAT tokens, zero-level padding, lowercase/space options); MFP §2.16 (round-trip contract: renamed output must re-parse).
 - **Notes**: Round-trip requirement: every rename template output in the test matrix must re-parse via the IMP parser to the same issue identity (this closes Mylar's four-way normalization divergence). Issue rendering uses the single ordering/normalization implementation from IMP.
 
-#### Scenario: Baseline acceptance
+#### Scenario: Tokens, padding, and case render as specified
 
-- **WHEN** this requirement is verified against the implementation
-- **THEN** A template test matrix covers each token (including a decimal issue `15.5` padded as `015.5`, an annual rendered per template, and a 300-char title truncated safely); disabling rename imports with the original name.
+- **WHEN** a name is rendered from a token template using {Series Title}, {Issue Number:000}, {Year}, {Release Group}, {Classification}, and [__{IssueId}__]
+- **THEN** padding specifiers, illegal-character replacement, byte-aware truncation, and case control are all applied to the output; and a decimal issue such as `15.5` renders decimal-safe under `{Issue:000}`.
+
+#### Scenario: Optional groups dropped when empty
+
+- **WHEN** an optional-group segment references tokens that are empty for the issue
+- **THEN** that group is dropped entirely from the rendered name.
+
+#### Scenario: Round-trip contract holds over the corpus
+
+- **WHEN** any rendered name is re-parsed by the single change-2 parser (property-tested over the corpus identities)
+- **THEN** it yields the same series matching key and issue identity (equal ordering key) as the source record.
+
+#### Scenario: Rename can be disabled
+
+- **WHEN** renaming is disabled
+- **THEN** the file imports under its original filename.
 
 ### Requirement: FRG-PP-010 — Folder templates and folder lifecycle
 
@@ -134,10 +217,20 @@ Series folder paths SHALL be built from a configurable folder template (at minim
 - **Source**: SA §5.3 (auto-created folders, ShouldDeleteFolder); MFS §4 (FOLDER_FORMAT tokens, booktype-in-folder only for non-print); SA §8 Import bullet 3.
 - **Notes**: Same token engine as file renaming — one template implementation. Per-series folder overrides/locks (Mylar SER surface) are out of PP scope.
 
-#### Scenario: Baseline acceptance
+#### Scenario: Folder built via safe_join
 
-- **WHEN** this requirement is verified against the implementation
-- **THEN** Importing into a fresh root creates the templated series folder; the source folder disappears after a move-mode import but survives when a non-junk sibling file is present.
+- **WHEN** a series folder path is built from the folder template on first import
+- **THEN** the directories are created via safe_join and the templated folder appears under the library root.
+
+#### Scenario: Emptied source dirs removed up to the root
+
+- **WHEN** a move-mode import empties a source download directory
+- **THEN** the emptied directories are removed up to (but not including) the root/staging root, while a directory still holding a non-junk sibling file survives.
+
+#### Scenario: Upgrade quarantines the replaced file
+
+- **WHEN** an import replaces an existing file as an upgrade
+- **THEN** the issue_files row is swapped to the new file and the replaced file is moved to `<config>/quarantine/<date>/` — never deleted (M1 stand-in for the M2 recycle bin).
 
 ### Requirement: FRG-PP-011 — Import history events
 
@@ -147,10 +240,15 @@ The system SHALL record a history event for every pipeline outcome — grabbed, 
 - **Source**: SA §4.3 (grab history rows), §7.3 (HistoryResource eventType vocabulary); SA §8 Downloading bullet 2.
 - **Notes**: Grabbed events belong to the download AREA at write time but share this one history store; listed here because import events and the ID join are PP's contract. History backs already-imported and blocklist decisions.
 
-#### Scenario: Baseline acceptance
+#### Scenario: Events written in the same transaction
 
-- **WHEN** this requirement is verified against the implementation
-- **THEN** Driving one download through grab → import → later upgrade produces the expected ordered event rows joined by download ID, visible via the history API.
+- **WHEN** a pipeline outcome occurs (grabbed / imported / import_failed / import_blocked / upgrade-replaced)
+- **THEN** an import_history row is written in the same transaction as the outcome, keyed by download_id, carrying the issue, event type, reasons JSON, and provenance.
+
+#### Scenario: Ordered events queryable and joined by download ID
+
+- **WHEN** one download progresses grab → import → later upgrade
+- **THEN** the resulting import_history rows are ordered, joined by download_id, and queryable both per issue and globally.
 
 ### Requirement: FRG-PP-012 — Rename preview before execution
 
@@ -221,7 +319,7 @@ When tagging is enabled, the import pipeline SHALL write ComicInfo.xml metadata 
 
 The system SHALL optionally convert CBR archives to CBZ at import time (verifying the converted archive before discarding the original), and SHALL support on-demand retag/convert operations per issue, per series, and library-wide, throttled to respect ComicVine API rate limits.
 
-- **Milestone**: M3
+- **Milestone**: B
 - **Source**: MFS §4 Metadata tagging (CBR→CBZ, CBR2CBZ_ONLY, group_metatag with CV batch-limit protection); MFS capability map META/PP.
 - **Notes**: Depends on the tagging requirement above. Conversion is where the cbz-preferred format profile (quality AREA) becomes actionable for existing files. Rar extraction needs an unrar capability in the Docker image — deployment note.
 

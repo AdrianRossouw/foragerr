@@ -1,12 +1,30 @@
 [project]
 name = "foragerr"
 version = "0.1.0"
-description = "foragerr backend (comic library manager)"
-requires-python = ">=3.12"
-dependencies = []
+description = "Private Sonarr-style comic management backend"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.115",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "sqlalchemy>=2.0",
+    "alembic>=1.13",
+    "aiosqlite>=0.20",
+    "httpx>=0.27",
+    "uvicorn>=0.30",
+    "pyyaml>=6.0",
+    "defusedxml>=0.7",
+    "websockets>=13",
+]
+
+[project.scripts]
+foragerr = "foragerr.app:main"
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = [
+    "pytest>=8.2",
+    "pytest-asyncio>=0.23",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -17,4 +35,9 @@ packages = ["src/foragerr"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["req(id): maps test to requirement"]
+asyncio_mode = "auto"
+markers = [
+    "req(id): maps test to requirement",
+    "docker: integration test that requires a docker daemon (skipped by default)",
+    "live: integration test that requires live news-server credentials (skipped by default)",
+]
