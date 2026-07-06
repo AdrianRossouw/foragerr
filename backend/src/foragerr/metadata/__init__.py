@@ -18,6 +18,7 @@ from foragerr.metadata.comicvine import (
 )
 from foragerr.metadata.covers import cache_cover
 from foragerr.metadata.errors import (
+    COMICVINE_CREDENTIAL_MESSAGE,
     ComicVineAuthError,
     ComicVineError,
     ComicVineMalformedResponse,
@@ -44,6 +45,7 @@ from foragerr.metadata.sanitize import MAX_TEXT_LENGTH, sanitize_cv_text
 from foragerr.metadata.search import plausibility
 
 __all__ = [
+    "COMICVINE_CREDENTIAL_MESSAGE",
     "DEFAULT_BASE",
     "MAX_TEXT_LENGTH",
     "ComicVineAuthError",

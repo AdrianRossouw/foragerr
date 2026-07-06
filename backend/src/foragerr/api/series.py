@@ -45,7 +45,12 @@ from foragerr.library.flows import (
 )
 from foragerr.library.models import SeriesRow
 from foragerr.library.repo import SeriesStatistics
-from foragerr.metadata import ComicVineAuthError, ComicVineClient, ComicVineError
+from foragerr.metadata import (
+    COMICVINE_CREDENTIAL_MESSAGE,
+    ComicVineAuthError,
+    ComicVineClient,
+    ComicVineError,
+)
 
 logger = logging.getLogger("foragerr.api.series")
 
@@ -294,8 +299,7 @@ async def lookup_series(term: str, request: Request) -> LookupResponse:
         )
         raise ApiError(
             _COMICVINE_LOOKUP_ERROR_STATUS,
-            "comicvine lookup failed: ComicVine rejected the API key "
-            "(missing or invalid) — set comicvine_api_key",
+            f"comicvine lookup failed: {COMICVINE_CREDENTIAL_MESSAGE}",
             field="comicvine_api_key",
         ) from exc
     except ComicVineError as exc:

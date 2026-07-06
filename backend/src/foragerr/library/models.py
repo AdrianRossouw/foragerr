@@ -264,9 +264,14 @@ class LibraryImportGroupRow(Base):
     proposal_publisher: Mapped[str | None] = mapped_column(Text, nullable=True)
     proposal_image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     state: Mapped[str] = mapped_column(Text, nullable=False, default="proposed")
-    #: Human-visible outcome/annotation (why no match was proposed, why an
-    #: import blocked, ...). Never silent (FRG-IMP-023 scenario 4).
+    #: Human-visible outcome/annotation (why no match was proposed, the
+    #: import-outcome summary, ...). Never silent (FRG-IMP-023 scenario 4).
     message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: Structured per-file blocked reasons from the last execute attempt, as a
+    #: canonical-JSON list of strings (``"[]"`` when nothing blocked) — the
+    #: review UI renders these as a real list; ``message`` stays the human
+    #: summary. Plain ``Text``: internally-serialized JSON.
+    rejections: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     scanned_at: Mapped[dt.datetime] = mapped_column(StrictDateTime, nullable=False)
 
     __table_args__ = (

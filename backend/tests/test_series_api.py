@@ -455,10 +455,10 @@ def test_lookup_upstream_failure_maps_to_503(client, monkeypatch):
 
 #: The exact static 503 message a lookup auth failure surfaces (asserted here
 #: so the frontend's credential-error sniff has a stable contract to key off).
-_LOOKUP_AUTH_MESSAGE = (
-    "comicvine lookup failed: ComicVine rejected the API key "
-    "(missing or invalid) — set comicvine_api_key"
-)
+#: Composed from the ONE shared constant every credential surface uses.
+from foragerr.metadata import COMICVINE_CREDENTIAL_MESSAGE
+
+_LOOKUP_AUTH_MESSAGE = f"comicvine lookup failed: {COMICVINE_CREDENTIAL_MESSAGE}"
 
 
 @pytest.mark.req("FRG-API-003")

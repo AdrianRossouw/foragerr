@@ -475,6 +475,27 @@ class Settings(BaseSettings):
             "existing-library import path (defined here, wired in a later change)."
         ),
     )
+    library_import_proposal_cap: int = Field(
+        default=50,
+        ge=1,
+        description=(
+            "Maximum ComicVine match proposals ONE library-import scan run "
+            "performs (each proposal is a live, politeness-gated search). "
+            "Groups beyond the cap stage without a proposed match — visibly, "
+            "never silently — and pick one up on a later re-scan."
+        ),
+    )
+    library_import_similarity_floor: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Minimum name similarity (0.0-1.0) the best ComicVine search "
+            "candidate must reach for a library-import scan to attach it as a "
+            "group's proposed match; below the floor the group stages as "
+            "no-match for manual resolution (never guessed)."
+        ),
+    )
     recycle_bin_path: str = Field(
         default="",
         description=(

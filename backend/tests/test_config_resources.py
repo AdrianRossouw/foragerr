@@ -128,6 +128,8 @@ def test_put_media_management_round_trips_its_fields(client, tmp_path):
         json={
             "import_transfer_mode": "copy",
             "library_import_mode": "move",
+            "library_import_proposal_cap": 25,
+            "library_import_similarity_floor": 0.7,
             "recycle_bin_path": str(bin_dir),
             "recycle_bin_retention_days": 14,
             "duplicate_constraint": "preferred-format",
@@ -139,6 +141,8 @@ def test_put_media_management_round_trips_its_fields(client, tmp_path):
     assert got == {
         "import_transfer_mode": "copy",
         "library_import_mode": "move",
+        "library_import_proposal_cap": 25,
+        "library_import_similarity_floor": 0.7,
         "recycle_bin_path": str(bin_dir),
         "recycle_bin_retention_days": 14,
         "duplicate_constraint": "preferred-format",
@@ -149,12 +153,16 @@ def test_put_media_management_round_trips_its_fields(client, tmp_path):
     assert client.app.state.settings.recycle_bin_path == str(bin_dir)
     assert client.app.state.settings.duplicate_constraint == "preferred-format"
     assert client.app.state.settings.duplicate_dump_path == str(dump_dir)
+    assert client.app.state.settings.library_import_proposal_cap == 25
+    assert client.app.state.settings.library_import_similarity_floor == 0.7
 
 
 def _mm_body(**overrides) -> dict:
     body = {
         "import_transfer_mode": "move",
         "library_import_mode": "in_place",
+        "library_import_proposal_cap": 50,
+        "library_import_similarity_floor": 0.5,
         "recycle_bin_path": "",
         "recycle_bin_retention_days": 0,
         "duplicate_constraint": "larger-size",
@@ -181,6 +189,40 @@ def test_media_management_defaults_include_the_duplicate_fields(client):
     got = client.get("/api/v1/config/mediamanagement").json()
     assert got["duplicate_constraint"] == "larger-size"  # documented default
     assert got["duplicate_dump_path"] == ""  # unset → normal disposal
+
+
+@pytest.mark.req("FRG-IMP-023")
+def test_media_management_defaults_include_the_library_import_knobs(client):
+    got = client.get("/api/v1/config/mediamanagement").json()
+    assert got["library_import_proposal_cap"] == 50  # documented default
+    assert got["library_import_similarity_floor"] == 0.5
+
+
+@pytest.mark.req("FRG-IMP-023")
+def test_put_media_management_rejects_out_of_range_library_import_knobs(client):
+    """The scan-tuning knobs validate field-precise like every other media-
+    management setting: the cap must be >= 1, the floor within 0..1; nothing
+    changes on rejection."""
+    resp = client.put(
+        "/api/v1/config/mediamanagement",
+        json=_mm_body(library_import_proposal_cap=0),
+    )
+    assert resp.status_code == 400
+    assert (
+        resp.json()["errors"][0]["field"] == "settings.library_import_proposal_cap"
+    )
+    assert client.app.state.settings.library_import_proposal_cap == 50
+
+    resp = client.put(
+        "/api/v1/config/mediamanagement",
+        json=_mm_body(library_import_similarity_floor=1.5),
+    )
+    assert resp.status_code == 400
+    assert (
+        resp.json()["errors"][0]["field"]
+        == "settings.library_import_similarity_floor"
+    )
+    assert client.app.state.settings.library_import_similarity_floor == 0.5
 
 
 @pytest.mark.req("FRG-PP-014")
