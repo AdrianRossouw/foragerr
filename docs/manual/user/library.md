@@ -6,8 +6,8 @@ on-disk files in sync going forward.
 
 ## Adding a series
 
-`POST /api/v1/series` (via the UI's add-series flow, once the UI exists — see
-`docs/manual/index.md` currency statement) adds a series by its ComicVine volume ID.
+`POST /api/v1/series` (via the UI's Add Series screen — see
+`user/web-ui.md`) adds a series by its ComicVine volume ID.
 Adding a series runs a fixed sequence:
 
 1. **Fetch and persist metadata** — the series and its issue list are pulled from
@@ -93,7 +93,7 @@ stale, and adding or removing a file is reflected immediately without a manual
 A per-series rescan re-enumerates the files under the series' path: it clears issue-file
 records for files that vanished from disk (returning those issues to Wanted), and
 routes any newly-found, unmatched files through the shared import pipeline (see
-`import.md` for the current status of that pipeline). Rescan runs automatically after
+`import.md` for how that pipeline works). Rescan runs automatically after
 a metadata refresh and is also available on demand.
 
 ## Editing and deleting a series

@@ -64,6 +64,9 @@ under the top level of `config.yaml`.
 | `sabnzbd_api_key` | `FORAGERR_SABNZBD_API_KEY` | *(empty, secret)* | See `secrets.md`. |
 | `track_downloads_interval_seconds` | `FORAGERR_TRACK_DOWNLOADS_INTERVAL_SECONDS` | `60` | Minimum 60s (download pool is serialized). |
 | `auto_redownload_failed` | `FORAGERR_AUTO_REDOWNLOAD_FAILED` | `true` | Self-healing re-search after a failed download. |
+| `opds_base_path` | `FORAGERR_OPDS_BASE_PATH` | `/opds` | Base URL path the OPDS catalog is mounted at. Must start with `/`; trailing slash stripped; in-feed links are built relative to it. |
+| `opds_page_size` | `FORAGERR_OPDS_PAGE_SIZE` | `50` | Default entries per OPDS feed page when the client doesn't ask. |
+| `opds_page_size_cap` | `FORAGERR_OPDS_PAGE_SIZE_CAP` | `100` | Hard upper bound on OPDS page size; larger client requests are clamped. |
 | `rename_enabled` | `FORAGERR_RENAME_ENABLED` | `true` | Rename files on import per the naming template. Off = keep source filenames. |
 | `file_naming_template` | `FORAGERR_FILE_NAMING_TEMPLATE` | `{Series Title} {Issue Number:000} ({Year}) [__{IssueId}__]` | Token template for imported file names. Must render a name that re-parses to the same issue (validated at startup/save). |
 | `folder_naming_template` | `FORAGERR_FOLDER_NAMING_TEMPLATE` | `{Series Title} ({Year})` | Token template for series folders. |
