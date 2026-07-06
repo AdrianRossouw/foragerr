@@ -231,6 +231,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.state.startup_hooks.append(_register_tracking_task)
 
+    # --- daily surfaces (m2-daily-surfaces): the history feed over
+    #     import_history (FRG-API-011), the derived wanted/missing list
+    #     (FRG-API-012), and the blocklist read/remove surface (FRG-UI-017)
+    #     under /api/v1. Read-only over existing tables (plus the blocklist
+    #     row deletes); no new commands or tasks. ---
+    from foragerr.api.blocklist import router as blocklist_router
+    from foragerr.api.history import router as history_router
+    from foragerr.api.wanted import router as wanted_router
+
+    app.include_router(history_router, prefix="/api/v1")
+    app.include_router(wanted_router, prefix="/api/v1")
+    app.include_router(blocklist_router, prefix="/api/v1")
+
     # --- import flows (m1-import-pipeline, area: flows): importing the module
     #     registers ProcessImportsCommand + handler (FRG-DL-009/010); register
     #     the ~1-minute pp-pool drain that runs the completed downloads through
