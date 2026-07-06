@@ -13,17 +13,16 @@ from foragerr.metadata import ComicVineAuthError
 
 
 def _page_handler(total: int, page_size: int, *, fail_at_offset: int | None = None,
-                  auth_fail_at_offset: int | None = None, advertised: int | None = None):
-    """Serve issue pages; optionally fail one page (503), reject one page with
-    an auth error (401), or advertise a total that exceeds the real count."""
+                  fail_status: int = 503, advertised: int | None = None):
+    """Serve issue pages; optionally fail one page with ``fail_status``
+    (503 = transient mid-walk failure, 401 = auth rejection), or advertise a
+    total that exceeds the real count."""
     advertised = total if advertised is None else advertised
 
     def handler(request: httpx.Request) -> httpx.Response:
         offset = int(request.url.params.get("offset", "0"))
-        if auth_fail_at_offset is not None and offset == auth_fail_at_offset:
-            return httpx.Response(401)
         if fail_at_offset is not None and offset == fail_at_offset:
-            return httpx.Response(503)
+            return httpx.Response(fail_status)
         end = min(offset + page_size, total)
         issues = [
             issue_payload(id=1000 + i, issue_number=str(i + 1))
@@ -72,12 +71,16 @@ async def test_mid_walk_failure_returns_partial_with_complete_false(tmp_path):
 
 
 @pytest.mark.req("FRG-META-004")
-async def test_auth_failure_on_first_page_propagates(tmp_path):
-    # An invalid/missing key cannot succeed on a later page: the walk must
-    # raise the typed auth error rather than degrade to an empty result.
+@pytest.mark.parametrize("auth_offset", [0, 2])
+async def test_auth_failure_propagates_without_partials(tmp_path, auth_offset):
+    # An invalid/missing key cannot succeed on a later page: whether the 401
+    # lands on the first page (offset 0) or mid-walk (offset 2, after page 1
+    # succeeded), the walk must raise the typed auth error rather than degrade
+    # to an empty/partial complete=False result.
     client, _ = make_client(
         tmp_path,
-        _page_handler(total=6, page_size=2, auth_fail_at_offset=0),
+        _page_handler(total=6, page_size=2, fail_at_offset=auth_offset,
+                      fail_status=401),
         comicvine_page_size=2,
         comicvine_min_interval_seconds=0.05,
     )
@@ -86,21 +89,6 @@ async def test_auth_failure_on_first_page_propagates(tmp_path):
             await client.get_issues(18166)
     # the API key value (make_client default) never leaks into the message
     assert "CV-SECRET-KEY-abc123" not in str(excinfo.value)
-
-
-@pytest.mark.req("FRG-META-004")
-async def test_auth_failure_mid_walk_propagates_without_partials(tmp_path):
-    # Auth error on page 2 (offset 2): the walk raises rather than returning
-    # the page-1 partials with complete=False.
-    client, _ = make_client(
-        tmp_path,
-        _page_handler(total=6, page_size=2, auth_fail_at_offset=2),
-        comicvine_page_size=2,
-        comicvine_min_interval_seconds=0.05,
-    )
-    async with client:
-        with pytest.raises(ComicVineAuthError):
-            await client.get_issues(18166)
 
 
 @pytest.mark.req("FRG-META-004")

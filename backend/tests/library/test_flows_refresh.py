@@ -160,7 +160,7 @@ async def test_auth_failure_mid_walk_fails_refresh_not_incomplete(
     # get_volume succeeds; the issues walk is rejected as unauthorized on page 2
     small = flows_settings(settings.config_dir, comicvine_page_size=1)
     fake = FakeCV().volume(1).issues(
-        1, [issue(100, "1"), issue(101, "2")], auth_fail_after_offset=1
+        1, [issue(100, "1"), issue(101, "2")], fail_after_offset=1, fail_status=401
     )
     factory = build_factory(small, fake.handler())
     with pytest.raises(ComicVineAuthError):
