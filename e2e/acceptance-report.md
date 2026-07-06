@@ -3,9 +3,9 @@
 _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.mjs` — do not edit by hand (FRG-PROC-010)._
 
 - **Verdict:** GREEN
-- **Scenarios:** 10 (9 pass, 0 fail, 1 skipped, 0 flaky, 0 not run)
-- **Run started:** 2026-07-06T09:40:54.909Z
-- **Duration:** 57.9s
+- **Scenarios:** 11 (10 pass, 0 fail, 1 skipped, 0 flaky, 0 not run)
+- **Run started:** 2026-07-06T11:10:18.227Z
+- **Duration:** 61.4s
 
 ## Scenario → requirement coverage
 
@@ -19,6 +19,7 @@ _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.m
 | PASS | FRG-PROC-010 FRG-UI-003 FRG-SER-009: the library browse shows the series with updated stats | FRG-PROC-010, FRG-SER-009, FRG-UI-003 |
 | PASS | FRG-PROC-010 FRG-OPDS-001 FRG-OPDS-002 FRG-OPDS-003 FRG-OPDS-005: OPDS navigates to a byte-identical comic download | FRG-OPDS-001, FRG-OPDS-002, FRG-OPDS-003, FRG-OPDS-005, FRG-PROC-010 |
 | SKIPPED | FRG-PROC-010: live SABnzbd tier (skipped — no credentials) | FRG-PROC-010 |
+| PASS | FRG-PROC-010 FRG-UI-015 FRG-IMP-022 FRG-IMP-023: library import scans a root, reviews matches and imports existing files in place without a download | FRG-IMP-022, FRG-IMP-023, FRG-PROC-010, FRG-UI-015 |
 | PASS | FRG-PROC-010 FRG-SCHED-002: library and command queue survive a container restart | FRG-PROC-010, FRG-SCHED-002 |
 | PASS | FRG-PROC-010 FRG-UI-005: an unconfigured ComicVine key surfaces an actionable credential error, not "no results" | FRG-PROC-010, FRG-UI-005 |
 
@@ -30,6 +31,8 @@ _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.m
 | FRG-DEP-001 | PASS |
 | FRG-DEP-007 | PASS |
 | FRG-DL-007 | PASS |
+| FRG-IMP-022 | PASS |
+| FRG-IMP-023 | PASS |
 | FRG-OPDS-001 | PASS |
 | FRG-OPDS-002 | PASS |
 | FRG-OPDS-003 | PASS |
@@ -45,6 +48,7 @@ _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.m
 | FRG-UI-005 | PASS |
 | FRG-UI-007 | PASS |
 | FRG-UI-008 | PASS |
+| FRG-UI-015 | PASS |
 
 ---
 

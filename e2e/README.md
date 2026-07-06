@@ -37,9 +37,18 @@ The spine (`tests/spine.spec.ts`, serial — the library grows across steps):
    (`FRG-OPDS-001/002/003/005`).
 7. **live-SAB tier** — skipped cleanly unless `E2E_LIVE_SAB=1` and SABnzbd /
    news-server credentials are present (the hermetic tier is the deliverable).
-8. **restart resilience** — `docker restart` mid-flight; library + persisted
+8. **library import** (`tests/y-library-import.spec.ts`, runs after the spine)
+   — a pre-existing folder tree seeded under the `/library` root is scanned
+   into staged groups (AppleDouble/zero-byte junk skipped, `FRG-IMP-022`);
+   review renders the proposed ComicVine match (Fables, the second mockhub
+   volume) and an explicit no-match group that cannot be selected; confirming
+   and importing with batch options lands the series **in place** — issues
+   show `has_file` with the files renamed per the naming template inside the
+   scanned folder (never moved out of it, byte-identical) and no download
+   involved (`FRG-UI-015`, `FRG-IMP-023`).
+9. **restart resilience** — `docker restart` mid-flight; library + persisted
    command queue survive (`FRG-SCHED-002`).
-9. **unconfigured key** (`tests/zz-unconfigured.spec.ts`, runs last) — the app
+10. **unconfigured key** (`tests/zz-unconfigured.spec.ts`, runs last) — the app
    container is recreated with an explicitly **empty** ComicVine key
    (`E2E_CV_API_KEY=` against compose's `${E2E_CV_API_KEY-e2e-example-key}`);
    an Add Series search renders the actionable credential error pointing at
