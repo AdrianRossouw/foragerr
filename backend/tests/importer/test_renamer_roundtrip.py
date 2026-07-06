@@ -104,6 +104,33 @@ def test_default_template_round_trips_every_identity():
 
 
 @pytest.mark.req("FRG-PP-009")
+def test_oversized_series_title_preserves_identity_tag_and_issue_number():
+    """A >255-byte series title must not truncate the round-trip identity away.
+
+    Regression: ``_truncate_bytes`` chopped the whole rendered basename from the
+    right, dropping the trailing ``[__{IssueId}__]`` tag (and the issue number)
+    when ``{Series Title}`` overran the byte ceiling — so a re-imported file
+    could no longer be reconciled back to its issue. The variable title portion
+    must be trimmed instead, leaving the id tag + issue number intact.
+    """
+    issue_id = 987654
+    fields = RenameFields(
+        series_title="Superlongtitle " * 40,  # ~600 bytes, well over the 255 cap
+        issue="404",
+        year="1987",
+        issue_id=str(issue_id),
+    )
+    rendered = render_filename(fields, ext=".cbz")
+
+    assert len(rendered.encode("utf-8")) <= 255  # respects the byte ceiling
+    assert f"[__{issue_id}__]" in rendered  # identity tag survived truncation
+    reparsed = parse(rendered, reference_year=2026)
+    assert reparsed.issue_id == str(issue_id)  # reconcilable back to the issue
+    assert reparsed.issue is not None
+    assert reparsed.issue.display.strip() == "404"  # issue number survived too
+
+
+@pytest.mark.req("FRG-PP-009")
 def test_seeded_template_variants_round_trip():
     rng = random.Random(SEED)
     rows = [r for r in CORPUS if _eligible(r)]

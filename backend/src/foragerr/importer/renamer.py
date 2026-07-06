@@ -36,7 +36,7 @@ series matching key and issue ordering key. Property-tested in
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from foragerr.security.paths import safe_path_component
 
@@ -211,6 +211,43 @@ def _truncate_bytes(text: str, max_bytes: int) -> str:
     return encoded[:max_bytes].decode("utf-8", "ignore").rstrip(" .")
 
 
+def _render_body(template: str, fields: RenameFields, replace_illegal: bool) -> str:
+    """Render + illegal-char-replace + whitespace-collapse a file basename."""
+    body = render(template, fields)
+    if replace_illegal:
+        body = _ILLEGAL_RE.sub(" ", body)
+    return _WS_RE.sub(" ", body).strip().strip(" .")
+
+
+def _shrink_series_title_to_fit(
+    fields: RenameFields,
+    template: str,
+    replace_illegal: bool,
+    budget: int,
+) -> RenameFields:
+    """Trim only ``series_title`` until the rendered basename fits ``budget`` bytes.
+
+    Truncating the whole rendered string from the right would drop the trailing
+    round-trip-critical ``[__{IssueId}__]`` identity tag (and the issue number),
+    making a re-imported file unrecoverable (FRG-PP-009). Instead we shrink the
+    one unbounded *variable* token — the series title — via a binary search on
+    the largest title prefix that still fits, so the issue number, year, and id
+    tag always survive.
+    """
+    title = fields.series_title or ""
+    lo, hi, best = 0, len(title), ""
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        trial = title[:mid].rstrip()
+        body = _render_body(template, replace(fields, series_title=trial), replace_illegal)
+        if len(body.encode("utf-8")) <= budget:
+            best = trial
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    return replace(fields, series_title=best)
+
+
 def render_filename(
     fields: RenameFields,
     *,
@@ -232,12 +269,22 @@ def render_filename(
         if original is None:
             raise ValueError("render_filename(enabled=False) needs the original name")
         return original
-    body = render(template, fields)
-    if replace_illegal:
-        body = _ILLEGAL_RE.sub(" ", body)
-    body = _WS_RE.sub(" ", body).strip().strip(" .")
     ext_str = _normalize_ext(ext)
-    body = _truncate_bytes(body, max_bytes - len(ext_str.encode("utf-8")))
+    budget = max_bytes - len(ext_str.encode("utf-8"))
+    body = _render_body(template, fields, replace_illegal)
+    if len(body.encode("utf-8")) > budget:
+        # Over the byte ceiling: shrink the variable series title so the trailing
+        # id tag + issue number survive (FRG-PP-009), rather than lopping the
+        # whole basename from the right (which would drop the identity tag).
+        body = _render_body(
+            template,
+            _shrink_series_title_to_fit(fields, template, replace_illegal, budget),
+            replace_illegal,
+        )
+        # Safety net for a pathological budget with no title left to trim: a
+        # last-resort byte truncation keeps the name within the filesystem limit.
+        if len(body.encode("utf-8")) > budget:
+            body = _truncate_bytes(body, budget)
     return body + ext_str
 
 
