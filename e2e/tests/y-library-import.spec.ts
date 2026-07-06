@@ -29,11 +29,12 @@ import { until } from './helpers';
  *   /library/Fables (2002)/Fables 001 (2002).cbz     <- matches mockhub 4977
  *   /library/Fables (2002)/Fables 002 (2002).cbz
  *   /library/Fables (2002)/._Fables 001 (2002).cbz   <- AppleDouble junk
- *   /library/Fables (2002)/Fables 003 (2002).cbz     <- zero-byte junk
  *   /library/Zenithal Chronicle (1987)/...001.cbz    <- no ComicVine result
  *
- * The junk files pin the shared walk's junk predicates end-to-end
- * (FRG-IMP-022): the Fables group must stage exactly 2 files.
+ * The AppleDouble sidecar pins the shared walk's junk predicates end-to-end
+ * (FRG-IMP-022): the Fables group must stage exactly 2 files. (Zero-byte
+ * files are deliberately NOT walk-skipped — they surface as visible
+ * decision-time rejections; that path is pinned by backend unit tests.)
  */
 
 const BASE_URL = process.env.FORAGERR_BASE_URL ?? 'http://127.0.0.1:8789';
@@ -54,10 +55,9 @@ function seedFixtureTree(): void {
   for (const name of MATCH_FILES) {
     copyFileSync(CBZ_SOURCE, path.join(matchDir, name));
   }
-  // Junk the shared walk must skip (FRG-IMP-022): an AppleDouble sidecar and a
-  // zero-byte archive. Neither may appear in the staged group's file list.
+  // Junk the shared walk must skip (FRG-IMP-022): an AppleDouble sidecar.
+  // It must not appear in the staged group's file list.
   writeFileSync(path.join(matchDir, `._${MATCH_FILES[0]}`), 'apple-double junk');
-  writeFileSync(path.join(matchDir, 'Fables 003 (2002).cbz'), '');
 
   const noMatchDir = path.join(LIBRARY_DIR, NOMATCH_DIR);
   mkdirSync(noMatchDir, { recursive: true });
