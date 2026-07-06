@@ -24,16 +24,22 @@ def _touch(path: Path, content: bytes = b"comicbytes") -> Path:
 
 @pytest.mark.req("FRG-IMP-022")
 def test_junk_tree_yields_exactly_the_real_archives(tmp_path: Path):
-    """AppleDouble/@eaDir dirs, ``._`` forks, dotfiles, zero-byte files, and
-    unpack-temp folders are all skipped; an UPPERCASE extension is recognized."""
+    """AppleDouble/@eaDir dirs, ``._`` forks, dotfiles, and unpack-temp folders
+    are all skipped; an UPPERCASE extension is recognized. Zero-byte files are
+    NOT walk-level junk: they enumerate so ``JunkFilterSpec`` blocks them
+    visibly (FRG-PP-005), and a user folder that merely starts with
+    ``_unpack``-without-the-trailing-underscore is a real library folder."""
     root = tmp_path / "library"
     real_lower = _touch(root / "Saga (2012)" / "Saga 001 (2012).cbz")
     real_upper = _touch(root / "Saga (2012)" / "Saga 002 (2012).CBZ")
+    # Zero-byte "archive": enumerated (blocked later, visibly), never skipped.
+    empty = _touch(root / "Saga (2012)" / "empty.cbz", b"")
+    # A user folder, NOT an unpack-temp dir (no trailing underscore marker).
+    extras = _touch(root / "_unpacked extras" / "Saga Annual (2013).cbz")
 
     # Junk files alongside the real archives.
     _touch(root / "Saga (2012)" / "._Saga 001 (2012).cbz")  # resource fork
     _touch(root / "Saga (2012)" / ".hidden.cbz")  # dotfile
-    _touch(root / "Saga (2012)" / "empty.cbz", b"")  # zero-byte
     # Junk directories that must never be descended into.
     _touch(root / "@eaDir" / "thumb.cbz")
     _touch(root / ".AppleDouble" / "Saga 001 (2012).cbz")
@@ -43,7 +49,7 @@ def test_junk_tree_yields_exactly_the_real_archives(tmp_path: Path):
     found = matching.iter_archive_files(str(root), ARCHIVE_EXTENSIONS)
 
     assert sorted(path for path, _size in found) == sorted(
-        [str(real_lower), str(real_upper)]
+        [str(real_lower), str(real_upper), str(empty), str(extras)]
     )
 
 
@@ -51,21 +57,30 @@ def test_junk_tree_yields_exactly_the_real_archives(tmp_path: Path):
 def test_junk_predicates_direct():
     assert matching.is_junk_dir("@eaDir")
     assert matching.is_junk_dir(".AppleDouble")
-    assert matching.is_junk_dir("_UNPACK_Some.Release")
+    assert matching.is_junk_dir("_UNPACK_Some.Release")  # SABnzbd unpack temp
     assert matching.is_junk_dir("_unpack_tmp")
     assert not matching.is_junk_dir("Saga (2012)")
     assert not matching.is_junk_dir("Undertow (2014)")  # no false _unpack prefix
+    # The trailing underscore is part of the unpack-temp marker: a user's
+    # folder is never pruned for merely starting with "_unpack".
+    assert not matching.is_junk_dir("_unpacked extras")
+    assert not matching.is_junk_dir("_unpackrat comics")
 
-    assert matching.is_junk_file("._fork.cbz", 100)
-    assert matching.is_junk_file(".hidden.cbz", 100)
-    assert matching.is_junk_file("empty.cbz", 0)
-    assert not matching.is_junk_file("Saga 001.cbz", 100)
+    assert matching.is_junk_file("._fork.cbz")
+    assert matching.is_junk_file(".hidden.cbz")
+    assert not matching.is_junk_file("Saga 001.cbz")
 
 
 @pytest.mark.req("FRG-IMP-022")
-def test_zero_byte_single_file_root_yields_nothing(tmp_path: Path):
+@pytest.mark.req("FRG-PP-005")
+def test_zero_byte_single_file_root_is_yielded_for_visible_blocking(tmp_path: Path):
+    """A zero-byte file is not silently dropped by the walk: it enumerates (with
+    its 0 size) so the decision engine's JunkFilterSpec blocks it VISIBLY in
+    rescan reports / manual-import listings / download blocked reasons."""
     empty = _touch(tmp_path / "empty.cbz", b"")
-    assert matching.iter_archive_files(str(empty), ARCHIVE_EXTENSIONS) == []
+    assert matching.iter_archive_files(str(empty), ARCHIVE_EXTENSIONS) == [
+        (str(empty), 0)
+    ]
 
 
 @pytest.mark.req("FRG-IMP-022")

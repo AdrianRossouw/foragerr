@@ -318,10 +318,17 @@ def same_rung(ev: ImportEvaluation) -> bool:
     """True when an existing file ties the incoming one on the profile ladder —
     the (and only the) case :class:`DuplicateConstraintSpec` arbitrates
     (FRG-PP-014). Also used by the pipeline's execute to tell a duplicate
-    resolution from a profile upgrade when disposing of the replaced file."""
-    return ev.existing_file_path is not None and _rank(
-        ev.new_format, ev.format_ladder
-    ) == _rank(ev.existing_format, ev.format_ladder)
+    resolution from a profile upgrade when disposing of the replaced file.
+
+    A tie requires BOTH sides to hold a real rung (rank >= 0): a pair the
+    ladder cannot rank at all (format absent from the ladder, an empty ladder,
+    a missing format) is NOT a same-rung tie — it stays
+    :class:`UpgradeAllowedSpec`'s pre-PP-014 "not an upgrade" rejection rather
+    than silently becoming a size contest between incomparable formats."""
+    if ev.existing_file_path is None:
+        return False
+    new_rank = _rank(ev.new_format, ev.format_ladder)
+    return new_rank >= 0 and new_rank == _rank(ev.existing_format, ev.format_ladder)
 
 
 def duplicate_win_reason(ev: ImportEvaluation) -> str:
