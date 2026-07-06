@@ -88,13 +88,18 @@ def match_issue_id(issue: Issue, issue_index: list[tuple[int, Issue]]) -> int | 
 #
 # One predicate pair applied INSIDE the shared walk, so every consumer — series
 # scan, rescan, manual import, library import — inherits identical junk rules
-# (m2-existing-library-import design decision 1). Zero-byte skipping happens at
-# walk time (the stat is already taken for size); the decision-time
-# ``JunkFilterSpec`` size floor remains the second gate.
+# (m2-existing-library-import design decision 1). Deliberately NOT skipped here:
+# zero-byte files. They enumerate so the decision-time ``JunkFilterSpec`` size
+# floor blocks them VISIBLY (FRG-PP-005: rescan reports, manual-import listings,
+# and download blocked reasons all show the block; a walk-level skip made them
+# silently vanish — and even let the crash-recovery path mark a failed zero-byte
+# grab as imported).
 
-#: Unpack-temp directory prefix (SABnzbd/NZBGet style ``_UNPACK_*``/``_unpack*``
-#: folders holding partially-extracted content — never library material).
-_UNPACK_PREFIX = "_unpack"
+#: Unpack-temp directory prefix (SABnzbd/NZBGet style ``_UNPACK_job`` folders
+#: holding partially-extracted content — never library material). The trailing
+#: underscore is part of the marker: a user folder like ``_unpacked extras``
+#: must NOT be pruned.
+_UNPACK_PREFIX = "_unpack_"
 
 
 def is_junk_dir(name: str) -> bool:
@@ -102,7 +107,9 @@ def is_junk_dir(name: str) -> bool:
 
     Junk directories: dot-directories (including the AppleDouble
     ``.AppleDouble`` tree), Synology ``@eaDir`` thumbnail trees, and
-    unpack-temp folders (``_UNPACK_*``-style, case-insensitive).
+    unpack-temp folders (``_UNPACK_``-prefixed, case-insensitive, trailing
+    underscore required — ``_UNPACK_job`` matches, ``_unpacked extras`` does
+    not).
     """
     return (
         name.startswith(".")
@@ -111,14 +118,15 @@ def is_junk_dir(name: str) -> bool:
     )
 
 
-def is_junk_file(name: str, size: int) -> bool:
+def is_junk_file(name: str) -> bool:
     """Whether a file entry is junk the walk must skip.
 
-    Junk files: dotfiles — which subsumes ``._*`` AppleDouble resource forks —
-    and zero-byte files (an empty "archive" is a placeholder or a botched copy,
-    never a comic).
+    Junk files: dotfiles — which subsumes ``._*`` AppleDouble resource forks.
+    Zero-byte files are NOT walk-level junk: they must enumerate so
+    ``JunkFilterSpec`` blocks them visibly instead of silently dropping them
+    (FRG-PP-005).
     """
-    return name.startswith(".") or size == 0
+    return name.startswith(".")
 
 
 def iter_archive_files(
@@ -137,7 +145,8 @@ def iter_archive_files(
 
     Junk skipping (FRG-IMP-022): junk directories (:func:`is_junk_dir`) are
     pruned — never descended into — and junk files (:func:`is_junk_file`:
-    dotfiles/resource forks, zero-byte files) are never yielded. Extensions are
+    dotfiles/resource forks) are never yielded. Zero-byte files ARE yielded so
+    the import decision engine blocks them visibly (FRG-PP-005). Extensions are
     matched case-insensitively, so an uppercase ``.CBZ`` is still recognized.
     """
     base = Path(root)
@@ -146,7 +155,7 @@ def iter_archive_files(
             size = base.stat().st_size
         except OSError:
             return []
-        if is_junk_file(base.name, size):
+        if is_junk_file(base.name):
             return []
         return [(str(base), size)]
     if not base.exists():
@@ -164,12 +173,12 @@ def iter_archive_files(
             ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
             if ext not in exts:
                 continue
+            if is_junk_file(name):
+                continue
             full = os.path.join(dirpath, name)
             try:
                 size = os.path.getsize(full)
             except OSError:  # racing deletion mid-walk: skip, never fail
-                continue
-            if is_junk_file(name, size):
                 continue
             out.append((full, size))
     return out

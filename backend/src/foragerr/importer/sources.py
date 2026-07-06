@@ -23,13 +23,22 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from foragerr.downloads.models import GrabHistoryRow
-from foragerr.downloads.pathmap import RemotePathMapping, apply_mappings
 from foragerr.importer.context import ImportContext
+
+# NOTE: the `foragerr.downloads` imports (GrabHistoryRow, apply_mappings) are
+# deliberately DEFERRED into `CompletedDownloadSource.gather`. Importing any
+# `foragerr.downloads` submodule initializes that package, whose init chain
+# (downloads → clients → search_ops → library.flows → library_import →
+# foragerr.importer) closes an import cycle that breaks
+# `import foragerr.importer` whenever the importer package is the entry point
+# (e.g. a scoped test run). The typing-only name stays under TYPE_CHECKING.
+if TYPE_CHECKING:  # pragma: no cover — typing-only, never imported at runtime
+    from foragerr.downloads.pathmap import RemotePathMapping
 
 # Source-kind discriminators carried on the candidate (data, not a type switch).
 # Canonically owned by :mod:`foragerr.importer.history` (the provenance column
@@ -104,6 +113,11 @@ class CompletedDownloadSource:
         self, session: AsyncSession, ctx: ImportContext
     ) -> list[ImportCandidate]:
         """Produce candidates for this download (FRG-PP-003/008)."""
+        # Deferred to keep `foragerr.importer` importable standalone (see the
+        # module-level note about the downloads package's import cycle).
+        from foragerr.downloads.models import GrabHistoryRow
+        from foragerr.downloads.pathmap import apply_mappings
+
         mapped = apply_mappings(self.output_path, list(self.mappings))
         # Reconcile by download id once; the grab title feeds evidence and its
         # series/issue become the candidate's high-confidence hints. A re-grab
@@ -308,17 +322,35 @@ class LibraryImportSource:
     async def gather(
         self, session: AsyncSession, ctx: ImportContext
     ) -> list[ImportCandidate]:
-        """Produce candidates for the group's still-present files.
+        """Produce candidates for the group's still-present, still-unregistered
+        files.
 
         A file that vanished between scan and execute is skipped (never an
         error — the staging re-check re-runs the scan); a deleted series
-        (raced between add and import) yields nothing.
+        (raced between add and import) yields nothing. Files already linked to
+        an issue-file record are skipped exactly like :class:`RescanSource`
+        does (FRG-IMP-023): re-running a partially-imported group must
+        re-candidate only its unregistered files, never block an
+        already-imported file against itself.
         """
         series = await session.get(SeriesRow, self.series_id)
         if series is None:
             return []
+        tracked = set(
+            (
+                await session.execute(
+                    select(IssueFileRow.path)
+                    .join(IssueRow, IssueFileRow.issue_id == IssueRow.id)
+                    .where(IssueRow.series_id == self.series_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
         out: list[ImportCandidate] = []
         for path in self.files:
+            if path in tracked:
+                continue  # already registered by an earlier (partial) run
             try:
                 size = os.path.getsize(path)
             except OSError:

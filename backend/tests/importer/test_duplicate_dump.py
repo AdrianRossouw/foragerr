@@ -281,6 +281,109 @@ async def test_fix_marker_from_real_filenames_wins_the_tie(db, seed, import_ctx,
     assert "f1" in data["duplicate_reason"]
 
 
+# --- same-path replacement: the loser is disposed of BEFORE placement -------
+#
+# The default template renders deterministically per issue, so a re-grab
+# replacement's destination is the COMMON case of colliding with the existing
+# file's own path. The loser must leave (dump/recycle) before place_file can
+# overwrite it, and the row swap must not trip the unique-path constraint.
+
+
+@pytest.mark.req("FRG-PP-014")
+async def test_same_path_duplicate_preserves_the_loser_in_the_dump(
+    db, seed, import_ctx, tmp_path
+):
+    """Existing file already sits at the rendered destination: the winner lands
+    on the same path, the loser's bytes are preserved in the dump (never
+    overwritten), and the row swap raises no unique-path IntegrityError."""
+    s = await seed()
+    dump = tmp_path / "dupes"
+    dump.mkdir()
+    ctx = import_ctx(duplicate_dump_path=str(dump))
+    # The existing file at EXACTLY the name the default template renders.
+    old = s.series_path / f"Batman 404 (1987) [__{s.issue_id}__].cbz"
+    make_cbz(old, images=1)
+    old_size = old.stat().st_size
+    await _register_existing(db, s.issue_id, old)
+
+    outcomes = await _import_one(
+        db, ctx, s, name="Batman 404 (1987).cbz", images=5, download_id="same-1"
+    )
+
+    assert outcomes[0].status is ImportStatus.IMPORTED
+    assert outcomes[0].upgraded
+    dumped = Path(outcomes[0].quarantine_path)
+    assert dump in dumped.parents  # the loser landed in the dump...
+    assert dumped.stat().st_size == old_size  # ...with the LOSER's bytes intact
+    async with db.read_session() as session:
+        files = (await session.execute(select(IssueFileRow))).scalars().all()
+    assert len(files) == 1 and files[0].path == str(old)  # same path, one row
+    assert files[0].size > old_size  # the row now describes the winner
+    assert old.stat().st_size == files[0].size  # and the winner is on disk
+
+
+@pytest.mark.req("FRG-PP-014")
+async def test_same_path_duplicate_without_dump_recycles_the_loser(
+    db, seed, import_ctx, tmp_path
+):
+    """No dump folder configured: the same-path loser goes to the recycle bin
+    (the existing replaced-file rule) — never silently overwritten."""
+    s = await seed()
+    recycle = tmp_path / "recycle"
+    recycle.mkdir()
+    ctx = import_ctx(recycle_bin_path=str(recycle))
+    old = s.series_path / f"Batman 404 (1987) [__{s.issue_id}__].cbz"
+    make_cbz(old, images=1)
+    old_size = old.stat().st_size
+    await _register_existing(db, s.issue_id, old)
+
+    outcomes = await _import_one(
+        db, ctx, s, name="Batman 404 (1987).cbz", images=5, download_id="same-2"
+    )
+
+    assert outcomes[0].status is ImportStatus.IMPORTED
+    recycled = Path(outcomes[0].quarantine_path)
+    assert recycle in recycled.parents
+    assert recycled.stat().st_size == old_size  # loser preserved in the bin
+    async with db.read_session() as session:
+        files = (await session.execute(select(IssueFileRow))).scalars().all()
+    assert len(files) == 1 and files[0].path == str(old)
+    assert files[0].size > old_size
+
+
+# --- persisted fix markers survive the marker-stripping rename ---------------
+
+
+@pytest.mark.req("FRG-PP-014")
+async def test_persisted_fix_marker_survives_rename_and_still_wins(
+    db, seed, import_ctx, tmp_path
+):
+    """Renaming strips the `(fN)` marker from the placed basename; the revision
+    is persisted on the IssueFileRow instead, so a later LARGER unfixed
+    challenger still loses to the fixed release it can no longer see on disk."""
+    s = await seed()
+    dump = tmp_path / "dupes"
+    dump.mkdir()
+    ctx = import_ctx(duplicate_dump_path=str(dump))
+
+    outcomes = await _import_one(
+        db, ctx, s, name="Batman 404 (1987) (f2).cbz", images=1, download_id="fx-p1"
+    )
+    assert outcomes[0].status is ImportStatus.IMPORTED
+    placed = Path(outcomes[0].imported_path)
+    assert "(f2)" not in placed.name  # the rename stripped the marker...
+    async with db.read_session() as session:
+        row = (await session.execute(select(IssueFileRow))).scalars().one()
+    assert row.fix_revision == 2  # ...but the row carries the revision
+
+    challenger = await _import_one(
+        db, ctx, s, name="Batman 404 (1987).cbz", images=5, download_id="fx-p2"
+    )
+    assert challenger[0].status is ImportStatus.BLOCKED
+    assert any("f2" in r and "fixed" in r for r in challenger[0].reasons)
+    assert placed.exists()  # the fixed release was never touched
+
+
 @pytest.mark.req("FRG-PP-014")
 async def test_an_unfixed_incoming_file_never_beats_a_fixed_existing_one(
     db, seed, import_ctx

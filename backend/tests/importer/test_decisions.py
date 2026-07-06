@@ -278,3 +278,39 @@ def test_equal_fix_markers_fall_back_to_the_configured_constraint():
 def test_duplicate_spec_is_silent_without_an_existing_file():
     decision = decide(_ev(existing_file_path=None))
     assert decision.approved
+
+
+@pytest.mark.req("FRG-PP-014")
+def test_format_incomparable_pairs_are_rejected_not_size_contested():
+    """A pair the ladder cannot rank — empty ladder, or the (shared) format
+    absent from it — is NOT a same-rung tie: it stays the upgrade spec's
+    pre-PP-014 'not an upgrade' rejection (byte-identical reason) even when
+    the incoming file is far larger, and the duplicate constraint never
+    speaks for it."""
+    for ladder in ((), ("pdf",)):
+        decision = decide(
+            _tie(format_ladder=ladder, size=9_000_000, existing_size=1_000)
+        )
+        assert not decision.approved
+        rej = next(r for r in decision.rejections if r.spec == "upgrade-allowed")
+        assert "not an upgrade" in rej.reason
+        assert not any(r.spec == "duplicate-constraint" for r in decision.rejections)
+
+
+@pytest.mark.req("FRG-PP-014")
+def test_missing_format_pair_is_rejected_not_size_contested():
+    """Both formats unknown (rank -1 == -1) must not become a size contest."""
+    decision = decide(
+        _tie(new_format=None, existing_format=None, size=9_000_000, existing_size=1)
+    )
+    assert not decision.approved
+    assert any(r.spec == "upgrade-allowed" for r in decision.rejections)
+    assert not any(r.spec == "duplicate-constraint" for r in decision.rejections)
+
+
+@pytest.mark.req("FRG-PP-014")
+def test_a_genuinely_ranked_equal_rung_still_reaches_the_constraint():
+    """The both-ranks-required guard must not disturb real ties: an equal rung
+    both sides hold on the ladder is still the duplicate constraint's case."""
+    decision = decide(_tie(size=9_000_000, existing_size=1_000))
+    assert decision.approved  # larger-size: the strictly larger file wins

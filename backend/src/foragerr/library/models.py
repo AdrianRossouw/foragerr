@@ -208,6 +208,13 @@ class IssueFileRow(Base):
     path: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     size: Mapped[int] = mapped_column(StrictInteger, nullable=False)
     added_at: Mapped[dt.datetime] = mapped_column(StrictDateTime, nullable=False)
+    #: The file's `(fN)` fixed-release marker revision as parsed at import
+    #: time (FRG-PP-014). ``None`` = unfixed, or a legacy/scan row predating
+    #: the column — the duplicate evaluation then falls back to parsing the
+    #: stored basename. Persisted here because renaming strips the marker
+    #: from the on-disk name, which would otherwise evaporate the
+    #: fixed-releases-always-win guarantee for future duplicate contests.
+    fix_revision: Mapped[int | None] = mapped_column(StrictInteger, nullable=True)
 
     issue: Mapped[IssueRow] = relationship(back_populates="files")
 
