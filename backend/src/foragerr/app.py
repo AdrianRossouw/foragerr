@@ -278,6 +278,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(wanted_router, prefix="/api/v1")
     app.include_router(blocklist_router, prefix="/api/v1")
 
+    # --- pull area (m3-pull-backbone, area E): the read-only weekly pull
+    #     resource, GET /api/v1/pull (FRG-API-019) — the metadata-derived
+    #     projection (FRG-PULL-001) merged with any stored pull entries
+    #     (FRG-PULL-003). No commands/tasks registered here: the fetch client,
+    #     matcher, and refresh command (areas B/C/D of this same change) land
+    #     in later commits and this router works standalone against whatever
+    #     is already in the library + `pull_entries` (empty table included). ---
+    from foragerr.api.pull import router as pull_router
+
+    app.include_router(pull_router, prefix="/api/v1")
+
     # --- import flows (m1-import-pipeline, area: flows): importing the module
     #     registers ProcessImportsCommand + handler (FRG-DL-009/010); register
     #     the ~1-minute pp-pool drain that runs the completed downloads through
