@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from foragerr.indexers.errors import IndexerMalformedError
-from foragerr.indexers.xml import parse_indexer_xml
+from foragerr.indexers.xml import parse_indexer_xml, parse_untrusted_xml
 from indexers_support import (
     BILLION_LAUGHS,
     EXTERNAL_ENTITY,
@@ -63,6 +63,23 @@ def test_junk_bytes_fail_as_typed_error():
 def test_valid_feed_parses_cleanly():
     root = parse_indexer_xml(newznab_feed(feed_item(guid="a", title="Saga 007")))
     assert root.tag.endswith("rss")
+
+
+@pytest.mark.req("FRG-SEC-002")
+def test_parse_untrusted_xml_is_the_generalized_hardened_site():
+    """The neutral entry point parses a valid feed and rejects a hostile one with
+    the same hardening — new callers (ComicInfo) route through it."""
+    root = parse_untrusted_xml(newznab_feed(feed_item(guid="a", title="Saga 007")))
+    assert root.tag.endswith("rss")
+    with pytest.raises(IndexerMalformedError):
+        parse_untrusted_xml(BILLION_LAUGHS)
+
+
+@pytest.mark.req("FRG-SEC-002")
+def test_parse_indexer_xml_is_a_thin_alias():
+    """The indexer alias delegates to the generalized site (same hardening)."""
+    with pytest.raises(IndexerMalformedError):
+        parse_indexer_xml(QUADRATIC_BLOWUP)
 
 
 @pytest.mark.req("FRG-SEC-002")

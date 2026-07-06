@@ -35,6 +35,9 @@ import pending, importing, imported, failed), a human-readable status message, a
 — for blocked imports — the exact reasons the pipeline recorded (`import.md`).
 Items can be removed from here; an item that is actively importing refuses removal
 until the import finishes, so files are never yanked out from under the importer.
+Import-blocked rows carry a **Manual import** action that opens the resolution
+overlay (`import.md`), and the toolbar's path picker runs the same overlay over
+any folder.
 
 ## Interactive search
 

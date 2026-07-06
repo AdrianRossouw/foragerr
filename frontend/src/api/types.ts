@@ -69,6 +69,8 @@ export interface QueueItem {
   downloadClient: string | null;
   indexer: string | null;
   estimatedCompletion: string | null;
+  /** The download-client id — the manual-import overlay's `?downloadId=` key. */
+  downloadId: string;
 }
 
 /** One `GET /api/v1/queue` record exactly as the backend serializes it. */
@@ -318,3 +320,45 @@ export interface RenamePreviewEntry {
   existingPath: string;
   newPath: string;
 }
+
+/*
+ * Manual-import candidate shapes (FRG-API-015 / FRG-UI-014). The list endpoint
+ * (GET /api/v1/manual-import?path= XOR ?downloadId=) computes each file's
+ * would-be import verdict through the shared pipeline; the execute endpoint
+ * (POST /api/v1/manual-import) takes operator-corrected mappings. Field NAMES
+ * are the backend's camelCase JSON verbatim.
+ */
+
+/** The embedded-ComicInfo read summary for one candidate (FRG-IMP-024). */
+export interface ManualImportEmbedded {
+  comicInfoPresent: boolean;
+  cvIssueId: number | null;
+  /** True once the embedded cv_issue_id was matched to a known issue. */
+  verified: boolean;
+}
+
+/** One candidate file's would-be verdict (GET /api/v1/manual-import). */
+export interface ManualImportEntry {
+  path: string;
+  name: string;
+  size: number;
+  folder: string | null;
+  approved: boolean;
+  /** Verbatim rejection reasons, in the pipeline's order — never re-sorted. */
+  rejections: string[];
+  suggestedSeriesId: number | null;
+  suggestedIssueId: number | null;
+  format: string | null;
+  embedded: ManualImportEmbedded;
+}
+
+/** One picked file's corrected mapping (POST /api/v1/manual-import body). */
+export interface ManualImportFileSpec {
+  path: string;
+  seriesId?: number | null;
+  issueId?: number | null;
+  format?: string | null;
+}
+
+/** The archive formats the override select offers (backend ARCHIVE_EXTENSIONS). */
+export const ARCHIVE_FORMATS = ['cbz', 'cbr', 'cb7', 'cbt', 'pdf'] as const;

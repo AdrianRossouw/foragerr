@@ -20,7 +20,8 @@ flows commands own those transitions. ``gather`` only reads.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import os
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from sqlalchemy import select
@@ -33,9 +34,25 @@ from foragerr.importer.context import ImportContext
 # Source-kind discriminators carried on the candidate (data, not a type switch).
 # Canonically owned by :mod:`foragerr.importer.history` (the provenance column
 # uses the same values); re-exported here so callers keep one import site.
-from foragerr.importer.history import SOURCE_DOWNLOAD, SOURCE_RESCAN
+from foragerr.importer.history import SOURCE_DOWNLOAD, SOURCE_MANUAL, SOURCE_RESCAN
 from foragerr.library import matching
 from foragerr.library.models import IssueFileRow, IssueRow, SeriesRow
+
+
+@dataclass(frozen=True, slots=True)
+class ManualOverride:
+    """A per-file manual mapping correction (FRG-PP-016, design decision 2).
+
+    Minimal and human-supplied: it pins the series/issue a file resolves to (top
+    priority in :func:`~foragerr.importer.pipeline.reconcile`) and, optionally, a
+    ``format`` that feeds the upgrade check only. An override MAY bypass only the
+    series/issue mapping specs — never the archive-valid / junk / free-space /
+    already-imported / upgrade safety specs, which still run in full.
+    """
+
+    series_id: int | None = None
+    issue_id: int | None = None
+    format: str | None = None  # e.g. "cbz" — feeds ImportEvaluation.new_format
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +79,10 @@ class ImportCandidate:
     #: Non-``None`` when the client path could not be mapped (FRG-PP-008); the
     #: pipeline turns this into an import_blocked with a mapping-fix reason.
     mapping_warning: str | None = None
+    #: A manual mapping override (FRG-PP-016); ``None`` for the two M1 sources, so
+    #: they are wholly untouched. When present it is the top-priority
+    #: reconciliation layer (validated against real rows before it is trusted).
+    override: ManualOverride | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,10 +206,81 @@ class RescanSource:
         ]
 
 
+@dataclass(frozen=True, slots=True)
+class ManualImportSource:
+    """The manual-import intake (FRG-PP-016, design decision 1).
+
+    Produces the SAME neutral :class:`ImportCandidate` list every other source
+    produces — nothing downstream forks — stamped ``source_kind = SOURCE_MANUAL``
+    and carrying per-file :class:`ManualOverride`s. Three shapes, matching the
+    three ways the manual view is driven:
+
+    - ``download`` given — an ``import_blocked`` download: delegates to
+      :meth:`CompletedDownloadSource.gather` VERBATIM so remote-path mapping
+      (FRG-PP-008), the latest grab-record lookup, and the grab hints are reused,
+      not re-implemented, then re-stamps ``SOURCE_MANUAL`` and attaches overrides.
+      A mapping-warning candidate is passed through unchanged.
+    - ``folder_path`` given — an arbitrary folder: walks it with the identical
+      bounded :func:`matching.iter_archive_files` intake ``RescanSource`` uses,
+      emitting unscoped candidates (no grab hints).
+    - ``files`` given — the execute path: an explicit list of picked file paths
+      (each with its override), imported as their own candidates.
+
+    ``overrides`` maps a candidate ``local_path`` to its :class:`ManualOverride`.
+    """
+
+    download: CompletedDownloadSource | None = None
+    folder_path: str | None = None
+    files: tuple[str, ...] = ()
+    overrides: dict[str, ManualOverride] = field(default_factory=dict)
+
+    async def gather(
+        self, session: AsyncSession, ctx: ImportContext
+    ) -> list[ImportCandidate]:
+        """Produce manual candidates (FRG-PP-016)."""
+        if self.download is not None:
+            base = await self.download.gather(session, ctx)
+            return [
+                replace(
+                    candidate,
+                    source_kind=SOURCE_MANUAL,
+                    override=self.overrides.get(candidate.local_path),
+                )
+                for candidate in base
+            ]
+        if self.folder_path is not None:
+            found = matching.iter_archive_files(
+                self.folder_path, ctx.archive_extensions, max_depth=ctx.max_walk_depth
+            )
+            return [self._candidate(path, size) for path, size in found]
+        return [self._candidate_for(path) for path in self.files]
+
+    def _candidate_for(self, path: str) -> ImportCandidate:
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            size = 0
+        return self._candidate(path, size)
+
+    def _candidate(self, path: str, size: int) -> ImportCandidate:
+        return ImportCandidate(
+            source_kind=SOURCE_MANUAL,
+            local_path=path,
+            size=size,
+            file_name=Path(path).name,
+            folder_name=Path(path).parent.name or None,
+            container_root=str(Path(path).parent),
+            override=self.overrides.get(path),
+        )
+
+
 __all__ = [
     "SOURCE_DOWNLOAD",
+    "SOURCE_MANUAL",
     "SOURCE_RESCAN",
     "CompletedDownloadSource",
     "ImportCandidate",
+    "ManualImportSource",
+    "ManualOverride",
     "RescanSource",
 ]

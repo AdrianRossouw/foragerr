@@ -40,6 +40,10 @@ EVENT_DOWNLOAD_FAILED = "download_failed"
 EVENT_FILE_DELETED = "file_deleted"
 EVENT_FILE_RENAMED = "file_renamed"
 EVENT_UPGRADE_REPLACED = "upgrade_replaced"
+#: A ComicInfo.xml tagging attempt failed AFTER the file was already imported
+#: (FRG-PP-017). The file lands untagged and the import is NOT failed — this
+#: warning event records the degraded outcome so the tag failure is visible.
+EVENT_COMICINFO_TAG_FAILED = "comicinfo_tag_failed"
 
 #: The full event-type vocabulary written to ``import_history.event_type``.
 IMPORT_EVENT_TYPES: frozenset[str] = frozenset(
@@ -52,12 +56,17 @@ IMPORT_EVENT_TYPES: frozenset[str] = frozenset(
         EVENT_FILE_DELETED,
         EVENT_FILE_RENAMED,
         EVENT_UPGRADE_REPLACED,
+        EVENT_COMICINFO_TAG_FAILED,
     }
 )
 
 #: Provenance discriminators for the ``source`` column.
 SOURCE_DOWNLOAD = "download"
 SOURCE_RESCAN = "rescan"
+#: A manual-import run (an operator resolving a blocked download or an ad-hoc
+#: folder through the shared pipeline, FRG-PP-016). Data only — the decision and
+#: file-op logic never read the source kind.
+SOURCE_MANUAL = "manual"
 
 
 def record_event(
@@ -146,6 +155,7 @@ async def all_events(
 
 
 __all__ = [
+    "EVENT_COMICINFO_TAG_FAILED",
     "EVENT_DOWNLOAD_FAILED",
     "EVENT_FILE_DELETED",
     "EVENT_FILE_RENAMED",
@@ -156,6 +166,7 @@ __all__ = [
     "EVENT_UPGRADE_REPLACED",
     "IMPORT_EVENT_TYPES",
     "SOURCE_DOWNLOAD",
+    "SOURCE_MANUAL",
     "SOURCE_RESCAN",
     "all_events",
     "decode_data",

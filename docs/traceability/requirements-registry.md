@@ -173,7 +173,7 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-IMP-021 | Corpus-driven regression suite | imp | implemented | M1 |
 | FRG-IMP-022 | Library scan walk | imp | approved | M2 |
 | FRG-IMP-023 | Existing-library import staging and review | imp | approved | M2 |
-| FRG-IMP-024 | Embedded metadata read during import | imp | approved | M2 |
+| FRG-IMP-024 | Embedded metadata read during import | imp | implemented | M2 |
 | FRG-IMP-025 | Story-arc reading-order prefix | imp | approved | B |
 | FRG-PP-001 | Single shared import pipeline | pp | implemented | M1 |
 | FRG-PP-002 | Completed-download handling state machine | pp | implemented | M1 |
@@ -190,8 +190,8 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-PP-013 | Upgrades and deletions via recycle bin | pp | implemented | M2 |
 | FRG-PP-014 | Duplicate constraint handling | pp | approved | M2 |
 | FRG-PP-015 | Failed-download blocklist and auto re-search | pp | withdrawn | — |
-| FRG-PP-016 | Manual import resolution | pp | approved | M2 |
-| FRG-PP-017 | ComicInfo.xml tagging on import | pp | approved | M2 |
+| FRG-PP-016 | Manual import resolution | pp | implemented | M2 |
+| FRG-PP-017 | ComicInfo.xml tagging on import | pp | implemented | M2 |
 | FRG-PP-018 | CBR-to-CBZ conversion and library-wide retagging | pp | approved | B |
 | FRG-PP-019 | Permissions and ownership enforcement | pp | approved | B |
 | FRG-API-001 | Versioned, OpenAPI-documented REST API | api | implemented | M1 |
@@ -208,7 +208,7 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-API-012 | Wanted/missing endpoint | api | approved | M2 |
 | FRG-API-013 | Config resource endpoints | api | implemented | M2 |
 | FRG-API-014 | System status, health, and task endpoints | api | approved | M2 |
-| FRG-API-015 | Manual import endpoint | api | approved | M2 |
+| FRG-API-015 | Manual import endpoint | api | implemented | M2 |
 | FRG-API-016 | Parse debug endpoint | api | approved | B |
 | FRG-UI-001 | SPA architecture: server state via React Query + WS invalidation | ui | implemented | M1 |
 | FRG-UI-002 | Design token layer with ant/foraging theme | ui | implemented | M1 |
@@ -223,7 +223,7 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-UI-011 | Wanted screen | ui | approved | M2 |
 | FRG-UI-012 | Settings: media management and naming with rename preview | ui | implemented | M2 |
 | FRG-UI-013 | Settings: notifications | ui | approved | B |
-| FRG-UI-014 | Manual import overlay | ui | approved | M2 |
+| FRG-UI-014 | Manual import overlay | ui | implemented | M2 |
 | FRG-UI-015 | Library import (existing files) flow | ui | approved | M2 |
 | FRG-UI-016 | System status and tasks screens | ui | approved | M2 |
 | FRG-UI-017 | Blocklist screen | ui | approved | M2 |

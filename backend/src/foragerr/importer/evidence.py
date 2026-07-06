@@ -33,6 +33,17 @@ LAYER_FOLDER = "folder_name"
 LAYER_CLIENT = "client_title"
 #: Provenance recorded for the issue id when it came from an embedded tag.
 PROV_ISSUE_ID_TAG = "issue_id_tag"
+#: Provenance recorded when the resolved (series, issue) came from a verified
+#: embedded ComicInfo ComicVine id (FRG-IMP-024, design decision 3).
+PROV_COMICINFO = "comicinfo"
+#: Provenance recorded when the resolved (series, issue) came from a validated
+#: manual override (FRG-PP-016, design decision 2) — human intent, top priority.
+PROV_MANUAL_OVERRIDE = "manual_override"
+#: Provenance key recorded when an embedded ComicInfo id was present but did NOT
+#: silently win (unverified / conflicting with the filename match); its value is
+#: the conflicting embedded ``cv_issue_id``. Surfaces the conflict as a
+#: review/blocked item rather than a silent mis-file (FRG-IMP-024).
+PROV_COMICINFO_CONFLICT = "comicinfo_conflict"
 
 #: High → low confidence order for per-field selection (FRG-PP-004).
 _LAYER_ORDER: tuple[str, ...] = (LAYER_GRAB, LAYER_FILENAME, LAYER_FOLDER, LAYER_CLIENT)
@@ -142,7 +153,10 @@ __all__ = [
     "LAYER_FILENAME",
     "LAYER_FOLDER",
     "LAYER_GRAB",
+    "PROV_COMICINFO",
+    "PROV_COMICINFO_CONFLICT",
     "PROV_ISSUE_ID_TAG",
+    "PROV_MANUAL_OVERRIDE",
     "Evidence",
     "aggregate",
 ]

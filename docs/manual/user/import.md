@@ -4,10 +4,9 @@ Import is how a comic file becomes part of your library: foragerr verifies the f
 works out which series and issue it is, decides whether it belongs in the library,
 and — only if every check passes — renames it into the right series folder and
 records it against the issue. One shared pipeline does this for every source: a
-completed download and a per-series rescan go through exactly the same evidence
-gathering, the same decision rules, and the same file handling. (Manual import — 
-pointing foragerr at an arbitrary folder and resolving matches by hand — is planned
-for M2 and will reuse this same pipeline.)
+completed download, a per-series rescan, and a manual import all go through
+exactly the same evidence gathering, the same decision rules, and the same file
+handling.
 
 ## Completed downloads
 
@@ -133,6 +132,31 @@ destination folder, flush to disk, verify the size, promote atomically, and only
 then remove the source. Free space (file size plus a margin) is checked before any
 bytes move. After a successful move, emptied source folders are cleaned up (ignoring
 junk like `.DS_Store`), stopping safely below the download/staging root.
+
+## Manual import
+
+When a download stays import-blocked — or you have a folder of files foragerr has
+never seen — the **manual import** overlay (from a blocked queue row, or the
+queue toolbar's path picker) lists each candidate file with the decision the
+pipeline *would* make and its verbatim rejection reasons. Pick the right series
+and issue per file (suggestions are pre-filled; a suggestion sourced from the
+file's own embedded metadata is badged "from ComicInfo") and import: your
+choices resolve the matching, but the safety checks still apply — a corrupt
+archive, junk-sized file, or full disk stays blocked with its reason no matter
+what you select. There is deliberately no way to force those.
+
+## Embedded metadata
+
+Archives carrying a `ComicInfo.xml` are read during import (bounded and safely —
+never extracted), and a ComicVine issue id found there is **preferred over the
+filename** when it can be verified against your library. An id that conflicts
+with a strong filename match blocks the file for review instead of silently
+filing it somewhere surprising.
+
+With `comicinfo_tag_on_import` enabled (off by default), foragerr also *writes*
+a fresh `ComicInfo.xml` into each imported cbz from the matched ComicVine
+record — rewritten atomically, and never at the cost of the import: if tagging
+fails, the file lands untagged with a warning in history.
 
 ## Rescanning a series
 

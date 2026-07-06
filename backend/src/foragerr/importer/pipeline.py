@@ -44,17 +44,32 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from foragerr.importer import fileops, history
 from foragerr.importer.context import ImportContext
 from foragerr.importer.decisions import ImportDecision, ImportEvaluation, decide
-from foragerr.importer.evidence import Evidence, aggregate
+from foragerr.importer.evidence import (
+    PROV_COMICINFO,
+    PROV_COMICINFO_CONFLICT,
+    PROV_MANUAL_OVERRIDE,
+    Evidence,
+    aggregate,
+)
 from foragerr.importer.models import ImportHistoryRow
 from foragerr.naming import RenameFields, render_filename
 from foragerr.importer.sources import (
     SOURCE_DOWNLOAD,
+    SOURCE_MANUAL,
+    SOURCE_RESCAN,
     CompletedDownloadSource,
     ImportCandidate,
+    ManualImportSource,
+    ManualOverride,
     RescanSource,
 )
 from foragerr.library import matching, repo
 from foragerr.library.models import IssueFileRow, IssueRow, SeriesRow
+from foragerr.metadata.comicinfo import (
+    build_comicinfo_bytes,
+    read_embedded_metadata,
+    tag_cbz,
+)
 from foragerr.parser.result import Booktype, IssueClassification
 from foragerr.quality.models import FormatProfileRow, decode_formats
 from foragerr.security.archives import inspect_archive
@@ -115,12 +130,12 @@ async def _run_fs(ctx: ImportContext, func, *args, **kwargs):
 
 
 async def gather(
-    source: CompletedDownloadSource | RescanSource,
+    source: CompletedDownloadSource | RescanSource | ManualImportSource,
     session: AsyncSession,
     ctx: ImportContext,
 ) -> list[ImportCandidate]:
     """Run a source's intake (FRG-PP-001). The source is data; this dispatch is
-    the only place the two M1 intakes differ."""
+    the only place the intakes differ."""
     return await source.gather(session, ctx)
 
 
@@ -164,18 +179,169 @@ async def _match_issue_in_series(
     )
 
 
+async def _resolve_override(
+    session: AsyncSession, candidate: ImportCandidate, override: ManualOverride
+) -> tuple[int, int] | None:
+    """Validate a manual override against real rows (FRG-PP-016, decision 2).
+
+    Returns the pinned ``(series_id, issue_id)`` only when the override names a
+    real issue that (when a series is also named) belongs to it AND — in a scoped
+    context — is in scope. An override naming a non-existent or mismatched entity
+    returns ``None`` (dropped, not trusted) so the file falls back to the
+    heuristic rather than fabricating a mapping. A series-only override cannot
+    resolve a concrete issue, so it too is ignored.
+    """
+    if override.issue_id is None:
+        return None
+    issue_row = await session.get(IssueRow, override.issue_id)
+    if issue_row is None:
+        return None
+    if override.series_id is not None and issue_row.series_id != override.series_id:
+        return None  # issue does not belong to the named series → not trusted
+    if (
+        candidate.series_scope_id is not None
+        and issue_row.series_id != candidate.series_scope_id
+    ):
+        return None  # out of scope for a series-pinned manual folder
+    return issue_row.series_id, issue_row.id
+
+
+async def _embedded_issue(session: AsyncSession, embedded) -> IssueRow | None:
+    """The library issue an embedded ComicVine id resolves to, or ``None``.
+
+    Looks up the ``cv_issue_id`` namespace (distinct from the internal
+    ``[__issueid__]`` tag). A parse-degraded or id-less embedded read resolves to
+    nothing (FRG-IMP-024)."""
+    if embedded is None or embedded.parse_error or embedded.cv_issue_id is None:
+        return None
+    return (
+        await session.execute(
+            select(IssueRow).where(IssueRow.cv_issue_id == embedded.cv_issue_id)
+        )
+    ).scalars().first()
+
+
+async def _filename_series_match(
+    session: AsyncSession, candidate: ImportCandidate, evidence: Evidence
+) -> int | None:
+    """The series the pure filename heuristic strongly matches, or ``None``.
+
+    Used only for embedded-id conflict detection (FRG-IMP-024): a strong filename
+    match to a *different* series than a resolvable embedded id is a conflict, so
+    the embedded id does not silently win."""
+    if candidate.series_scope_id is not None:
+        series = await session.get(SeriesRow, candidate.series_scope_id)
+        if series is not None and matching.series_title_matches(
+            evidence.matching_key, series.matching_key
+        ):
+            return series.id
+        return None
+    if evidence.matching_key is None:
+        return None
+    series = (
+        await session.execute(
+            select(SeriesRow).where(SeriesRow.matching_key == evidence.matching_key)
+        )
+    ).scalars().first()
+    return series.id if series is not None else None
+
+
+#: How :func:`_reconcile_base` resolved the candidate — the signal that produced
+#: the returned mapping. ``TAG``/``GRAB`` are our OWN trusted internal signals
+#: (an ``[__issueid__]`` tag we wrote, or a grab record we recorded); ``FILENAME``
+#: is the untrusted parse; ``None`` means nothing resolved it. The embedded
+#: ComicInfo layer sits ABOVE ``FILENAME`` but BELOW ``TAG``/``GRAB``.
+_BASE_TAG = "tag"
+_BASE_GRAB = "grab"
+_BASE_FILENAME = "filename"
+
+
 async def reconcile(
     session: AsyncSession,
     candidate: ImportCandidate,
     evidence: Evidence,
     ctx: ImportContext,
+    *,
+    override: ManualOverride | None = None,
+    embedded=None,
 ) -> tuple[int | None, int | None]:
-    """Resolve (series_id, issue_id) for a candidate (FRG-PP-003).
+    """Resolve (series_id, issue_id) for a candidate (FRG-PP-003, FRG-PP-016,
+    FRG-IMP-024).
 
-    Priority: embedded ``[__issueid__]`` tag (direct lookup, DDL handshake) >
-    grab-history reconciliation by download id > parser heuristic (matching key +
-    issue number, scoped to the rescan series when present).
+    Confidence order::
+
+        manual override > [__issueid__] tag > grab hints
+                        > verified embedded CV id > filename heuristic
+
+    A manual override (validated against real rows) is top priority — human intent
+    beats any parse. The embedded ComicVine id is authoritative ONLY over the
+    untrusted filename parse: it sits ABOVE the filename heuristic but BELOW our
+    own ``[__issueid__]`` tag and grab record. So a correctly-grabbed or id-tagged
+    download is NEVER overridden by (and never blocked over) archive metadata —
+    the grab/tag wins silently, and a stray embedded id is ignored. The embedded
+    layer only affects a file whose sole other evidence is the filename (a rescan
+    of untagged files, an arbitrary-folder manual import).
+
+    "Conflict" (→ :class:`EmbeddedIdConflictSpec` block) is raised only when the
+    embedded id disagrees with a signal AT OR BELOW its precedence that would
+    otherwise have resolved the file — i.e. embedded-vs-filename for a file with
+    no tag/grab. It is recorded on the evidence provenance so the file surfaces as
+    a review/blocked item rather than a silent mis-file.
     """
+    # 1. manual override — top priority (validated, or dropped and fall through).
+    if override is not None:
+        resolved = await _resolve_override(session, candidate, override)
+        if resolved is not None:
+            evidence.provenance["series"] = PROV_MANUAL_OVERRIDE
+            evidence.provenance["issue"] = PROV_MANUAL_OVERRIDE
+            return resolved
+
+    base_series, base_issue, base_source = await _reconcile_base(
+        session, candidate, evidence, ctx
+    )
+
+    # 2. verified embedded ComicVine id — considered ONLY when no trusted internal
+    #    signal (our tag / grab record) already resolved the candidate. A tag or
+    #    grab is authoritative above the embedded layer: it wins silently and a
+    #    differing embedded id is neither an override nor a conflict block.
+    if base_source not in (_BASE_TAG, _BASE_GRAB):
+        issue_row = await _embedded_issue(session, embedded)
+        if issue_row is not None:
+            scope_ok = (
+                candidate.series_scope_id is None
+                or issue_row.series_id == candidate.series_scope_id
+            )
+            filename_series = await _filename_series_match(session, candidate, evidence)
+            filename_conflict = (
+                filename_series is not None and filename_series != issue_row.series_id
+            )
+            if scope_ok and not filename_conflict:
+                # Beats the filename heuristic (the only signal below it here).
+                evidence.provenance["series"] = PROV_COMICINFO
+                evidence.provenance["issue"] = PROV_COMICINFO
+                return issue_row.series_id, issue_row.id
+            # Resolvable but disagrees with the filename that would otherwise have
+            # resolved this untagged/ungrabbed file (or is out of scope): record
+            # the conflict so it surfaces as a review item, not a silent mis-file.
+            evidence.provenance[PROV_COMICINFO_CONFLICT] = str(embedded.cv_issue_id)
+
+    return base_series, base_issue
+
+
+async def _reconcile_base(
+    session: AsyncSession,
+    candidate: ImportCandidate,
+    evidence: Evidence,
+    ctx: ImportContext,
+) -> tuple[int | None, int | None, str | None]:
+    """The M1 base resolution: ``[__issueid__]`` tag > grab hints > filename
+    heuristic (FRG-PP-003). The override/embedded layers sit above this.
+
+    Returns ``(series_id, issue_id, base_source)`` where ``base_source`` names the
+    signal that produced the mapping (:data:`_BASE_TAG` / :data:`_BASE_GRAB` /
+    :data:`_BASE_FILENAME`, or ``None`` when nothing resolved). The caller uses it
+    to decide whether the embedded ComicInfo id may be consulted at all — a
+    tag/grab result is authoritative above the embedded layer."""
     # 1. issue-id tag short-circuit.
     if evidence.issue_id:
         try:
@@ -193,35 +359,35 @@ async def reconcile(
                     candidate.series_scope_id is None
                     or issue_row.series_id == candidate.series_scope_id
                 ):
-                    return issue_row.series_id, issue_row.id
+                    return issue_row.series_id, issue_row.id, _BASE_TAG
 
     # 2. grab-history reconciliation by download id (survives an unparseable name).
     if candidate.grab_series_id is not None and candidate.grab_issue_id is not None:
-        return candidate.grab_series_id, candidate.grab_issue_id
+        return candidate.grab_series_id, candidate.grab_issue_id, _BASE_GRAB
 
     # 3. parser heuristic.
     if evidence.issue is None:
-        return None, None
+        return None, None, None
     if candidate.series_scope_id is not None:
         series = await session.get(SeriesRow, candidate.series_scope_id)
         if series is None or not matching.series_title_matches(
             evidence.matching_key, series.matching_key
         ):
-            return None, None
+            return None, None, None
         issue_id = await _match_issue_in_series(session, series.id, evidence.issue, ctx)
-        return (series.id, issue_id) if issue_id is not None else (None, None)
+        return (series.id, issue_id, _BASE_FILENAME) if issue_id is not None else (None, None, None)
 
     if evidence.matching_key is None:
-        return None, None
+        return None, None, None
     series = (
         await session.execute(
             select(SeriesRow).where(SeriesRow.matching_key == evidence.matching_key)
         )
     ).scalars().first()
     if series is None:
-        return None, None
+        return None, None, None
     issue_id = await _match_issue_in_series(session, series.id, evidence.issue, ctx)
-    return (series.id, issue_id) if issue_id is not None else (None, None)
+    return (series.id, issue_id, _BASE_FILENAME) if issue_id is not None else (None, None, None)
 
 
 # --- stage 3 prep: build the once-computed evaluation ------------------------
@@ -266,13 +432,28 @@ async def build_evaluation(
             junk_size_floor=ctx.junk_size_floor_bytes,
         )
 
-    series_id, issue_id = await reconcile(session, candidate, evidence, ctx)
-
+    # Archive I/O first: inspection and the embedded ComicInfo read (FRG-IMP-024)
+    # both need the archive on disk, and reconcile() consumes the embedded read.
     archive = None
+    embedded = None
     if os.path.exists(candidate.local_path):
         # Archive inspection reads the whole central directory off disk; run it
         # off the event loop when an offload seam is wired (FRG-PP-006).
         archive = await _run_fs(ctx, inspect_archive, candidate.local_path)
+        # Embedded ComicInfo read is always active (not gated by the tagging
+        # toggle); it degrades to None on an unlisted/failed archive.
+        embedded = await _run_fs(
+            ctx, read_embedded_metadata, candidate.local_path, archive
+        )
+
+    series_id, issue_id = await reconcile(
+        session,
+        candidate,
+        evidence,
+        ctx,
+        override=candidate.override,
+        embedded=embedded,
+    )
 
     existing_path: str | None = None
     existing_format: str | None = None
@@ -299,6 +480,12 @@ async def build_evaluation(
 
     free = ctx.free_space_probe(dest_dir or ctx.library_root)
 
+    # A manual format override feeds the upgrade check only (design decision 2).
+    override_format = (
+        candidate.override.format if candidate.override is not None else None
+    )
+    new_format = override_format or _ext(candidate.file_name)
+
     return ImportEvaluation(
         evidence=evidence,
         size=candidate.size,
@@ -307,13 +494,17 @@ async def build_evaluation(
         archive=archive,
         existing_file_path=existing_path,
         existing_format=existing_format,
-        new_format=_ext(candidate.file_name),
+        new_format=new_format,
         format_ladder=ladder,
         free_bytes=free,
         needed_bytes=candidate.size,
         margin_bytes=ctx.free_space_margin_bytes,
         already_imported=await _already_imported(session, candidate.download_id, issue_id),
         junk_size_floor=ctx.junk_size_floor_bytes,
+        comic_info_present=embedded is not None and embedded.comic_info_present,
+        embedded_cv_issue_id=embedded.cv_issue_id if embedded is not None else None,
+        embedded_verified=evidence.provenance.get("issue") == PROV_COMICINFO,
+        comicinfo_conflict=PROV_COMICINFO_CONFLICT in evidence.provenance,
     )
 
 
@@ -476,12 +667,82 @@ async def execute(
 # --- the driven whole: aggregate -> decide -> execute ------------------------
 
 
+#: Provenance ``source`` column value per candidate kind — a data lookup, so the
+#: decision and file-op logic never branch on ``source_kind`` (FRG-PP-001).
+_PROVENANCE_BY_KIND: dict[str, str] = {
+    SOURCE_DOWNLOAD: history.SOURCE_DOWNLOAD,
+    SOURCE_RESCAN: history.SOURCE_RESCAN,
+    SOURCE_MANUAL: history.SOURCE_MANUAL,
+}
+
+
 def _source_provenance(candidate: ImportCandidate) -> str:
-    return (
-        history.SOURCE_DOWNLOAD
-        if candidate.source_kind == SOURCE_DOWNLOAD
-        else history.SOURCE_RESCAN
-    )
+    return _PROVENANCE_BY_KIND.get(candidate.source_kind, history.SOURCE_DOWNLOAD)
+
+
+async def _tag_comicinfo(
+    session: AsyncSession,
+    candidate: ImportCandidate,
+    ev: ImportEvaluation,
+    ctx: ImportContext,
+    result: ExecuteResult,
+) -> None:
+    """Write a ComicInfo.xml tag into the just-placed cbz (FRG-PP-017).
+
+    Runs ONLY after the file is placed and the imported/upgrade history event is
+    recorded, so a tagging failure can never unwind a completed import. Gated
+    honestly on the tagging toggle AND the archive having passed inspection
+    (``safe_to_extract`` — a fully-listed, fully-vetted zip) AND the placed file
+    being a ``.cbz``; a magic-only cbr/cb7 or an unvetted archive is never
+    rewritten. The rewrite itself is filesystem work, run through ``ctx.offload``.
+
+    A tagging failure is swallowed here: the file lands untagged and a
+    ``comicinfo_tag_failed`` warning event is recorded — the import still
+    succeeded. This never raises.
+    """
+    archive = ev.archive
+    if not (
+        ctx.comicinfo_tag_enabled
+        and archive is not None
+        and archive.safe_to_extract
+        and result.imported_path.lower().endswith(".cbz")
+    ):
+        return
+    try:
+        series = await session.get(SeriesRow, ev.series_id)
+        issue = await session.get(IssueRow, ev.issue_id)
+        if series is None or issue is None:  # defensive; execute already asserted
+            return
+        xml_bytes = build_comicinfo_bytes(series, issue)
+        await _run_fs(ctx, tag_cbz, result.imported_path, xml_bytes)
+    except Exception as exc:  # noqa: BLE001 — tagging is best-effort, never fatal
+        # Tagging is best-effort AFTER a completed import: any failure here (a
+        # cbz rewrite error, an OSError, or a DB error loading the records) must
+        # NOT unwind the already-committed import. Catch broadly (Exception, NOT
+        # BaseException — cancellation/KeyboardInterrupt still propagate): the
+        # placed file is byte-identical (the rewrite unwound its own temp) and
+        # stays imported.
+        logger.warning(
+            "comicinfo: tagging %s failed after import; left untagged: %s",
+            result.imported_path,
+            exc,
+        )
+        history.record_event(
+            session,
+            event_type=history.EVENT_COMICINFO_TAG_FAILED,
+            series_id=ev.series_id,
+            issue_id=ev.issue_id,
+            download_id=candidate.download_id,
+            source_title=_source_title(candidate),
+            source=_source_provenance(candidate),
+            data={
+                "provenance": dict(ev.evidence.provenance),
+                "source_kind": candidate.source_kind,
+                "imported_path": result.imported_path,
+                "error": str(exc),
+            },
+            now=ctx.now,
+        )
 
 
 def _source_title(candidate: ImportCandidate) -> str:
@@ -564,6 +825,10 @@ async def import_candidate(
                 quarantine_path=result.quarantine_path,
                 now=ctx.now,
             )
+            # ComicInfo tagging (FRG-PP-017) runs AFTER place_file + the
+            # issue_files row + the imported event: a tagging failure is caught
+            # inside and NEVER unwinds this completed import (records a warning).
+            await _tag_comicinfo(session, candidate, ev, ctx, result)
             return ImportOutcome(
                 status=ImportStatus.IMPORTED,
                 candidate=candidate,

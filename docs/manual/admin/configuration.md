@@ -73,6 +73,7 @@ under the top level of `config.yaml`.
 | `recycle_bin_path` | `FORAGERR_RECYCLE_BIN_PATH` | *(empty)* | Directory upgrade-replaced and user-deleted files are moved to. **Empty = permanently delete.** Must be writable when set; destinations are confinement-checked. |
 | `recycle_bin_retention_days` | `FORAGERR_RECYCLE_BIN_RETENTION_DAYS` | `0` | Days before housekeeping permanently prunes bin entries. `0` = keep forever. |
 | `config_backup_retention` | `FORAGERR_CONFIG_BACKUP_RETENTION` | `3` | Pre-migration `config.yaml` backups kept under `backups/`. |
+| `comicinfo_tag_on_import` | `FORAGERR_COMICINFO_TAG_ON_IMPORT` | `false` | Write ComicInfo.xml into imported cbz archives from the matched ComicVine record (atomic rewrite; a tagging failure never fails the import). |
 
 Unknown keys found in `config.yaml` are ignored with a logged warning rather than
 failing startup, so a config file from a slightly different version doesn't brick

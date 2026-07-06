@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Modal } from '../../components/Modal';
-import { Popover } from '../../components/Popover';
+import { ReasonsPopover } from '../../components/ReasonsPopover';
 import { useGrabRelease, useReleases } from '../../api/hooks';
 import { ApiRequestError } from '../../api/fetcher';
 import { queryKeys } from '../../api/queryKeys';
@@ -165,17 +165,13 @@ function DecisionRow({
     <tr data-testid={`release-row-${decision.guid}`}>
       <td>
         {decision.rejections.length > 0 ? (
-          <Popover
-            trigger={<span className={chipClass}>! {label}</span>}
+          <ReasonsPopover
+            reasons={decision.rejections}
             label={`${label} — show reasons`}
-          >
-            {/* Verbatim reasons, one per line — never paraphrased (FRG-UI-007). */}
-            <ul className={styles.rejectionList} data-testid={`ft-rejections-${decision.guid}`}>
-              {decision.rejections.map((reason) => (
-                <li key={reason}>{reason}</li>
-              ))}
-            </ul>
-          </Popover>
+            chipClassName={chipClass}
+            chipContent={<>! {label}</>}
+            listTestId={`ft-rejections-${decision.guid}`}
+          />
         ) : (
           <span className={chipClass}>{label}</span>
         )}

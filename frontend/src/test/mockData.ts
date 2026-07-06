@@ -4,6 +4,7 @@ import type {
   FormatProfileResource,
   IssueResource,
   LookupCandidate,
+  ManualImportEntry,
   QueuePageResponse,
   QueueResourceRaw,
   ReleaseDecision,
@@ -326,6 +327,46 @@ export function makeCommand(overrides: Partial<CommandResource> = {}): CommandRe
     ...overrides,
   };
 }
+
+/** One manual-import candidate exactly as GET /api/v1/manual-import serializes it. */
+export function makeManualEntry(
+  overrides: Partial<ManualImportEntry> & Pick<ManualImportEntry, 'path'>,
+): ManualImportEntry {
+  return {
+    name: overrides.path.split('/').pop() ?? overrides.path,
+    size: 52_428_800,
+    folder: null,
+    approved: false,
+    rejections: [],
+    suggestedSeriesId: null,
+    suggestedIssueId: null,
+    format: null,
+    embedded: { comicInfoPresent: false, cvIssueId: null, verified: false },
+    ...overrides,
+  };
+}
+
+/**
+ * A candidate list covering FRG-UI-014: one approved row with a verified
+ * embedded-ComicInfo suggestion, one blocked row whose reasons the overlay must
+ * render verbatim and which becomes importable after an override.
+ */
+export const mockManualCandidates: ManualImportEntry[] = [
+  makeManualEntry({
+    path: '/comics/Invincible (2003)/Invincible 001.cbz',
+    approved: true,
+    suggestedSeriesId: 7,
+    suggestedIssueId: 71,
+    format: 'cbz',
+    embedded: { comicInfoPresent: true, cvIssueId: 6071, verified: true },
+  }),
+  makeManualEntry({
+    path: '/comics/_unsorted/mystery 002.cbr',
+    approved: false,
+    rejections: ['No series match for parsed title', 'Unmapped issue number'],
+    format: 'cbr',
+  }),
+];
 
 export const mockSeriesCreated: SeriesCreatedResource = {
   ...makeSeriesResource({

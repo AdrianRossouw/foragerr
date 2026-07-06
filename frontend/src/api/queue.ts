@@ -69,5 +69,6 @@ export function toQueueItem(raw: QueueResourceRaw): QueueItem {
     downloadClient: raw.downloadClient,
     indexer: raw.indexer,
     estimatedCompletion: raw.estimatedCompletion,
+    downloadId: raw.downloadId,
   };
 }

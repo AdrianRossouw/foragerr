@@ -66,6 +66,14 @@ class ImportEvaluation:
     already_imported: bool = False
     junk_size_floor: int = 0
     mapping_warning: str | None = None
+    #: Embedded ComicInfo read summary (FRG-IMP-024) — reported by the manual
+    #: import listing and used by the conflict spec. ``comicinfo_conflict`` is set
+    #: when an embedded id was present but did NOT silently win (unverified /
+    #: conflicting with the filename match) so it surfaces as a review item.
+    comic_info_present: bool = False
+    embedded_cv_issue_id: int | None = None
+    embedded_verified: bool = False
+    comicinfo_conflict: bool = False
 
 
 class ImportSpec:
@@ -102,6 +110,28 @@ class MappedToIssueSpec(ImportSpec):
             return None
         return ImportRejection(
             reason="could not match this file to a known series and issue",
+            spec=self.name,
+        )
+
+
+class EmbeddedIdConflictSpec(ImportSpec):
+    """Block when a present embedded ComicInfo id conflicts with the filename
+    match (FRG-IMP-024). The unverified/conflicting id does NOT silently win —
+    the candidate resolved by the heuristic but the disagreement surfaces here as
+    a review item rather than a silent mis-file. A verified embedded id (which
+    won the reconciliation) never sets this flag, so it does not trip."""
+
+    name = "embedded-id-conflict"
+
+    def evaluate(self, ev: ImportEvaluation) -> ImportRejection | None:
+        if ev.mapping_warning is not None or not ev.comicinfo_conflict:
+            return None
+        return ImportRejection(
+            reason=(
+                "the embedded ComicInfo ComicVine id "
+                f"({ev.embedded_cv_issue_id}) conflicts with the filename match; "
+                "confirm the correct issue before importing"
+            ),
             spec=self.name,
         )
 
@@ -202,6 +232,7 @@ def default_specs() -> tuple[ImportSpec, ...]:
     return (
         RemotePathMappedSpec(),
         MappedToIssueSpec(),
+        EmbeddedIdConflictSpec(),
         ArchiveValidSpec(),
         JunkFilterSpec(),
         FreeSpaceSpec(),
@@ -251,6 +282,7 @@ def decide(
 __all__ = [
     "AlreadyImportedSpec",
     "ArchiveValidSpec",
+    "EmbeddedIdConflictSpec",
     "FreeSpaceSpec",
     "ImportDecision",
     "ImportEvaluation",

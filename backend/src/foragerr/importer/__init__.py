@@ -42,6 +42,8 @@ from foragerr.importer.pipeline import (
 from foragerr.importer.sources import (
     CompletedDownloadSource,
     ImportCandidate,
+    ManualImportSource,
+    ManualOverride,
     RescanSource,
 )
 
@@ -60,6 +62,8 @@ __all__ = [
     "ImportHistoryRow",
     "ImportOutcome",
     "ImportStatus",
+    "ManualImportSource",
+    "ManualOverride",
     "RescanSource",
     "gather",
     "import_candidate",
