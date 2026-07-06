@@ -43,13 +43,6 @@ class SeriesNotFoundError(LookupError):
     """No series exists for the given id (maps to HTTP 404)."""
 
 
-class DeleteFilesNotSupportedError(NotImplementedError):
-    """``deleteFiles=true`` is deliberately unimplemented in M1 (HTTP 501).
-
-    Raised before any row is deleted or file touched (FRG-SER-014).
-    """
-
-
 # --- domain event -----------------------------------------------------------
 
 

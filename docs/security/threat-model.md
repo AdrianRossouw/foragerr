@@ -767,6 +767,45 @@ existing hardened surfaces. Disposition:
 - **Fixed-release marker parsing**: a bounded regex token rule on the existing
   crash-safe parser (corpus + fuzz discipline apply); no new input channel.
 
+### 2026-07-06 — m2-daily-surfaces (M2 change 4)
+
+**OPDS OpenSearch (FRG-OPDS-007)** puts the first untrusted FREE-TEXT input on
+the deliberately unauthenticated OPDS listener (COMP 3): `GET /opds/search?q=`,
+advertised via the root feed's `rel="search"` link and a static
+`application/opensearchdescription+xml` descriptor. M1 shipped compliant
+option (b) — no search advertised; the new surface extends T-OPDS-2
+(injection) and the W7 reflected-markup class to a string parameter for the
+first time. Disposition:
+
+- **SQL injection**: the term never reaches SQL as text. It is folded through
+  the shared `matching_key` normalization and compared only as a bound ORM
+  `LIKE` parameter with autoescaped wildcards (`.contains(..., autoescape=True)`
+  — a bare `%`/`_` matches literally, not everything); alias matching runs as
+  Python substring containment over decoded rows. The existing static guard
+  (no `text()`, no interpolated SQL in the OPDS modules) covers the new route.
+- **Reflected markup / feed injection**: the term is never echoed into feed
+  text; its only reflection is URL-encoded into the search feed's own
+  pagination links, emitted through the escaping Atom builder's attribute
+  quoting. The OpenSearch descriptor is fully static. No XML parser is
+  constructed anywhere (serializer-only, FRG-SEC-002 posture unchanged).
+- **Resource bounding**: the term is trimmed to 256 chars before any work
+  (oversized input stays a normal, possibly empty, feed — never an error or
+  a long reflection); results ride the shared FRG-OPDS-006 page-size clamp.
+- **No new data exposure**: results are navigation entries into series
+  acquisition feeds already listed by the catalog's own shelves; file access
+  remains id-only resolution + root confinement (T-OPDS-1 unchanged). The
+  unauthenticated posture is unchanged and remains RISK-003/RISK-020 (M3 auth).
+- Adversarial cases (SQL metacharacters, LIKE wildcards, markup payloads,
+  10k-char terms) are pinned in `tests/test_opds_security.py`.
+
+The same change also adds `/opds/recent` (a reordering of already-served
+acquisition entries — no new input beyond the existing typed page params) and
+the delete-files write paths (`DELETE /api/v1/issuefile/{id}`,
+`DELETE /api/v1/series/{id}?deleteFiles=true`): id-only parameters, disposal
+routed through the existing `safe_join`-confined recycle bin with
+files-before-rows compensation (FRG-PP-013 mechanics, no new confinement
+surface); destructive scope is bounded to rows the id resolves to.
+
 ## Coverage summary
 
 - **Well covered by the five drafts** (mitigation named, no new requirement needed): OPDS

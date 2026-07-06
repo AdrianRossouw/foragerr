@@ -293,8 +293,25 @@ def test_delete_series_removes_row_only(client, tmp_path, monkeypatch):
     assert client.get(f"/api/v1/series/{created['id']}").status_code == 404
 
 
+async def _add_issue_with_file(app, series_id: int, path) -> None:
+    async with app.state.db.write_session() as session:
+        issue = await repo.create_issue(
+            session, series_id=series_id, cv_issue_id=9001, issue_number="1"
+        )
+        await repo.add_issue_file(
+            session, issue_id=issue.id, path=str(path), size=path.stat().st_size
+        )
+
+
 @pytest.mark.req("FRG-API-003")
-def test_delete_series_with_delete_files_true_is_501(client, tmp_path, monkeypatch):
+def test_delete_series_with_delete_files_true_removes_files_and_rows(
+    client, tmp_path, monkeypatch
+):
+    """`deleteFiles=true` is implemented (m2-daily-surfaces — was the M1 501):
+    the on-disk file is disposed of BEFORE the rows are removed (permanently
+    here — this app has no recycle bin configured; bin routing and the
+    ordering/compensation guarantees are pinned in
+    tests/library/test_flows_edit_delete.py)."""
     root_id = make_root_folder(client, tmp_path)
     factory = build_factory(
         settings=client.app.state.settings, handler=FakeCV().volume(1, name="Saga").handler()
@@ -303,27 +320,27 @@ def test_delete_series_with_delete_files_true_is_501(client, tmp_path, monkeypat
     created = client.post(
         "/api/v1/series", json={"cv_volume_id": 1, "root_folder_id": root_id}
     ).json()
+    on_disk = Path(created["path"]) / "Saga 001.cbz"
+    on_disk.parent.mkdir(parents=True, exist_ok=True)
+    on_disk.write_bytes(b"comic-bytes")
+    client.portal.call(_add_issue_with_file, client.app, created["id"], on_disk)
 
     response = client.delete(
         f"/api/v1/series/{created['id']}", params={"deleteFiles": "true"}
     )
-    assert response.status_code == 501
-    # row untouched by the rejected request
-    assert client.get(f"/api/v1/series/{created['id']}").status_code == 200
+    assert response.status_code == 204
+    assert client.get(f"/api/v1/series/{created['id']}").status_code == 404
+    assert not on_disk.exists()  # the file went with the rows
 
 
 @pytest.mark.req("FRG-API-003")
-def test_delete_nonexistent_series_with_delete_files_true_is_still_501(client):
-    """Documents a deliberate precedence: `delete_series` (edit_delete.py)
-    raises `DeleteFilesNotSupportedError` BEFORE it ever looks the series up
-    — the flag is checked first, unconditionally. So `deleteFiles=true`
-    against an id that doesn't exist yields 501, not 404: the "not
-    implemented" rejection always wins over a not-found check for this
-    flag, by the (frozen) flows layer's own contract."""
+def test_delete_nonexistent_series_with_delete_files_true_is_404(client):
+    """The M1 501-precedence quirk is gone with the implementation: an unknown
+    id with `deleteFiles=true` is a plain not-found."""
     response = client.delete(
         "/api/v1/series/999999", params={"deleteFiles": "true"}
     )
-    assert response.status_code == 501
+    assert response.status_code == 404
 
 
 # --- lookup ------------------------------------------------------------------

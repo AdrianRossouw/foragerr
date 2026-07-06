@@ -173,6 +173,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(manual_import_router, prefix="/api/v1")
 
+    # --- issue-file deletion (m2-daily-surfaces): user file deletion routed
+    #     through the recycle bin via the delete_issue_file flow
+    #     (FRG-API-003, FRG-UI-004, FRG-PP-013) under /api/v1. ---
+    from foragerr.api.issuefile import router as issuefile_router
+
+    app.include_router(issuefile_router, prefix="/api/v1")
+
     # --- library import (m2-existing-library-import): the scan/execute
     #     commands + handlers registered via the ``foragerr.library.flows``
     #     import above (FRG-IMP-022/023); mount the staging review endpoints. ---

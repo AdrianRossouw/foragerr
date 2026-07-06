@@ -1,13 +1,17 @@
 """OPDS security-by-construction tests: the download surface exposes no path
 parameter (route-table inventory), id/page parameters reject injection
-payloads at the type boundary, and the OPDS module builds no SQL text from
-request input (FRG-OPDS-003, FRG-OPDS-004).
+payloads at the type boundary, the OPDS module builds no SQL text from
+request input, and the search feed's free-text term — the one hostile string
+input on this unauthenticated listener — is inert: SQL metacharacters bound,
+markup never reflected, oversized input bounded (FRG-OPDS-003, FRG-OPDS-004,
+FRG-OPDS-007).
 """
 
 from __future__ import annotations
 
 import re
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 from xml.etree import ElementTree as ET
 
 import pytest
@@ -115,3 +119,77 @@ def test_opds_module_builds_no_sql_text_from_input():
                 raise AssertionError(f"possible interpolated SQL in {module.__name__}: {line!r}")
     # Positive: the router uses the ORM select() construct.
     assert "select(" in Path(router_mod.__file__).read_text(encoding="utf-8")
+
+
+# --- FRG-OPDS-007: the search term is hostile input --------------------------
+
+
+def _search(client, q: str):
+    resp = client.get("/opds/search", params={"q": q})
+    assert resp.status_code == 200, q  # never a 500, never a reject-with-reflection
+    return resp
+
+
+@pytest.mark.req("FRG-OPDS-007")
+def test_search_sql_metacharacters_are_inert(client, tmp_path):
+    data = client.portal.call(
+        seed, client.app, tmp_path / "library",
+        [simple_series("Saga", cv_volume_id=1, n_issues=2)],
+    )
+    series_id = data["series"][0]["id"]
+
+    for payload in (
+        "' OR 1=1 --",
+        '"; DROP TABLE series; --',
+        "saga' UNION SELECT * FROM issue_files --",
+    ):
+        feed = ET.fromstring(_search(client, payload).text)
+        # A bound parameter: the payload matches nothing (or only a genuine
+        # fold-containment hit) — it never becomes a tautology returning rows.
+        hrefs = [e.find(f"{ATOM}id").text for e in feed.findall(f"{ATOM}entry")]
+        assert hrefs in ([], [f"/opds/series/{series_id}"]), payload
+
+    # LIKE wildcards are autoescaped: a bare '%' matches nothing rather than
+    # every series (it would match all rows if bound unescaped into LIKE).
+    feed = ET.fromstring(_search(client, "%").text)
+    assert feed.findall(f"{ATOM}entry") == []
+
+    # The database survived every payload: the real feed is intact.
+    feed = ET.fromstring(client.get(f"/opds/series/{series_id}").text)
+    assert len(feed.findall(f"{ATOM}entry")) == 2
+
+
+@pytest.mark.req("FRG-OPDS-007")
+def test_search_markup_in_query_is_never_reflected_unescaped(client, tmp_path):
+    client.portal.call(
+        seed, client.app, tmp_path / "library", [simple_series(n_issues=1)]
+    )
+    for payload in (
+        "<script>alert(1)</script>",
+        ']]></title><entry><id>evil</id>',
+        '"><link href="http://evil/"/>',
+    ):
+        body = _search(client, payload).text
+        assert "<script>" not in body, payload
+        assert "evil" not in body or "http://evil/" not in body, payload
+        feed = ET.fromstring(body)  # still well-formed XML
+        # No entry was injected; the only entries are genuine series matches.
+        for entry in feed.findall(f"{ATOM}entry"):
+            assert entry.find(f"{ATOM}id").text.startswith("/opds/series/")
+
+
+@pytest.mark.req("FRG-OPDS-007")
+def test_search_oversized_query_is_bounded(client, tmp_path):
+    client.portal.call(
+        seed, client.app, tmp_path / "library", [simple_series(n_issues=1)]
+    )
+    resp = _search(client, "A" * 10_000)
+    feed = ET.fromstring(resp.text)  # a normal, valid (here: empty) feed
+    assert feed.findall(f"{ATOM}entry") == []
+
+    # The trimmed term — not the 10k payload — is what pagination echoes:
+    # every reflected q parameter is capped at the documented bound.
+    for el in feed.findall(f"{ATOM}link"):
+        query = parse_qs(urlsplit(el.get("href")).query)
+        for value in query.get("q", []):
+            assert len(value) <= router_mod.MAX_SEARCH_QUERY_LEN
