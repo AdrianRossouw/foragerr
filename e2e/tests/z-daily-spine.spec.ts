@@ -1,4 +1,4 @@
-import { test, expect, request as pwRequest, type APIRequestContext } from '@playwright/test';
+import { test, expect, request as pwRequest, type APIRequestContext, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { nudgeImport, until } from './helpers';
@@ -53,6 +53,26 @@ function expectOpdsFeedType(contentType: string | undefined, kind: 'navigation' 
   expect(contentType).toContain(`kind=${kind}`);
 }
 
+/**
+ * The History screen (FRG-UI-010) exposes only an event-type filter and
+ * server-side "Prev"/"Next" paging — no series filter or page-size override
+ * reaches it (`useHistoryPage` accepts a `seriesId`, but the screen never
+ * wires a control or URL param to it). So a row that isn't on page 1 has no
+ * shortcut: page forward through the real screen, bounded by the control's
+ * own "Page x of y" label, until the target testid appears (or pages run
+ * out, in which case the caller's `toBeVisible()` fails with a clear diff).
+ */
+async function findHistoryRow(page: Page, id: number) {
+  const row = page.getByTestId(`history-row-${id}`);
+  const nextButton = page.getByRole('button', { name: 'Next ›' });
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if ((await row.count()) > 0) return row;
+    if (await nextButton.isDisabled()) break;
+    await nextButton.click();
+  }
+  return row;
+}
+
 let api: APIRequestContext;
 // The spine-added Saga series id, resolved once from the assembled state.
 let sagaId = 0;
@@ -102,27 +122,39 @@ test('FRG-PROC-010 FRG-API-011: History shows the grabbed and imported rows shar
   const imported = await (
     await api.get(`/api/v1/history?eventType=imported&seriesId=${sagaId}&pageSize=200`)
   ).json();
-  const grabRow = grabbed.records[0];
+  // Anchor on the IMPORTED row first: import is deduped/idempotent, so
+  // `imported.records[0]` is stable across a serial-group retry. `grabbed`
+  // is NOT idempotent — a retry re-runs the spine's grab step and adds a
+  // fresh row with a NEW downloadId, which would become `grabbed.records[0]`
+  // and no longer pair with the (unchanged) import. So search the WHOLE
+  // grabbed feed for the row sharing the import's downloadId instead of
+  // assuming it is the newest one.
   const importRow = imported.records[0];
-  expect(grabRow.downloadId, 'the grab row carries a downloadId').toBeTruthy();
   expect(importRow.downloadId, 'the import row carries a downloadId').toBeTruthy();
-  // The single-source feed joins the grab to its import by ONE download identity.
-  expect(importRow.downloadId).toBe(grabRow.downloadId);
+  const grabRow = grabbed.records.find(
+    (r: any) => r.downloadId === importRow.downloadId,
+  );
+  expect(
+    grabRow,
+    'a grabbed row shares the imported row\'s downloadId',
+  ).toBeTruthy();
 
-  // The real History screen renders both events. Filter to each type (the feed
-  // grows with every run step; filtering keeps the assertion independent of how
-  // many newer rows exist) and assert the specific row is on screen with its
+  // The real History screen renders both events. It exposes only an
+  // event-type filter and page-forward paging (no series filter or page-size
+  // override) — filter to each type to narrow the field, then page forward
+  // to the specific row resolved above (robust to it no longer being on
+  // page 1 as the event count grows) and assert it's on screen with its
   // chip label.
   await page.goto('/history');
   const filter = page.getByRole('combobox', { name: 'Filter by event type' });
 
   await filter.selectOption('grabbed');
-  const grabbedRow = page.getByTestId(`history-row-${grabRow.id}`);
+  const grabbedRow = await findHistoryRow(page, grabRow.id);
   await expect(grabbedRow).toBeVisible();
   await expect(grabbedRow.getByText('Grabbed', { exact: true })).toBeVisible();
 
   await filter.selectOption('imported');
-  const importedRow = page.getByTestId(`history-row-${importRow.id}`);
+  const importedRow = await findHistoryRow(page, importRow.id);
   await expect(importedRow).toBeVisible();
   await expect(importedRow.getByText('Imported', { exact: true })).toBeVisible();
 });
