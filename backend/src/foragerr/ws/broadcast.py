@@ -33,6 +33,11 @@ DEFAULT_DEBOUNCE_SECONDS = 0.1
 #: (never draining its socket) is judged too slow and dropped.
 DEFAULT_QUEUE_MAXSIZE = 64
 
+#: Concurrent-connection cap (FRG-NFR-014). A connection attempted at or above
+#: this many live sockets is refused cleanly at the handshake without touching
+#: the registry. Matches the ``ws_max_connections`` config default.
+DEFAULT_MAX_CONNECTIONS = 32
+
 
 class Connection:
     """One connected client: a bounded outbound queue plus a drop signal."""
@@ -62,9 +67,11 @@ class WsBroadcaster:
         *,
         debounce_seconds: float = DEFAULT_DEBOUNCE_SECONDS,
         queue_maxsize: int = DEFAULT_QUEUE_MAXSIZE,
+        max_connections: int = DEFAULT_MAX_CONNECTIONS,
     ) -> None:
         self._debounce = debounce_seconds
         self._queue_maxsize = queue_maxsize
+        self._max_connections = max_connections
         self._connections: set[Connection] = set()
         #: (name, action, identity) -> latest resource in the current debounce
         #: window. Keying on the resource identity (not just name+action) keeps
@@ -101,6 +108,20 @@ class WsBroadcaster:
         conn = Connection(self._queue_maxsize)
         self._connections.add(conn)
         return conn
+
+    def try_connect(self) -> Connection | None:
+        """Register a new socket, or ``None`` if the connection cap is reached.
+
+        The concurrent-connection cap (FRG-NFR-014): once ``connection_count``
+        has reached ``max_connections`` this returns ``None`` **without
+        mutating the registry or disturbing any live connection**, so the
+        router can refuse the handshake cleanly. Below the cap it registers and
+        returns the handle exactly as :meth:`connect`. No lock is needed — like
+        the rest of this class it runs on the single app event-loop thread.
+        """
+        if len(self._connections) >= self._max_connections:
+            return None
+        return self.connect()
 
     def disconnect(self, conn: Connection) -> None:
         """Remove a client socket (client disconnect or endpoint teardown)."""
@@ -191,6 +212,7 @@ async def pump(conn: Connection, send: Callable[[str], Awaitable[None]]) -> None
 __all__ = [
     "DEFAULT_DEBOUNCE_SECONDS",
     "DEFAULT_QUEUE_MAXSIZE",
+    "DEFAULT_MAX_CONNECTIONS",
     "Connection",
     "WsBroadcaster",
     "pump",
