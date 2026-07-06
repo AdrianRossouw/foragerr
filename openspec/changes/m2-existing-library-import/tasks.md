@@ -33,13 +33,13 @@
 
 ## 3. Duplicate constraint (FRG-PP-014)
 
-- [ ] 3.1 Parser: `(fN)` fixed-release marker annotation on `ParseResult` +
+- [x] 3.1 Parser: `(fN)` fixed-release marker annotation on `ParseResult` +
       corpus rows (incl. a title-plausibility guard case). [FRG-PP-014]
-- [ ] 3.2 `DuplicateConstraintSpec` arbitrating ONLY same-rung ties:
+- [x] 3.2 `DuplicateConstraintSpec` arbitrating ONLY same-rung ties:
       markers first, then `duplicate_constraint` (`larger-size` default,
       `preferred-format`); history reason recorded. Upgrade/downgrade behavior
       byte-identical to before (tests pin). [FRG-PP-014]
-- [ ] 3.3 Dump-folder disposal in `execute`'s replaced-file branch:
+- [x] 3.3 Dump-folder disposal in `execute`'s replaced-file branch:
       `duplicate_dump_path` dated subdirs, collision-suffixed, unmarked root
       (recycle prune never touches it — test). Config fields + config resource
       + settings UI + documented config regen. [FRG-PP-014]
