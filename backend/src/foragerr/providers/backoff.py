@@ -40,6 +40,14 @@ logger = logging.getLogger("foragerr.providers.backoff")
 PROVIDER_INDEXER = "indexer"
 PROVIDER_DOWNLOAD_CLIENT = "download_client"
 PROVIDER_DDL = "ddl"
+#: The single external weekly-pull source (m3-pull-backbone, FRG-PULL-002). It
+#: is a singleton — one configured URL, not a table of rows — so it rides the
+#: shared ladder under a fixed sentinel id (:data:`PULL_PROVIDER_ID`); a
+#: back-off row here is what surfaces the pull source as degraded in health.
+PROVIDER_PULL = "pull"
+
+#: The fixed row id for the singleton pull source on the shared back-off ladder.
+PULL_PROVIDER_ID = 0
 
 #: The escalation ladder (FRG-IDX-010): index 0 is "no back-off" (0 s); each
 #: consecutive failure steps one rung, capped at 24 h. Copied close to Sonarr's
