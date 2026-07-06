@@ -551,3 +551,73 @@ export interface LibraryImportGroup {
    * failure) — rendered verbatim on the group card when present. */
   message: string | null;
 }
+
+/*
+ * System status / health / tasks (FRG-API-014, FRG-NFR-011, FRG-UI-016).
+ * m2-ops-health-backups — the backend routers do not exist yet in this
+ * worktree; these types are coded directly from the change's delta specs
+ * (specs/api/spec.md, specs/ui/spec.md) and design.md decisions 6/8/9.
+ */
+
+/**
+ * GET /api/v1/system/status response (FRG-API-014). EXTENDS the existing
+ * `{version, commit, build_date}` fields (kept byte-for-byte) with runtime
+ * info and managed `/config` paths only — never a secret (design decision 9).
+ */
+export interface SystemStatusResource {
+  version: string;
+  commit: string;
+  build_date: string;
+  config_dir: string;
+  db_path: string;
+  backups_dir: string;
+  root_folder_count: number;
+  uptime_seconds: number;
+  python_version: string;
+  os: string;
+}
+
+/** Health item severity, shared by the warnings list and per-component view. */
+export type HealthStateType = 'ok' | 'warning' | 'error';
+
+/**
+ * One GET /api/v1/health warnings-list entry (FRG-API-014 design decision 5).
+ * `remediationHint` is camelCase verbatim per the api delta spec's contract
+ * note, even though most other envelopes in this API are snake_case.
+ */
+export interface HealthWarningItem {
+  source: string;
+  type: HealthStateType;
+  message: string;
+  remediationHint: string | null;
+}
+
+/** Per-component state for GET /api/v1/system/health (FRG-NFR-011). */
+export type ComponentHealthState = 'ok' | 'degraded' | 'error';
+
+/**
+ * One GET /api/v1/system/health per-component row (design decision 6). A
+ * `degraded` indexer/provider carries `disabled_until` (back-off countdown);
+ * `database` reflects integrity + last-backup age instead.
+ */
+export interface SystemHealthComponent {
+  component: string;
+  state: ComponentHealthState;
+  message: string | null;
+  last_success: string | null;
+  last_failure: string | null;
+  disabled_until: string | null;
+}
+
+/**
+ * One GET /api/v1/system/task row (design decision 8): `scheduler.status()`
+ * enriched with the command name and a display label.
+ */
+export interface ScheduledTaskResource {
+  name: string;
+  command_name: string;
+  label: string;
+  interval_seconds: number;
+  last_run: string | null;
+  next_run: string | null;
+}

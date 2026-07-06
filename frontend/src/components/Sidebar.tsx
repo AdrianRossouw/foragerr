@@ -45,6 +45,17 @@ const NAV_GROUPS: NavGroup[] = [
       { to: '/settings/download-clients', label: 'Download Clients' },
     ],
   },
+  // System (FRG-UI-016, m2-ops-health-backups): the operator's view of the
+  // running instance — status/paths/runtime, health warnings + per-component
+  // state, and the scheduled-task list with force-run/"Back up now".
+  {
+    label: 'System',
+    items: [
+      { to: '/system/status', label: 'Status' },
+      { to: '/system/health', label: 'Health' },
+      { to: '/system/tasks', label: 'Tasks' },
+    ],
+  },
 ];
 
 const STATUS_LABEL: Record<ConnectionStatus, string> = {

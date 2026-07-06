@@ -11,6 +11,9 @@ import { WantedScreen } from './screens/wanted/WantedScreen';
 import { IndexerSettings } from './routes/settings/IndexerSettings';
 import { DownloadClientSettings } from './routes/settings/DownloadClientSettings';
 import { MediaManagement } from './screens/settings/MediaManagement';
+import { StatusScreen } from './screens/system/StatusScreen';
+import { HealthScreen } from './screens/system/HealthScreen';
+import { TasksScreen } from './screens/system/TasksScreen';
 
 /**
  * Routing (FRG-UI-001). All change-7 screens are real: library cluster
@@ -18,7 +21,8 @@ import { MediaManagement } from './screens/settings/MediaManagement';
  * renderer (FRG-UI-008/009). The interactive-search overlay (FRG-UI-007)
  * mounts from SeriesDetail/Wanted, not a route. m2-daily-surfaces adds the
  * daily review screens: wanted (FRG-UI-011), history (FRG-UI-010), and
- * blocklist (FRG-UI-017).
+ * blocklist (FRG-UI-017). m2-ops-health-backups adds the System area
+ * (FRG-UI-016): status, health, and tasks.
  */
 export function App() {
   return (
@@ -41,6 +45,9 @@ export function App() {
           path="settings/media-management"
           element={<MediaManagement />}
         />
+        <Route path="system/status" element={<StatusScreen />} />
+        <Route path="system/health" element={<HealthScreen />} />
+        <Route path="system/tasks" element={<TasksScreen />} />
       </Route>
     </Routes>
   );

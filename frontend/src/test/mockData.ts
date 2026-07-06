@@ -3,6 +3,7 @@ import type {
   BlocklistRecord,
   CommandResource,
   FormatProfileResource,
+  HealthWarningItem,
   HistoryRecord,
   IssueResource,
   LibraryImportGroup,
@@ -13,12 +14,15 @@ import type {
   QueueResourceRaw,
   ReleaseDecision,
   RootFolderResource,
+  ScheduledTaskResource,
   Series,
   SeriesCreatedResource,
   SeriesDetail,
   SeriesResource,
   SeriesStatisticsResource,
   SuggestCandidate,
+  SystemHealthComponent,
+  SystemStatusResource,
   WantedIssueRecord,
 } from '../api/types';
 
@@ -516,3 +520,77 @@ export const mockSeriesCreated: SeriesCreatedResource = {
   }),
   refresh_command_id: 55,
 };
+
+/*
+ * System area (FRG-UI-016 / FRG-API-014 / FRG-NFR-011) — m2-ops-health-backups.
+ */
+
+/** GET /api/v1/system/status — a healthy, fully-populated status (no secret fields). */
+export function makeSystemStatus(
+  overrides: Partial<SystemStatusResource> = {},
+): SystemStatusResource {
+  return {
+    version: '0.2.5',
+    commit: '077833d',
+    build_date: '2026-07-06T00:00:00Z',
+    config_dir: '/config',
+    db_path: '/config/foragerr.db',
+    backups_dir: '/config/backups',
+    root_folder_count: 2,
+    uptime_seconds: 3_600 * 5,
+    python_version: '3.12.4',
+    os: 'Linux',
+    ...overrides,
+  };
+}
+
+/** One GET /api/v1/health warnings-list entry. */
+export function makeHealthWarning(
+  overrides: Partial<HealthWarningItem> & Pick<HealthWarningItem, 'source'>,
+): HealthWarningItem {
+  return {
+    type: 'warning',
+    message: 'Indexer is disabled after repeated failures.',
+    remediationHint: 'Check the indexer credentials and try again.',
+    ...overrides,
+  };
+}
+
+/** One GET /api/v1/system/health per-component row. */
+export function makeHealthComponent(
+  overrides: Partial<SystemHealthComponent> & Pick<SystemHealthComponent, 'component'>,
+): SystemHealthComponent {
+  return {
+    state: 'ok',
+    message: null,
+    last_success: '2026-07-06T12:00:00Z',
+    last_failure: null,
+    disabled_until: null,
+    ...overrides,
+  };
+}
+
+/** GET /api/v1/system/health for an all-healthy system, one row per component area. */
+export const mockHealthyComponents: SystemHealthComponent[] = [
+  makeHealthComponent({ component: 'comicvine' }),
+  makeHealthComponent({ component: 'indexer:DogNZB' }),
+  makeHealthComponent({ component: 'download_client:SABnzbd' }),
+  makeHealthComponent({ component: 'scheduler' }),
+  makeHealthComponent({ component: 'database' }),
+  makeHealthComponent({ component: 'root_folders' }),
+  makeHealthComponent({ component: 'disk_space' }),
+];
+
+/** One GET /api/v1/system/task row. */
+export function makeScheduledTask(
+  overrides: Partial<ScheduledTaskResource> & Pick<ScheduledTaskResource, 'name'>,
+): ScheduledTaskResource {
+  return {
+    command_name: overrides.name,
+    label: overrides.name,
+    interval_seconds: 86_400,
+    last_run: '2026-07-05T03:00:00Z',
+    next_run: '2026-07-06T03:00:00Z',
+    ...overrides,
+  };
+}

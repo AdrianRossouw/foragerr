@@ -111,6 +111,20 @@ export const queryKeys = {
     // collides or cross-invalidates.
     suggest: (term: string) => ['lookup', 'suggest', term] as const,
   },
+  // System area (FRG-UI-016 / FRG-API-014 / FRG-NFR-011), mirroring
+  // GET /api/v1/system/{status,health,task}.
+  system: {
+    status: () => ['system', 'status'] as const,
+    health: () => ['system', 'health'] as const,
+    tasks: () => ['system', 'task'] as const,
+  },
+  // The actionable warnings list is deliberately its OWN top-level family
+  // (not nested under `system`): it mirrors GET /api/v1/health, distinct from
+  // both the root liveness `/health` (no query key — never fetched via React
+  // Query) and GET /api/v1/system/health above (design decision 5).
+  health: {
+    warnings: () => ['health'] as const,
+  },
 } as const;
 
 export type SeriesListKey = ReturnType<typeof queryKeys.series.all>;
