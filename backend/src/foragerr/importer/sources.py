@@ -20,8 +20,7 @@ flows commands own those transitions. ``gather`` only reads.
 
 from __future__ import annotations
 
-import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from sqlalchemy import select
@@ -30,11 +29,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from foragerr.downloads.models import GrabHistoryRow
 from foragerr.downloads.pathmap import RemotePathMapping, apply_mappings
 from foragerr.importer.context import ImportContext
-from foragerr.library.models import IssueFileRow, IssueRow, SeriesRow
 
 # Source-kind discriminators carried on the candidate (data, not a type switch).
-SOURCE_DOWNLOAD = "download"
-SOURCE_RESCAN = "rescan"
+# Canonically owned by :mod:`foragerr.importer.history` (the provenance column
+# uses the same values); re-exported here so callers keep one import site.
+from foragerr.importer.history import SOURCE_DOWNLOAD, SOURCE_RESCAN
+from foragerr.library import matching
+from foragerr.library.models import IssueFileRow, IssueRow, SeriesRow
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,41 +64,6 @@ class ImportCandidate:
     mapping_warning: str | None = None
 
 
-def _iter_archive_files(
-    root: str, extensions: tuple[str, ...], max_depth: int
-) -> list[tuple[str, int]]:
-    """Yield ``(path, size)`` for archive files under ``root`` to a bounded depth.
-
-    A single regular file passed as ``root`` yields just itself. A non-existent
-    path yields nothing. Depth is measured from ``root`` (0 = files directly in
-    ``root``)."""
-    base = Path(root)
-    if base.is_file():
-        try:
-            return [(str(base), base.stat().st_size)]
-        except OSError:
-            return []
-    if not base.exists():
-        return []
-    exts = {e.lower().lstrip(".") for e in extensions}
-    out: list[tuple[str, int]] = []
-    base_depth = str(base).rstrip(os.sep).count(os.sep)
-    for dirpath, dirs, files in os.walk(base):
-        depth = dirpath.rstrip(os.sep).count(os.sep) - base_depth
-        if depth >= max_depth:
-            dirs[:] = []  # do not descend further
-        for name in files:
-            ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
-            if ext not in exts:
-                continue
-            full = os.path.join(dirpath, name)
-            try:
-                out.append((full, os.path.getsize(full)))
-            except OSError:  # pragma: no cover - racing deletion
-                continue
-    return out
-
-
 @dataclass(frozen=True, slots=True)
 class CompletedDownloadSource:
     """A completed download awaiting import (FRG-PP-001/003/008)."""
@@ -114,12 +80,14 @@ class CompletedDownloadSource:
         """Produce candidates for this download (FRG-PP-003/008)."""
         mapped = apply_mappings(self.output_path, list(self.mappings))
         # Reconcile by download id once; the grab title feeds evidence and its
-        # series/issue become the candidate's high-confidence hints.
+        # series/issue become the candidate's high-confidence hints. A re-grab
+        # of the same download id leaves several rows, so take the LATEST by id
+        # (deterministic) rather than an arbitrary one (FRG-PP-004).
         grab = (
             await session.execute(
-                select(GrabHistoryRow).where(
-                    GrabHistoryRow.download_id == self.download_id
-                )
+                select(GrabHistoryRow)
+                .where(GrabHistoryRow.download_id == self.download_id)
+                .order_by(GrabHistoryRow.id.desc())
             )
         ).scalars().first()
         grab_title = grab.title if grab is not None else None
@@ -146,8 +114,8 @@ class CompletedDownloadSource:
                 )
             ]
 
-        files = _iter_archive_files(
-            mapped.path, ctx.archive_extensions, ctx.max_walk_depth
+        files = matching.iter_archive_files(
+            mapped.path, ctx.archive_extensions, max_depth=ctx.max_walk_depth
         )
         root = mapped.path if Path(mapped.path).is_dir() else str(Path(mapped.path).parent)
         return [
@@ -199,7 +167,9 @@ class RescanSource:
             .scalars()
             .all()
         )
-        files = _iter_archive_files(path, ctx.archive_extensions, ctx.max_walk_depth)
+        files = matching.iter_archive_files(
+            path, ctx.archive_extensions, max_depth=ctx.max_walk_depth
+        )
         return [
             ImportCandidate(
                 source_kind=SOURCE_RESCAN,
