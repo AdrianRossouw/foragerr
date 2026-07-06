@@ -56,7 +56,7 @@ worktrees per FRG-PROC-008). Every requirement gets at least one tagged test
 
 ## D. Docs, security, traceability, gate
 
-- [x] D.1 Manual (FRG-PROC-011): `docs/manual/web-ui.md` — Add Series section
+- [x] D.1 Manual (FRG-PROC-011): `docs/manual/user/web-ui.md` — Add Series section
       gains the debounced autosuggest behaviour; a new "Quick search" subsection
       documents the header search box (local titles/aliases, keyboard nav, and
       the "Search ComicVine for …" fall-through into Add Series). [FRG-PROC-011]

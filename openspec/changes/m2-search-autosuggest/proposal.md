@@ -98,7 +98,7 @@ day-to-day navigation gaps and one deferred verification debt:
   data already delivered). **Declared: a security-docs delta IS required and is
   a task in this change.**
 - **Manual** (FRG-PROC-011): this adds user-facing search UX, so
-  `docs/manual/web-ui.md` WILL be updated — the Add Series section gains the
+  `docs/manual/user/web-ui.md` WILL be updated — the Add Series section gains the
   autosuggest behaviour, and a new "Quick search" subsection documents the header
   search box (local-only matching over titles/aliases, keyboard navigation, and
   the "Search ComicVine for …" fall-through into Add Series). No admin-facing or
