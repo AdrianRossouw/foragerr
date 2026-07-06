@@ -201,10 +201,13 @@ export interface IssueResource {
  * Lookup envelope (FRG-API-003): the candidate records plus the pagination
  * walk's `complete` flag. A degraded ComicVine walk returns `complete=false`
  * so the UI can flag partial results instead of rendering plain "no results".
+ * `truncated=true` means the deliberate result cap was hit (and implies
+ * `complete=false`) — that outcome asks for a narrower term, not a retry.
  */
 export interface LookupResponse {
   records: LookupCandidate[];
   complete: boolean;
+  truncated: boolean;
 }
 
 /** ComicVine search candidate with plausibility annotations (FRG-META-007). */

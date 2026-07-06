@@ -13,37 +13,72 @@ import {
   pageOf,
 } from '../../test/mockData';
 import { useUiStore } from '../../store/uiStore';
-import { ApiRequestError } from '../../api/fetcher';
-import type { FetcherInit } from '../../api/fetcher';
-import {
-  AddSeries,
-  isComicVineAuthMessage,
-  normalizeLookupTerm,
-} from './AddSeries';
+import { ApiRequestError, isComicVineAuthError } from '../../api/fetcher';
+import { AddSeries, normalizeLookupTerm } from './AddSeries';
 import { SeriesDetail } from '../series/SeriesDetail';
 
-/** The backend's verbatim ComicVine auth-failure message (FRG-API-003). */
-const CV_AUTH_MESSAGE =
-  'comicvine lookup failed: ComicVine rejected the API key (missing or invalid) — set comicvine_api_key';
+/**
+ * The backend's verbatim ComicVine auth-failure error body (pinned by a
+ * backend contract test). The errors[] entry naming the offending field is
+ * the machine-readable discriminator the screen classifies on — the message
+ * text is presentation only.
+ */
+const CV_AUTH_BODY = {
+  message:
+    'comicvine lookup failed: ComicVine rejected the API key (missing or invalid) — set comicvine_api_key',
+  errors: [
+    {
+      field: 'comicvine_api_key',
+      message:
+        'ComicVine rejected the API key (missing or invalid) — set comicvine_api_key',
+    },
+  ],
+};
+
+/** A non-credential lookup failure: uniform body, no field discriminator. */
+const CV_UPSTREAM_BODY = {
+  message: 'comicvine lookup failed: upstream unavailable',
+  errors: [],
+};
+
+function cvAuthError(): ApiRequestError {
+  return new ApiRequestError(503, CV_AUTH_BODY, '/api/v1/series/lookup?term=saga');
+}
+
+function cvUpstreamError(): ApiRequestError {
+  return new ApiRequestError(
+    503,
+    CV_UPSTREAM_BODY,
+    '/api/v1/series/lookup?term=saga',
+  );
+}
 
 /**
  * FRG-UI-005 — Add-series screen: ComicVine lookup with plausibility
- * annotations, add-options panel, add -> navigate to detail with the queued
- * refresh command visible in progress. Fake fetcher only.
+ * annotations, distinct non-success outcome states, add-options panel,
+ * add -> navigate to detail with the queued refresh command visible in
+ * progress. Fake fetcher only.
  */
 
 beforeEach(() => {
   useUiStore.setState({ interactiveSearchIssueId: null });
 });
 
-function addFetcher() {
+/** Default lookup resolver: candidates for `saga`, clean-empty otherwise. */
+function defaultLookup(path: string): unknown {
+  if (path === '/api/v1/series/lookup?term=saga') {
+    return { records: mockLookupCandidates, complete: true, truncated: false };
+  }
+  return { records: [], complete: true, truncated: false };
+}
+
+function addFetcher({
+  lookup = defaultLookup,
+}: { lookup?: (path: string) => unknown } = {}) {
   return fakeFetcher((path, options) => {
     const method = options?.method ?? 'GET';
-    if (method === 'GET' && path === '/api/v1/series/lookup?term=saga') {
-      return { records: mockLookupCandidates, complete: true };
-    }
     if (method === 'GET' && path.startsWith('/api/v1/series/lookup?term=')) {
-      return { records: [], complete: true };
+      return lookup(path);
     }
     if (method === 'GET' && path === '/api/v1/rootfolder') return mockRootFolders;
     if (method === 'GET' && path === '/api/v1/formatprofile') {
@@ -62,8 +97,8 @@ function addFetcher() {
   });
 }
 
-function renderAdd() {
-  const { spy, fetcher } = addFetcher();
+function renderAdd(overrides: { lookup?: (path: string) => unknown } = {}) {
+  const { spy, fetcher } = addFetcher(overrides);
   const utils = renderWithProviders(
     <Routes>
       <Route path="/add" element={<AddSeries />} />
@@ -223,40 +258,19 @@ describe('FRG-UI-005: add series', () => {
 });
 
 /**
- * FRG-UI-005 — the three non-success search outcomes must render distinctly:
- * a credential/lookup error, an incomplete (degraded) walk, and a genuinely
- * empty result — a credential failure or degraded walk is NEVER shown as plain
- * "no results".
+ * FRG-UI-005 — the non-success search outcomes must render distinctly and
+ * mutually exclusively: a credential error, a generic lookup error, a
+ * degraded walk (with and without records), a capped result set, and a
+ * genuinely empty result. A credential failure or degraded walk is NEVER
+ * shown as plain "no results", and stale candidates never render under an
+ * error.
  */
 describe('FRG-UI-005: lookup outcome states', () => {
-  /** Render Add with a bespoke resolver for the `term=saga` lookup only. */
-  function renderAddWithLookup(lookup: (path: string) => unknown) {
-    const { fetcher } = fakeFetcher((path: string, options?: FetcherInit) => {
-      const method = options?.method ?? 'GET';
-      if (method === 'GET' && path.startsWith('/api/v1/series/lookup?term=')) {
-        return lookup(path);
-      }
-      if (method === 'GET' && path === '/api/v1/rootfolder') return mockRootFolders;
-      if (method === 'GET' && path === '/api/v1/formatprofile') {
-        return mockFormatProfiles;
-      }
-      throw new Error(`unexpected request: ${method} ${path}`);
-    });
-    return renderWithProviders(
-      <Routes>
-        <Route path="/add" element={<AddSeries />} />
-      </Routes>,
-      { fetcher, route: '/add' },
-    );
-  }
-
   it('FRG-UI-005 — a ComicVine credential failure renders Settings guidance, not the empty state', async () => {
-    renderAddWithLookup(() => {
-      throw new ApiRequestError(
-        503,
-        { message: CV_AUTH_MESSAGE, errors: [] },
-        '/api/v1/series/lookup?term=saga',
-      );
+    renderAdd({
+      lookup: () => {
+        throw cvAuthError();
+      },
     });
     await searchFor('saga');
 
@@ -265,19 +279,50 @@ describe('FRG-UI-005: lookup outcome states', () => {
         screen.getByText('ComicVine API key missing or invalid — check Settings.'),
       ).toBeInTheDocument(),
     );
+    expect(screen.getByRole('alert')).toBeInTheDocument();
     // The credential error must NOT be dressed up as "no results".
     expect(screen.queryByText(/No volumes found/)).not.toBeInTheDocument();
     // ...nor as the generic retry error.
     expect(screen.queryByText(/Try again in a moment/)).not.toBeInTheDocument();
   });
 
+  it('FRG-UI-005 — credential detection is structural (errors[] field), not message prose', () => {
+    // The field discriminator decides, regardless of the message text.
+    expect(isComicVineAuthError(cvAuthError())).toBe(true);
+    expect(
+      isComicVineAuthError(
+        new ApiRequestError(
+          503,
+          { message: 'anything at all', errors: CV_AUTH_BODY.errors },
+          '/api/v1/series/lookup?term=saga',
+        ),
+      ),
+    ).toBe(true);
+    // Credential-sounding prose WITHOUT the field must not match.
+    expect(
+      isComicVineAuthError(
+        new ApiRequestError(
+          503,
+          { message: CV_AUTH_BODY.message, errors: [] },
+          '/api/v1/series/lookup?term=saga',
+        ),
+      ),
+    ).toBe(false);
+    // Non-ApiRequestError values and missing bodies never match.
+    expect(isComicVineAuthError(new Error(CV_AUTH_BODY.message))).toBe(false);
+    expect(
+      isComicVineAuthError(
+        new ApiRequestError(503, null, '/api/v1/series/lookup?term=saga'),
+      ),
+    ).toBe(false);
+    expect(isComicVineAuthError(undefined)).toBe(false);
+  });
+
   it('FRG-UI-005 — a non-credential lookup failure renders the generic error', async () => {
-    renderAddWithLookup(() => {
-      throw new ApiRequestError(
-        503,
-        { message: 'comicvine lookup failed: upstream unavailable', errors: [] },
-        '/api/v1/series/lookup?term=saga',
-      );
+    renderAdd({
+      lookup: () => {
+        throw cvUpstreamError();
+      },
     });
     await searchFor('saga');
 
@@ -289,20 +334,67 @@ describe('FRG-UI-005: lookup outcome states', () => {
     expect(screen.queryByText(/check Settings/)).not.toBeInTheDocument();
   });
 
-  it('FRG-UI-005 — an incomplete result renders the candidates plus an incomplete notice', async () => {
-    renderAddWithLookup(() => ({ records: mockLookupCandidates, complete: false }));
+  it('FRG-UI-005 — a degraded walk with zero records renders as a lookup failure, not a footnote', async () => {
+    renderAdd({
+      lookup: () => ({ records: [], complete: false, truncated: false }),
+    });
+    await searchFor('saga');
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(
+      'ComicVine lookup failed part-way and returned nothing — try again in a moment.',
+    );
+    // Error styling and retry guidance — never "no results" or a mild notice.
+    expect(screen.queryByText(/No volumes found/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Results may be incomplete/)).not.toBeInTheDocument();
+  });
+
+  it('FRG-UI-005 — a capped result renders the candidates plus narrow-the-term guidance', async () => {
+    renderAdd({
+      lookup: () => ({
+        records: mockLookupCandidates,
+        complete: false,
+        truncated: true,
+      }),
+    });
     await searchFor('saga');
 
     await waitFor(() =>
       expect(screen.getByTestId('candidate-40501234')).toBeInTheDocument(),
     );
-    expect(screen.getByText(/Results may be incomplete/)).toBeInTheDocument();
-    // Incomplete is NOT "no results".
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Too many results — ComicVine capped this search. Narrow the term.',
+    );
+    // The cap advises narrowing — never the transient "retry" wording.
+    expect(screen.queryByText(/Results may be incomplete/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/try again/i)).not.toBeInTheDocument();
+  });
+
+  it('FRG-UI-005 — an incomplete result renders the candidates plus an incomplete notice', async () => {
+    renderAdd({
+      lookup: () => ({
+        records: mockLookupCandidates,
+        complete: false,
+        truncated: false,
+      }),
+    });
+    await searchFor('saga');
+
+    await waitFor(() =>
+      expect(screen.getByTestId('candidate-40501234')).toBeInTheDocument(),
+    );
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Results may be incomplete — ComicVine did not return everything.',
+    );
+    // Incomplete is NOT "no results" and NOT the cap notice.
     expect(screen.queryByText(/No volumes found/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Too many results/)).not.toBeInTheDocument();
   });
 
   it('FRG-UI-005 — a complete-and-empty result renders the plain "No volumes found" state', async () => {
-    renderAddWithLookup(() => ({ records: [], complete: true }));
+    renderAdd({
+      lookup: () => ({ records: [], complete: true, truncated: false }),
+    });
     await searchFor('saga');
 
     await waitFor(() =>
@@ -310,20 +402,77 @@ describe('FRG-UI-005: lookup outcome states', () => {
     );
     expect(screen.queryByText(/Results may be incomplete/)).not.toBeInTheDocument();
     expect(screen.queryByText(/check Settings/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
-  it('FRG-UI-005 — isComicVineAuthMessage matches only the credential wording', () => {
-    expect(isComicVineAuthMessage(CV_AUTH_MESSAGE)).toBe(true);
+  it('FRG-UI-005 — re-submitting the same term after an error refires the lookup for real', async () => {
+    let calls = 0;
+    const { spy } = renderAdd({
+      lookup: () => {
+        calls += 1;
+        if (calls === 1) throw cvUpstreamError();
+        return { records: mockLookupCandidates, complete: true, truncated: false };
+      },
+    });
+    const user = await searchFor('saga');
+
+    await waitFor(() =>
+      expect(
+        screen.getByText('ComicVine lookup failed. Try again in a moment.'),
+      ).toBeInTheDocument(),
+    );
+
+    // Same term, submitted again: a FRESH request must be issued — the error
+    // is not served from cache and no term perturbation is needed.
+    await user.click(screen.getByRole('button', { name: 'Search' }));
+    await waitFor(() =>
+      expect(screen.getByTestId('candidate-40501234')).toBeInTheDocument(),
+    );
+    const lookupCalls = spy.mock.calls.filter(
+      ([path]) => path === '/api/v1/series/lookup?term=saga',
+    );
+    expect(lookupCalls).toHaveLength(2);
     expect(
-      isComicVineAuthMessage('ComicVine rejected the API key (missing or invalid)'),
-    ).toBe(true);
-    // Narrow: a generic upstream 503 or unrelated error must not match.
-    expect(
-      isComicVineAuthMessage('comicvine lookup failed: upstream unavailable'),
-    ).toBe(false);
-    expect(isComicVineAuthMessage('Request failed: 500')).toBe(false);
-    expect(isComicVineAuthMessage(null)).toBe(false);
-    expect(isComicVineAuthMessage(undefined)).toBe(false);
-    expect(isComicVineAuthMessage('')).toBe(false);
+      screen.queryByText(/Try again in a moment/),
+    ).not.toBeInTheDocument();
+  });
+
+  it('FRG-UI-005 — a same-term retry of a degraded outcome refetches, and an error then suppresses the stale candidates', async () => {
+    let calls = 0;
+    const { spy } = renderAdd({
+      lookup: () => {
+        calls += 1;
+        if (calls === 1) {
+          // Capped outcome: retryable, so a same-term re-submit refetches.
+          return {
+            records: mockLookupCandidates,
+            complete: false,
+            truncated: true,
+          };
+        }
+        throw cvUpstreamError();
+      },
+    });
+    const user = await searchFor('saga');
+
+    await waitFor(() =>
+      expect(screen.getByTestId('candidate-40501234')).toBeInTheDocument(),
+    );
+    expect(screen.getByText(/Too many results/)).toBeInTheDocument();
+
+    // Same term again: the capped envelope is not served from cache...
+    await user.click(screen.getByRole('button', { name: 'Search' }));
+    await waitFor(() =>
+      expect(
+        screen.getByText('ComicVine lookup failed. Try again in a moment.'),
+      ).toBeInTheDocument(),
+    );
+    const lookupCalls = spy.mock.calls.filter(
+      ([path]) => path === '/api/v1/series/lookup?term=saga',
+    );
+    expect(lookupCalls).toHaveLength(2);
+    // ...and the now-stale candidates must NOT render under the error.
+    expect(screen.queryByTestId('candidate-40501234')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Too many results/)).not.toBeInTheDocument();
   });
 });
