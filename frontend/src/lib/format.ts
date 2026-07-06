@@ -32,10 +32,28 @@ export function formatAge(ageSeconds: number | null | undefined): string {
   return `${(days / 365).toFixed(1)}y`;
 }
 
+/**
+ * FRG-API-014: the backend's `utcnow()` (backend/src/foragerr/db/base.py)
+ * persists NAIVE UTC datetimes by convention (tzinfo stripped), and Pydantic
+ * v2 serializes a naive `datetime` field via plain `isoformat()` — no
+ * trailing 'Z', no offset (e.g. "2026-07-06T03:00:00"). `Date.parse`/`new
+ * Date(...)` treat such an offset-less *datetime* string as LOCAL time, which
+ * silently shifts every countdown/timestamp by the viewer's UTC offset (a
+ * UTC+2 viewer sees next-run times 2h in the past, "—"; a health
+ * disabled-until countdown reads wrong). This appends 'Z' to an offset-less
+ * datetime string so it parses as the UTC instant the backend meant. A string
+ * that already carries 'Z' or a numeric offset — or has no time component at
+ * all (a plain date like "2003-01-01", which the spec already treats as
+ * UTC-midnight) — is returned unchanged.
+ */
+function asUtcIso(iso: string): string {
+  return /T/.test(iso) && !/(Z|[+-]\d{2}:?\d{2})$/.test(iso) ? `${iso}Z` : iso;
+}
+
 /** ISO timestamp -> "in 4m" / "in 2h 05m"; past or null -> em dash. */
 export function formatEta(iso: string | null | undefined, now = Date.now()): string {
   if (!iso) return '—';
-  const target = Date.parse(iso);
+  const target = Date.parse(asUtcIso(iso));
   if (Number.isNaN(target) || target <= now) return '—';
   const totalMinutes = Math.ceil((target - now) / 60_000);
   if (totalMinutes < 60) return `in ${totalMinutes}m`;
@@ -47,7 +65,7 @@ export function formatEta(iso: string | null | undefined, now = Date.now()): str
 /** ISO date/datetime string -> "Jan 5 2026"; null-safe. */
 export function formatDate(iso: string | null): string {
   if (!iso) return '—';
-  const date = new Date(iso);
+  const date = new Date(asUtcIso(iso));
   if (Number.isNaN(date.getTime())) return '—';
   return date.toLocaleDateString('en-US', {
     month: 'short',

@@ -207,7 +207,7 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-API-011 | History endpoint | api | implemented | M2 |
 | FRG-API-012 | Wanted/missing endpoint | api | implemented | M2 |
 | FRG-API-013 | Config resource endpoints | api | implemented | M2 |
-| FRG-API-014 | System status, health, and task endpoints | api | approved | M2 |
+| FRG-API-014 | System status, health, and task endpoints | api | implemented | M2 |
 | FRG-API-015 | Manual import endpoint | api | implemented | M2 |
 | FRG-API-016 | Parse debug endpoint | api | approved | B |
 | FRG-API-017 | ComicVine suggest (bounded lookup variant) | api | implemented | M2 |
@@ -226,7 +226,7 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-UI-013 | Settings: notifications | ui | approved | B |
 | FRG-UI-014 | Manual import overlay | ui | implemented | M2 |
 | FRG-UI-015 | Library import (existing files) flow | ui | implemented | M2 |
-| FRG-UI-016 | System status and tasks screens | ui | approved | M2 |
+| FRG-UI-016 | System status and tasks screens | ui | implemented | M2 |
 | FRG-UI-017 | Blocklist screen | ui | implemented | M2 |
 | FRG-UI-018 | Weekly pull / calendar view | ui | approved | M3 |
 | FRG-UI-019 | Global header quick-search over the local library | ui | implemented | M2 |
@@ -261,10 +261,10 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-DB-006 | single-writer discipline | db | implemented | M1 |
 | FRG-DB-007 | transactional multi-step operations | db | implemented | M1 |
 | FRG-DB-008 | typed, sentinel-free schema | db | implemented | M1 |
-| FRG-DB-009 | scheduled backups with retention | db | approved | M2 |
-| FRG-DB-010 | restore from backup | db | approved | M2 |
+| FRG-DB-009 | scheduled backups with retention | db | implemented | M2 |
+| FRG-DB-010 | restore from backup | db | implemented | M2 |
 | FRG-DB-011 | library export and import | db | approved | B |
-| FRG-DB-012 | integrity verification | db | approved | M2 |
+| FRG-DB-012 | integrity verification | db | implemented | M2 |
 | FRG-SCHED-001 | command abstraction for background work | sched | implemented | M1 |
 | FRG-SCHED-002 | persisted command queue surviving restart | sched | implemented | M1 |
 | FRG-SCHED-003 | command de-duplication | sched | implemented | M1 |
@@ -308,7 +308,7 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-NFR-008 | secret redaction in logs and errors | nfr | implemented | M1 |
 | FRG-NFR-009 | configuration validation at startup | nfr | implemented | M1 |
 | FRG-NFR-010 | resilience to external-service failure | nfr | implemented | M1 |
-| FRG-NFR-011 | observable component health | nfr | approved | M2 |
+| FRG-NFR-011 | observable component health | nfr | implemented | M2 |
 | FRG-NFR-012 | untrusted external content handling | nfr | implemented | M1 |
 | FRG-NFR-013 | resource footprint | nfr | approved | B |
 | FRG-SEC-001 | SSRF egress controls for server-side fetches | sec | implemented | M1 |

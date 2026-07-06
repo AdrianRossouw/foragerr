@@ -44,8 +44,10 @@ last update to this statement, that is everything through M1 (v0.1.x: foundation
 filename parser, library + metadata, search + indexers, downloads, import pipeline,
 UI + OPDS + deployment, integration/e2e) and the M2 changes merged so far (v0.2.x:
 settings/naming/recycle-bin configuration, manual import + ComicInfo tagging,
-lookup error surfacing). It does not describe behavior that exists only in an open
-change branch or an unmerged proposal.
+lookup error surfacing, existing-library import, delete/OpenSearch/quick-search
+daily-use surfaces, search autosuggest, and scheduled backups + restore + the
+System status/health/tasks screens). It does not describe behavior that exists
+only in an open change branch or an unmerged proposal.
 
 Per `FRG-PROC-011`, every OpenSpec change proposal declares its manual impact
 (sections it adds or updates, or an explicit "no manual impact" with rationale), and
@@ -53,6 +55,7 @@ a change that alters manual-documented behavior updates the affected sections in
 same change, before merge to `main`. The merge gate checklist (`docs/process/`)
 verifies the declared impact was carried out.
 
-No chapters are currently stubbed. When a milestone adds user-visible surface
-(library import, wanted/history screens, backups are all in-flight M2 work), its
-chapter or section lands in the same change that merges the behavior.
+No chapters are currently stubbed. Every milestone that has added user-visible
+surface so far (library import, wanted/history screens, backups/restore/System
+screens) landed its chapter or section in the same change that merged the
+behavior.

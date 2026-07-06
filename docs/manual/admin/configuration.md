@@ -41,6 +41,8 @@ under the top level of `config.yaml`.
 | `http_max_response_bytes` | `FORAGERR_HTTP_MAX_RESPONSE_BYTES` | `26214400` (25 MiB) | Byte cap on outbound response bodies; callers may lower, never raise. |
 | `db_busy_timeout_ms` | `FORAGERR_DB_BUSY_TIMEOUT_MS` | `5000` | SQLite `busy_timeout`, all connections. |
 | `db_backup_retention` | `FORAGERR_DB_BACKUP_RETENTION` | `3` | Pre-migration DB backups retained. |
+| `db_backup_interval_seconds` | `FORAGERR_DB_BACKUP_INTERVAL_SECONDS` | `86400` (daily) | How often the scheduled `backup-database` task runs. Minimum 3600 (1 hour); a smaller value is rejected at load. See "Scheduled backups" below. |
+| `db_scheduled_backup_retention` | `FORAGERR_DB_SCHEDULED_BACKUP_RETENTION` | `7` | Number of scheduled backups kept under `backups/scheduled-*`; independent of `db_backup_retention` (the pre-migration pool). |
 | `workers_search` | `FORAGERR_WORKERS_SEARCH` | `1` | Worker count, "search" workload (keep at 1 for indexer politeness). |
 | `workers_download` | `FORAGERR_WORKERS_DOWNLOAD` | `1` | Worker count, "download" workload (SAB tracking + DDL). |
 | `workers_pp` | `FORAGERR_WORKERS_PP` | `1` | Worker count, post-processing workload. |
@@ -103,3 +105,44 @@ migrated forward one step at a time; before any rewrite the original is backed u
 build refuses startup with a precise error and the file is left untouched — restore
 the matching build or the backed-up file. Operator-set values survive migration
 verbatim.
+
+## Scheduled backups
+
+Separately from the pre-migration/pre-config-migration safety copies above,
+foragerr runs a **scheduled `backup-database` task** on `db_backup_interval_seconds`
+(default daily). Each run:
+
+1. runs a full `PRAGMA integrity_check` against the live database — a failing
+   check **aborts the backup** (no new backup directory is written) and is
+   surfaced as a database health error on the System → Health screen instead
+   of silently rotating a copy of the corruption into the backup pool;
+2. WAL-checkpoints and writes a consistent copy of the database (SQLite's
+   online backup API — never a raw file copy of a live WAL database) plus a
+   copy of `config.yaml`, both into a new
+   `/config/backups/scheduled-<timestamp>/` directory;
+3. prunes the `scheduled-*` pool to the newest `db_scheduled_backup_retention`
+   directories (default 7), oldest first.
+
+The `scheduled-*` pool is pruned independently of the `pre-migration-*` pool
+(`db_backup_retention`) and the `pre-config-migration-*` pool
+(`config_backup_retention`) — each prefix is retained on its own count, so
+running low on one never evicts the other.
+
+Because the scheduled backup is an ordinary scheduled task, it also shows up on
+the System → Tasks screen with its interval and last/next run, and its
+prominent **"Back up now"** button force-runs it on demand (the same
+force-run mechanism every other task uses — see `../user/web-ui.md`).
+
+**A backup is a plaintext-credential artifact.** Both the database and
+`config.yaml` store the ComicVine, indexer (DogNZB, NZB.su), and SABnzbd API
+keys in plaintext today — foragerr has no encryption-at-rest or secret store
+yet — so every file under `/config/backups/` carries the same secrets as the
+live configuration. This is a deliberately accepted risk
+(`docs/security/risk-register.md` RISK-041), on the same footing as the
+no-auth posture (RISK-020): backups never leave the container-private
+`/config` volume (there is no cloud/remote/download-backup feature), they
+inherit `/config`'s non-root PUID/PGID ownership, and secret values are never
+logged. Treat `/config/backups/` with the same care as `/config` itself if you
+ever copy it off the host.
+
+See `deployment.md` → "Restoring from a backup" for how to use these files.

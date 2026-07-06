@@ -102,6 +102,9 @@ class BackoffStatus:
     next_allowed_at: dt.datetime | None
     last_reason: str | None
     remaining_seconds: float
+    #: When the most recent failure was recorded (for the health surface,
+    #: FRG-NFR-011 "last-failure timestamp"); ``None`` for an untracked provider.
+    last_failure_at: dt.datetime | None = None
 
     @property
     def healthy(self) -> bool:
@@ -265,4 +268,5 @@ class ProviderBackoff:
             next_allowed_at=row.next_allowed_at,
             last_reason=row.last_reason,
             remaining_seconds=remaining,
+            last_failure_at=row.last_failure_at,
         )

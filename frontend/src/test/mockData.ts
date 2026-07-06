@@ -3,6 +3,7 @@ import type {
   BlocklistRecord,
   CommandResource,
   FormatProfileResource,
+  HealthWarningItem,
   HistoryRecord,
   IssueResource,
   LibraryImportGroup,
@@ -13,12 +14,15 @@ import type {
   QueueResourceRaw,
   ReleaseDecision,
   RootFolderResource,
+  ScheduledTaskResource,
   Series,
   SeriesCreatedResource,
   SeriesDetail,
   SeriesResource,
   SeriesStatisticsResource,
   SuggestCandidate,
+  SystemHealthComponent,
+  SystemStatusResource,
   WantedIssueRecord,
 } from '../api/types';
 
@@ -516,3 +520,105 @@ export const mockSeriesCreated: SeriesCreatedResource = {
   }),
   refresh_command_id: 55,
 };
+
+/*
+ * System area (FRG-UI-016 / FRG-API-014 / FRG-NFR-011) — m2-ops-health-backups.
+ */
+
+/** GET /api/v1/system/status — a healthy, fully-populated status (no secret fields). */
+export function makeSystemStatus(
+  overrides: Partial<SystemStatusResource> = {},
+): SystemStatusResource {
+  return {
+    version: '0.2.5',
+    commit: '077833d',
+    build_date: '2026-07-06T00:00:00Z',
+    config_dir: '/config',
+    db_path: '/config/foragerr.db',
+    backups_dir: '/config/backups',
+    root_folder_count: 2,
+    uptime_seconds: 3_600 * 5,
+    python_version: '3.12.4',
+    os: 'Linux',
+    ...overrides,
+  };
+}
+
+/** One GET /api/v1/health warnings-list entry. */
+export function makeHealthWarning(
+  overrides: Partial<HealthWarningItem> & Pick<HealthWarningItem, 'source'>,
+): HealthWarningItem {
+  return {
+    type: 'warning',
+    message: 'Indexer is disabled after repeated failures.',
+    remediationHint: 'Check the indexer credentials and try again.',
+    ...overrides,
+  };
+}
+
+/**
+ * One GET /api/v1/system/health per-component row. `component` and `label`
+ * are both required overrides (no default) — the real service always emits
+ * a hyphenated `kind:numeric-id` machine id (e.g. "indexer:3") alongside a
+ * distinct human-readable label (e.g. "Indexer: DogNZB"), and a mock that
+ * defaulted `label` risks silently drifting back to the machine id.
+ *
+ * `last_success` is deliberately offset-LESS ("...T12:00:00", no 'Z') —
+ * that is the REAL wire shape: `HealthService`/`ComponentHealth` timestamps
+ * come from the app's naive-UTC `utcnow()` (backend/src/foragerr/db/base.py),
+ * and Pydantic v2 serializes a naive datetime without a trailing 'Z' or
+ * offset. A mock that added 'Z' would hide the FRG-API-014 UTC-parsing bug
+ * the fixed `asUtcIso` helper in lib/format.ts exists to handle.
+ */
+export function makeHealthComponent(
+  overrides: Partial<SystemHealthComponent> &
+    Pick<SystemHealthComponent, 'component' | 'label'>,
+): SystemHealthComponent {
+  return {
+    state: 'ok',
+    message: null,
+    last_success: '2026-07-06T12:00:00',
+    last_failure: null,
+    disabled_until: null,
+    ...overrides,
+  };
+}
+
+/**
+ * GET /api/v1/system/health for an all-healthy system, one row per component
+ * area — machine ids and labels match the real `HealthService` shapes
+ * (backend/src/foragerr/health/service.py): hyphenated `kind:numeric-id`
+ * ids, distinct human-readable labels.
+ */
+export const mockHealthyComponents: SystemHealthComponent[] = [
+  makeHealthComponent({ component: 'comicvine', label: 'ComicVine' }),
+  makeHealthComponent({ component: 'indexer:3', label: 'Indexer: DogNZB' }),
+  makeHealthComponent({
+    component: 'download-client:1',
+    label: 'Download client: SABnzbd',
+  }),
+  makeHealthComponent({ component: 'scheduler', label: 'Scheduler' }),
+  makeHealthComponent({ component: 'database', label: 'Database' }),
+  makeHealthComponent({ component: 'root-folder:1', label: 'Root folder: /comics' }),
+  makeHealthComponent({ component: 'disk-space', label: 'Config volume free space' }),
+];
+
+/**
+ * One GET /api/v1/system/task row. `last_run`/`next_run` are deliberately
+ * offset-LESS ("...T03:00:00", no 'Z') — the real `ScheduledTask` timestamps
+ * come from the naive-UTC `utcnow()` (backend/src/foragerr/db/base.py), and
+ * Pydantic v2 serializes a naive datetime without a trailing 'Z' or offset.
+ * See `makeHealthComponent` for the same rationale.
+ */
+export function makeScheduledTask(
+  overrides: Partial<ScheduledTaskResource> & Pick<ScheduledTaskResource, 'name'>,
+): ScheduledTaskResource {
+  return {
+    command_name: overrides.name,
+    label: overrides.name,
+    interval_seconds: 86_400,
+    last_run: '2026-07-05T03:00:00',
+    next_run: '2026-07-06T03:00:00',
+    ...overrides,
+  };
+}

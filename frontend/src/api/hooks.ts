@@ -17,6 +17,7 @@ import type {
   BlocklistRecord,
   CommandResource,
   FormatProfileResource,
+  HealthWarningItem,
   HistoryRecord,
   IssueFileDeleteResult,
   IssueResource,
@@ -25,12 +26,15 @@ import type {
   QueuePageResponse,
   ReleaseDecision,
   RootFolderResource,
+  ScheduledTaskResource,
   Series,
   SeriesCreatePayload,
   SeriesCreatedResource,
   SeriesEditPayload,
   SeriesResource,
   SuggestResponse,
+  SystemHealthComponent,
+  SystemStatusResource,
   WantedIssueRecord,
 } from './types';
 
@@ -286,15 +290,29 @@ export const LIVE_COMMAND_STATUSES: ReadonlySet<string> = new Set([
  * behind a `status === 'completed'` check. The terminal status stays visible
  * (`status` is not reset) so chips can keep showing e.g. "completed"; a later
  * `start` watches the new command.
+ *
+ * `error` covers the WATCH path itself failing (the `GET /command/{id}` poll
+ * erroring, as opposed to the command it is watching finishing with
+ * `status: 'failed'`): without this, `status` would stay stuck at the
+ * optimistic `'queued'` fallback forever (no data ever arrives to overwrite
+ * it) and `running` would never clear, wedging the row's button disabled.
+ * On a persistent poll error `status` becomes the synthetic terminal value
+ * `'error'` (surfaced by the same chip that renders any other status) and
+ * `running` clears like any other terminal transition; `error` carries the
+ * message for a caller that wants to show more than the bare chip.
  */
 export function useWatchedCommand(onFinished: (status: string) => void): {
   status: string | null;
   running: boolean;
+  error: string | null;
   start: (commandId: number) => void;
 } {
   const [commandId, setCommandId] = useState<number | null>(null);
   const commandQuery = useCommandStatus(commandId);
-  const status = commandQuery.data?.status ?? (commandId !== null ? 'queued' : null);
+  const watchFailed = commandQuery.isError;
+  const status = watchFailed
+    ? 'error'
+    : commandQuery.data?.status ?? (commandId !== null ? 'queued' : null);
   const running = status !== null && LIVE_COMMAND_STATUSES.has(status);
   const finished = status !== null && !running ? status : null;
 
@@ -307,7 +325,12 @@ export function useWatchedCommand(onFinished: (status: string) => void): {
     onFinishedRef.current(finished);
   }, [finished]);
 
-  return { status, running, start: setCommandId };
+  return {
+    status,
+    running,
+    error: watchFailed ? (commandQuery.error?.message ?? 'Could not check task status.') : null,
+    start: setCommandId,
+  };
 }
 
 /*
@@ -745,5 +768,92 @@ export function useRunCommand(): UseMutationResult<
         method: 'POST',
         body: { name, payload: payload ?? null },
       }),
+  });
+}
+
+/*
+ * System area (FRG-UI-016): status, health, and scheduled-task hooks over
+ * FRG-API-014 / FRG-NFR-011. The backend routers land from a parallel change
+ * area; these hooks are coded directly from the delta specs' contracts.
+ */
+
+/**
+ * GET /api/v1/system/status (FRG-API-014): version/build, managed `/config`
+ * paths, and runtime info — never a secret. Plain fetch-once; nothing here
+ * changes without a restart.
+ */
+export function useSystemStatus(): UseQueryResult<SystemStatusResource> {
+  const fetcher = useFetcher();
+  return useQuery({
+    queryKey: queryKeys.system.status(),
+    queryFn: () => fetcher<SystemStatusResource>('/api/v1/system/status'),
+  });
+}
+
+/**
+ * Poll interval for the System Health screen (design decision 7): health is
+ * low-frequency, so a modest refetch is enough for a recovered component to
+ * clear without a manual refresh or restart.
+ */
+export const HEALTH_POLL_INTERVAL_MS = 15_000;
+
+/**
+ * GET /api/v1/health (FRG-API-014) — the actionable warnings list, distinct
+ * from the root liveness `/health` probe. Poll-first per design decision 7.
+ */
+export function useHealthWarnings(): UseQueryResult<HealthWarningItem[]> {
+  const fetcher = useFetcher();
+  return useQuery({
+    queryKey: queryKeys.health.warnings(),
+    queryFn: () => fetcher<HealthWarningItem[]>('/api/v1/health'),
+    refetchInterval: HEALTH_POLL_INTERVAL_MS,
+  });
+}
+
+/**
+ * GET /api/v1/system/health (FRG-NFR-011) — the full per-component health
+ * table. Poll-first alongside the warnings list so both halves of the Health
+ * screen recover together.
+ */
+export function useSystemHealth(): UseQueryResult<SystemHealthComponent[]> {
+  const fetcher = useFetcher();
+  return useQuery({
+    queryKey: queryKeys.system.health(),
+    queryFn: () => fetcher<SystemHealthComponent[]>('/api/v1/system/health'),
+    refetchInterval: HEALTH_POLL_INTERVAL_MS,
+  });
+}
+
+/** GET /api/v1/system/task (FRG-API-014) — scheduled tasks with schedule state and the command each runs. */
+export function useSystemTasks(): UseQueryResult<ScheduledTaskResource[]> {
+  const fetcher = useFetcher();
+  return useQuery({
+    queryKey: queryKeys.system.tasks(),
+    queryFn: () => fetcher<ScheduledTaskResource[]>('/api/v1/system/task'),
+  });
+}
+
+/**
+ * POST /api/v1/system/task/{name} (FRG-API-014 / FRG-SCHED-007) — force-run a
+ * scheduled task: enqueues now, resets the timer, dedups, and returns the
+ * enqueued command so the caller can watch it to terminal via
+ * `useWatchedCommand`. "Back up now" is this mutation against the
+ * `backup-database` task name. The task list is invalidated immediately (the
+ * timer reset is visible right away); the caller re-invalidates once the
+ * watched command reaches terminal so last-run/next-run reflect the finished
+ * run too.
+ */
+export function useForceRunTask(): UseMutationResult<CommandResource, Error, string> {
+  const fetcher = useFetcher();
+  const queryClient = useQueryClient();
+  return useMutation({
+    // Defensive: task names are registry slugs today (no reserved URL
+    // characters), but the name still rides straight into a path segment.
+    mutationFn: (name: string) =>
+      fetcher<CommandResource>(`/api/v1/system/task/${encodeURIComponent(name)}`, {
+        method: 'POST',
+      }),
+    onSuccess: () =>
+      void queryClient.invalidateQueries({ queryKey: queryKeys.system.tasks() }),
   });
 }
