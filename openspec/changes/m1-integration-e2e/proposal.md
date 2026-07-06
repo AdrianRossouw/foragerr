@@ -32,6 +32,16 @@ wiring, WS liveness, real-service handoffs).
 - **Scope note**: runs after change 7 (needs the image + UI); authored now so the
   UI/OPDS implementation can keep its selectors/testability honest from the start
   (data-testid conventions documented here, consumed by change 7).
+- **Acceptance layer (amended 2026-07-06 per the owner's 2026-07-05 decision,
+  recorded in `docs/process/decisions.md`)**: this change's gate doubles as the M1
+  UAT via a LIGHT acceptance layer — the acceptance report is **generated** from
+  the FRG-tagged Playwright results (each e2e scenario names the requirement ids it
+  exercises; the report maps scenario → tagged ids → pass/fail/skipped), with no
+  hand-authored criteria matrix. The generated report is committed with the run
+  (`e2e/acceptance-report.md`) and referenced from an `## Acceptance` section added
+  to this proposal, where Adrian records his sign-off at his check-in. Merging the
+  suite proceeds under the standing grant; the milestone is *acceptance-certified*
+  when the sign-off line is filled.
 
 ## Capabilities
 
@@ -60,6 +70,13 @@ None (the requirement extends the existing `dev-process` capability).
   `implemented` when the suite exists and runs green against the change-7 image.
 - **Security**: no new attack surface (test-only tooling; creds stay env-gated and
   redacted).
+
+## Manual impact
+
+None (declared per FRG-PROC-011, which post-dates this proposal's original
+approval): the e2e harness is development/verification tooling with no user- or
+administrator-facing application behavior. The manual's deployment chapter already
+documents the image the suite builds and drives; nothing it documents changes.
 
 ## Approval
 
