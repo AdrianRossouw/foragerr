@@ -98,9 +98,11 @@ async def rename_series(
     """Execute a series' renames (FRG-PP-012).
 
     Recomputes the plan under the current templates and applies exactly the
-    changed moves, updating ``issue_files.path`` and writing one
-    ``EVENT_FILE_RENAMED`` per rename inside one write transaction. A missing
-    series yields an empty plan."""
+    changed moves. Each renamed file's ``issue_files.path`` update and its
+    ``EVENT_FILE_RENAMED`` row commit in their OWN transaction (per-file
+    isolation, see :func:`execute_renames`), so a mid-batch failure never rolls
+    back files that already moved on disk. A missing series yields an empty
+    plan."""
     now = now or utcnow()
     async with db.read_session() as session:
         series = await repo.get_series(session, series_id)
@@ -109,11 +111,7 @@ async def rename_series(
             return RenamePlan(series_id=series_id, entries=())
         reference_year = series.start_year or now.year
     ctx = _build_ctx(series.path, reference_year, settings, now=now, offload=offload)
-    async with db.write_session() as session:
-        series = await repo.get_series(session, series_id)
-        if series is None:
-            return RenamePlan(series_id=series_id, entries=())
-        plan = await execute_renames(session, series, ctx)
+    plan = await execute_renames(db, series, ctx)
     logger.info("rename series %d: %s", series_id, plan.summary())
     return plan
 

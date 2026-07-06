@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 from fastapi.testclient import TestClient
 
 from foragerr.api.config_resources import MediaManagementConfig, NamingConfig
@@ -184,6 +185,79 @@ def test_get_naming_tokens_exposes_the_shared_vocabulary(client):
     assert body["aliases"]["issue number"] == "issue"
     # The default templates are carried so the UI can seed without duplicating.
     assert body["defaults"]["file_naming_template"] == DEFAULT_FILE_TEMPLATE
+
+
+@pytest.mark.req("FRG-DEP-003")
+def test_put_preserves_the_documented_config_comments(client, tmp_path):
+    """A PUT rewrites config.yaml through the documented renderer, so the Field
+    description comments the first-run file promised survive every write (they are
+    not stripped down to bare key/value YAML)."""
+    put = client.put(
+        "/api/v1/config/naming",
+        json={
+            "rename_enabled": True,
+            "file_naming_template": _ROUNDTRIP_TEMPLATE,
+            "folder_naming_template": "{Series Title} ({Year})",
+            "replace_illegal_characters": True,
+        },
+    )
+    assert put.status_code == 200
+    text = (Path(client.app.state.settings.config_dir) / "config.yaml").read_text(
+        encoding="utf-8"
+    )
+    assert "# foragerr configuration" in text  # documented header
+    assert "Token template for imported" in text  # a Field-description comment
+    assert "file_naming_template:" in text  # and the live value line
+
+
+@pytest.mark.req("FRG-API-013")
+@pytest.mark.req("FRG-DEP-004")
+async def test_concurrent_config_puts_do_not_lose_updates(tmp_path):
+    """Two overlapping PUTs to the two config resources both persist: the
+    lock-guarded read-modify-write re-reads the file the other just wrote, so one
+    update can never silently clobber the other (lost-update guard)."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from foragerr.api.config_resources import (
+        MediaManagementConfig,
+        NamingConfig,
+        _apply,
+    )
+
+    cfg = tmp_path / "cfg"
+    cfg.mkdir()
+    bin_dir = tmp_path / "recycle"
+    bin_dir.mkdir()
+    settings = make_settings(cfg)
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(settings=settings))
+    )
+    naming_update = {
+        "rename_enabled": False,
+        "file_naming_template": _ROUNDTRIP_TEMPLATE,
+        "folder_naming_template": "{Series Title} ({Year})",
+        "replace_illegal_characters": True,
+    }
+    mm_update = {
+        "import_transfer_mode": "copy",
+        "library_import_mode": "move",
+        "recycle_bin_path": str(bin_dir),
+        "recycle_bin_retention_days": 14,
+    }
+
+    await asyncio.gather(
+        _apply(request, naming_update, NamingConfig),
+        _apply(request, mm_update, MediaManagementConfig),
+    )
+
+    parsed = yaml.safe_load((cfg / "config.yaml").read_text(encoding="utf-8"))
+    assert parsed["rename_enabled"] is False  # the naming PUT persisted...
+    assert parsed["recycle_bin_retention_days"] == 14  # ...and the mm PUT too
+    assert parsed["recycle_bin_path"] == str(bin_dir)
+    # The final in-memory settings reflect both changes as well.
+    assert request.app.state.settings.rename_enabled is False
+    assert request.app.state.settings.recycle_bin_path == str(bin_dir)
 
 
 @pytest.mark.req("FRG-API-013")

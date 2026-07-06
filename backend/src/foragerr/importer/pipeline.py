@@ -46,7 +46,7 @@ from foragerr.importer.context import ImportContext
 from foragerr.importer.decisions import ImportDecision, ImportEvaluation, decide
 from foragerr.importer.evidence import Evidence, aggregate
 from foragerr.importer.models import ImportHistoryRow
-from foragerr.importer.renamer import RenameFields, render_filename
+from foragerr.naming import RenameFields, render_filename
 from foragerr.importer.sources import (
     SOURCE_DOWNLOAD,
     CompletedDownloadSource,

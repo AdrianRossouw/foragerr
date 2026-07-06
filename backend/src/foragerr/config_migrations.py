@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import os
 import shutil
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -48,17 +50,36 @@ class ConfigSchemaVersionError(ConfigMigrationError):
     """The config file is newer than this build supports (FRG-DEP-004)."""
 
 
-ConfigMigrator = Callable[[dict[str, Any]], dict[str, Any]]
+#: A migrator receives the loaded mapping and the resolved config directory
+#: (some steps need it to derive a path default) and returns the next-version
+#: mapping. The config dir is passed as *context* so a step never has to guess
+#: where persistent state lives.
+ConfigMigrator = Callable[[dict[str, Any], Path], dict[str, Any]]
+
+#: Where M1 parked upgrade-replaced files (``<config>/quarantine``). An M1 config
+#: never permanently deleted a superseded file — it always quarantined it — so
+#: the v1 migration MUST preserve that keep-everything semantic (see below).
+_M1_QUARANTINE_DIRNAME = "quarantine"
 
 
-def _migrate_0_to_1(values: dict[str, Any]) -> dict[str, Any]:
+def _migrate_0_to_1(values: dict[str, Any], config_dir: Path) -> dict[str, Any]:
     """Baseline stamp migration: an unversioned (M1) config becomes v1.
 
-    v1 only *adds* naming/media-management fields, every one of which supplies a
-    safe default through the ``Settings`` model, so no value needs rewriting here
-    — operator-set values pass through verbatim. The runner stamps the version.
+    v1 adds naming/media-management fields whose model defaults are safe for a
+    *fresh* install — but there is ONE field whose fresh default silently changes
+    behavior for an EXISTING M1 install: ``recycle_bin_path`` defaults to ``""``,
+    which means *permanently delete* an upgrade-replaced file. M1 never deleted:
+    it always quarantined the superseded file under ``<config>/quarantine``. So
+    for an existing config that never set the key, we pin ``recycle_bin_path`` to
+    that quarantine directory, preserving M1's keep-everything semantics (an
+    operator who later wants hard-delete can clear it). A fresh install has no
+    config file to migrate, so it keeps the ``""`` default. All other operator
+    values pass through verbatim; the runner stamps the version.
     """
-    return dict(values)
+    migrated = dict(values)
+    if "recycle_bin_path" not in migrated:
+        migrated["recycle_bin_path"] = str(config_dir / _M1_QUARANTINE_DIRNAME)
+    return migrated
 
 
 #: ``{from_version: migrator}`` applied one step at a time up to the current
@@ -77,7 +98,9 @@ def stamped_version(values: dict[str, Any]) -> int:
         return 0
 
 
-def migrate_forward(values: dict[str, Any], from_version: int) -> dict[str, Any]:
+def migrate_forward(
+    values: dict[str, Any], from_version: int, config_dir: Path
+) -> dict[str, Any]:
     """Apply migrators one step at a time from ``from_version`` to current."""
     result = dict(values)
     version = from_version
@@ -87,7 +110,7 @@ def migrate_forward(values: dict[str, Any], from_version: int) -> dict[str, Any]
             raise ConfigMigrationError(
                 f"no config migrator registered from schema version {version}"
             )
-        result = migrator(result)
+        result = migrator(result, config_dir)
         version += 1
     return result
 
@@ -98,13 +121,18 @@ def migrate_config(
     config_dir: Path,
     *,
     retention: int = DEFAULT_CONFIG_BACKUP_RETENTION,
+    render: Callable[[dict[str, Any]], str] | None = None,
 ) -> dict[str, Any]:
     """Migrate ``values`` (the loaded ``config.yaml``) forward to current (FRG-DEP-004).
 
     Refuses (leaving the file untouched, taking no backup) when the stamp is newer
     than this build. When it is older, backs the original file up with retention
     pruning, applies the stepped migrators, stamps the current version, and
-    rewrites the file. Returns the (possibly migrated) mapping for validation.
+    rewrites the file. ``render`` turns the migrated mapping into the file text
+    (the caller passes the documented-config renderer so comments regenerate on
+    every write); it defaults to a bare YAML dump for standalone use. The rewrite
+    is atomic (temp-file + ``fsync`` + ``os.replace``). Returns the (possibly
+    migrated) mapping for validation.
     """
     version = stamped_version(values)
     if version == CURRENT_CONFIG_VERSION:
@@ -120,9 +148,9 @@ def migrate_config(
 
     # Older: back the original up BEFORE rewriting, then step forward and stamp.
     backup_before_config_migration(config_file, config_dir, version, retention)
-    migrated = migrate_forward(values, version)
+    migrated = migrate_forward(values, version, config_dir)
     migrated[CONFIG_VERSION_KEY] = CURRENT_CONFIG_VERSION
-    _write_config(config_file, migrated)
+    _write_config(config_file, migrated, render)
     logger.info(
         "config: migrated %s from schema version %s to %s",
         config_file,
@@ -161,12 +189,46 @@ def prune_config_backups(backups_root: Path, retention: int) -> list[Path]:
     return pruned
 
 
-def _write_config(config_file: Path, values: dict[str, Any]) -> None:
-    """Rewrite ``config.yaml`` with the migrated values (the backup keeps the
-    original, comments and all)."""
-    config_file.write_text(
-        yaml.safe_dump(values, sort_keys=False), encoding="utf-8"
-    )
+def _write_config(
+    config_file: Path,
+    values: dict[str, Any],
+    render: Callable[[dict[str, Any]], str] | None,
+) -> None:
+    """Atomically rewrite ``config.yaml`` with the migrated values.
+
+    ``render`` (the documented-config renderer when the caller supplies it)
+    controls the on-disk form so comments regenerate on every write; without one
+    a bare YAML dump is used. The write is atomic so an interrupted rewrite can
+    never leave a torn/half-written config in place (the backup also keeps the
+    original)."""
+    text = render(values) if render is not None else yaml.safe_dump(values, sort_keys=False)
+    atomic_write_text(config_file, text)
+
+
+def atomic_write_text(path: Path, text: str) -> None:
+    """Write ``text`` to ``path`` atomically: temp file in the same directory,
+    ``fsync``, then ``os.replace`` (FRG-DEP-004 / FRG-API-013).
+
+    A reader (or a crash) never observes a partially written config: the final
+    path is either the old file or the complete new one. Kept here — dependency
+    free — so both the migration runner and the config-resource ``PUT`` handler
+    share one writer.
+    """
+    path = Path(path)
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            tmp.unlink()
+        except FileNotFoundError:
+            pass
+        raise
 
 
 __all__ = [
@@ -175,6 +237,7 @@ __all__ = [
     "DEFAULT_CONFIG_BACKUP_RETENTION",
     "ConfigMigrationError",
     "ConfigSchemaVersionError",
+    "atomic_write_text",
     "backup_before_config_migration",
     "migrate_config",
     "migrate_forward",

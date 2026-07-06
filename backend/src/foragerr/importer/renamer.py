@@ -16,7 +16,6 @@ from foragerr.naming import (
     DEFAULT_FILE_TEMPLATE,
     DEFAULT_FOLDER_TEMPLATE,
     DEFAULT_MAX_FILENAME_BYTES,
-    FOLDER_TEMPLATE_NO_YEAR as _FOLDER_TEMPLATE_NO_YEAR,
     RenameFields,
     _TOKEN_ALIASES,
     render,

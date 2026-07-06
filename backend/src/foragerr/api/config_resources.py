@@ -14,6 +14,7 @@ surface.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +24,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
 
 from foragerr.api.errors import error_body
-from foragerr.config import CONFIG_FILENAME, Settings
+from foragerr.config import CONFIG_FILENAME, Settings, render_documented_config
+from foragerr.config_migrations import atomic_write_text
 from foragerr.logging import register_secret
 from foragerr.naming import (
     DEFAULT_FILE_TEMPLATE,
@@ -32,6 +34,11 @@ from foragerr.naming import (
 )
 
 router = APIRouter(prefix="/config", tags=["config"])
+
+#: Serializes the read-modify-write-reload of ``config.yaml`` across concurrent
+#: PUTs to ANY config resource, so two overlapping updates can't lost-update each
+#: other (each re-reads the file the other just wrote under the lock).
+_config_write_lock = asyncio.Lock()
 
 
 class NamingTokens(BaseModel):
@@ -114,7 +121,7 @@ async def get_naming(request: Request) -> NamingConfig:
 @router.put("/naming", response_model=NamingConfig)
 async def put_naming(body: NamingConfig, request: Request):
     """Validate + persist naming settings, re-loading app.state.settings."""
-    return _apply(request, body.model_dump(), NamingConfig)
+    return await _apply(request, body.model_dump(), NamingConfig)
 
 
 @router.get("/mediamanagement", response_model=MediaManagementConfig)
@@ -126,48 +133,50 @@ async def get_media_management(request: Request) -> MediaManagementConfig:
 @router.put("/mediamanagement", response_model=MediaManagementConfig)
 async def put_media_management(body: MediaManagementConfig, request: Request):
     """Validate + persist media-management settings, re-loading app.state.settings."""
-    return _apply(request, body.model_dump(), MediaManagementConfig)
+    return await _apply(request, body.model_dump(), MediaManagementConfig)
 
 
-def _apply(request: Request, updates: dict[str, Any], resource: type[BaseModel]):
+async def _apply(request: Request, updates: dict[str, Any], resource: type[BaseModel]):
     """Validate ``updates`` against the full config, persist, and reload.
 
-    On a validation failure NOTHING is changed and a 400 in the uniform shape is
-    returned, each offending field named under the ``settings.`` prefix.
+    The whole read-modify-write-reload runs under ``_config_write_lock`` so two
+    concurrent PUTs can't lost-update one another. On a validation failure NOTHING
+    is changed and a 400 in the uniform shape is returned, each offending field
+    named under the ``settings.`` prefix. The persisted file is rewritten through
+    the documented-config renderer (comments preserved) and written atomically.
     """
-    current: Settings = request.app.state.settings
-    config_dir = Path(current.config_dir)
-    config_file = config_dir / CONFIG_FILENAME
+    async with _config_write_lock:
+        current: Settings = request.app.state.settings
+        config_dir = Path(current.config_dir)
+        config_file = config_dir / CONFIG_FILENAME
 
-    stored = _read_config(config_file)
-    merged = {**stored, **updates}
-    merged.pop("config_dir", None)  # environment-only
+        stored = _read_config(config_file)
+        merged = {**stored, **updates}
+        merged.pop("config_dir", None)  # environment-only
 
-    try:
-        new_settings = Settings(config_dir=config_dir, **merged)
-    except ValidationError as exc:
-        return JSONResponse(
-            status_code=400,
-            content=error_body(
-                "config validation failed",
-                [
-                    {
-                        "field": f"settings.{'.'.join(str(p) for p in err['loc'])}",
-                        "message": err.get("msg", "invalid value"),
-                    }
-                    for err in exc.errors()
-                ],
-            ),
-        )
+        try:
+            new_settings = Settings(config_dir=config_dir, **merged)
+        except ValidationError as exc:
+            return JSONResponse(
+                status_code=400,
+                content=error_body(
+                    "config validation failed",
+                    [
+                        {
+                            "field": f"settings.{'.'.join(str(p) for p in err['loc'])}",
+                            "message": err.get("msg", "invalid value"),
+                        }
+                        for err in exc.errors()
+                    ],
+                ),
+            )
 
-    # Validation passed: persist and swap in the reloaded settings.
-    stored.update(updates)
-    stored.pop("config_dir", None)
-    config_file.write_text(yaml.safe_dump(stored, sort_keys=False), encoding="utf-8")
-    for secret in new_settings.secret_fields().values():
-        register_secret(secret.get_secret_value())
-    request.app.state.settings = new_settings
-    return resource.from_settings(new_settings)
+        # Validation passed: persist (documented + atomic) and swap in the reload.
+        atomic_write_text(config_file, render_documented_config(merged))
+        for secret in new_settings.secret_fields().values():
+            register_secret(secret.get_secret_value())
+        request.app.state.settings = new_settings
+        return resource.from_settings(new_settings)
 
 
 def _read_config(config_file: Path) -> dict[str, Any]:

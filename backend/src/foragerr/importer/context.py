@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from foragerr.importer import fileops
-from foragerr.importer.renamer import DEFAULT_FILE_TEMPLATE, DEFAULT_FOLDER_TEMPLATE
+from foragerr.naming import DEFAULT_FILE_TEMPLATE, DEFAULT_FOLDER_TEMPLATE
 from foragerr.parser.vocab import ARCHIVE_EXTENSIONS
 
 #: ``HandlerContext.offload``-compatible callable (``daemon_offload`` in

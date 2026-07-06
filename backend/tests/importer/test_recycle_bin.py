@@ -37,33 +37,27 @@ def test_recycle_file_destination_is_confined_under_the_bin(tmp_path):
 
 @pytest.mark.req("FRG-PP-013")
 @pytest.mark.req("FRG-SEC-004")
-def test_recycle_destination_is_built_via_safe_join_under_the_bin(tmp_path, monkeypatch):
-    """The destination is constructed through ``safe_join`` under the bin root —
-    the same confinement guarantee every other destination path uses, so a source
-    name engineered to traverse (``..``/absolute) is reduced to a safe segment and
-    cannot land outside the bin (FRG-SEC-004)."""
+def test_recycle_confines_a_hostile_source_name_under_the_bin(tmp_path):
+    """Driving ``recycle_file`` itself with a traversal-laden source basename: the
+    destination is built via ``safe_join`` under the resolved bin root, so a name
+    engineered to climb out (``..``/separator lookalikes) is reduced to a single
+    safe segment and can never land outside the bin (FRG-SEC-004)."""
     bin_root = tmp_path / "recycle"
     bin_root.mkdir()
-    src = tmp_path / "Batman 001.cbz"
-    src.write_bytes(b"x")
+    outside = tmp_path / "outside-the-bin"
+    outside.mkdir()
+    # A real, filesystem-legal basename a malicious archive might carry, whose raw
+    # form would escape if joined naively.
+    src = tmp_path / "..__..__escape.cbz"
+    src.write_bytes(b"payload")
 
-    seen: list = []
-    real_safe_join = fileops.safe_join
-
-    def spy(root, *parts):
-        seen.append((str(root), parts))
-        result = real_safe_join(root, *parts)
-        # A crafted traversal segment resolves back inside the bin, never outside.
-        assert bin_root in Path(result).parents or Path(result) == bin_root
-        return result
-
-    monkeypatch.setattr(fileops, "safe_join", spy)
     dest = fileops.recycle_file(src, bin_root, now=dt.datetime(2026, 7, 5))
 
-    assert seen and seen[0][0] == str(bin_root)  # confinement rooted at the bin
-    assert bin_root in dest.parents
-    # A traversal segment is reduced to a safe component, never a real boundary.
-    assert bin_root in real_safe_join(bin_root, "..", "escape.cbz").parents
+    resolved = dest.resolve()
+    assert bin_root.resolve() in resolved.parents  # confined under the bin root
+    assert outside.resolve() not in resolved.parents  # never escaped sideways
+    assert dest.read_bytes() == b"payload"
+    assert not src.exists()  # moved, not copied
 
 
 @pytest.mark.req("FRG-PP-013")
@@ -90,6 +84,7 @@ def test_prune_removes_only_aged_entries(tmp_path):
     today = dt.date(2026, 7, 5).isoformat()
     (bin_root / today).mkdir()
     (bin_root / today / "new.cbz").write_bytes(b"new")
+    (bin_root / fileops.RECYCLE_BIN_MARKER).touch()  # a real foragerr bin
 
     removed = fileops.prune_recycle_bin(
         bin_root, retention_days=30, now=dt.datetime(2026, 7, 5)
@@ -98,6 +93,28 @@ def test_prune_removes_only_aged_entries(tmp_path):
     assert removed == 1
     assert not (bin_root / "2020-01-01").exists()  # aged folder pruned
     assert (bin_root / today / "new.cbz").exists()  # recent one retained
+    assert (bin_root / fileops.RECYCLE_BIN_MARKER).exists()  # marker never pruned
+
+
+@pytest.mark.req("FRG-PP-013")
+def test_prune_refuses_a_directory_without_the_bin_marker(tmp_path):
+    """A retention prune pointed at a directory that is NOT a foragerr recycle bin
+    (no marker) — e.g. a library root full of series folders, some ISO-date-named —
+    deletes NOTHING, so housekeeping can never eat a real library."""
+    library_root = tmp_path / "library"
+    # Series-like folders, including one whose name happens to be an ISO date.
+    (library_root / "Batman (1987)").mkdir(parents=True)
+    (library_root / "Batman (1987)" / "issue.cbz").write_bytes(b"real")
+    (library_root / "2020-01-01").mkdir()  # aged-looking, but no marker present
+    (library_root / "2020-01-01" / "keep.cbz").write_bytes(b"real")
+
+    removed = fileops.prune_recycle_bin(
+        library_root, retention_days=1, now=dt.datetime(2026, 7, 5)
+    )
+
+    assert removed == 0  # refused — not a recycle bin
+    assert (library_root / "Batman (1987)" / "issue.cbz").exists()
+    assert (library_root / "2020-01-01" / "keep.cbz").exists()  # nothing deleted
 
 
 @pytest.mark.req("FRG-PP-013")
@@ -207,3 +224,60 @@ async def test_user_deletion_without_bin_deletes_permanently(db, seed, library_r
         events = await history.all_events(session)
     deleted = [e for e in events if e.event_type == history.EVENT_FILE_DELETED]
     assert len(deleted) == 1 and deleted[0].quarantine_path is None
+
+
+@pytest.mark.req("FRG-PP-013")
+async def test_recycle_deletion_compensates_when_the_commit_fails(
+    db, seed, library_root, tmp_path, monkeypatch
+):
+    """The file is moved to the bin BEFORE the row-removal transaction; if that
+    transaction fails the move is COMPENSATED (file restored to its original
+    path), so a commit failure never leaves a live row pointing at a moved file."""
+    from foragerr.library.flows import edit_delete
+
+    file_id, path = await _seed_file(db, seed, "Batman 012.cbz")
+    bin_root = tmp_path / "recycle"
+    bin_root.mkdir()
+    (tmp_path / "cfg").mkdir(exist_ok=True)
+    settings = make_settings(tmp_path / "cfg", recycle_bin_path=str(bin_root))
+
+    async def boom(session, issue_file_id):
+        raise RuntimeError("row removal failed mid-commit")
+
+    monkeypatch.setattr(edit_delete.repo, "remove_issue_file", boom)
+
+    with pytest.raises(RuntimeError):
+        await delete_issue_file(db, settings, file_id, now=dt.datetime(2026, 7, 5))
+
+    assert path.exists()  # compensated: file moved back out of the bin
+    assert path.read_bytes() == b"a-real-library-file"
+    assert not list(bin_root.rglob("*.cbz"))  # the staged copy was moved back
+    async with db.read_session() as session:
+        remaining = (await session.execute(select(IssueFileRow))).scalars().all()
+    assert len(remaining) == 1  # row survived — never orphaned a moved file
+
+
+@pytest.mark.req("FRG-PP-013")
+async def test_permanent_delete_commits_row_before_unlinking(
+    db, seed, library_root, tmp_path, monkeypatch
+):
+    """With no bin, the row removal + event COMMIT first and the file is unlinked
+    only AFTER; a post-commit unlink failure orphans the file on disk (recoverable)
+    rather than leaving a dangling row pointing at a live file."""
+    from foragerr.library.flows import edit_delete
+
+    file_id, path = await _seed_file(db, seed, "Batman 013.cbz")
+    settings = make_settings(tmp_path / "cfg")  # no recycle bin
+
+    def boom(target):
+        raise OSError("unlink denied")
+
+    monkeypatch.setattr(edit_delete.os, "remove", boom)
+
+    result = await delete_issue_file(db, settings, file_id)
+
+    assert result is None
+    async with db.read_session() as session:
+        remaining = (await session.execute(select(IssueFileRow))).scalars().all()
+    assert remaining == []  # row removed even though the unlink failed
+    assert path.exists()  # file orphaned on disk (recoverable), never a dangling row

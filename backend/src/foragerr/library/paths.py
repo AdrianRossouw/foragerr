@@ -51,7 +51,7 @@ def series_folder_name(title: str, start_year: int | None) -> str:
     FRG-PP-010): this is a thin delegation so there is exactly one implementation
     of the series-folder template, with no behaviour change for existing rows.
     """
-    from foragerr.importer.renamer import render_series_folder
+    from foragerr.naming import render_series_folder
 
     return render_series_folder(title, start_year)
 

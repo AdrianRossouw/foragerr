@@ -97,6 +97,35 @@ def test_backup_retention_pruning(tmp_path):
 
 
 @pytest.mark.req("FRG-DEP-004")
+@pytest.mark.req("FRG-PP-013")
+def test_m1_config_migration_preserves_keep_everything_recycle_semantics(config_dir):
+    """An existing M1 (unversioned) config never permanently deleted a superseded
+    file — it quarantined it. Migrating it to v1 must NOT silently adopt the fresh
+    ``recycle_bin_path=""`` (permanent-delete) default: it pins the bin at the M1
+    quarantine dir so keep-everything semantics survive the upgrade (data loss)."""
+    _write_config(config_dir, {"log_level": "INFO"})  # no version stamp ⇒ v0
+
+    settings = load_settings()
+
+    expected = str(config_dir / "quarantine")
+    assert settings.recycle_bin_path == expected  # never flipped to hard-delete
+    parsed = yaml.safe_load((config_dir / CONFIG_FILENAME).read_text(encoding="utf-8"))
+    assert parsed["recycle_bin_path"] == expected
+
+
+@pytest.mark.req("FRG-DEP-004")
+@pytest.mark.req("FRG-PP-013")
+def test_fresh_install_keeps_empty_recycle_bin_default(config_dir):
+    """A fresh install has no config file to migrate, so the generated config keeps
+    the ``""`` (permanent-delete) default — the migration pin is for upgrades only."""
+    settings = load_settings()  # generates a first-run documented config
+
+    assert settings.recycle_bin_path == ""
+    parsed = yaml.safe_load((config_dir / CONFIG_FILENAME).read_text(encoding="utf-8"))
+    assert parsed["recycle_bin_path"] == ""
+
+
+@pytest.mark.req("FRG-DEP-004")
 def test_migrate_config_is_a_noop_at_current_version(tmp_path):
     config_dir = tmp_path / "cfg"
     config_dir.mkdir()

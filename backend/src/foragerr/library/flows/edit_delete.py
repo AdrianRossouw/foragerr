@@ -181,49 +181,114 @@ async def delete_issue_file(
     issue_file_id: int,
     *,
     now: dt.datetime | None = None,
+    offload=None,
 ) -> str | None:
     """Delete one library file through the app, routing it via the recycle bin
     (FRG-PP-013).
 
-    When a recycle bin is configured the backing file is moved there (never
-    hard-deleted); with no bin configured it is permanently deleted. Either way
-    the ``issue_files`` row is removed — which alone returns the issue to the
-    derived Wanted state (FRG-SER-004) — and an ``EVENT_FILE_DELETED`` history row
-    records the deletion (carrying the recycle path, or ``None`` when permanently
-    deleted). The file move happens inside the write transaction, so a rollback
-    leaves the row intact rather than orphaning a moved file. Returns the recycle
-    destination path, or ``None`` when the file was permanently deleted / absent.
+    Ordered so a commit failure can never leave a live ``issue_files`` row
+    pointing at a destroyed file (the permanent-delete case would be data loss):
+
+    - **Recycle bin configured** — the file is FIRST moved to the bin (a
+      *reversible* move), then the row removal + ``EVENT_FILE_DELETED`` commit; if
+      that transaction fails the move is COMPENSATED (the file is moved back to
+      its original path) so the row keeps pointing at a real file.
+    - **No bin (permanent delete)** — the row removal + event are COMMITTED first,
+      and only then is the file unlinked. A post-commit unlink failure leaves an
+      orphaned file on disk (recoverable) rather than a dangling row.
+
+    Removing the row alone returns the issue to the derived Wanted state
+    (FRG-SER-004). The filesystem work runs off the event loop through ``offload``
+    when wired. Returns the recycle destination path, or ``None`` when the file
+    was permanently deleted / absent.
     """
     now = now or utcnow()
-    async with db.write_session() as session:
+    # Read the row's identifying data in a read session; the write transaction
+    # below re-resolves the row by id so nothing is held across the FS move.
+    async with db.read_session() as session:
         row = await session.get(IssueFileRow, issue_file_id)
         if row is None:
             raise IssueFileNotFoundError(f"no issue_files row {issue_file_id}")
         path = row.path
-        issue = await session.get(IssueRow, row.issue_id)
+        issue_id = row.issue_id
+        issue = await session.get(IssueRow, issue_id)
         series_id = issue.series_id if issue is not None else None
 
-        recycle_path: str | None = None
-        if os.path.exists(path):
-            if settings is not None and settings.recycle_bin_path:
-                recycle_path = str(
-                    fileops.recycle_file(path, settings.recycle_bin_path, now=now)
-                )
-            else:
-                os.remove(path)  # no bin configured → permanent delete
+    file_present = os.path.exists(path)
+    use_bin = bool(settings is not None and settings.recycle_bin_path and file_present)
 
+    if use_bin:
+        # 1. Reversible move to the bin FIRST, then remove the row in a
+        #    transaction; on failure, move the file back (compensation).
+        dest = await _offloaded(
+            offload, fileops.recycle_file, path, settings.recycle_bin_path, now=now
+        )
+        recycle_path = str(dest)
+        try:
+            await _commit_file_deletion(
+                db, issue_file_id, series_id, issue_id, path, recycle_path, now
+            )
+        except BaseException:
+            try:
+                await _offloaded(
+                    offload,
+                    fileops.place_file,
+                    recycle_path,
+                    path,
+                    mode=fileops.TransferMode.MOVE,
+                )
+            except Exception:  # pragma: no cover - compensation best-effort
+                logger.error(
+                    "delete_issue_file: row removal failed AND could not restore "
+                    "%s from the recycle bin (%s); file preserved in the bin",
+                    path, recycle_path,
+                )
+            raise
+        return recycle_path
+
+    # Permanent-delete (or file already absent): commit the row removal + event
+    # FIRST, then unlink after the commit so a crash never orphans the row.
+    await _commit_file_deletion(db, issue_file_id, series_id, issue_id, path, None, now)
+    if file_present:
+        try:
+            await _offloaded(offload, os.remove, path)
+        except OSError as exc:  # pragma: no cover - orphaned file is recoverable
+            logger.warning(
+                "delete_issue_file: row removed but unlinking %s failed (%s); "
+                "file orphaned on disk (recoverable)", path, exc,
+            )
+    return None
+
+
+async def _commit_file_deletion(
+    db: Database,
+    issue_file_id: int,
+    series_id: int | None,
+    issue_id: int,
+    path: str,
+    recycle_path: str | None,
+    now: dt.datetime,
+) -> None:
+    """Remove the issue-file row + write the delete event in one transaction."""
+    async with db.write_session() as session:
         await repo.remove_issue_file(session, issue_file_id)
         history.record_event(
             session,
             event_type=history.EVENT_FILE_DELETED,
             series_id=series_id,
-            issue_id=row.issue_id,
+            issue_id=issue_id,
             source=history.SOURCE_RESCAN,
             data={"path": path, "recycle_path": recycle_path},
             quarantine_path=recycle_path,
             now=now,
         )
-    return recycle_path
+
+
+async def _offloaded(offload, func, *args, **kwargs):
+    """Run a blocking filesystem op through the offload seam (``None`` = inline)."""
+    if offload is not None:
+        return await offload(func, *args, **kwargs)
+    return func(*args, **kwargs)
 
 
 async def _require_profile(session, format_profile_id: int) -> None:

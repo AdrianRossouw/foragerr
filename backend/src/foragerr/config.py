@@ -32,6 +32,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from foragerr.config_migrations import (
     CURRENT_CONFIG_VERSION,
     ConfigSchemaVersionError,
+    atomic_write_text,
     migrate_config,
 )
 from foragerr.logging import register_secret
@@ -79,12 +80,22 @@ def resolve_config_dir() -> Path:
 
 
 def _file_template_round_trips(template: str) -> bool:
-    """True if ``template`` renders a probe identity that re-parses back to the
-    same series matching key and issue ordering key (the FRG-PP-009 contract).
+    """True if ``template`` both round-trips a probe identity AND is injective over
+    distinct issues (the FRG-PP-009 contract + its data-loss corollary).
 
-    A template that drops the series title, issue number, or the ``[__{IssueId}__]``
-    tag would make a renamed file unreconcilable, so config rejects it. Imports are
-    deferred to avoid an import cycle (``config`` is imported very early).
+    Two properties are checked, because a single-identity probe misses the worst
+    failure: a template that renders the SAME name for DISTINCT issues silently
+    overwrites one library file with another on rename.
+
+    1. **Round-trip.** A rendered probe re-parses back to the same series matching
+       key and issue ordering key — so a renamed file stays reconcilable.
+    2. **Injectivity.** Two probes differing only in issue number, and two probes
+       differing only in the ``[__{IssueId}__]`` identity, must each render
+       DIFFERENT names. This rejects a template that drops the issue number (issues
+       7 and 8 would collide) or the id tag (two issues sharing a display number
+       would collide) — the tokens that guarantee one file per issue.
+
+    Imports are deferred to avoid an import cycle (``config`` is imported early).
     """
     from fractions import Fraction
 
@@ -95,20 +106,28 @@ def _file_template_round_trips(template: str) -> bool:
     from foragerr.parser.ordering import sort_key
     from foragerr.parser.result import Issue
 
-    probe = RenameFields(
-        series_title="Foragerr Probe Series",
-        issue="7",
-        year="2015",
-        issue_id="424242",
-    )
+    def _render(issue: str, issue_id: str) -> str:
+        fields = RenameFields(
+            series_title="Foragerr Probe Series",
+            issue=issue,
+            year="2015",
+            issue_id=issue_id,
+        )
+        return render_filename(fields, template=template, ext=".cbz")
+
     try:
-        rendered = render_filename(probe, template=template, ext=".cbz")
+        rendered = _render("7", "424242")
+        # Injectivity: distinct issue numbers and distinct ids must not collide.
+        differs_by_number = _render("8", "424242") != rendered
+        differs_by_id = _render("7", "424243") != rendered
         reparsed = parse(rendered, reference_year=2016)
     except Exception:
         return False
+    if not (differs_by_number and differs_by_id):
+        return False
     if not reparsed.success or reparsed.issue is None:
         return False
-    if reparsed.matching_key != matching_key(probe.series_title):
+    if reparsed.matching_key != matching_key("Foragerr Probe Series"):
         return False
     expected = encode_sort_key(sort_key(Issue(value=Fraction(7), display="7")))
     return encode_sort_key(sort_key(reparsed.issue)) == expected
@@ -642,9 +661,19 @@ class Settings(BaseSettings):
         }
 
 
-def generate_default_config(path: Path) -> None:
-    """Write a first-run ``config.yaml``: every setting, its default, and an
-    explanatory comment; secrets only as commented placeholders (FRG-DEP-003)."""
+def render_documented_config(values: dict[str, Any] | None = None) -> str:
+    """Render a fully documented ``config.yaml`` body (FRG-DEP-003).
+
+    Every setting is emitted with its explanatory comment (from the ``Field``
+    description) and its built-in default; secrets and the environment-only
+    ``config_dir`` are commented placeholders. This is the ONE renderer used for
+    both the first-run write (``values=None`` ⇒ pure defaults) AND every rewrite
+    (migration, config-resource ``PUT``): passing the CURRENT ``values`` emits the
+    same documented shape carrying live values, so no rewrite ever strips the
+    documentation the first-run file promised. Any key not in the model (an
+    operator/unknown key) is preserved verbatim at the end rather than dropped.
+    """
+    provided = values or {}
     lines = [
         "# foragerr configuration",
         "#",
@@ -665,13 +694,33 @@ def generate_default_config(path: Path) -> None:
             continue
         default = field.default
         if isinstance(default, SecretStr):
+            supplied = provided.get(name)
             lines.append("# default: (empty)")
-            lines.append(f'#{name}: ""')
+            if supplied:  # operator set the secret in the file — preserve it
+                lines.append(yaml.safe_dump({name: supplied}, sort_keys=False).strip())
+            else:
+                lines.append(f'#{name}: ""')
         else:
+            current = provided.get(name, default)
             lines.append(f"# default: {default}")
-            lines.append(yaml.safe_dump({name: default}, sort_keys=False).strip())
+            lines.append(yaml.safe_dump({name: current}, sort_keys=False).strip())
         lines.append("")
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    extras = {
+        key: val
+        for key, val in provided.items()
+        if key not in Settings.model_fields and key != "config_dir"
+    }
+    if extras:
+        lines.append("# keys not recognized by this build (preserved verbatim):")
+        lines.append(yaml.safe_dump(extras, sort_keys=False).strip())
+        lines.append("")
+    return "\n".join(lines) + "\n"
+
+
+def generate_default_config(path: Path) -> None:
+    """Write a first-run ``config.yaml`` (FRG-DEP-003): the documented defaults,
+    written atomically."""
+    atomic_write_text(path, render_documented_config())
 
 
 def _format_validation_error(exc: ValidationError) -> str:
@@ -714,7 +763,11 @@ def load_settings() -> Settings:
             retention = 3
         try:
             file_values = migrate_config(
-                config_file, loaded, config_dir, retention=retention
+                config_file,
+                loaded,
+                config_dir,
+                retention=retention,
+                render=render_documented_config,
             )
         except ConfigSchemaVersionError as exc:
             raise ConfigError(str(exc)) from exc
