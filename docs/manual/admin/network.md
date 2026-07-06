@@ -7,7 +7,7 @@ defaults `0.0.0.0` and `8789`). Inside a container, the default all-interfaces b
 means the port is reachable however you choose to publish it — the actual exposure
 boundary is up to you (see below).
 
-## No authentication in M1 — an accepted risk
+## No authentication in M1/M2 — an accepted risk
 
 **foragerr currently ships with no authentication on the web UI, API, or OPDS
 surfaces.** This is a deliberate, owner-approved decision, not an oversight:

@@ -40,9 +40,11 @@ loaded, its value self-registers with foragerr's log-redaction filter
 ## What is not yet covered
 
 At-rest encryption of secrets stored in the database (as opposed to environment/config
-file) is a later milestone (`FRG-AUTH-008`, targeted M3) — it applies to secrets a
-user enters through a UI once one exists (e.g. an indexer API key saved through
-settings), not to the environment-sourced values above. Until then, treat the
+file) is a later milestone (`FRG-AUTH-008`, targeted M3). This gap is **live today**:
+provider secrets entered through the UI — an indexer API key or download-client
+credential saved in Settings → Indexers / Download Clients — are stored unencrypted
+in the SQLite database. It does not affect the environment-sourced values above.
+Until then, treat the
 `/config` volume itself as sensitive: anyone who can read the SQLite database or
 `config.yaml` on disk can read any secret stored there in plaintext. Restrict
 filesystem access to the config volume accordingly.
