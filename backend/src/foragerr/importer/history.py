@@ -40,6 +40,10 @@ EVENT_DOWNLOAD_FAILED = "download_failed"
 EVENT_FILE_DELETED = "file_deleted"
 EVENT_FILE_RENAMED = "file_renamed"
 EVENT_UPGRADE_REPLACED = "upgrade_replaced"
+#: A ComicInfo.xml tagging attempt failed AFTER the file was already imported
+#: (FRG-PP-017). The file lands untagged and the import is NOT failed — this
+#: warning event records the degraded outcome so the tag failure is visible.
+EVENT_COMICINFO_TAG_FAILED = "comicinfo_tag_failed"
 
 #: The full event-type vocabulary written to ``import_history.event_type``.
 IMPORT_EVENT_TYPES: frozenset[str] = frozenset(
@@ -52,6 +56,7 @@ IMPORT_EVENT_TYPES: frozenset[str] = frozenset(
         EVENT_FILE_DELETED,
         EVENT_FILE_RENAMED,
         EVENT_UPGRADE_REPLACED,
+        EVENT_COMICINFO_TAG_FAILED,
     }
 )
 
@@ -150,6 +155,7 @@ async def all_events(
 
 
 __all__ = [
+    "EVENT_COMICINFO_TAG_FAILED",
     "EVENT_DOWNLOAD_FAILED",
     "EVENT_FILE_DELETED",
     "EVENT_FILE_RENAMED",
