@@ -605,6 +605,154 @@ def test_lookup_clean_empty_is_200_complete_with_no_records(client, monkeypatch)
     assert body["records"] == []
 
 
+# --- suggest (FRG-API-017) ---------------------------------------------------
+#
+# `GET /series/lookup/suggest` rides `ComicVineClient.suggest_series` (a
+# single-page fetch over the SAME `volumes/` search endpoint `/lookup` uses),
+# so `_search_handler` above is reused unchanged. These tests focus on what
+# is DIFFERENT from `/lookup`: no `truncated` field, a ~10 cap, and the SAME
+# 503/auth mapping reused (not re-implemented) from the lookup route.
+
+
+@pytest.mark.req("FRG-API-017")
+def test_suggest_returns_bounded_candidates_without_walking(client, monkeypatch):
+    volumes = [{"id": 101, "name": "Saga", "start_year": "2012"}]
+    factory = build_factory(
+        settings=client.app.state.settings, handler=_search_handler(volumes)
+    )
+    monkeypatch.setattr("foragerr.api.series.comicvine_factory", lambda _settings: factory)
+
+    response = client.get("/api/v1/series/lookup/suggest", params={"term": "Saga"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["complete"] is True
+    assert set(body) == {"records", "complete"}  # NO `truncated` field
+    candidates = body["records"]
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate["cv_volume_id"] == 101
+    assert candidate["name"] == "Saga"
+    assert candidate["start_year"] == 2012
+    assert candidate["have_it"] is False
+    # no plausibility annotations (unlike a lookup candidate)
+    assert "name_similarity" not in candidate
+    assert "year_proximity" not in candidate
+    assert "target_issue_plausible" not in candidate
+
+    assert client.get("/api/v1/series").json()["totalRecords"] == 0
+
+
+@pytest.mark.req("FRG-API-017")
+def test_suggest_marks_have_it_true_for_an_existing_series(
+    client, tmp_path, monkeypatch
+):
+    root_id = make_root_folder(client, tmp_path)
+    add_factory = build_factory(
+        settings=client.app.state.settings, handler=FakeCV().volume(101, name="Saga").handler()
+    )
+    patch_comicvine(monkeypatch, add_factory)
+    created = client.post(
+        "/api/v1/series", json={"cv_volume_id": 101, "root_folder_id": root_id}
+    )
+    assert created.status_code == 201
+
+    volumes = [{"id": 101, "name": "Saga", "start_year": "2012"}]
+    search_factory = build_factory(
+        settings=client.app.state.settings, handler=_search_handler(volumes)
+    )
+    monkeypatch.setattr(
+        "foragerr.api.series.comicvine_factory", lambda _settings: search_factory
+    )
+
+    response = client.get("/api/v1/series/lookup/suggest", params={"term": "Saga"})
+    assert response.json()["records"][0]["have_it"] is True
+
+
+@pytest.mark.req("FRG-API-017")
+def test_suggest_upstream_failure_is_200_complete_false(client, monkeypatch):
+    """A single failed page degrades to `complete=false` with no candidates —
+    NOT a 503 (that arm is reserved for auth failures, mirroring `/lookup`'s
+    per-page-failure behaviour)."""
+    factory = build_factory(
+        settings=client.app.state.settings,
+        handler=_search_handler([], status=500),
+    )
+    monkeypatch.setattr(
+        "foragerr.api.series.comicvine_factory", lambda _settings: factory
+    )
+
+    response = client.get("/api/v1/series/lookup/suggest", params={"term": "Saga"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["complete"] is False
+    assert body["records"] == []
+
+
+@pytest.mark.req("FRG-API-017")
+def test_suggest_auth_failure_is_503_naming_the_key_without_leaking_it(
+    client, monkeypatch, caplog
+):
+    """SAME 503 + `field="comicvine_api_key"` + no-key-leak contract as
+    `/lookup` (reused mapping, not a parallel copy) — see
+    `_LOOKUP_AUTH_MESSAGE`/`_comicvine_error_to_api_error`."""
+    import logging
+
+    factory = build_factory(
+        settings=client.app.state.settings, handler=_search_handler([], status=401)
+    )
+    monkeypatch.setattr(
+        "foragerr.api.series.comicvine_factory", lambda _settings: factory
+    )
+
+    with caplog.at_level(logging.WARNING, logger="foragerr.api.series"):
+        response = client.get(
+            "/api/v1/series/lookup/suggest", params={"term": "Saga"}
+        )
+    assert response.status_code == 503
+    body = response.json()
+    assert body["message"] == _LOOKUP_AUTH_MESSAGE
+    assert body["errors"][0]["field"] == "comicvine_api_key"
+    assert any(
+        "series lookup rejected by ComicVine: API key missing or invalid"
+        == record.getMessage()
+        for record in caplog.records
+    )
+    assert "CV-SECRET-KEY-abc123" not in response.text
+    assert "CV-SECRET-KEY-abc123" not in caplog.text
+
+
+@pytest.mark.req("FRG-API-017")
+def test_suggest_caps_at_roughly_ten_candidates(client, monkeypatch):
+    volumes = [
+        {"id": i, "name": f"Saga {i}", "start_year": "2012"} for i in range(15)
+    ]
+    factory = build_factory(
+        settings=client.app.state.settings, handler=_search_handler(volumes)
+    )
+    monkeypatch.setattr(
+        "foragerr.api.series.comicvine_factory", lambda _settings: factory
+    )
+
+    response = client.get("/api/v1/series/lookup/suggest", params={"term": "Saga"})
+    assert response.status_code == 200
+    assert len(response.json()["records"]) <= 10
+
+
+@pytest.mark.req("FRG-API-017")
+def test_suggest_route_is_not_shadowed_by_series_id_route(client, monkeypatch):
+    """`/lookup/suggest` is registered before `/{series_id}` (like `/lookup`)
+    so it is reachable at all rather than 422-ing on an int-path mismatch."""
+    factory = build_factory(
+        settings=client.app.state.settings, handler=_search_handler([])
+    )
+    monkeypatch.setattr(
+        "foragerr.api.series.comicvine_factory", lambda _settings: factory
+    )
+
+    response = client.get("/api/v1/series/lookup/suggest", params={"term": "Saga"})
+    assert response.status_code == 200
+
+
 # --- cover -------------------------------------------------------------------
 
 

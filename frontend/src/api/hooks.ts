@@ -10,6 +10,7 @@ import {
 import { queryKeys } from './queryKeys';
 import { useFetcher, type Fetcher } from './fetcher';
 import { toQueueItem } from './queue';
+import { useDebouncedValue } from '../lib/useDebouncedValue';
 import type {
   ApiPage,
   BlocklistBulkDeleteResult,
@@ -29,6 +30,7 @@ import type {
   SeriesCreatedResource,
   SeriesEditPayload,
   SeriesResource,
+  SuggestResponse,
   WantedIssueRecord,
 } from './types';
 
@@ -144,6 +146,51 @@ export function useLookup(term: string): UseQueryResult<LookupResponse> {
       query.state.data?.complete && !query.state.data.truncated ? Infinity : 0,
     retry: false,
   });
+}
+
+/** Add Series autosuggest debounce interval (FRG-UI-005 design decision #5). */
+export const SUGGEST_DEBOUNCE_MS = 250;
+/** Minimum trimmed-term length before an autosuggest request fires (FRG-UI-005). */
+export const SUGGEST_MIN_TERM_LENGTH = 3;
+
+/**
+ * The suggest query result plus `settledTerm` — the debounced, trimmed term
+ * the current `data`/`error` actually belong to. The dropdown lags the raw
+ * input by the debounce, so a consumer that renders candidates under the live
+ * input must gate on `settledTerm === input.trim()` to avoid painting a
+ * superseded term's rows under a newer input during the debounce window
+ * (FRG-UI-005).
+ */
+export type SuggestQueryResult = UseQueryResult<SuggestResponse> & {
+  settledTerm: string;
+};
+
+/**
+ * Bounded ComicVine suggest accelerator (FRG-API-017) backing the Add Series
+ * autosuggest dropdown (FRG-UI-005). Takes the LIVE, per-keystroke typed term;
+ * debounces it (~250ms) and gates on a >=3-char trimmed term before firing,
+ * term-keyed under ['lookup','suggest',term] so a response for a superseded
+ * term can never render over a newer one — the query for an old term simply
+ * has no observer once the debounced term moves on. The query's AbortSignal
+ * is wired through the fetcher so an in-flight request for a term that is no
+ * longer current is also cancelled at the network layer, not just ignored.
+ * `settledTerm` (the debounced term) is exposed so the screen can refuse to
+ * render lagging candidates under a newer input.
+ */
+export function useSuggest(rawTerm: string): SuggestQueryResult {
+  const fetcher = useFetcher();
+  const debounced = useDebouncedValue(rawTerm.trim(), SUGGEST_DEBOUNCE_MS);
+  const query = useQuery({
+    queryKey: queryKeys.lookup.suggest(debounced),
+    queryFn: ({ signal }) =>
+      fetcher<SuggestResponse>(
+        `/api/v1/series/lookup/suggest?term=${encodeURIComponent(debounced)}`,
+        { signal },
+      ),
+    enabled: debounced.length >= SUGGEST_MIN_TERM_LENGTH,
+    retry: false,
+  });
+  return { ...query, settledTerm: debounced } as SuggestQueryResult;
 }
 
 /** Configured root folders for the add-flow picker (FRG-UI-005). */

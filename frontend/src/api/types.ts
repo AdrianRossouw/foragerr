@@ -225,6 +225,47 @@ export interface LookupCandidate {
 }
 
 /**
+ * Suggest envelope (FRG-API-017): the bounded, first-page-only accelerator
+ * behind the Add Series autosuggest dropdown (FRG-UI-005). Carries `complete`
+ * (a clean single-page fetch vs. one degraded by a mid-fetch upstream
+ * failure) but deliberately carries NO `truncated` flag — a suggest result is
+ * definitionally partial, so a cap is not a signal-worthy truncation.
+ */
+export interface SuggestResponse {
+  records: SuggestCandidate[];
+  complete: boolean;
+}
+
+/**
+ * ComicVine suggest candidate (FRG-API-017) — the cheap first-page shape.
+ * Unlike `LookupCandidate` it carries no plausibility annotations (the
+ * suggest endpoint MAY omit that scoring to stay cheap); `have_it` is
+ * retained so an already-owned volume can still be marked in the dropdown.
+ */
+export interface SuggestCandidate {
+  cv_volume_id: number;
+  name: string | null;
+  publisher: string | null;
+  start_year: number | null;
+  image_url: string | null;
+  count_of_issues: number | null;
+  have_it: boolean;
+}
+
+/**
+ * Router navigation-state contract for arriving at the Add Series screen with a
+ * prefilled term (FRG-UI-005 / FRG-UI-019) — the header quick-search
+ * fall-through (`HeaderQuickSearch`) navigates to `/add` carrying this shape,
+ * which `AddSeries` consumes to seed its input and debounced autosuggest. Lives
+ * in this neutral shared-types module rather than a screen module so both the
+ * producer (`HeaderQuickSearch`) and the consumer (`AddSeries`) import it
+ * without a cross-screen dependency.
+ */
+export interface AddSeriesNavigationState {
+  prefillTerm?: string;
+}
+
+/**
  * One `GET /api/v1/rootfolder` row (FRG-SER-008). `free_space` is filesystem
  * free bytes, or null when the path could not be stat'd.
  */

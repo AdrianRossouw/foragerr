@@ -28,14 +28,39 @@ signals (issue counts, years) so the right volume is easy to pick. The add panel
 lets you choose the root folder, format profile, and monitoring options before the
 add flow kicks off its chained refresh → scan → optional search.
 
+As you type (three characters or more) a debounced autosuggest dropdown offers up
+to about ten candidates straight from ComicVine, without waiting for the full
+search below — pick one and it opens the exact same add panel a full-search
+result would. It's an accelerator, not a replacement: the full search stays the
+authoritative one, so submitting it (⏎ or the Search button) always runs for
+real, and re-submitting an identical term after an error or a degraded/capped
+result retries instead of doing nothing.
+
 A search that can't be completed is never presented as "no results": if ComicVine
 rejects the API key (unset or invalid) the screen says so and points you at
-Settings; if the search degraded mid-way (rate limiting, a ComicVine outage)
+Settings — the autosuggest dropdown shows the same guidance if it hits a
+rejected key; if the search degraded mid-way (rate limiting, a ComicVine outage)
 any candidates found so far render with a "results may be incomplete" notice —
 or, when nothing at all was retrieved, an explicit failure message; and a search
 that hit the result cap says so and advises a narrower term. Re-searching the
 same term always retries for real. Only a fully completed search with zero
 matches shows the plain no-results state.
+
+## Quick search
+
+The search box in the header, present on every screen, jumps you straight to a
+series you already own. Start typing and it matches against your library's
+titles and aliases entirely locally — there is no ComicVine request and no
+network round trip at all, so it works even if ComicVine is unreachable or the
+key isn't configured. Matches are ranked exact and prefix hits first, then
+word-boundary and substring hits.
+
+Navigate the list with the arrow keys, press Enter to jump to the highlighted
+series' detail page, or Escape to dismiss it. The last row is always
+**"Search ComicVine for '\<term\>'…"**, whether or not any local matches were
+found — selecting it takes you to Add Series with your term already filled in
+(and its autosuggest already running), bridging "it isn't in my library yet"
+straight into adding it.
 
 ## Library Import
 

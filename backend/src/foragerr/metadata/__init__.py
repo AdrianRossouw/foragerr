@@ -35,6 +35,7 @@ from foragerr.metadata.models import (
     SearchResult,
     SeriesCandidate,
     SeriesRecord,
+    SuggestResult,
 )
 from foragerr.metadata.ratelimit import (
     comicvine_degraded,
@@ -62,6 +63,7 @@ __all__ = [
     "SearchResult",
     "SeriesCandidate",
     "SeriesRecord",
+    "SuggestResult",
     "cache_cover",
     "comicvine_degraded",
     "comicvine_health",

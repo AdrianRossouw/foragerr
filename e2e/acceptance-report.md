@@ -3,9 +3,9 @@
 _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.mjs` — do not edit by hand (FRG-PROC-010)._
 
 - **Verdict:** GREEN
-- **Scenarios:** 11 (10 pass, 0 fail, 1 skipped, 0 flaky, 0 not run)
-- **Run started:** 2026-07-06T13:45:26.593Z
-- **Duration:** 61.8s
+- **Scenarios:** 14 (13 pass, 0 fail, 1 skipped, 0 flaky, 0 not run)
+- **Run started:** 2026-07-06T15:02:04.392Z
+- **Duration:** 62.0s
 
 ## Scenario → requirement coverage
 
@@ -20,6 +20,9 @@ _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.m
 | PASS | FRG-PROC-010 FRG-OPDS-001 FRG-OPDS-002 FRG-OPDS-003 FRG-OPDS-005: OPDS navigates to a byte-identical comic download | FRG-OPDS-001, FRG-OPDS-002, FRG-OPDS-003, FRG-OPDS-005, FRG-PROC-010 |
 | SKIPPED | FRG-PROC-010: live SABnzbd tier (skipped — no credentials) | FRG-PROC-010 |
 | PASS | FRG-PROC-010 FRG-UI-015 FRG-IMP-022 FRG-IMP-023: library import scans a root, reviews matches and imports existing files in place without a download | FRG-IMP-022, FRG-IMP-023, FRG-PROC-010, FRG-UI-015 |
+| PASS | FRG-PROC-010 FRG-API-011: History shows the grabbed and imported rows sharing a downloadId | FRG-API-011, FRG-PROC-010 |
+| PASS | FRG-PROC-010 FRG-API-012: Wanted lists a monitored, published, fileless issue | FRG-API-012, FRG-PROC-010 |
+| PASS | FRG-PROC-010 FRG-OPDS-013: OPDS Recent serves the imported issue file bytes | FRG-OPDS-013, FRG-PROC-010 |
 | PASS | FRG-PROC-010 FRG-SCHED-002: library and command queue survive a container restart | FRG-PROC-010, FRG-SCHED-002 |
 | PASS | FRG-PROC-010 FRG-UI-005: an unconfigured ComicVine key surfaces an actionable credential error, not "no results" | FRG-PROC-010, FRG-UI-005 |
 
@@ -27,6 +30,8 @@ _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.m
 
 | FRG id | Result |
 | --- | --- |
+| FRG-API-011 | PASS |
+| FRG-API-012 | PASS |
 | FRG-DDL-010 | PASS |
 | FRG-DEP-001 | PASS |
 | FRG-DEP-007 | PASS |
@@ -37,6 +42,7 @@ _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.m
 | FRG-OPDS-002 | PASS |
 | FRG-OPDS-003 | PASS |
 | FRG-OPDS-005 | PASS |
+| FRG-OPDS-013 | PASS |
 | FRG-PP-009 | PASS |
 | FRG-PP-010 | PASS |
 | FRG-PROC-010 | PASS |

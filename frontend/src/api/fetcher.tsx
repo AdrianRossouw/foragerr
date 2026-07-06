@@ -16,6 +16,13 @@ export interface FetcherInit {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   /** JSON-serialized as the request body when present. */
   body?: unknown;
+  /**
+   * Cancellation signal (FRG-UI-005: the Add Series autosuggest wires
+   * React Query's per-query AbortSignal through here so an in-flight
+   * suggest request for a superseded term is aborted rather than left to
+   * resolve into a stale, unrenderable response).
+   */
+  signal?: AbortSignal;
 }
 
 /** The backend's uniform 4xx error shape (FRG-API-002). */
@@ -72,6 +79,7 @@ export const defaultFetcher: Fetcher = async <T,>(
       ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
     },
     ...(hasBody ? { body: JSON.stringify(init?.body) } : {}),
+    ...(init?.signal ? { signal: init.signal } : {}),
   });
   if (!res.ok) {
     let body: ApiErrorBody | null = null;

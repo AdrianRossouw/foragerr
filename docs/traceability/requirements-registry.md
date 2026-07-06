@@ -210,6 +210,7 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-API-014 | System status, health, and task endpoints | api | approved | M2 |
 | FRG-API-015 | Manual import endpoint | api | implemented | M2 |
 | FRG-API-016 | Parse debug endpoint | api | approved | B |
+| FRG-API-017 | ComicVine suggest (bounded lookup variant) | api | implemented | M2 |
 | FRG-UI-001 | SPA architecture: server state via React Query + WS invalidation | ui | implemented | M1 |
 | FRG-UI-002 | Design token layer with ant/foraging theme | ui | implemented | M1 |
 | FRG-UI-003 | Library index screen | ui | implemented | M1 |
@@ -228,6 +229,7 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-UI-016 | System status and tasks screens | ui | approved | M2 |
 | FRG-UI-017 | Blocklist screen | ui | implemented | M2 |
 | FRG-UI-018 | Weekly pull / calendar view | ui | approved | M3 |
+| FRG-UI-019 | Global header quick-search over the local library | ui | implemented | M2 |
 | FRG-OPDS-001 | OPDS 1.2 Atom catalog with navigation root | opds | implemented | M1 |
 | FRG-OPDS-002 | Acquisition feeds with per-entry metadata | opds | implemented | M1 |
 | FRG-OPDS-003 | Library-id-based file resolution only (no client-supplied paths) | opds | implemented | M1 |

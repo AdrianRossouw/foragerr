@@ -104,6 +104,12 @@ export const queryKeys = {
   // screen is open.
   lookup: {
     term: (term: string) => ['lookup', term] as const,
+    // Suggest (FRG-API-017) is a SEPARATE cache family from the full lookup
+    // above, even though both key off `term`: it is a different envelope
+    // shape ({records, complete} — no `truncated`) and a different endpoint,
+    // so a term that has both a full-lookup and a suggest entry never
+    // collides or cross-invalidates.
+    suggest: (term: string) => ['lookup', 'suggest', term] as const,
   },
 } as const;
 
