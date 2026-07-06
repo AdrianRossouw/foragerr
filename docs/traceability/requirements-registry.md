@@ -212,6 +212,7 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-API-016 | Parse debug endpoint | api | approved | B |
 | FRG-API-017 | ComicVine suggest (bounded lookup variant) | api | implemented | M2 |
 | FRG-API-018 | ComicVine credential settings resource | api | implemented | M2 |
+| FRG-API-019 | Pull/weekly resource endpoint | api | proposed | M3 |
 | FRG-UI-001 | SPA architecture: server state via React Query + WS invalidation | ui | implemented | M1 |
 | FRG-UI-002 | Design token layer with ant/foraging theme | ui | implemented | M1 |
 | FRG-UI-003 | Library index screen | ui | implemented | M1 |
