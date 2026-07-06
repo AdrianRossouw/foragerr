@@ -37,7 +37,14 @@ from foragerr.metadata.errors import (
     ComicVineUnavailable,
 )
 from foragerr.metadata.mapping import map_issue, map_volume
-from foragerr.metadata.models import IssueRecord, Page, SearchResult, SeriesCandidate, SeriesRecord
+from foragerr.metadata.models import (
+    IssueRecord,
+    Page,
+    SearchResult,
+    SeriesCandidate,
+    SeriesRecord,
+    SuggestResult,
+)
 from foragerr.metadata.ratelimit import effective_interval, gate
 from foragerr.metadata.search import plausibility
 
@@ -59,6 +66,11 @@ ISSUE_FIELDS = "id,name,issue_number,cover_date,store_date,image,volume"
 
 #: JSON-response byte cap (lower than the factory ceiling; ample per page).
 JSON_MAX_BYTES = 16_000_000
+
+#: Result cap for :meth:`ComicVineClient.suggest_series` (FRG-API-017) — a
+#: fixed, small first-page size for as-you-type suggestion, independent of
+#: the configured ``comicvine_page_size`` (which sizes the full-walk pages).
+SUGGEST_LIMIT = 10
 
 #: Body markers that identify a ComicVine ban / abnormal-traffic HTML page.
 _BAN_MARKERS = (
@@ -173,6 +185,59 @@ class ComicVineClient:
             truncated=page.truncated,
             complete=page.complete,
         )
+
+    async def suggest_series(self, term: str) -> SuggestResult:
+        """Bounded, single-page volume search for as-you-type suggestion
+        (FRG-API-017) — a cheap accelerator over :meth:`search_series`.
+
+        Fetches ONLY the first page (offset 0, ``limit=SUGGEST_LIMIT``) via
+        one direct :meth:`_request` call and NEVER loops through
+        :meth:`_paginate`'s walk to ``_max_pages`` — this is the load-bearing
+        "never the full pagination walk" guarantee. Reuses the exact same
+        filter-metacharacter neutralisation as :meth:`search_series` and the
+        same ignored-publisher drop, but skips plausibility scoring (no query
+        year/target-issue analysis) to keep the call cheap: candidates carry
+        only the raw mapped fields (name, start year, publisher, issue count,
+        image, cv_volume_id).
+
+        A ComicVine auth failure propagates unchanged (the same carve-out
+        ``_paginate`` documents: a credential failure cannot be distinguished
+        from an empty search if swallowed). Any OTHER upstream failure on
+        this single page degrades the result to ``complete=False`` with no
+        candidates, rather than raising — there is only one page to lose.
+        """
+        query = term.strip()
+        # Neutralise CV filter metacharacters exactly as `search_series` does.
+        filter_value = query.replace(",", " ").replace(":", " ").strip()
+        params = {
+            "field_list": SEARCH_VOLUME_FIELDS,
+            "filter": f"name:{filter_value}",
+            "sort": "name:asc",
+            "offset": 0,
+            "limit": SUGGEST_LIMIT,
+        }
+        try:
+            data = await self._request("volumes/", params)
+        except ComicVineAuthError:
+            raise
+        except ComicVineError:
+            return SuggestResult(candidates=(), complete=False)
+
+        results = data.get("results")
+        if not isinstance(results, list):
+            return SuggestResult(candidates=(), complete=False)
+
+        candidates: list[SeriesRecord] = []
+        for raw in results[:SUGGEST_LIMIT]:
+            if not isinstance(raw, dict):
+                continue
+            record = map_volume(raw)
+            publisher = (record.publisher or "").casefold()
+            if publisher and publisher in self._ignored_publishers:
+                continue
+            candidates.append(record)
+
+        return SuggestResult(candidates=tuple(candidates), complete=True)
 
     async def aclose(self) -> None:
         await self._client.aclose()

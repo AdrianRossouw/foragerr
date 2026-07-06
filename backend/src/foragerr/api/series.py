@@ -233,7 +233,65 @@ class LookupResponse(BaseModel):
     truncated: bool
 
 
+class SuggestCandidateResource(BaseModel):
+    """One bounded ComicVine suggest candidate (FRG-API-017) — deliberately
+    NARROWER than :class:`LookupCandidateResource`: no plausibility signals
+    (``name_similarity``/``year_proximity``/``target_issue_plausible``),
+    since suggest skips that scoring to stay cheap. ``have_it`` is still
+    computed over the ≤10 returned ids for parity with the full lookup."""
+
+    cv_volume_id: int
+    name: str | None
+    publisher: str | None
+    start_year: int | None
+    count_of_issues: int | None
+    image_url: str | None
+    have_it: bool
+
+
+class SuggestResponse(BaseModel):
+    """Suggest outcome envelope (FRG-API-017). Carries ``complete`` (a clean
+    single-page fetch vs. one degraded by a mid-fetch upstream failure) but
+    deliberately has NO ``truncated`` field, unlike :class:`LookupResponse`:
+    a suggest result is definitionally partial — the full ``GET /lookup``
+    remains the complete search — so a cap is not a truncation to signal."""
+
+    records: list[SuggestCandidateResource]
+    complete: bool
+
+
 # --- routes -------------------------------------------------------------------
+
+
+def _comicvine_error_to_api_error(exc: ComicVineError) -> ApiError:
+    """Map any ComicVine client failure to the uniform error the lookup
+    FAMILY surfaces — shared verbatim by ``GET /lookup`` (FRG-API-003) and
+    ``GET /lookup/suggest`` (FRG-API-017) so neither route carries a parallel
+    copy of this mapping and the frontend's ``isComicVineAuthError`` sniff
+    classifies a suggest 503 identically to a lookup 503.
+
+    ``ComicVineAuthError`` (a missing/invalid key propagating out of the
+    client rather than degrading to a partial/empty result — see
+    ``ComicVineClient._paginate``'s and ``suggest_series``'s auth carve-outs)
+    maps to the dedicated credential message plus the machine-readable
+    ``field="comicvine_api_key"`` discriminator, and logs ONE static warning
+    naming the failure — never the key value. Every other ``ComicVineError``
+    is a defensive backstop mapped to a generic 503 naming the failure."""
+    if isinstance(exc, ComicVineAuthError):
+        # Static message and static log line — never interpolate the key or
+        # the exception's raw text, so no credential value can reach the
+        # response body or the log.
+        logger.warning(
+            "series lookup rejected by ComicVine: API key missing or invalid"
+        )
+        return ApiError(
+            _COMICVINE_LOOKUP_ERROR_STATUS,
+            f"comicvine lookup failed: {COMICVINE_CREDENTIAL_MESSAGE}",
+            field="comicvine_api_key",
+        )
+    return ApiError(
+        _COMICVINE_LOOKUP_ERROR_STATUS, f"comicvine lookup failed: {exc}"
+    )
 
 
 @router.get("", response_model=SeriesPage)
@@ -276,37 +334,26 @@ async def list_series(
 async def lookup_series(term: str, request: Request) -> LookupResponse:
     """Live ComicVine volume search; no library side effect (FRG-API-003).
 
-    NOTE on the two ``except`` arms below: ``ComicVineClient._paginate`` (which
-    ``search_series`` rides) carves out ``ComicVineAuthError`` — a missing or
-    invalid API key propagates out of the pagination walk rather than degrading
-    to a partial/empty ``SearchResult`` (FRG-META-004) — so the auth arm below
-    IS a reachable path and maps a credential failure to a 503 naming the key.
-    Every OTHER per-page ``ComicVineError`` is still swallowed internally and
-    degrades to ``complete=False``, so a mid-walk outage surfaces here as a 200
-    envelope with ``complete=false``, not a 503; the general ``ComicVineError``
-    arm is a defensive backstop against any future client change that raises
-    directly."""
+    NOTE on the single ``except`` arm below: ``ComicVineClient._paginate``
+    (which ``search_series`` rides) carves out ``ComicVineAuthError`` — a
+    missing or invalid API key propagates out of the pagination walk rather
+    than degrading to a partial/empty ``SearchResult`` (FRG-META-004) — so
+    ``_comicvine_error_to_api_error`` (shared verbatim with the
+    ``/lookup/suggest`` route, FRG-API-017) IS reached for a credential
+    failure and maps it to a 503 naming the key. Every OTHER per-page
+    ``ComicVineError`` is still swallowed internally and degrades to
+    ``complete=False``, so a mid-walk outage surfaces here as a 200 envelope
+    with ``complete=false``, not a 503; catching the general
+    ``ComicVineError`` here (which also matches its ``ComicVineAuthError``
+    subclass) is a defensive backstop against any future client change that
+    raises directly."""
     settings = request.app.state.settings
     factory = comicvine_factory(settings)
     try:
         async with ComicVineClient(settings, factory) as cv:
             result = await cv.search_series(term)
-    except ComicVineAuthError as exc:
-        # Static message and static log line — never interpolate the key or
-        # the exception's raw text, so no credential value can reach the
-        # response body or the log.
-        logger.warning(
-            "series lookup rejected by ComicVine: API key missing or invalid"
-        )
-        raise ApiError(
-            _COMICVINE_LOOKUP_ERROR_STATUS,
-            f"comicvine lookup failed: {COMICVINE_CREDENTIAL_MESSAGE}",
-            field="comicvine_api_key",
-        ) from exc
     except ComicVineError as exc:
-        raise ApiError(
-            _COMICVINE_LOOKUP_ERROR_STATUS, f"comicvine lookup failed: {exc}"
-        ) from exc
+        raise _comicvine_error_to_api_error(exc) from exc
 
     ids = [candidate.series.cv_volume_id for candidate in result.candidates]
     have: set[int] = set()
@@ -336,6 +383,56 @@ async def lookup_series(term: str, request: Request) -> LookupResponse:
         ],
         complete=result.complete,
         truncated=result.truncated,
+    )
+
+
+# NOTE: registered BEFORE "/{series_id}" (like "/lookup" above) so
+# "lookup/suggest" is never swallowed by the int-typed path parameter.
+@router.get("/lookup/suggest", response_model=SuggestResponse)
+async def suggest_series(term: str, request: Request) -> SuggestResponse:
+    """Bounded, first-page-only ComicVine suggestion for as-you-type UX
+    (FRG-API-017) — a cheap accelerator over ``GET /lookup``, riding
+    ``ComicVineClient.suggest_series`` which fetches a single page and NEVER
+    performs the full pagination walk ``search_series`` does. Reuses
+    ``GET /lookup``'s error mapping verbatim via
+    ``_comicvine_error_to_api_error`` (see that route's docstring for why the
+    single ``except ComicVineError`` arm below still reaches the auth-specific
+    503 for a credential failure), so the frontend's ``isComicVineAuthError``
+    classifies a suggest 503 identically to a lookup 503. No plausibility
+    scoring is computed (see ``SuggestCandidateResource``); ``have_it`` is
+    still annotated over the ≤10 returned ids."""
+    settings = request.app.state.settings
+    factory = comicvine_factory(settings)
+    try:
+        async with ComicVineClient(settings, factory) as cv:
+            result = await cv.suggest_series(term)
+    except ComicVineError as exc:
+        raise _comicvine_error_to_api_error(exc) from exc
+
+    ids = [record.cv_volume_id for record in result.candidates]
+    have: set[int] = set()
+    if ids:
+        db = request.app.state.db
+        async with db.read_session() as session:
+            rows = await session.execute(
+                select(SeriesRow.cv_volume_id).where(SeriesRow.cv_volume_id.in_(ids))
+            )
+            have = set(rows.scalars().all())
+
+    return SuggestResponse(
+        records=[
+            SuggestCandidateResource(
+                cv_volume_id=record.cv_volume_id,
+                name=record.name,
+                publisher=record.publisher,
+                start_year=record.start_year,
+                count_of_issues=record.count_of_issues,
+                image_url=record.image_url,
+                have_it=record.cv_volume_id in have,
+            )
+            for record in result.candidates
+        ],
+        complete=result.complete,
     )
 
 

@@ -119,6 +119,24 @@ class SearchResult:
 
 
 @dataclass(frozen=True, slots=True)
+class SuggestResult:
+    """The bounded, single-page result of a ComicVine suggest fetch
+    (FRG-API-017) — a cheap as-you-type accelerator over :class:`SearchResult`.
+
+    Unlike :class:`SearchResult`, there is NO ``truncated`` flag: a suggest
+    fetch is definitionally partial (the full lookup, not suggest, is the
+    complete search), so a cap is not a truncation worth signalling.
+    ``complete`` distinguishes a clean single-page fetch (``True``) from one
+    degraded by a mid-fetch upstream failure (``False``) — auth failures
+    still propagate as :class:`~foragerr.metadata.errors.ComicVineAuthError`
+    rather than reaching here, exactly as :class:`SearchResult` documents.
+    """
+
+    candidates: tuple[SeriesRecord, ...]
+    complete: bool
+
+
+@dataclass(frozen=True, slots=True)
 class Page(Generic[T]):
     """The result of a bounded, offset-based ComicVine pagination walk.
 
