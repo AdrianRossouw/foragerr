@@ -289,7 +289,11 @@ async def test_endpoint_pushes_then_cleans_up_on_client_disconnect():
 
     ws._incoming.put_nowait(WebSocketDisconnect(1000))  # client disconnects
     await asyncio.wait_for(endpoint, 1.0)
-    assert ws.closed
+    # The endpoint deregisters, but does NOT re-close a socket the CLIENT
+    # already closed — closing a gone socket races the ASGI teardown (that
+    # race surfaced as a CancelledError escaping the real-ASGI test). The
+    # cleanup guarantee is deregistration, not a server-side close here.
+    assert not ws.closed
     assert broadcaster.connection_count == 0
 
 
