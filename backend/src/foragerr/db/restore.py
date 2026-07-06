@@ -18,15 +18,27 @@ On a present marker it:
    discarding any stale live WAL/SHM so the restored file is authoritative;
 5. deletes the marker so a restore never loops.
 
-A refusal (confinement violation or corrupt backup) leaves the live database and
-config **byte-for-byte unchanged**, logs the reason, and lets startup proceed
-against the untouched live database — it never swaps in a rejected target. All
+Two outcomes leave the live database and config **byte-for-byte unchanged** and
+let startup proceed against the untouched live database:
+
+- a **refusal** (``status="refused"``) — a confinement violation or a corrupt
+  backup source: the target was rejected, so no swap was attempted; and
+- a **failure** (``status="failed"``) — an operational error (disk full, I/O)
+  while snapshotting or swapping: the swap is staged so the live files are never
+  half-written, and the marker is deliberately KEPT so a retry (e.g. after
+  freeing space) can still restore. The startup hook logs the failure and boots
+  against the live database rather than aborting into a boot loop.
+
+The swap itself is crash-safe: each new file is streamed to a temp beside its
+live target, fsync'd, and committed with ``os.replace`` (an atomic rename on the
+same filesystem), so a crash mid-copy can never corrupt the live database. All
 synchronous; the startup hook offloads it to a thread.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -51,7 +63,11 @@ _WAL_SUFFIXES = ("-wal", "-shm")
 class RestoreResult:
     """What :func:`apply_restore_marker` did (for logging + tests)."""
 
-    status: str  # "restored" | "refused"
+    #: ``"restored"`` (swap applied, marker cleared), ``"refused"`` (target
+    #: rejected — hostile/corrupt — live untouched, marker cleared) or
+    #: ``"failed"`` (operational error while snapshotting/swapping — live
+    #: untouched, marker KEPT for a retry).
+    status: str  # "restored" | "refused" | "failed"
     target: Path | None = None
     snapshot_dir: Path | None = None
     reason: str | None = None
@@ -113,7 +129,26 @@ def apply_restore_marker(config_dir: Path) -> RestoreResult | None:
             status="refused", target=target, reason="backup database missing"
         )
 
-    integrity = run_full_integrity_check(backup_db)
+    # Belt-and-suspenders: confine the resolved backup FILES (not just the dir),
+    # refusing a symlinked db/config that escapes the backups root even though
+    # the containing directory validated.
+    backups_root = config_dir / BACKUPS_DIRNAME
+    backup_config = target / CONFIG_FILENAME
+    try:
+        validate_under_root(backup_db, [backups_root])
+        if backup_config.exists():
+            validate_under_root(backup_config, [backups_root])
+    except PathConfinementError as exc:
+        logger.error(
+            "db: restore refused — a backup file escapes the backups root (%s); "
+            "the live database is left untouched",
+            exc,
+        )
+        return RestoreResult(status="refused", target=target, reason=str(exc))
+
+    # A backup copy is quiescent — check it immutably so we do not leave a
+    # ``-wal``/``-shm`` sidecar in the backup dir or bump its mtime.
+    integrity = run_full_integrity_check(backup_db, immutable=True)
     if not integrity.ok:
         logger.error(
             "db: restore refused — backup %s failed integrity (%s); live "
@@ -125,27 +160,52 @@ def apply_restore_marker(config_dir: Path) -> RestoreResult | None:
             status="refused", target=target, reason=integrity.detail
         )
 
-    # Snapshot the current live DB (+ side files) and config aside FIRST.
-    snapshot_dir = config_dir / BACKUPS_DIRNAME / f"pre-restore-{_timestamp()}"
-    snapshot_dir.mkdir(parents=True)
     live_db = config_dir / DB_FILENAME
     live_config = config_dir / CONFIG_FILENAME
-    if live_db.exists():
-        # A consistent snapshot of the CURRENT db, so a botched restore is
-        # itself recoverable (checkpoint+backup API, not a torn file copy).
-        write_consistent_backup(live_db, snapshot_dir)
-    if live_config.exists():
-        shutil.copy2(live_config, snapshot_dir / live_config.name)
+    snapshot_dir = backups_root / f"pre-restore-{_timestamp()}"
+    staged: list[Path] = []
+    # Everything below touches the filesystem and can fail operationally (disk
+    # full, I/O). Guard it: a failure leaves the live files untouched (the swap
+    # is staged, committed only by atomic rename) and KEEPS the marker so a retry
+    # can still restore — it must never crash the startup hook into a boot loop.
+    try:
+        # Snapshot the current live DB (+ side files) and config aside FIRST, so
+        # a botched restore is itself recoverable.
+        snapshot_dir.mkdir(parents=True)
+        if live_db.exists():
+            # Consistent snapshot (checkpoint+backup API, not a torn file copy).
+            write_consistent_backup(live_db, snapshot_dir)
+        if live_config.exists():
+            shutil.copy2(live_config, snapshot_dir / live_config.name)
 
-    # Clear stale WAL/SHM so the restored file is authoritative, then swap.
-    for suffix in _WAL_SUFFIXES:
-        side = config_dir / f"{DB_FILENAME}{suffix}"
-        if side.exists():
-            side.unlink()
-    shutil.copy2(backup_db, live_db)
-    backup_config = target / CONFIG_FILENAME
-    if backup_config.exists():
-        shutil.copy2(backup_config, live_config)
+        # Phase 1 — stream the new files to temps beside their live targets and
+        # fsync them. All fallible I/O happens here, BEFORE any live mutation.
+        staged.append(_stage_copy(backup_db, live_db))
+        if backup_config.exists():
+            staged.append(_stage_copy(backup_config, live_config))
+
+        # Phase 2 — commit. Clear stale WAL/SHM so the restored file is
+        # authoritative, then atomically rename each temp into place; the DB
+        # path's replace is its LAST mutation, so a crash can never leave a
+        # half-written live database.
+        for suffix in _WAL_SUFFIXES:
+            side = config_dir / f"{DB_FILENAME}{suffix}"
+            if side.exists():
+                side.unlink()
+        os.replace(staged[0], live_db)
+        if backup_config.exists():
+            os.replace(staged[1], live_config)
+    except OSError as exc:
+        for tmp in staged:
+            _quiet_unlink(tmp)
+        logger.error(
+            "db: restore FAILED operationally (%s); the live database is "
+            "untouched and the restore marker is kept for a retry",
+            exc,
+        )
+        return RestoreResult(
+            status="failed", target=target, snapshot_dir=snapshot_dir, reason=str(exc)
+        )
 
     marker.unlink()  # never loop a restore
     logger.warning(
@@ -154,6 +214,30 @@ def apply_restore_marker(config_dir: Path) -> RestoreResult | None:
         snapshot_dir,
     )
     return RestoreResult(status="restored", target=target, snapshot_dir=snapshot_dir)
+
+
+def _stage_copy(src: Path, dst: Path) -> Path:
+    """Copy ``src`` to a fsync'd temp file beside ``dst``; return the temp path.
+
+    The temp lives in ``dst``'s own directory so the later ``os.replace`` is an
+    atomic same-filesystem rename. Copying + fsync (the fallible part) happens
+    here; the caller commits with ``os.replace`` as a separate, atomic step.
+    """
+    tmp = dst.parent / f".{dst.name}.restore-tmp"
+    shutil.copyfile(src, tmp)
+    fd = os.open(tmp, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    return tmp
+
+
+def _quiet_unlink(path: Path) -> None:
+    try:
+        path.unlink()
+    except OSError:  # pragma: no cover - cleanup best-effort
+        pass
 
 
 def _timestamp() -> str:

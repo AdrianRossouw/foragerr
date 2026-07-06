@@ -103,6 +103,67 @@ def test_retention_prunes_only_scheduled_pool(tmp_path):
 
 
 @pytest.mark.req("FRG-DB-009")
+def test_failed_backup_leaves_no_dir_and_does_not_rotate_pool(tmp_path, monkeypatch):
+    """A backup that fails mid-write must not leave a partial ``scheduled-*`` dir
+    (which prune would count and freshness would trust) nor rotate the pool."""
+    import foragerr.db.backup as backup_mod
+
+    cfg = _migrated_config(tmp_path)
+    db_path = cfg / DB_FILENAME
+    config_path = cfg / "config.yaml"
+    config_path.write_text("x: 1\n", encoding="utf-8")
+    backups_root = cfg / "backups"
+
+    # Two good backups form the pool at retention=2.
+    a = write_scheduled_backup(db_path, config_path, cfg, retention=2)
+    os.utime(a, (1000, 1000))
+    b = write_scheduled_backup(db_path, config_path, cfg, retention=2)
+    os.utime(b, (2000, 2000))
+
+    # The next backup fails while copying — no final dir, pool NOT rotated.
+    def boom(*_a, **_k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(backup_mod, "write_consistent_backup", boom)
+    with pytest.raises(OSError):
+        write_scheduled_backup(db_path, config_path, cfg, retention=2)
+
+    scheduled = sorted(backups_root.glob(f"{SCHEDULED_PREFIX}*"))
+    assert scheduled == [a, b]  # A and B survive; no partial C rotated them out
+    # No staging leftover, and freshness never sees a partial.
+    assert not list(backups_root.glob(f".{SCHEDULED_PREFIX}*"))
+    assert latest_scheduled_backup(cfg) in (a, b)
+
+
+@pytest.mark.req("FRG-DB-009")
+def test_prune_orders_by_name_timestamp_and_skips_symlinks(tmp_path):
+    """Prune deletes the genuinely-oldest by NAME timestamp (mtime bumps/skew
+    cannot misorder it), and never follows/rmtrees a symlink in the pool."""
+    backups_root = tmp_path / "backups"
+    backups_root.mkdir()
+    d1 = backups_root / f"{SCHEDULED_PREFIX}20200101000000000000"  # oldest name
+    d2 = backups_root / f"{SCHEDULED_PREFIX}20200102000000000000"
+    d3 = backups_root / f"{SCHEDULED_PREFIX}20200103000000000000"  # newest name
+    for d in (d1, d2, d3):
+        d.mkdir()
+        (d / "x").write_text("x", encoding="utf-8")
+    # mtimes in REVERSE of name order (an integrity check / clock skew bumped
+    # the oldest to look newest); name order must still win.
+    os.utime(d1, (3000, 3000))
+    os.utime(d2, (2000, 2000))
+    os.utime(d3, (1000, 1000))
+    # A symlink sitting in the pool must be skipped, not counted or deleted.
+    link = backups_root / f"{SCHEDULED_PREFIX}zzz-link"
+    link.symlink_to(d3)
+
+    pruned = prune_backup_pool(backups_root, SCHEDULED_PREFIX, 2)
+
+    assert pruned == [d1] and not d1.exists()  # oldest-by-name pruned
+    assert d2.exists() and d3.exists()  # newer-by-name kept despite mtimes
+    assert link.exists() and link.is_symlink()  # symlink never followed/removed
+
+
+@pytest.mark.req("FRG-DB-009")
 def test_latest_scheduled_backup_picks_newest(tmp_path):
     cfg = _migrated_config(tmp_path)
     assert latest_scheduled_backup(cfg) is None

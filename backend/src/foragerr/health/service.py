@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import logging
 import os
 import shutil
 from dataclasses import dataclass
@@ -39,8 +40,8 @@ from typing import Any
 
 from sqlalchemy import select
 
-from foragerr.config import CONFIG_FILENAME, Settings
-from foragerr.db import Database, database_path, utcnow
+from foragerr.config import Settings
+from foragerr.db import Database, utcnow
 from foragerr.db.backup import latest_scheduled_backup
 from foragerr.downloads.models import DownloadClientRow
 from foragerr.health.state import current_integrity
@@ -55,9 +56,18 @@ from foragerr.providers.backoff import (
     ProviderBackoff,
 )
 
+logger = logging.getLogger("foragerr.health.service")
+
 #: Free-space floor below which a volume is flagged (design open question 2:
 #: a small absolute floor; promote to a config key only if it proves noisy).
 LOW_DISK_FLOOR_BYTES = 1 * 1024**3  # 1 GiB
+
+#: Deadline for a single offloaded filesystem probe (root-folder / disk stat).
+#: A wedged network mount would otherwise hang the health request and pile
+#: blocked threads into the shared executor; the timeout bounds the REQUEST.
+#: NOTE: the blocked worker thread itself cannot be cancelled (an inherent limit
+#: of ``to_thread``); this only stops the request from waiting on it.
+FS_PROBE_TIMEOUT_SECONDS = 5.0
 
 #: A scheduled backup older than this multiple of the configured interval is
 #: surfaced as an overdue-backup warning on the database component.
@@ -124,15 +134,81 @@ class HealthService:
         self._backoff = ProviderBackoff(db)
 
     async def component_view(self) -> list[ComponentHealth]:
-        """Every tracked component with state + timestamps (one aggregation)."""
+        """Every tracked component with state + timestamps (one aggregation).
+
+        Each producer is isolated: one raising check becomes an error-state
+        component instead of 500-ing the whole endpoint, so a single broken
+        signal never hides every other component's health.
+        """
         components: list[ComponentHealth] = []
-        components.append(self._comicvine_component())
-        components.extend(await self._provider_components())
-        components.append(await self._scheduler_component())
-        components.append(await self._database_component())
-        components.extend(await self._root_folder_components())
-        components.append(await self._disk_component())
+        components += await self._safe(
+            lambda: self._comicvine_component(),
+            component="comicvine",
+            kind="comicvine",
+            label="ComicVine",
+        )
+        components += await self._safe(
+            lambda: self._provider_components(),
+            component="providers",
+            kind="provider",
+            label="Providers",
+        )
+        components += await self._safe(
+            lambda: self._scheduler_component(),
+            component="scheduler",
+            kind="scheduler",
+            label="Scheduler",
+        )
+        components += await self._safe(
+            lambda: self._database_component(),
+            component="database",
+            kind="database",
+            label="Database",
+        )
+        components += await self._safe(
+            lambda: self._root_folder_components(),
+            component="root-folders",
+            kind="root_folder",
+            label="Root folders",
+        )
+        components += await self._safe(
+            lambda: self._disk_component(),
+            component="disk-space",
+            kind="disk",
+            label="Config volume free space",
+        )
         return components
+
+    async def _safe(
+        self, produce, *, component: str, kind: str, label: str
+    ) -> list[ComponentHealth]:
+        """Run one component producer, converting any raise into an error item.
+
+        ``produce`` may return a single :class:`ComponentHealth`, a list of them,
+        or a coroutine yielding either. A raised exception is logged (with the
+        traceback) and reported as one error-state component so the rest of the
+        view still renders and the endpoint stays 200.
+        """
+        try:
+            result = produce()
+            if asyncio.iscoroutine(result):
+                result = await result
+            return list(result) if isinstance(result, list) else [result]
+        except Exception as exc:  # noqa: BLE001 - isolation is the whole point
+            logger.exception("health: component %s check raised", component)
+            return [
+                ComponentHealth(
+                    component=component,
+                    kind=kind,
+                    label=label,
+                    state=_STATE_ERROR,
+                    message=f"health check failed: {type(exc).__name__}",
+                    remediation=(
+                        "This health check raised an error; see the server logs "
+                        "for the traceback."
+                    ),
+                )
+            ]
 
     async def warnings(self) -> list[HealthWarning]:
         """The non-ok subset of :meth:`component_view`, with remediation hints."""
@@ -365,7 +441,21 @@ class HealthService:
     async def _root_folder_component(self, rid: int, path: str) -> ComponentHealth:
         component = f"root-folder:{rid}"
         label = f"Root folder: {path}"
-        exists, writable, free = await asyncio.to_thread(self._probe_path, path)
+        try:
+            exists, writable, free = await asyncio.wait_for(
+                asyncio.to_thread(self._probe_path, path), FS_PROBE_TIMEOUT_SECONDS
+            )
+        except (asyncio.TimeoutError, TimeoutError):
+            # A wedged mount: unreachable is an error for a root folder (its
+            # media cannot be read/written). The orphaned probe thread lives on.
+            return ComponentHealth(
+                component=component,
+                kind="root_folder",
+                label=label,
+                state=_STATE_ERROR,
+                message=f"Root folder '{path}' is unreachable (timed out)",
+                remediation="Check the volume mount; the path did not respond.",
+            )
         if not exists:
             return ComponentHealth(
                 component=component,
@@ -401,7 +491,20 @@ class HealthService:
         config_dir = str(self._settings.config_dir)
         component = "disk-space"
         label = "Config volume free space"
-        free = await asyncio.to_thread(self._free_space, config_dir)
+        try:
+            free = await asyncio.wait_for(
+                asyncio.to_thread(self._free_space, config_dir),
+                FS_PROBE_TIMEOUT_SECONDS,
+            )
+        except (asyncio.TimeoutError, TimeoutError):
+            return ComponentHealth(
+                component=component,
+                kind="disk",
+                label=label,
+                state=_STATE_ERROR,
+                message=f"Config volume ({config_dir}) is unreachable (timed out)",
+                remediation="Check the /config mount; the volume did not respond.",
+            )
         if free is None:
             return ComponentHealth(
                 component=component,
@@ -447,15 +550,6 @@ class HealthService:
             return shutil.disk_usage(path).free
         except OSError:
             return None
-
-    # -- convenience ---------------------------------------------------------
-
-    def config_file_path(self) -> Path:
-        """The resolved config file path (for callers building status views)."""
-        return self._settings.config_dir / CONFIG_FILENAME
-
-    def database_file_path(self) -> Path:
-        return database_path(self._settings.config_dir)
 
 
 def _gib(nbytes: int) -> str:

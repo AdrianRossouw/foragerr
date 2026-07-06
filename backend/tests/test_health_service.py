@@ -4,14 +4,20 @@
 from __future__ import annotations
 
 import datetime as dt
+import os
+import time
+from types import SimpleNamespace
 
 import pytest
 
 from foragerr.config import Settings
 from foragerr.db import DB_FILENAME
 from foragerr.db.backup import write_scheduled_backup
+from foragerr.db.backup_command import quick_check_startup_hook
 from foragerr.downloads.models import DownloadClientRow
 from foragerr.health import HealthService
+from foragerr.health import service as health_service
+from foragerr.health.service import BACKUP_OVERDUE_INTERVAL_MULTIPLE
 from foragerr.health.state import record_integrity, reset_integrity
 from foragerr.indexers.models import IndexerRow
 from foragerr.library.models import RootFolderRow
@@ -167,3 +173,90 @@ async def test_database_component_reflects_integrity_and_last_backup(db, tmp_pat
     write_scheduled_backup(cfg / DB_FILENAME, cfg / "config.yaml", cfg, retention=7)
     comp = _by_component(await service.component_view())["database"]
     assert comp.state == "ok"
+
+
+@pytest.mark.req("FRG-NFR-011")
+async def test_overdue_scheduled_backup_is_degraded(db):
+    """A scheduled backup older than 2× the backup interval is a degraded
+    (overdue) warning on the database component."""
+    cfg = db.db_path.parent
+    (cfg / "config.yaml").write_text("x: 1\n", encoding="utf-8")
+    backup = write_scheduled_backup(
+        cfg / DB_FILENAME, cfg / "config.yaml", cfg, retention=7
+    )
+    interval = _settings(db).db_backup_interval_seconds
+    old = time.time() - interval * (BACKUP_OVERDUE_INTERVAL_MULTIPLE + 1)
+    os.utime(backup, (old, old))
+
+    comp = _by_component(await _service(db).component_view())["database"]
+    assert comp.state == "degraded"
+    assert "overdue" in (comp.message or "").lower()
+
+
+@pytest.mark.req("FRG-DB-012")
+async def test_clean_check_clears_database_health_error_without_restart(db):
+    """A previously-failing integrity reading clears on the next CLEAN check run
+    through the real startup hook (not the reset_integrity test hook), with no
+    restart — the database component recovers."""
+    cfg = db.db_path.parent
+    service = _service(db)
+
+    record_integrity(
+        ok=False, check="quick_check", source="startup", detail="disk image malformed"
+    )
+    assert _by_component(await service.component_view())["database"].state == "error"
+
+    # A real clean quick_check via the production hook clears the error.
+    app = SimpleNamespace(state=SimpleNamespace(settings=Settings(config_dir=cfg)))
+    await quick_check_startup_hook(app)
+    (cfg / "config.yaml").write_text("x: 1\n", encoding="utf-8")
+    write_scheduled_backup(cfg / DB_FILENAME, cfg / "config.yaml", cfg, retention=7)
+
+    comp = _by_component(await service.component_view())["database"]
+    assert comp.state == "ok"  # recovered, no restart
+
+
+@pytest.mark.req("FRG-NFR-011")
+async def test_root_folder_probe_timeout_is_bounded(db, tmp_path, monkeypatch):
+    """A wedged mount (a probe that hangs) times out fast: the component reports
+    an unreachable/timed-out error and the request returns within the deadline
+    rather than hanging (the orphaned probe thread is an inherent, accepted
+    leak)."""
+    root = tmp_path / "root"
+    root.mkdir()
+    async with db.write_session() as session:
+        session.add(RootFolderRow(path=str(root)))
+
+    monkeypatch.setattr(health_service, "FS_PROBE_TIMEOUT_SECONDS", 0.05)
+
+    def hang(_path):
+        time.sleep(1.0)  # far longer than the probe deadline
+        return (True, True, 10**12)
+
+    monkeypatch.setattr(HealthService, "_probe_path", staticmethod(hang))
+
+    start = time.monotonic()
+    comps = _by_component(await _service(db).component_view())
+    elapsed = time.monotonic() - start
+
+    rf = next(c for c in comps.values() if c.kind == "root_folder")
+    assert rf.state == "error"
+    assert "timed out" in (rf.message or "").lower()
+    assert elapsed < 0.8  # bounded well under the 1s hang
+
+
+@pytest.mark.req("FRG-NFR-011")
+async def test_one_failing_check_is_isolated_others_intact(db, monkeypatch):
+    """One component producer raising becomes an error-state component instead
+    of 500-ing the whole aggregation; the other components still render."""
+
+    async def boom(self):
+        raise RuntimeError("kaboom")
+
+    monkeypatch.setattr(HealthService, "_database_component", boom)
+
+    components = await _service(db).component_view()  # does not raise
+    comps = _by_component(components)
+    assert comps["database"].state == "error"
+    assert "health check failed" in (comps["database"].message or "")
+    assert comps["comicvine"].state == "ok"  # unaffected component intact
