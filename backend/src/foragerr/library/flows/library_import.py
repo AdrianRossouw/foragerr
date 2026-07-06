@@ -183,6 +183,12 @@ class _GroupDraft:
     state: str = "proposed"
     proposed_cv_volume_id: int | None = None
     confirmed_cv_volume_id: int | None = None
+    #: Display details of the proposed volume (name/year/publisher/poster),
+    #: captured at proposal time so the review UI needs no CV round-trip.
+    proposal_name: str | None = None
+    proposal_start_year: int | None = None
+    proposal_publisher: str | None = None
+    proposal_image_url: str | None = None
     message: str | None = None
 
     @property
@@ -281,6 +287,10 @@ async def _propose_matches(
                 >= LIBRARY_IMPORT_SIMILARITY_FLOOR
             ):
                 draft.proposed_cv_volume_id = best.series.cv_volume_id
+                draft.proposal_name = best.series.name
+                draft.proposal_start_year = best.series.start_year
+                draft.proposal_publisher = best.series.publisher
+                draft.proposal_image_url = best.series.image_url
                 draft.message = None
             else:
                 draft.state = "no_match"
@@ -328,7 +338,16 @@ async def scan_library_root(
             (await session.execute(select(IssueFileRow.path))).scalars().all()
         )
         prior = {
-            row.matching_key: (row.state, row.confirmed_cv_volume_id)
+            row.matching_key: (
+                row.state,
+                row.confirmed_cv_volume_id,
+                (
+                    row.proposal_name,
+                    row.proposal_start_year,
+                    row.proposal_publisher,
+                    row.proposal_image_url,
+                ),
+            )
             for row in (
                 await session.execute(
                     select(LibraryImportGroupRow).where(
@@ -373,10 +392,18 @@ async def scan_library_root(
     for key, draft in sorted(
         groups.items(), key=lambda kv: (-len(kv[1].files), kv[0])
     ):
-        prior_state, prior_confirmed = prior.get(key, (None, None))
+        prior_state, prior_confirmed, prior_display = prior.get(
+            key, (None, None, (None, None, None, None))
+        )
         if prior_state == "confirmed" and prior_confirmed is not None:
             draft.state = "confirmed"
             draft.confirmed_cv_volume_id = prior_confirmed
+            (
+                draft.proposal_name,
+                draft.proposal_start_year,
+                draft.proposal_publisher,
+                draft.proposal_image_url,
+            ) = prior_display
             continue
         if prior_state == "skipped":
             draft.state = "skipped"
@@ -425,6 +452,10 @@ async def scan_library_root(
                     confidence=draft.confidence,
                     proposed_cv_volume_id=draft.proposed_cv_volume_id,
                     confirmed_cv_volume_id=draft.confirmed_cv_volume_id,
+                    proposal_name=draft.proposal_name,
+                    proposal_start_year=draft.proposal_start_year,
+                    proposal_publisher=draft.proposal_publisher,
+                    proposal_image_url=draft.proposal_image_url,
                     state=draft.state,
                     message=draft.message,
                     scanned_at=now,

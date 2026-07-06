@@ -22,7 +22,7 @@ import type {
  * Surface (design decision 6):
  *   POST  /api/v1/library-import/scan        {rootFolderId}  -> CommandResource
  *   GET   /api/v1/library-import?rootFolderId=&page=          paged groups
- *   PATCH /api/v1/library-import/groups/{id} {action}|{cvVolumeId}
+ *   PATCH /api/v1/library-import/groups/{id} {state}|{cvVolumeId}
  *   POST  /api/v1/library-import/execute     {groupIds, addOptions} -> CommandResource
  *
  * Staging is persisted server-side (survives restarts), so the list is
@@ -61,7 +61,12 @@ export function toLibraryImportGroup(
     id: field<number>(raw, 'id', 'id', 0),
     matchingKey: field<string>(raw, 'matchingKey', 'matching_key', ''),
     folder: field<string>(raw, 'folder', 'folder', ''),
-    files: field<string[]>(raw, 'files', 'files', []),
+    files: field<{ path: string; name: string; size: number }[]>(
+      raw,
+      'files',
+      'files',
+      [],
+    ),
     confidence: confidence > 1 ? confidence / 100 : confidence,
     proposedCvVolumeId: field<number | null>(
       raw,
@@ -140,9 +145,9 @@ export function useStartLibraryScan(): UseMutationResult<
   });
 }
 
-/** The PATCH body: a state action XOR a ComicVine match override. */
+/** The PATCH body: a state change XOR a ComicVine match override. */
 export type LibraryImportGroupPatch =
-  | { action: 'confirm' | 'skip' }
+  | { state: 'confirmed' | 'skipped' | 'proposed' }
   | { cvVolumeId: number };
 
 /**

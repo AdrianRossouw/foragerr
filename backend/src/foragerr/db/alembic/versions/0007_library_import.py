@@ -52,6 +52,12 @@ def upgrade() -> None:
         sa.Column("confidence", sa.Float(), nullable=False, server_default="0.0"),
         sa.Column("proposed_cv_volume_id", sa.Integer(), nullable=True),
         sa.Column("confirmed_cv_volume_id", sa.Integer(), nullable=True),
+        # Display details of the proposed/confirmed volume, captured at
+        # proposal/override time (review UI renders without CV round-trips).
+        sa.Column("proposal_name", sa.Text(), nullable=True),
+        sa.Column("proposal_start_year", sa.Integer(), nullable=True),
+        sa.Column("proposal_publisher", sa.Text(), nullable=True),
+        sa.Column("proposal_image_url", sa.Text(), nullable=True),
         # state ∈ proposed | confirmed | no_match | imported | skipped.
         sa.Column("state", sa.Text(), nullable=False, server_default="proposed"),
         # Human-visible outcome/annotation (no-match reason, blocked reasons).

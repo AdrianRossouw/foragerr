@@ -41,7 +41,12 @@ from foragerr.library.flows._common import (
     comicvine_factory,
 )
 from foragerr.library.models import LibraryImportGroupRow, RootFolderRow
-from foragerr.metadata import ComicVineAuthError, ComicVineClient, ComicVineError
+from foragerr.metadata import (
+    ComicVineAuthError,
+    ComicVineClient,
+    ComicVineError,
+    SeriesRecord,
+)
 from foragerr.quality.models import FormatProfileRow
 
 router = APIRouter(prefix="/library-import", tags=["library-import"])
@@ -79,6 +84,11 @@ class LibraryImportGroupResource(BaseModel):
     confidence: float
     proposedCvVolumeId: int | None
     confirmedCvVolumeId: int | None
+    #: Display details of the proposed/confirmed volume (FRG-UI-015).
+    name: str | None
+    startYear: int | None
+    publisher: str | None
+    imageUrl: str | None
     state: str
     message: str | None
     scannedAt: dt.datetime
@@ -97,6 +107,10 @@ class LibraryImportGroupResource(BaseModel):
             confidence=row.confidence,
             proposedCvVolumeId=row.proposed_cv_volume_id,
             confirmedCvVolumeId=row.confirmed_cv_volume_id,
+            name=row.proposal_name,
+            startYear=row.proposal_start_year,
+            publisher=row.proposal_publisher,
+            imageUrl=row.proposal_image_url,
             state=row.state,
             message=row.message,
             scannedAt=row.scanned_at,
@@ -200,16 +214,17 @@ async def list_groups_endpoint(
     )
 
 
-async def _validate_cv_volume(request: Request, cv_volume_id: int) -> None:
+async def _validate_cv_volume(request: Request, cv_volume_id: int) -> SeriesRecord:
     """Validate an override volume live against ComicVine, like add does.
 
+    Returns the fetched record so the override can capture display details.
     An unknown/unfetchable volume is a 400 naming the id; a credential failure
     is a 503 with the static wording (no key material leaks)."""
     settings = request.app.state.settings
     factory = comicvine_factory(settings)
     try:
         async with ComicVineClient(settings, factory) as cv:
-            await cv.get_volume(cv_volume_id)
+            return await cv.get_volume(cv_volume_id)
     except ComicVineAuthError as exc:
         raise ApiError(
             503,
@@ -240,8 +255,9 @@ async def patch_group_endpoint(
         )
 
     # Live ComicVine validation happens OUTSIDE the write lock (network I/O).
+    override_record: SeriesRecord | None = None
     if body.cvVolumeId is not None:
-        await _validate_cv_volume(request, body.cvVolumeId)
+        override_record = await _validate_cv_volume(request, body.cvVolumeId)
 
     async with db.write_session() as session:
         group = await session.get(LibraryImportGroupRow, group_id)
@@ -249,6 +265,11 @@ async def patch_group_endpoint(
             raise ApiError(404, f"no library-import group with id {group_id}")
         if body.cvVolumeId is not None:
             group.confirmed_cv_volume_id = body.cvVolumeId
+            assert override_record is not None
+            group.proposal_name = override_record.name
+            group.proposal_start_year = override_record.start_year
+            group.proposal_publisher = override_record.publisher
+            group.proposal_image_url = override_record.image_url
             group.state = body.state or "confirmed"
             group.message = None
         elif body.state == "confirmed":

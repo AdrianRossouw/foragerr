@@ -254,6 +254,15 @@ class LibraryImportGroupRow(Base):
     confirmed_cv_volume_id: Mapped[int | None] = mapped_column(
         StrictInteger, nullable=True
     )
+    #: Display details of the currently proposed/confirmed volume, captured at
+    #: proposal/override time so the review UI renders name/poster/year/
+    #: publisher without a ComicVine round-trip per group (FRG-UI-015).
+    proposal_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    proposal_start_year: Mapped[int | None] = mapped_column(
+        StrictInteger, nullable=True
+    )
+    proposal_publisher: Mapped[str | None] = mapped_column(Text, nullable=True)
+    proposal_image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     state: Mapped[str] = mapped_column(Text, nullable=False, default="proposed")
     #: Human-visible outcome/annotation (why no match was proposed, why an
     #: import blocked, ...). Never silent (FRG-IMP-023 scenario 4).

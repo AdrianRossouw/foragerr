@@ -418,7 +418,7 @@ function GroupCard({
               type="button"
               className={`${styles.btn} ${styles.btnPrimary}`}
               disabled={busy}
-              onClick={() => onPatch({ action: 'confirm' })}
+              onClick={() => onPatch({ state: 'confirmed' })}
             >
               Confirm match
             </button>
@@ -439,7 +439,7 @@ function GroupCard({
             type="button"
             className={styles.btn}
             disabled={busy}
-            onClick={() => onPatch({ action: 'skip' })}
+            onClick={() => onPatch({ state: 'skipped' })}
           >
             Skip
           </button>

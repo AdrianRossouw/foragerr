@@ -400,7 +400,9 @@ export interface LibraryImportGroup {
   matchingKey: string;
   /** Absolute folder the group's files live under. */
   folder: string;
-  files: string[];
+  /** File entries; the API serves {path,name,size} objects. Only the count
+   * and names are rendered, so entries are kept structural. */
+  files: { path: string; name: string; size: number }[];
   /** Parse confidence, normalized to 0..1. */
   confidence: number;
   proposedCvVolumeId: number | null;

@@ -382,8 +382,16 @@ export function makeLibraryImportGroup(
     matchingKey: `series ${id}`,
     folder: `/comics/Series ${id}`,
     files: [
-      `/comics/Series ${id}/Series ${id} 001.cbz`,
-      `/comics/Series ${id}/Series ${id} 002.cbz`,
+      {
+        path: `/comics/Series ${id}/Series ${id} 001.cbz`,
+        name: `Series ${id} 001.cbz`,
+        size: 25_000_000,
+      },
+      {
+        path: `/comics/Series ${id}/Series ${id} 002.cbz`,
+        name: `Series ${id} 002.cbz`,
+        size: 26_000_000,
+      },
     ],
     confidence: 0.9,
     proposedCvVolumeId: 40501234,

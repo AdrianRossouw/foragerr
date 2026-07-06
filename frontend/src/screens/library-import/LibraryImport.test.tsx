@@ -31,7 +31,7 @@ const proposedGroup = makeLibraryImportGroup({
   id: 2,
   folder: '/comics/Saga (2012)',
   matchingKey: 'saga',
-  files: ['/comics/Saga (2012)/Saga 001.cbz', '/comics/Saga (2012)/Saga 002.cbz'],
+  files: [{ path: '/comics/Saga (2012)/Saga 001.cbz', name: 'Saga 001.cbz', size: 25_000_000 }, { path: '/comics/Saga (2012)/Saga 002.cbz', name: 'Saga 002.cbz', size: 25_000_000 }],
   confidence: 0.9,
 });
 
@@ -40,7 +40,7 @@ const noMatchGroup = makeLibraryImportGroup({
   id: 3,
   folder: '/comics/Unknown Mini',
   matchingKey: 'unknown mini',
-  files: ['/comics/Unknown Mini/Unknown Mini 001.cbz'],
+  files: [{ path: '/comics/Unknown Mini/Unknown Mini 001.cbz', name: 'Unknown Mini 001.cbz', size: 25_000_000 }],
   confidence: 0.3,
   state: 'no_match',
   proposedCvVolumeId: null,
@@ -353,7 +353,7 @@ describe('FRG-UI-015: correcting a match before import', () => {
     await waitFor(() =>
       expect(spy).toHaveBeenCalledWith('/api/v1/library-import/groups/2', {
         method: 'PATCH',
-        body: { action: 'confirm' },
+        body: { state: 'confirmed' },
       }),
     );
 
@@ -362,7 +362,7 @@ describe('FRG-UI-015: correcting a match before import', () => {
     await waitFor(() =>
       expect(spy).toHaveBeenCalledWith('/api/v1/library-import/groups/3', {
         method: 'PATCH',
-        body: { action: 'skip' },
+        body: { state: 'skipped' },
       }),
     );
   });
@@ -414,7 +414,7 @@ describe('FRG-UI-015: bulk add with batch options and per-group outcomes', () =>
       id: 4,
       folder: '/comics/Bone',
       matchingKey: 'bone',
-      files: ['/comics/Bone/Bone 001.cbz'],
+      files: [{ path: '/comics/Bone/Bone 001.cbz', name: 'Bone 001.cbz', size: 25_000_000 }],
       state: 'confirmed',
       proposedCvVolumeId: null,
       confirmedCvVolumeId: 40509999,
