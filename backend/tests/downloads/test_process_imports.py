@@ -213,6 +213,49 @@ async def test_blocked_item_reprocesses_to_imported_when_evidence_appears(db, tm
     )
 
 
+# --- FRG-DL-009: crash-recovery re-claim reconciles FS↔DB, never orphans -----
+
+
+@pytest.mark.req("FRG-DL-009")
+async def test_stale_importing_row_recovers_orphaned_move(db, tmp_path):
+    # Simulate a crashed prior run: the file was already MOVED into the series
+    # folder (carrying its [__issueid__] identity tag) but the DB transaction
+    # rolled back, so the tracked row is stuck at `importing` and the source
+    # path is now empty. Re-claim must reconcile against the filesystem and
+    # advance to `imported` — NOT downgrade to import_blocked (which would orphan
+    # the moved file and revert the issue to Wanted).
+    series_id, issue_id = await seed_library(db, tmp_path)
+    series_path = tmp_path / "lib-root" / "Spawn"
+    series_path.mkdir(parents=True, exist_ok=True)
+    moved = series_path / f"Spawn 001 (2024) [__{issue_id}__].cbz"
+    make_large_cbz(moved)
+    empty_src = tmp_path / "downloads" / "drained"
+    empty_src.mkdir(parents=True, exist_ok=True)
+
+    await insert_grab_history(db, download_id="d-rec", series_id=series_id, issue_id=issue_id)
+    await insert_tracked(
+        db,
+        download_id="d-rec",
+        state=TrackedDownloadState.IMPORTING,  # stale claim left by the crash
+        client_id=None,
+        series_id=series_id,
+        issue_id=issue_id,
+    )
+    async with db.write_session() as session:
+        (await tracked_by_download_id_session(session, "d-rec")).output_path = str(empty_src)
+
+    summary = await process_imports(db, None, now=_NOW)
+
+    assert summary == "imported=1 blocked=0 failed=0"
+    row = await tracked_by_download_id(db, "d-rec")
+    assert row.state == TrackedDownloadState.IMPORTED.value
+    files = await _issue_files(db, series_id)
+    assert len(files) == 1 and files[0].path == str(moved)  # adopted, not orphaned
+    assert os.path.exists(moved)
+    events = await _history(db, "d-rec")
+    assert any(e.event_type == history.EVENT_IMPORTED for e in events)
+
+
 async def tracked_by_download_id_session(session, download_id):
     return (
         await session.execute(

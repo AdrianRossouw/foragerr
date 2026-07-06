@@ -37,6 +37,7 @@ from foragerr.commands.service import HandlerContext
 from foragerr.config import Settings
 from foragerr.db import Database, utcnow
 from foragerr.importer import (
+    IMPORT_FILE_MUTATION_GROUP,
     ImportContext,
     ImportStatus,
     RescanSource,
@@ -55,11 +56,15 @@ OffloadFn = Callable[..., Awaitable[Any]]
 class RescanSeriesCommand(BaseCommand):
     """Rescan one series' folder: clean vanished files, pipeline the rest.
 
-    Runs on the ``pp`` pool so its file moves serialize behind the completed-
-    download drain (one importer-owned pool)."""
+    Runs on the ``pp`` pool and shares the importer's file-mutation exclusivity
+    group with the completed-download drain, so a rescan and an import can never
+    mutate the library concurrently regardless of ``workers_pp`` (which may be up
+    to 4) — the double-import guard must not depend on the pool being size 1
+    (FRG-SER-010)."""
 
     name: Literal["rescan-series"] = "rescan-series"
     workload_class: ClassVar[str] = "pp"
+    exclusivity_group: ClassVar[str | None] = IMPORT_FILE_MUTATION_GROUP
     series_id: int
     path_override: str | None = None
 
@@ -96,8 +101,12 @@ async def rescan_series(
     """Rescan one series and return its :class:`RescanReport` (FRG-SER-010).
 
     A missing series (deleted between enqueue and run) yields an empty report
-    rather than an error. ``offload`` runs the directory walk off the event loop
-    when supplied (the handler passes ``ctx.offload``); direct callers may omit it.
+    rather than an error. ``offload`` (the handler passes ``ctx.offload``) runs
+    the FS-heavy work off the event loop: the vanished-file existence scan here,
+    and — via :class:`ImportContext` — the pipeline's ``place_file`` copy and
+    archive inspection. The RescanSource walk that enumerates candidates runs on
+    the loop inside a read session (it holds no write lock); direct callers may
+    omit ``offload`` and everything runs inline.
     """
     now = now or utcnow()
     async with db.read_session() as session:
@@ -124,6 +133,7 @@ async def rescan_series(
         config_dir=str(settings.config_dir) if settings is not None else ".",
         reference_year=reference_year,
         now=now,
+        offload=offload,
     )
 
     # Which linked files have vanished (checked off the loop when offloaded).

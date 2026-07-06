@@ -40,11 +40,11 @@ before the ``issue_files`` row is durable.
 from __future__ import annotations
 
 import datetime as dt
-import json
 import logging
+import os
 from typing import ClassVar, Literal
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from foragerr.commands.registry import BaseCommand, register_command, register_handler
@@ -61,18 +61,22 @@ from foragerr.downloads.state import (
 )
 from foragerr.downloads.tracking import (
     TrackedStateChanged,
+    _encode_messages,
     build_client_for_id,
     process_failures,
 )
 from foragerr.importer import (
+    IMPORT_FILE_MUTATION_GROUP,
     CompletedDownloadSource,
     ImportContext,
     ImportOutcome,
     ImportStatus,
     gather,
+    history,
     import_candidate,
 )
 from foragerr.library import repo
+from foragerr.library.models import IssueFileRow, IssueRow, SeriesRow
 
 logger = logging.getLogger("foragerr.downloads.imports")
 
@@ -93,13 +97,12 @@ _CLAIMABLE = (
 )
 
 
-def _encode_messages(messages: list[str]) -> str | None:
-    """Encode tracked-download status messages (mirrors ``tracking._encode_messages``)."""
-    return json.dumps(messages) if messages else None
-
-
 async def build_import_context(
-    db: Database, settings: Settings | None, *, now: dt.datetime
+    db: Database,
+    settings: Settings | None,
+    *,
+    now: dt.datetime,
+    offload=None,
 ) -> ImportContext:
     """Assemble the per-run :class:`ImportContext` for the completed-download drain.
 
@@ -118,6 +121,7 @@ async def build_import_context(
         config_dir=config_dir,
         reference_year=now.year,
         now=now,
+        offload=offload,
     )
 
 
@@ -132,14 +136,19 @@ class ProcessImportsCommand(BaseCommand):
 
     name: Literal["process-imports"] = "process-imports"
     workload_class: ClassVar[str] = "pp"
-    exclusivity_group: ClassVar[str | None] = "process-imports"
+    #: Shared with RescanSeriesCommand so a drain and a rescan never mutate the
+    #: library concurrently (FRG-SER-010); also serializes the drain against
+    #: itself so a stale ``importing`` row can be safely recovered.
+    exclusivity_group: ClassVar[str | None] = IMPORT_FILE_MUTATION_GROUP
 
 
 @register_handler("process-imports")
 async def _handle_process_imports(
     command: ProcessImportsCommand, ctx: HandlerContext
 ) -> str:
-    return await process_imports(ctx.db, ctx.settings, commands=ctx.commands)
+    return await process_imports(
+        ctx.db, ctx.settings, commands=ctx.commands, offload=ctx.offload
+    )
 
 
 async def process_imports(
@@ -147,16 +156,18 @@ async def process_imports(
     settings: Settings | None,
     *,
     commands=None,
+    offload=None,
     now: dt.datetime | None = None,
 ) -> str:
     """Drain every claimable completed download through the pipeline (FRG-DL-009).
 
     Returns an ``"imported=N blocked=M failed=K"`` summary (the command's
     job-history result). Each download is processed independently: a failure in
-    one never rolls back another's committed import.
+    one never rolls back another's committed import. ``offload`` (the handler
+    passes ``ctx.offload``) routes the pipeline's FS-heavy work off the loop.
     """
     now = now or utcnow()
-    ctx = await build_import_context(db, settings, now=now)
+    ctx = await build_import_context(db, settings, now=now, offload=offload)
 
     # Snapshot the claimable rows up front (read-only); the per-row guarded claim
     # re-checks state, so a row that changes between snapshot and claim is skipped.
@@ -204,22 +215,22 @@ async def _process_one(
     be claimed (raced / vanished / no output path).
     """
     # 1. Status-guarded claim: import_pending|importing -> importing, atomically.
+    #    Capture the PRIOR state under the same write lock so we can tell a fresh
+    #    completed download from a stale ``importing`` row a crashed run left —
+    #    the two need different reconciliation (FRG-DL-009).
     async with db.write_session() as session:
-        result = await session.execute(
-            update(TrackedDownloadRow)
-            .where(
-                TrackedDownloadRow.id == row_id,
-                TrackedDownloadRow.state.in_(_CLAIMABLE),
-            )
-            .values(state=TrackedDownloadState.IMPORTING.value, updated_at=ctx.now)
-        )
-        if result.rowcount != 1:
-            return None  # raced with TrackDownloads / already claimed / removed
         row = await session.get(TrackedDownloadRow, row_id)
+        if row is None or row.state not in _CLAIMABLE:
+            return None  # raced with TrackDownloads / already claimed / removed
+        was_recovering = row.state == TrackedDownloadState.IMPORTING.value
+        row.state = TrackedDownloadState.IMPORTING.value
+        row.updated_at = ctx.now
         download_id = row.download_id
         client_id = row.client_id
         client_title = row.title
         output_path = row.output_path
+        series_id = row.series_id
+        issue_id = row.issue_id
 
     if not output_path:
         # Claimed but nothing to import from: block, never lose it.
@@ -240,6 +251,24 @@ async def _process_one(
     )
     async with db.read_session() as session:
         candidates = await gather(source, session, ctx)
+
+    # 2b. Crash-recovery reconciliation (FRG-DL-009). A crashed prior run may have
+    #     already MOVED the file into the library before its DB txn committed —
+    #     so the source path is now empty even though the import effectively
+    #     happened. Downgrading that to import_blocked would orphan the moved
+    #     file and revert the issue to Wanted. Reconcile against the filesystem
+    #     first; only fall through to normal handling when nothing is recoverable.
+    if was_recovering and not candidates:
+        recovered = await _reconcile_recovered_import(
+            db,
+            ctx,
+            row_id=row_id,
+            download_id=download_id,
+            series_id=series_id,
+            issue_id=issue_id,
+        )
+        if recovered is not None:
+            return recovered
 
     # 3. Import every candidate in ONE write session so each issue_files row and
     #    its history event land atomically with the final state transition.
@@ -263,6 +292,102 @@ async def _process_one(
         await process_failures(db, commands=commands, settings=settings, now=ctx.now)
 
     return final_state
+
+
+async def _reconcile_recovered_import(
+    db: Database,
+    ctx: ImportContext,
+    *,
+    row_id: int,
+    download_id: str,
+    series_id: int | None,
+    issue_id: int | None,
+) -> TrackedDownloadState | None:
+    """Reconcile a stale ``importing`` row whose source path is now empty.
+
+    A crashed run can leave the file already moved into the library (FS,
+    irreversible) while its ``issue_files``/history/state writes rolled back. We
+    detect that on disk instead of blindly downgrading to ``import_blocked``:
+
+    - if an ``issue_files`` row already covers a still-present file for the
+      resolved issue, the import is durable → just advance to ``imported``;
+    - else if an orphaned file carrying this issue's ``[__issueid__]`` identity
+      tag sits in the series folder (the moved-but-unrecorded file), adopt it:
+      create the ``issue_files`` row + an ``imported`` history event and advance.
+
+    Returns the terminal state applied, or ``None`` when nothing is recoverable
+    (caller then leaves the row ``importing`` for a later retry rather than
+    orphaning the move).
+    """
+    if issue_id is None:
+        return None
+    async with db.read_session() as session:
+        issue = await session.get(IssueRow, issue_id)
+        if issue is None:
+            return None
+        series = await session.get(SeriesRow, issue.series_id)
+        if series is None:
+            return None
+        linked = (
+            (
+                await session.execute(
+                    select(IssueFileRow.path).where(IssueFileRow.issue_id == issue_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        series_path = series.path
+        resolved_series_id = series_id if series_id is not None else issue.series_id
+
+    linked_paths = set(linked)
+    # Case A: a recorded file for this issue still exists → import already durable.
+    if any(os.path.exists(p) for p in linked_paths):
+        async with db.write_session() as session:
+            await _apply_state(
+                session, row_id, TrackedDownloadState.IMPORTED, TRACKED_STATUS_OK, [], ctx.now
+            )
+        return TrackedDownloadState.IMPORTED
+
+    # Case B: an orphaned moved file carrying this issue's id tag → adopt it.
+    tag = f"[__{issue_id}__]"
+    adopted: str | None = None
+    try:
+        entries = os.listdir(series_path) if os.path.isdir(series_path) else []
+    except OSError:
+        entries = []
+    for name in entries:
+        full = os.path.join(series_path, name)
+        if tag in name and full not in linked_paths and os.path.isfile(full):
+            adopted = full
+            break
+    if adopted is None:
+        return None
+
+    async with db.write_session() as session:
+        size = os.path.getsize(adopted)
+        await repo.add_issue_file(
+            session, issue_id=issue_id, path=adopted, size=size, added_at=ctx.now
+        )
+        history.record_event(
+            session,
+            event_type=history.EVENT_IMPORTED,
+            series_id=resolved_series_id,
+            issue_id=issue_id,
+            download_id=download_id,
+            source=history.SOURCE_DOWNLOAD,
+            data={"reconciled": True, "imported_path": adopted},
+            now=ctx.now,
+        )
+        await _apply_state(
+            session, row_id, TrackedDownloadState.IMPORTED, TRACKED_STATUS_OK, [], ctx.now
+        )
+    logger.info(
+        "process-imports: recovered orphaned import for download %s -> %s",
+        download_id,
+        adopted,
+    )
+    return TrackedDownloadState.IMPORTED
 
 
 def _resolve_final(

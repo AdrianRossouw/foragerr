@@ -165,6 +165,63 @@ async def test_rescan_skips_already_linked_files(
 
 
 @pytest.mark.req("FRG-SER-010")
+def test_rescan_shares_importer_file_mutation_exclusivity_group():
+    # Double-import safety vs the drain must not rest on workers_pp being 1
+    # (config allows up to 4): the rescan command shares the importer's
+    # file-mutation exclusivity group with ProcessImportsCommand.
+    from foragerr.downloads.imports import ProcessImportsCommand
+    from foragerr.importer import IMPORT_FILE_MUTATION_GROUP
+    from foragerr.library.flows.rescan import RescanSeriesCommand
+
+    assert RescanSeriesCommand.exclusivity_group is not None
+    assert RescanSeriesCommand.exclusivity_group == IMPORT_FILE_MUTATION_GROUP
+    assert ProcessImportsCommand.exclusivity_group == IMPORT_FILE_MUTATION_GROUP
+
+
+@pytest.mark.req("FRG-SER-010")
+async def test_rescan_ignores_foreign_issue_id_tag(
+    db, settings, root_folder_id, format_profile_id, tmp_path
+):
+    # A file dropped into series A but carrying series B's [__issueid__] tag must
+    # not short-circuit into B (nor A): the tag is only trustworthy within the
+    # scoped rescan series. Before the fix it resolved straight to B and got
+    # moved out of A into B's folder.
+    sidA, iidA, sdirA = await _mk_series(db, tmp_path, root_folder_id, format_profile_id)
+    seriesB_dir = tmp_path / "Batman (1987)"
+    seriesB_dir.mkdir(parents=True, exist_ok=True)
+    async with db.write_session() as session:
+        sB = await repo.create_series(
+            session,
+            cv_volume_id=2,
+            title="Batman",
+            start_year=1987,
+            format_profile_id=format_profile_id,
+            root_folder_id=root_folder_id,
+            path=str(seriesB_dir),
+            monitored=True,
+        )
+        iB = await repo.create_issue(
+            session,
+            series_id=sB.id,
+            cv_issue_id=2,
+            issue_number="404",
+            cover_date=dt.date(1987, 1, 1),
+            monitored=True,
+        )
+        sidB, iidB = sB.id, iB.id
+
+    orphan = sdirA / f"Totally Other Thing [__{iidB}__].cbz"
+    make_large_cbz(orphan)
+
+    report = await rescan_series(db, settings, sidA)
+
+    assert report.imported == ()  # not dragged into B, not matched in A
+    assert os.path.exists(orphan)  # left in place for the operator
+    assert await _issue_files(db, sidB) == []  # never moved into series B
+    assert await _issue_files(db, sidA) == []
+
+
+@pytest.mark.req("FRG-SER-010")
 async def test_rescan_honours_path_override(
     db, settings, root_folder_id, format_profile_id, tmp_path
 ):

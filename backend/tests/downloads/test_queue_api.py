@@ -97,3 +97,22 @@ def test_delete_removes_and_blocklists(client, tmp_path):
 @pytest.mark.req("FRG-DL-008")
 def test_delete_missing_item_is_404(client):
     assert client.delete("/api/v1/queue/999").status_code == 404
+
+
+@pytest.mark.req("FRG-DL-010")
+def test_delete_refuses_while_importing(client, tmp_path):
+    # An in-flight import (state=importing) is actively moving this item's files.
+    # A manual remove that deletes client data now would yank files out from
+    # under the drain — so it must be refused, and the row left in place.
+    client.portal.call(
+        _seed_download, client.app, tmp_path, TrackedDownloadState.IMPORTING
+    )
+    queue_id = client.get("/api/v1/queue").json()["records"][0]["id"]
+
+    resp = client.delete(f"/api/v1/queue/{queue_id}?deleteData=true")
+
+    assert resp.status_code == 409  # import in progress
+    # The item is still tracked (not de-tracked out from under the drain).
+    body = client.get("/api/v1/queue").json()
+    assert body["totalRecords"] == 1
+    assert body["records"][0]["state"] == TrackedDownloadState.IMPORTING.value
