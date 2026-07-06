@@ -38,9 +38,14 @@ docker run -d \
   -v /srv/foragerr/config:/config \
   -v /srv/media/comics:/comics \
   -v /srv/downloads:/downloads \
-  -p 8789:8789 \
+  -p 100.x.y.z:8789:8789 \
   foragerr:latest
 ```
+
+The port binding is deliberately prefixed with the host's **tailnet address**
+(substitute your own `100.x.y.z`) — a bare `-p 8789:8789` would publish the
+unauthenticated listener on every host interface. This is the RISK-020
+compensating control; it is not optional (see `network.md`).
 
 Files created under `/config` are owned by the `PUID:PGID` you supply — the container
 drops root at startup and runs the application as that unprivileged user. See the
