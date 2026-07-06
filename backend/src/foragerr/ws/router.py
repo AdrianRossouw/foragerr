@@ -34,11 +34,19 @@ async def _drain_incoming(websocket: WebSocket) -> None:
 
 async def ws_endpoint(websocket: WebSocket) -> None:
     broadcaster = websocket.app.state.ws_broadcaster
-    await websocket.accept()
+    # Register BEFORE accepting: the client considers itself connected the
+    # moment the accept frame arrives, so registering afterwards leaves a
+    # window where an event published by another task is broadcast to a
+    # registry this socket isn't in yet and silently lost. Anything published
+    # while we're still inside accept() just queues on the bounded connection
+    # queue and is delivered once the pump starts.
     conn = broadcaster.connect()
-    pump_task = asyncio.ensure_future(pump(conn, websocket.send_text))
-    recv_task = asyncio.ensure_future(_drain_incoming(websocket))
+    pump_task: asyncio.Future[None] | None = None
+    recv_task: asyncio.Future[None] | None = None
     try:
+        await websocket.accept()
+        pump_task = asyncio.ensure_future(pump(conn, websocket.send_text))
+        recv_task = asyncio.ensure_future(_drain_incoming(websocket))
         # First to finish wins: pump returns on a slow-client drop; recv returns
         # on client disconnect. Either way we fall through to teardown.
         await asyncio.wait(
@@ -46,10 +54,12 @@ async def ws_endpoint(websocket: WebSocket) -> None:
         )
     finally:
         broadcaster.disconnect(conn)
-        for task in (pump_task, recv_task):
+        tasks = [t for t in (pump_task, recv_task) if t is not None]
+        for task in tasks:
             if not task.done():
                 task.cancel()
-        await asyncio.gather(pump_task, recv_task, return_exceptions=True)
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
         with contextlib.suppress(Exception):
             await websocket.close()
 

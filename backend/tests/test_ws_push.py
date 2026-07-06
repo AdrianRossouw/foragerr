@@ -288,6 +288,47 @@ async def test_endpoint_closes_a_dropped_slow_client():
     assert broadcaster.connection_count == 0
 
 
+class _PublishDuringAcceptWebSocket(_FakeWebSocket):
+    """Publishes a domain event while the endpoint is still inside accept().
+
+    Reproduces (deterministically) the race the full suite exposed under load:
+    a client whose handshake has completed publishes/observes an event before
+    the endpoint coroutine resumes. Registration must precede accept or the
+    broadcast fans out to a registry this socket is not in yet and the message
+    is silently lost.
+    """
+
+    def __init__(self, app: object, bus: EventBus) -> None:
+        super().__init__(app)
+        self._bus = bus
+
+    async def accept(self) -> None:
+        self._bus.publish(SeriesRefreshed(series_id=77, partial=False))
+        # A real sleep so the (zero-second) debounce timer fires — i.e. the
+        # broadcast fan-out happens — while we are still inside accept().
+        await asyncio.sleep(0.01)
+        await super().accept()
+
+
+@pytest.mark.req("FRG-API-010")
+async def test_event_published_during_accept_is_not_lost():
+    bus = EventBus()
+    broadcaster = WsBroadcaster(debounce_seconds=0.0)
+    broadcaster.subscribe(bus)
+    ws = _PublishDuringAcceptWebSocket(_fake_app(broadcaster), bus)
+
+    endpoint = asyncio.ensure_future(ws_endpoint(ws))
+    await asyncio.sleep(0.05)
+    assert any(json.loads(t)["resource"]["id"] == 77 for t in ws.sent), (
+        "an event published while the endpoint was inside accept() was lost — "
+        "the connection must be registered with the broadcaster BEFORE accept"
+    )
+
+    ws._incoming.put_nowait(WebSocketDisconnect(1000))
+    await asyncio.wait_for(endpoint, 1.0)
+    assert broadcaster.connection_count == 0
+
+
 # -- app wiring ---------------------------------------------------------------
 
 
