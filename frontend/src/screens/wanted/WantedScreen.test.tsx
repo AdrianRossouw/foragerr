@@ -14,8 +14,8 @@ import { WantedScreen } from './WantedScreen';
  */
 
 const wantedRecords = [
-  makeWantedRecord({ id: 72, issueNumber: '1.5', title: 'Interlude', releaseDate: '2003-02-01', series: { id: 7, title: 'Invincible' } }),
-  makeWantedRecord({ id: 73, issueNumber: '1.MU', title: 'Marvel Universe??', releaseDate: '2003-03-01', series: { id: 7, title: 'Invincible' } }),
+  makeWantedRecord({ id: 72, series_id: 7, issue_number: '1.5', title: 'Interlude', store_date: '2003-02-01', series: { id: 7, title: 'Invincible' } }),
+  makeWantedRecord({ id: 73, series_id: 7, issue_number: '1.MU', title: 'Marvel Universe??', store_date: '2003-03-01', series: { id: 7, title: 'Invincible' } }),
 ];
 
 describe('FRG-UI-011: wanted screen', () => {

@@ -435,23 +435,27 @@ export interface HistoryRecord {
  */
 export interface WantedIssueRecord {
   id: number;
+  series_id: number;
+  cv_issue_id: number;
   /** Verbatim string — NEVER numeric ("1.5"/"1.MU" render unchanged). */
-  issueNumber: string | null;
+  issue_number: string | null;
   title: string | null;
-  releaseDate?: string | null;
-  coverDate?: string | null;
-  storeDate?: string | null;
-  series: { id: number; title: string };
+  cover_date: string | null;
+  store_date: string | null;
+  issue_type: string;
+  monitored: boolean;
+  series: { id: number; title: string } | null;
 }
 
 /** One GET /api/v1/blocklist record. `message` is the verbatim ban reason. */
 export interface BlocklistRecord {
   id: number;
-  sourceTitle: string;
-  indexerName: string | null;
-  /** The backend serves the ban timestamp as `date` (or `createdAt`). */
-  date?: string | null;
-  createdAt?: string | null;
+  sourceTitle: string | null;
+  indexer: string | null;
+  guid: string | null;
+  downloadId: string | null;
+  /** The ban timestamp. */
+  date: string;
   message: string | null;
   protocol: string | null;
   series: { id: number; title: string } | null;

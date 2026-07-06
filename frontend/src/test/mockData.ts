@@ -438,9 +438,14 @@ export function makeWantedRecord(
   overrides: Partial<WantedIssueRecord> & Pick<WantedIssueRecord, 'id'>,
 ): WantedIssueRecord {
   return {
-    issueNumber: '41',
+    series_id: 1,
+    cv_issue_id: 900041,
+    issue_number: '41',
     title: 'Chapter Forty-One',
-    releaseDate: '2017-01-25',
+    cover_date: '2017-01-31',
+    store_date: '2017-01-25',
+    issue_type: 'issue',
+    monitored: true,
     series: { id: 1, title: 'Saga' },
     ...overrides,
   };
@@ -452,7 +457,9 @@ export function makeBlocklistRecord(
 ): BlocklistRecord {
   return {
     sourceTitle: 'Saga 041 scanned',
-    indexerName: 'DogNZB',
+    indexer: 'DogNZB',
+    guid: 'guid-41',
+    downloadId: 'dl-41',
     date: '2026-07-04T09:00:00Z',
     message: 'Download failed: archive is corrupt',
     protocol: 'usenet',

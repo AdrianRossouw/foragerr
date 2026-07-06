@@ -20,7 +20,7 @@ import styles from './BlocklistScreen.module.css';
  */
 
 function banDate(record: BlocklistRecord): string | null {
-  return record.date ?? record.createdAt ?? null;
+  return record.date ?? null;
 }
 
 export function BlocklistScreen() {
@@ -143,7 +143,7 @@ export function BlocklistScreen() {
                       : '—'}
                   </td>
                   <td className={styles.muted}>
-                    {record.indexerName ?? '—'}
+                    {record.indexer ?? '—'}
                     {record.protocol ? ` · ${record.protocol}` : ''}
                   </td>
                   <td className={styles.numeric}>{formatDate(banDate(record))}</td>

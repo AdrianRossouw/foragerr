@@ -23,7 +23,7 @@ import styles from './WantedScreen.module.css';
 
 /** The release date column tolerates whichever date field the backend serves. */
 function releaseDate(record: WantedIssueRecord): string | null {
-  return record.releaseDate ?? record.storeDate ?? record.coverDate ?? null;
+  return record.store_date ?? record.cover_date ?? null;
 }
 
 export function WantedScreen() {
@@ -105,16 +105,20 @@ export function WantedScreen() {
               {records.map((record) => (
                 <tr key={record.id} data-testid={`wanted-row-${record.id}`}>
                   <td>
-                    <Link
-                      className={styles.seriesLink}
-                      to={`/series/${record.series.id}`}
-                    >
-                      {record.series.title}
-                    </Link>
+                    {record.series ? (
+                      <Link
+                        className={styles.seriesLink}
+                        to={`/series/${record.series.id}`}
+                      >
+                        {record.series.title}
+                      </Link>
+                    ) : (
+                      '—'
+                    )}
                   </td>
                   {/* Verbatim string issue number — never coerced. */}
                   <td className={styles.numeric}>
-                    {record.issueNumber != null ? `#${record.issueNumber}` : '—'}
+                    {record.issue_number != null ? `#${record.issue_number}` : '—'}
                   </td>
                   <td>{record.title ?? '—'}</td>
                   <td className={styles.numeric}>{formatDate(releaseDate(record))}</td>
@@ -122,13 +126,13 @@ export function WantedScreen() {
                     <button
                       type="button"
                       className={styles.iconButton}
-                      aria-label={`Automatic search for issue ${record.issueNumber ?? record.id}`}
+                      aria-label={`Automatic search for issue ${record.issue_number ?? record.id}`}
                       title="Automatic search"
                       onClick={() =>
                         dispatch(
-                          `Search #${record.issueNumber ?? record.id}`,
+                          `Search #${record.issue_number ?? record.id}`,
                           'issue-search',
-                          { series_id: record.series.id, issue_id: record.id },
+                          { series_id: record.series_id, issue_id: record.id },
                         )
                       }
                     >
@@ -137,7 +141,7 @@ export function WantedScreen() {
                     <button
                       type="button"
                       className={styles.iconButton}
-                      aria-label={`Interactive search for issue ${record.issueNumber ?? record.id}`}
+                      aria-label={`Interactive search for issue ${record.issue_number ?? record.id}`}
                       title="Interactive search"
                       onClick={() => setSearchIssue(record)}
                     >
@@ -167,7 +171,7 @@ export function WantedScreen() {
         >
           <InteractiveSearchOverlay
             issueId={searchIssue.id}
-            contextTitle={`${searchIssue.series.title} #${searchIssue.issueNumber ?? searchIssue.id}`}
+            contextTitle={`${searchIssue.series?.title ?? ''} #${searchIssue.issue_number ?? searchIssue.id}`}
             onClose={() => setSearchIssue(null)}
           />
         </div>
