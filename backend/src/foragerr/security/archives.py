@@ -136,6 +136,15 @@ def _is_nested_archive(name: str) -> bool:
     return Path(name).suffix.lower() in _NESTED_ARCHIVE_EXTS
 
 
+def is_safe_member_name(name: str) -> bool:
+    """Public zip-slip guard: ``True`` when ``name`` is safe to write/read.
+
+    The sanctioned member-name check for callers outside this module (e.g. the
+    ComicInfo cbz rewrite's defense-in-depth re-check), so they do not reach into
+    the private :func:`_unsafe_member_name`. Simply the negation of it."""
+    return not _unsafe_member_name(name)
+
+
 def _unsafe_member_name(name: str) -> bool:
     """True if ``name`` is absolute, drive-qualified, or contains a ``..`` /
     separator escape — the zip-slip family, checked before any write/read."""
@@ -393,4 +402,5 @@ __all__ = [
     "ArchiveLimits",
     "ArchiveReport",
     "inspect_archive",
+    "is_safe_member_name",
 ]

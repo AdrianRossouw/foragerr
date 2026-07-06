@@ -249,6 +249,55 @@ async def test_rewrite_failure_leaves_original_and_still_imports(
 
 
 @pytest.mark.req("FRG-PP-017")
+async def test_db_error_during_tagging_leaves_import_committed(
+    db, seed, import_ctx, monkeypatch
+):
+    """Tagging is best-effort AFTER the import commits: a non-IO error while
+    building the tag (e.g. a DB error loading records) must NOT unwind the
+    completed import — it lands untagged with a warning event (regression: the
+    narrow catch let it escape and roll the import back to BLOCKED)."""
+    s = await seed()
+    await _enrich(db, s)
+    make_cbz(s.series_path / "Batman 404 (1987).cbz")
+    ctx = import_ctx(comicinfo_tag_enabled=True)
+
+    def _boom(series, issue):
+        raise RuntimeError("db connection lost while building the tag")
+
+    monkeypatch.setattr(pipeline, "build_comicinfo_bytes", _boom)
+
+    outcomes = await _run(db, RescanSource(series_id=s.series_id), ctx)
+
+    assert [o.status for o in outcomes] == [ImportStatus.IMPORTED]
+    async with db.read_session() as session:
+        events = await history.events_for_issue(session, s.issue_id)
+    types = [e.event_type for e in events]
+    assert "imported" in types
+    assert history.EVENT_COMICINFO_TAG_FAILED in types
+
+
+@pytest.mark.req("FRG-PP-017")
+def test_tag_cbz_propagates_cancellation_after_cleanup(tmp_path, monkeypatch):
+    """Cleanup must not swallow cancellation/shutdown: a ``KeyboardInterrupt`` (a
+    BaseException, not Exception) raised mid-rewrite is re-raised after the temp is
+    unlinked, not wrapped as a ``ComicInfoTagError`` (regression)."""
+    cbz = tmp_path / "c.cbz"
+    make_cbz(cbz)
+    original = cbz.read_bytes()
+
+    def _boom(_src, _dst):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(comicinfo.os, "replace", _boom)
+
+    with pytest.raises(KeyboardInterrupt):
+        tag_cbz(str(cbz), b"<ComicInfo><Series>X</Series></ComicInfo>")
+
+    assert cbz.read_bytes() == original  # untouched
+    assert _no_temp_left(tmp_path)  # temp still cleaned up before re-raising
+
+
+@pytest.mark.req("FRG-PP-017")
 def test_tag_cbz_primitive_cleans_temp_on_replace_failure(tmp_path, monkeypatch):
     """The rewrite primitive unlinks its temp and leaves the source byte-identical
     when the atomic replace itself fails."""

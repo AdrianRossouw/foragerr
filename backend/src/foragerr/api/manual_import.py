@@ -18,16 +18,17 @@ automatic import.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Query, Request, Response
 from pydantic import BaseModel
 
 from foragerr.api.command import CommandResource
 from foragerr.api.errors import ApiError
 from foragerr.commands import CommandValidationError
+from foragerr.commands.service import daemon_offload
 from foragerr.downloads.manual_import import (
     ManualImportError,
-    _confine,
-    _execute_roots,
+    confine_under_roots,
+    execute_roots,
     list_manual_candidates,
 )
 
@@ -64,6 +65,10 @@ class ManualImportFile(BaseModel):
     seriesId: int | None = None
     issueId: int | None = None
     format: str | None = None
+    #: Set by the overlay when the row came from a blocked download, so execute
+    #: rebuilds the file through the same download-shaped source and the same
+    #: specs (esp. already-imported) evaluate as the listing did (FRG-PP-016).
+    downloadId: str | None = None
 
 
 class ManualImportRequest(BaseModel):
@@ -75,19 +80,26 @@ class ManualImportRequest(BaseModel):
 @router.get("/manual-import", response_model=list[ManualImportEntry])
 async def list_manual_import_endpoint(
     request: Request,
+    response: Response,
     path: str | None = Query(None),
     downloadId: str | None = Query(None),
 ) -> list[ManualImportEntry]:
     """List candidate files with their decisions (FRG-API-015). Touches no disk
-    beyond inspection; an unreadable path or unknown download is a typed error."""
+    beyond inspection; an unreadable path or unknown download is a typed error.
+
+    The per-candidate archive inspection is offloaded off the event loop, and the
+    list is capped: when the folder exceeded the cap the response is truncated and
+    an ``X-Manual-Import-Truncated: true`` header flags it."""
     db = request.app.state.db
     settings = request.app.state.settings
     try:
-        entries = await list_manual_candidates(
-            db, settings, path=path, download_id=downloadId
+        listing = await list_manual_candidates(
+            db, settings, path=path, download_id=downloadId, offload=daemon_offload
         )
     except ManualImportError as exc:
         raise ApiError(exc.status_code, exc.message) from exc
+    if listing.truncated:
+        response.headers["X-Manual-Import-Truncated"] = "true"
     return [
         ManualImportEntry(
             path=entry.candidate.local_path,
@@ -105,7 +117,7 @@ async def list_manual_import_endpoint(
                 verified=entry.embedded_verified,
             ),
         )
-        for entry in entries
+        for entry in listing.entries
     ]
 
 
@@ -119,22 +131,32 @@ async def execute_manual_import_endpoint(
     if not body.files:
         raise ApiError(400, "no files supplied for manual import", field="files")
 
-    roots = await _execute_roots(db)
+    roots = await execute_roots(db)
     payload_files: list[dict[str, object]] = []
     for spec in body.files:
-        confined = _confine(spec.path, roots)
-        if confined is None:
-            raise ApiError(
-                400,
-                f"path is not under a managed root or does not exist: {spec.path}",
-                field="files",
-            )
+        if spec.downloadId:
+            # A download-scoped pick is confined by the command to the download's
+            # own gathered files (only a path the download actually produced is
+            # imported), so it is not root-confined here — the path is the mapped
+            # local path the listing returned, which may sit outside a library
+            # root (a download staging dir). Threaded through with its download id.
+            path = spec.path
+        else:
+            confined = confine_under_roots(spec.path, roots)
+            if confined is None:
+                raise ApiError(
+                    400,
+                    f"path is not under a managed root or does not exist: {spec.path}",
+                    field="files",
+                )
+            path = confined
         payload_files.append(
             {
-                "path": confined,
+                "path": path,
                 "series_id": spec.seriesId,
                 "issue_id": spec.issueId,
                 "format": spec.format,
+                "download_id": spec.downloadId,
             }
         )
 

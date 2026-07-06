@@ -128,6 +128,42 @@ def test_unlisted_and_failed_archives_yield_none(tmp_path: Path):
 
 
 @pytest.mark.req("FRG-IMP-024")
+def test_unsupported_compression_method_degrades_to_none(tmp_path, monkeypatch):
+    """A member whose declared compression is unsupported makes ``ZipFile.read``
+    raise ``NotImplementedError`` — it must degrade to no evidence, honouring the
+    'never raises' contract, not escape into the pipeline (regression)."""
+    import zipfile as _zip
+
+    cbz = tmp_path / "u.cbz"
+    make_cbz_with_comicinfo(cbz, xml=comicinfo_xml(cv_issue_id=9001))
+    report = inspect_archive(str(cbz))  # inspected before the read is patched
+
+    def _boom(self, name):
+        raise NotImplementedError("compression type 99 (unsupported)")
+
+    monkeypatch.setattr(_zip.ZipFile, "read", _boom)
+    assert read_embedded_metadata(str(cbz), report) is None
+
+
+@pytest.mark.req("FRG-IMP-024")
+def test_corrupt_deflate_stream_degrades_to_none(tmp_path, monkeypatch):
+    """A corrupt deflate stream makes ``ZipFile.read`` raise ``zlib.error`` —
+    also degraded to no evidence rather than escaping (regression)."""
+    import zipfile as _zip
+    import zlib
+
+    cbz = tmp_path / "z.cbz"
+    make_cbz_with_comicinfo(cbz, xml=comicinfo_xml(cv_issue_id=9001))
+    report = inspect_archive(str(cbz))
+
+    def _boom(self, name):
+        raise zlib.error("Error -3 while decompressing data: invalid distance")
+
+    monkeypatch.setattr(_zip.ZipFile, "read", _boom)
+    assert read_embedded_metadata(str(cbz), report) is None
+
+
+@pytest.mark.req("FRG-IMP-024")
 def test_read_extracts_nothing_to_disk(tmp_path: Path):
     cbz = tmp_path / "b.cbz"
     make_cbz_with_comicinfo(cbz, xml=comicinfo_xml(cv_issue_id=9001))

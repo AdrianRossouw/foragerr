@@ -8,14 +8,18 @@ only difference, and the full ``default_specs()`` set always runs.
 
 from __future__ import annotations
 
+import datetime as dt
+
 import pytest
 from sqlalchemy import select
 
+from foragerr.db import utcnow
 from foragerr.downloads.manual_import import (
     ManualFileSpec,
     execute_manual_import,
     list_manual_candidates,
 )
+from foragerr.downloads.models import GrabHistoryRow, TrackedDownloadRow
 from foragerr.importer import (
     CompletedDownloadSource,
     ImportStatus,
@@ -43,6 +47,21 @@ async def _run(db, source, ctx):
         for candidate in await gather(source, session, ctx):
             outcomes.append(await import_candidate(session, candidate, ctx))
     return outcomes
+
+
+async def _add_grab(db, *, download_id, series_id, issue_id, title):
+    async with db.write_session() as session:
+        session.add(
+            GrabHistoryRow(
+                download_id=download_id,
+                series_id=series_id,
+                issue_id=issue_id,
+                title=title,
+                protocol="usenet",
+                source="indexer",
+                created_at=dt.datetime(2026, 7, 5),
+            )
+        )
 
 
 async def _issue_files(db):
@@ -165,7 +184,124 @@ async def test_oversized_comicinfo_pipeline_imports_on_filename(
     assert outcomes[0].issue_id == s.issue_id
 
 
+# --- FRG-IMP-024: our own signals (tag / grab) outrank the embedded id -------
+
+
+@pytest.mark.req("FRG-IMP-024")
+async def test_grabbed_download_ignores_misleading_embedded_id(
+    db, seed, import_ctx, tmp_path
+):
+    """An automatic download with authoritative grab hints imports to the GRABBED
+    issue — a stray embedded id neither overrides it nor blocks it. The embedded
+    layer sits BELOW our own grab record (regression: it used to override)."""
+    s = await seed(title="Batman", issue_number="404", cv_issue_id=9001)
+    id_405 = await _add_issue(db, s.series_id, cv_issue_id=9002, issue_number="405")
+    ctx = import_ctx()
+    dl = tmp_path / "dl"
+    # The grab record points at 405; the filename also reads 405; but the embedded
+    # ComicInfo CV id resolves to 404 — a misleading disagreement.
+    make_cbz_with_comicinfo(
+        dl / "Batman 405 (1987).cbz", xml=comicinfo_xml(cv_issue_id=9001)
+    )
+    await _add_grab(
+        db, download_id="dl-1", series_id=s.series_id, issue_id=id_405,
+        title="Batman 405 (1987)",
+    )
+
+    outcomes = await _run(
+        db, CompletedDownloadSource(download_id="dl-1", output_path=str(dl)), ctx
+    )
+
+    # Grab won silently: imported to 405, NOT the embedded 404, and NOT blocked.
+    assert [o.status for o in outcomes] == [ImportStatus.IMPORTED]
+    assert outcomes[0].issue_id == id_405
+    async with db.read_session() as session:
+        events = await history.events_for_issue(session, id_405)
+    data = history.decode_data(events[0].data)
+    # No conflict flag was recorded (the grab is above the embedded layer).
+    assert "comicinfo_conflict" not in data["provenance"]
+
+
+@pytest.mark.req("FRG-IMP-024")
+async def test_tagged_file_ignores_stray_embedded_id(db, seed, import_ctx, tmp_path):
+    """A file carrying our own ``[__issueid__]`` tag imports to the TAG — a stray
+    embedded id below it neither overrides nor blocks (regression)."""
+    s = await seed(title="Batman", issue_number="404", cv_issue_id=9001)
+    id_405 = await _add_issue(db, s.series_id, cv_issue_id=9002, issue_number="405")
+    ctx = import_ctx()
+    dl = tmp_path / "dl"
+    # The internal id tag pins IssueRow id_405; the embedded CV id resolves to 404.
+    make_cbz_with_comicinfo(
+        dl / f"Batman 405 (1987) [__{id_405}__].cbz",
+        xml=comicinfo_xml(cv_issue_id=9001),
+    )
+
+    outcomes = await _run(
+        db, CompletedDownloadSource(download_id="dl-1", output_path=str(dl)), ctx
+    )
+
+    assert [o.status for o in outcomes] == [ImportStatus.IMPORTED]
+    assert outcomes[0].issue_id == id_405  # the tag won, not the embedded 404
+    async with db.read_session() as session:
+        events = await history.events_for_issue(session, id_405)
+    data = history.decode_data(events[0].data)
+    assert "comicinfo_conflict" not in data["provenance"]
+
+
 # --- FRG-PP-016: manual import resolution -----------------------------------
+
+
+@pytest.mark.req("FRG-PP-016")
+async def test_download_scoped_execute_keeps_already_imported_blocked(
+    db, seed, import_ctx, tmp_path
+):
+    """A blocked download file the listing showed as already-imported stays blocked
+    at execute when submitted with its ``downloadId`` — the download context (grab
+    hints + download id) is rebuilt so ``AlreadyImportedSpec`` evaluates as it did
+    in the listing, instead of the file slipping through as a bare files-only
+    candidate (download_id lost) that never trips the spec (FRG-PP-016)."""
+    s = await seed(title="Batman", issue_number="404", cv_issue_id=9001)
+    staging = tmp_path / "staging"
+    cbz = staging / "Batman 404 (1987).cbz"
+    make_cbz(cbz)
+    now = utcnow()
+    async with db.write_session() as session:
+        session.add(
+            TrackedDownloadRow(
+                download_id="dl-1",
+                client_id=None,
+                state="import_blocked",
+                status="warning",
+                title="Batman 404",
+                output_path=str(staging),
+                added_at=now,
+                updated_at=now,
+            )
+        )
+    await _add_grab(
+        db, download_id="dl-1", series_id=s.series_id, issue_id=s.issue_id,
+        title="Batman 404 (1987)",
+    )
+    # A prior successful import of THIS download for THIS issue.
+    async with db.write_session() as session:
+        history.record_event(
+            session,
+            event_type=history.EVENT_IMPORTED,
+            series_id=s.series_id,
+            issue_id=s.issue_id,
+            download_id="dl-1",
+            source_title="Batman 404",
+            source=history.SOURCE_DOWNLOAD,
+            now=now,
+        )
+
+    summary = await execute_manual_import(
+        db, None, [ManualFileSpec(path=str(cbz), download_id="dl-1")]
+    )
+
+    assert "blocked=1" in summary
+    assert "imported=0" in summary
+    assert await _issue_files(db) == []  # nothing re-imported
 
 
 @pytest.mark.req("FRG-PP-016")
@@ -204,9 +340,9 @@ async def test_arbitrary_folder_unmatched_files(db, seed, import_ctx, library_ro
 
     # Listing shows the would-be verdict + reasons for the unmatched file.
     listing = await list_manual_candidates(db, None, path=str(inbox))
-    assert len(listing) == 1
-    assert listing[0].approved is False
-    assert any("match" in r for r in listing[0].rejections)
+    assert len(listing.entries) == 1
+    assert listing.entries[0].approved is False
+    assert any("match" in r for r in listing.entries[0].rejections)
 
     # A per-file override drives it to the correct issue through the pipeline.
     source = ManualImportSource(

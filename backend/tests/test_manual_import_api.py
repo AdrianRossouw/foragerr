@@ -167,6 +167,48 @@ def test_unreadable_path_is_a_typed_error(client, tmp_path):
 
 
 @pytest.mark.req("FRG-API-015")
+@pytest.mark.req("FRG-SEC-004")
+def test_path_outside_roots_gives_no_existence_oracle(client, tmp_path):
+    """A path OUTSIDE every managed root returns an IDENTICAL response whether or
+    not it exists, and never echoes the resolved out-of-root path — so a caller
+    cannot probe the filesystem for arbitrary paths (e.g. /config vs /etc)."""
+    client.portal.call(_seed, client.app, tmp_path / "library")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    existing = outside / "exists.cbz"
+    make_cbz(existing)
+    missing = outside / "nonexistent.cbz"  # never created
+
+    r_exists = client.get("/api/v1/manual-import", params={"path": str(existing)})
+    r_missing = client.get("/api/v1/manual-import", params={"path": str(missing)})
+
+    # Same status AND same body for the existing and the absent out-of-root path.
+    assert r_exists.status_code == r_missing.status_code
+    assert r_exists.json() == r_missing.json()
+    # The resolved out-of-root path is not leaked back to the caller.
+    assert str(existing) not in r_exists.text
+    assert str(missing) not in r_missing.text
+
+
+@pytest.mark.req("FRG-API-015")
+def test_listing_is_capped_and_flags_truncation(client, tmp_path, monkeypatch):
+    """A folder over the per-listing cap returns the capped list and flags the
+    truncation via a response header (DoS: the listing inspects every file)."""
+    import foragerr.downloads.manual_import as mi
+
+    monkeypatch.setattr(mi, "MANUAL_IMPORT_LISTING_CAP", 2)
+    seeded = client.portal.call(_seed, client.app, tmp_path / "library")
+    inbox = Path(seeded["root"]) / "inbox"
+    for i in range(5):
+        make_cbz(inbox / f"file-{i:02d}.cbz")
+
+    resp = client.get("/api/v1/manual-import", params={"path": str(inbox)})
+    assert resp.status_code == 200
+    assert len(resp.json()) == 2  # capped
+    assert resp.headers.get("X-Manual-Import-Truncated") == "true"
+
+
+@pytest.mark.req("FRG-API-015")
 def test_post_path_outside_managed_roots_is_rejected(client, tmp_path):
     seeded = client.portal.call(_seed, client.app, tmp_path / "library")
     stray = tmp_path / "elsewhere" / "x.cbz"

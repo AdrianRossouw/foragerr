@@ -45,6 +45,7 @@ import os
 import re
 import shutil
 import tempfile
+import zlib
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -61,7 +62,7 @@ from foragerr.indexers.xml import parse_untrusted_xml
 from foragerr.security.archives import (
     DEFAULT_ARCHIVE_LIMITS,
     ArchiveReport,
-    _unsafe_member_name,
+    is_safe_member_name,
 )
 
 if TYPE_CHECKING:
@@ -171,9 +172,12 @@ def read_embedded_metadata(
                 )
                 return None
             data = archive.read(member.filename)
-    except (OSError, zipfile.BadZipFile) as exc:
-        # The archive passed inspection but a concurrent change / IO error broke
-        # the read: degrade to no embedded evidence, never fail the candidate.
+    except (OSError, zipfile.BadZipFile, NotImplementedError, zlib.error) as exc:
+        # The archive passed inspection but the member could not be read: a
+        # concurrent change / IO error (OSError, BadZipFile), an unsupported
+        # compression method (``ZipFile.read`` raises NotImplementedError), or a
+        # corrupt deflate stream (zlib.error). "Never raises" is the contract —
+        # degrade to no embedded evidence rather than escaping into the pipeline.
         logger.warning("comicinfo: could not read ComicInfo.xml from %s: %s", path, exc)
         return None
 
@@ -264,6 +268,20 @@ def build_comicinfo_bytes(series: SeriesRow, issue: IssueRow) -> bytes:
     return tostring(root, encoding="utf-8", xml_declaration=True)
 
 
+def _fsync_dir(directory: Path) -> None:
+    """Best-effort fsync of ``directory`` so a rename into it is durable.
+
+    Some platforms (notably Windows) cannot open a directory for fsync; there a
+    failure is swallowed rather than turned into a tagging failure — the atomic
+    replace already happened and the import is committed either way."""
+    with contextlib.suppress(OSError):
+        fd = os.open(str(directory), os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
+
 def tag_cbz(
     path: str,
     xml_bytes: bytes,
@@ -276,7 +294,7 @@ def tag_cbz(
     Streams every source member into a temp zip created in the placed file's OWN
     directory (``mkstemp`` there → an atomic same-directory :func:`os.replace`),
     NEVER extracting to disk. For each source member the name is RE-CHECKED with
-    :func:`~foragerr.security.archives._unsafe_member_name` (defense in depth even
+    :func:`~foragerr.security.archives.is_safe_member_name` (defense in depth even
     though ``inspect_archive`` already vetted it) and its declared size bounded by
     a per-member cap; any existing ``ComicInfo.xml`` is dropped and the freshly
     built one appended. The temp is fsync'd and atomically renamed over ``path``.
@@ -299,7 +317,7 @@ def tag_cbz(
         ):
             for info in src.infolist():
                 name = info.filename
-                if _unsafe_member_name(name):
+                if not is_safe_member_name(name):
                     # A hostile name that slipped past inspection is refused here
                     # rather than copied to a traversed path (FRG-PP-017 scenario).
                     raise ComicInfoTagError(
@@ -327,12 +345,22 @@ def tag_cbz(
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp, placed)  # atomic — a reader never sees a half-written cbz
+        # Durably record the rename itself by fsync'ing the containing directory,
+        # so the atomic replace survives a crash right after it (best-effort: a
+        # platform that cannot fsync a directory handle is not fatal to tagging).
+        _fsync_dir(placed.parent)
     except BaseException as exc:
         with contextlib.suppress(FileNotFoundError):
             tmp.unlink()
         if isinstance(exc, ComicInfoTagError):
             raise
-        # Wrap any IO/zip failure so the pipeline handles one tagging-failure type.
+        if not isinstance(exc, Exception):
+            # A CancelledError / KeyboardInterrupt / SystemExit is NOT a tagging
+            # failure to wrap and swallow — clean up the temp, then let it
+            # propagate so cancellation/shutdown is honoured (FRG-PP-017).
+            raise
+        # Wrap any ordinary IO/zip failure so the pipeline handles one
+        # tagging-failure type; the placed file is left byte-identical.
         raise ComicInfoTagError(f"cbz rewrite failed for {path}: {exc}") from exc
 
 
