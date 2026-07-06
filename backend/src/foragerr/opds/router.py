@@ -1,11 +1,14 @@
-"""OPDS 1.2 catalog routes (FRG-OPDS-001, 002, 003, 005, 006).
+"""OPDS 1.2 catalog routes (FRG-OPDS-001, 002, 003, 005, 006, 007, 013).
 
 Per-feed routes — a deliberate divergence from Mylar's single ``?cmd=``
 dispatch endpoint::
 
-    {base}                        root navigation feed  (shelves)
+    {base}                        root navigation feed  (shelves + search link)
     {base}/series                 All Series navigation feed (paginated)
     {base}/series/{series_id}     one series' acquisition feed (paginated)
+    {base}/recent                 Recent Additions acquisition feed (paginated)
+    {base}/opensearch.xml         OpenSearch description document
+    {base}/search?q=              series search feed (paginated)
     {base}/file/{issue_file_id}   whole-file download
 
 Security posture (this listener serves UNAUTHENTICATED content on the
@@ -18,7 +21,11 @@ Tailscale-only deployment, so every request value is treated as hostile):
   Mylar ``?cmd=deliverFile&file=/etc/passwd`` traversal is therefore
   unrepresentable — there is no parameter to carry the path.
 - Every query is an ORM ``select`` with bound parameters; no SQL text is
-  built from request input (FRG-OPDS-004).
+  built from request input (FRG-OPDS-004). The search term (the one free-text
+  request input, FRG-OPDS-007) is length-capped, folded through the shared
+  ``matching_key`` normalization, and only ever compared — as a bound LIKE
+  parameter with autoescaped wildcards, or by Python substring containment —
+  never interpolated anywhere.
 - Feed rendering reads DB rows only and never opens an archive
   (FRG-OPDS-002); the escaping Atom builder neutralizes injected markup.
 """
@@ -27,22 +34,27 @@ from __future__ import annotations
 
 import datetime as dt
 import math
+from urllib.parse import quote_plus
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import FileResponse, Response
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 
 from foragerr.api.errors import ApiError
 from foragerr.db.base import utcnow
 from foragerr.library import repo
+from foragerr.library.flows import decode_aliases
 from foragerr.library.models import IssueFileRow, IssueRow, SeriesRow
+from foragerr.parser.normalize import matching_key
 
 from foragerr.security.paths import PathConfinementError, validate_under_root
 from foragerr.opds.atom import (
     ACQ_KIND,
     NAV_KIND,
+    OPENSEARCH_DESC_KIND,
     REL_ACQUISITION,
     REL_IMAGE,
+    REL_SEARCH,
     REL_START,
     REL_SUBSECTION,
     REL_THUMBNAIL,
@@ -50,11 +62,19 @@ from foragerr.opds.atom import (
     Feed,
     Link,
     render_feed,
+    render_opensearch_description,
 )
 from foragerr.opds.mime import media_type_for
 
 CATALOG_TITLE = "foragerr"
 ALL_SERIES_TITLE = "All Series"
+RECENT_TITLE = "Recent Additions"
+SEARCH_TITLE = "Search"
+
+#: Upper bound on the hostile free-text search term (FRG-OPDS-007). Anything
+#: beyond it is TRIMMED (never an error): the spec requires oversized input to
+#: be bounded while the response stays a normal, possibly empty, feed.
+MAX_SEARCH_QUERY_LEN = 256
 
 
 def _feed_response(feed: Feed, kind: str) -> Response:
@@ -90,14 +110,24 @@ def _effective_page_size(count: int | None, settings) -> int:
     return max(1, min(size, settings.opds_page_size_cap))
 
 
-def _pagination_links(feed_path: str, kind: str, page: int, page_size: int, total: int) -> tuple[list[Link], int]:
+def _pagination_links(
+    feed_path: str,
+    kind: str,
+    page: int,
+    page_size: int,
+    total: int,
+    *,
+    extra_query: str = "",
+) -> tuple[list[Link], int]:
     """Atom next/previous/first/last links, every one pointing back at
     ``feed_path`` (the same feed it paginates — the Mylar wrong-``cmd`` bug
-    class). Returns the link list and the last page number."""
+    class). ``extra_query`` carries feed-specific parameters (the search
+    feed's already-encoded ``q=...&``) so pagination never drops them.
+    Returns the link list and the last page number."""
     last_page = max(1, math.ceil(total / page_size)) if total else 1
 
     def url(p: int) -> str:
-        return f"{feed_path}?page={p}&count={page_size}"
+        return f"{feed_path}?{extra_query}page={p}&count={page_size}"
 
     links = [
         Link(href=url(1), rel="first", type=kind),
@@ -116,19 +146,33 @@ def build_opds_router(base_path: str) -> APIRouter:
     router = APIRouter(tags=["opds"])
 
     series_shelf_url = f"{base_path}/series"
+    recent_url = f"{base_path}/recent"
+    search_url = f"{base_path}/search"
+    descriptor_url = f"{base_path}/opensearch.xml"
 
     def start_link() -> Link:
         return Link(href=base_path, rel=REL_START, type=NAV_KIND)
 
+    def search_link() -> Link:
+        """The advertised OpenSearch descriptor link (FRG-OPDS-007 option a):
+        advertised because the descriptor AND the search feed are implemented —
+        never a dangling promise."""
+        return Link(href=descriptor_url, rel=REL_SEARCH, type=OPENSEARCH_DESC_KIND)
+
     @router.get("")
     async def root_feed(request: Request) -> Response:
         """Root navigation feed: links to shelves that have content
-        (FRG-OPDS-001). M1 shelf set = All Series only, shown only when the
-        library holds at least one series."""
+        (FRG-OPDS-001, FRG-OPDS-013) plus the OpenSearch link (FRG-OPDS-007).
+        Shelf set = All Series (shown only when the library holds at least one
+        series) and Recent Additions (shown only when at least one issue file
+        exists — the same non-empty convention)."""
         db = request.app.state.db
         async with db.read_session() as session:
             series_count = await session.scalar(
                 select(func.count()).select_from(SeriesRow)
+            )
+            file_count = await session.scalar(
+                select(func.count()).select_from(IssueFileRow)
             )
         entries: list[Entry] = []
         if series_count:
@@ -142,11 +186,22 @@ def build_opds_router(base_path: str) -> APIRouter:
                     links=(Link(href=series_shelf_url, rel=REL_SUBSECTION, type=NAV_KIND),),
                 )
             )
+        if file_count:
+            entries.append(
+                Entry(
+                    id=recent_url,
+                    title=RECENT_TITLE,
+                    updated=utcnow(),
+                    # Resolves to a feed of downloadable issues -> acquisition.
+                    links=(Link(href=recent_url, rel=REL_SUBSECTION, type=ACQ_KIND),),
+                )
+            )
         feed = Feed(
             id=base_path,
             title=CATALOG_TITLE,
             updated=utcnow(),
             self_url=base_path,
+            links=(search_link(),),
             entries=tuple(entries),
         )
         return _feed_response(feed, NAV_KIND)
@@ -173,23 +228,7 @@ def build_opds_router(base_path: str) -> APIRouter:
             )
             rows = result.scalars().all()
 
-        entries = tuple(
-            Entry(
-                id=f"{base_path}/series/{row.id}",
-                title=row.title,
-                updated=row.refreshed_at or row.added_at,
-                links=(
-                    Link(
-                        href=f"{base_path}/series/{row.id}",
-                        rel=REL_SUBSECTION,
-                        # This link resolves to a feed of downloadable issues
-                        # -> acquisition kind.
-                        type=ACQ_KIND,
-                    ),
-                ),
-            )
-            for row in rows
-        )
+        entries = tuple(_series_nav_entry(base_path, row) for row in rows)
 
         nav_links, _ = _pagination_links(series_shelf_url, NAV_KIND, page, page_size, total)
         feed = Feed(
@@ -259,6 +298,138 @@ def build_opds_router(base_path: str) -> APIRouter:
         )
         return _feed_response(feed, ACQ_KIND)
 
+    @router.get("/recent")
+    async def recent_feed(
+        request: Request,
+        page: int = Query(1, ge=1),
+        count: int | None = Query(None, ge=1),
+    ) -> Response:
+        """Recent Additions acquisition feed (FRG-OPDS-013): every issue file
+        in the library ordered newest-first by IMPORT time (``added_at``,
+        never release date), paginated per FRG-OPDS-006 — the pagination is
+        what bounds the shelf; there is no separate window config. Entries are
+        the same full acquisition entries the series shelf serves."""
+        settings = request.app.state.settings
+        page_size = _effective_page_size(count, settings)
+        db = request.app.state.db
+        async with db.read_session() as session:
+            base_query = (
+                select(IssueFileRow, IssueRow, SeriesRow)
+                .join(IssueRow, IssueRow.id == IssueFileRow.issue_id)
+                .join(SeriesRow, SeriesRow.id == IssueRow.series_id)
+            )
+            total, result = await _count_and_page(
+                session,
+                base_query,
+                order_by=(IssueFileRow.added_at.desc(), IssueFileRow.id.desc()),
+                page=page,
+                page_size=page_size,
+            )
+            triples = result.all()
+
+        entries = tuple(
+            _issue_file_entry(base_path, series, issue_file, issue, _cover_url(series.id))
+            for issue_file, issue, series in triples
+        )
+
+        nav_links, _ = _pagination_links(recent_url, ACQ_KIND, page, page_size, total)
+        feed = Feed(
+            id=recent_url,
+            title=RECENT_TITLE,
+            updated=utcnow(),
+            self_url=f"{recent_url}?page={page}&count={page_size}",
+            links=[start_link(), *nav_links],
+            entries=entries,
+            total_results=total,
+            items_per_page=page_size,
+            start_index=(page - 1) * page_size + 1,
+        )
+        return _feed_response(feed, ACQ_KIND)
+
+    @router.get("/opensearch.xml")
+    async def opensearch_description() -> Response:
+        """The OpenSearch description document the root feed's ``rel="search"``
+        link advertises (FRG-OPDS-007 option a). Static: the template carries
+        the literal ``{searchTerms}`` placeholder a reader substitutes."""
+        document = render_opensearch_description(
+            short_name=CATALOG_TITLE,
+            description="Search series in the foragerr comic catalog",
+            template=f"{search_url}?q={{searchTerms}}",
+            results_type=NAV_KIND,
+        )
+        return Response(content=document, media_type=OPENSEARCH_DESC_KIND)
+
+    @router.get("/search")
+    async def search_feed(
+        request: Request,
+        q: str = Query(""),
+        page: int = Query(1, ge=1),
+        count: int | None = Query(None, ge=1),
+    ) -> Response:
+        """Series search feed (FRG-OPDS-007): case-folded containment match of
+        the query against every series title AND its aliases, returning
+        navigation entries into the matching series' acquisition feeds.
+
+        The term is the one hostile free-text input on this unauthenticated
+        listener, so it is bounded and inert by construction: trimmed to
+        ``MAX_SEARCH_QUERY_LEN``, folded through the shared ``matching_key``
+        normalization (FRG-IMP-005 — resilient to case/punctuation/unicode
+        variants), compared via a bound autoescaped LIKE parameter plus a
+        Python containment pass over the (folded) alias lists, and reflected
+        nowhere except URL-encoded into this feed's own pagination links,
+        which the escaping builder quotes. No match — or an empty/fold-empty
+        term — yields an empty but valid feed, never an error."""
+        settings = request.app.state.settings
+        page_size = _effective_page_size(count, settings)
+        term = q[:MAX_SEARCH_QUERY_LEN]
+        folded = matching_key(term)
+
+        rows: list[SeriesRow] = []
+        if folded:
+            db = request.app.state.db
+            async with db.read_session() as session:
+                # Bound parameters only: `.contains(..., autoescape=True)`
+                # binds the folded term as a LIKE parameter with `%`/`_`
+                # escaped. Alias containment cannot be expressed against the
+                # folded form in SQL (aliases are stored as raw user strings),
+                # so alias-bearing series are candidates and the fold+contain
+                # check runs in Python below — still zero SQL from input.
+                result = await session.execute(
+                    select(SeriesRow)
+                    .where(
+                        or_(
+                            SeriesRow.matching_key.contains(folded, autoescape=True),
+                            SeriesRow.aliases.is_not(None),
+                        )
+                    )
+                    .order_by(SeriesRow.sort_title, SeriesRow.id)
+                )
+                candidates = result.scalars().all()
+            rows = [row for row in candidates if _series_matches(row, folded)]
+
+        total = len(rows)
+        start = (page - 1) * page_size
+        entries = tuple(
+            _series_nav_entry(base_path, row) for row in rows[start : start + page_size]
+        )
+
+        extra_query = f"q={quote_plus(term)}&"
+        nav_links, _ = _pagination_links(
+            search_url, NAV_KIND, page, page_size, total, extra_query=extra_query
+        )
+        feed = Feed(
+            id=search_url,
+            title=SEARCH_TITLE,
+            updated=utcnow(),
+            self_url=f"{search_url}?{extra_query}page={page}&count={page_size}",
+            links=[start_link(), *nav_links],
+            entries=entries,
+            total_results=total,
+            items_per_page=page_size,
+            start_index=start + 1,
+        )
+        return _feed_response(feed, NAV_KIND)
+
     @router.get("/file/{issue_file_id}")
     async def download_file(issue_file_id: int, request: Request) -> FileResponse:
         """Whole-file download by issue-file id ONLY (FRG-OPDS-003, 005).
@@ -293,6 +464,37 @@ def build_opds_router(base_path: str) -> APIRouter:
         )
 
     return router
+
+
+def _series_nav_entry(base_path: str, row: SeriesRow) -> Entry:
+    """One navigation entry linking into a series' acquisition feed — the
+    shape shared by the All Series shelf and the search feed (FRG-OPDS-001,
+    FRG-OPDS-007)."""
+    return Entry(
+        id=f"{base_path}/series/{row.id}",
+        title=row.title,
+        updated=row.refreshed_at or row.added_at,
+        links=(
+            Link(
+                href=f"{base_path}/series/{row.id}",
+                rel=REL_SUBSECTION,
+                # This link resolves to a feed of downloadable issues
+                # -> acquisition kind.
+                type=ACQ_KIND,
+            ),
+        ),
+    )
+
+
+def _series_matches(row: SeriesRow, folded_query: str) -> bool:
+    """Case-folded containment of the (already folded) query in the series'
+    stored matching key or any alias folded the same way (FRG-OPDS-007)."""
+    if folded_query in row.matching_key:
+        return True
+    return any(
+        folded_query in matching_key(alias)
+        for alias in decode_aliases(row.aliases, series_id=row.id)
+    )
 
 
 def _issue_file_entry(

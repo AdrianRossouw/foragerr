@@ -50,14 +50,16 @@ def _links(feed_or_entry) -> list[dict]:
 
 
 @pytest.mark.req("FRG-OPDS-001")
-def test_root_feed_lists_only_non_empty_all_series_shelf(client, tmp_path):
+def test_root_feed_lists_only_non_empty_shelves(client, tmp_path):
     # Empty library: the root feed surfaces NO shelf (nothing has content).
     empty = client.get("/opds")
     assert empty.status_code == 200
     root = ET.fromstring(empty.text)
     assert root.findall(f"{ATOM}entry") == []
 
-    _seed(client, tmp_path, [simple_series()])
+    # A series with issues-but-no-files: All Series has content, Recent does
+    # NOT (the non-empty convention applies per shelf).
+    _seed(client, tmp_path, [simple_series(n_issues=0)])
     resp = client.get("/opds")
     assert resp.status_code == 200
     root = ET.fromstring(resp.text)
@@ -68,9 +70,15 @@ def test_root_feed_lists_only_non_empty_all_series_shelf(client, tmp_path):
     (link,) = _links(entries[0])
     assert link["type"] == NAV_KIND
     assert link["href"] == "/opds/series"
-    # No empty M1 shelves (Recent/Publishers/Story Arcs) appear.
+    # No empty shelves (Recent/Publishers/Story Arcs) appear.
     titles = {e.find(f"{ATOM}title").text for e in entries}
     assert titles == {"All Series"}
+
+    # Once an issue FILE exists, the Recent shelf appears beside All Series.
+    _seed(client, tmp_path / "more", [simple_series("Paper Girls", cv_volume_id=2)])
+    root = ET.fromstring(client.get("/opds").text)
+    titles = {e.find(f"{ATOM}title").text for e in root.findall(f"{ATOM}entry")}
+    assert titles == {"All Series", "Recent Additions"}
 
 
 @pytest.mark.req("FRG-OPDS-001")

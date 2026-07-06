@@ -34,7 +34,6 @@ from foragerr.api.paging import paginate
 from foragerr.library import repo
 from foragerr.library.flows import (
     MAX_ALIAS_LENGTH,
-    DeleteFilesNotSupportedError,
     SeriesNotFoundError,
     SeriesValidationError,
     add_series,
@@ -434,14 +433,13 @@ async def remove_series(
     request: Request,
     deleteFiles: bool = Query(False),
 ) -> None:
-    """Row-only delete by default; ``deleteFiles=true`` is 501 in M1
-    (FRG-SER-014)."""
+    """Row-only delete by default; ``deleteFiles=true`` routes every issue
+    file through the recycle bin BEFORE the rows are removed (FRG-SER-014,
+    FRG-API-003 delete-files scenario — implemented in m2-daily-surfaces)."""
     db = request.app.state.db
     settings = request.app.state.settings
     try:
         await delete_series(db, series_id, delete_files=deleteFiles, settings=settings)
-    except DeleteFilesNotSupportedError as exc:
-        raise ApiError(501, str(exc)) from exc
     except SeriesNotFoundError as exc:
         raise ApiError(404, str(exc)) from exc
     return None
