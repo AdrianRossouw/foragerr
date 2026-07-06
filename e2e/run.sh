@@ -2,7 +2,8 @@
 # One-command hermetic end-to-end run for foragerr (FRG-PROC-010).
 #
 #   build the real image -> generate fixtures (CA/cert, cbz) -> compose up ->
-#   wait /health -> seed a root folder -> playwright test -> generate
+#   wait /health -> register the root folder via the API -> playwright test ->
+#   generate
 #   e2e/acceptance-report.md -> compose down.
 #
 # Exit code propagates: non-zero when any scenario fails (Playwright's own exit),
@@ -112,17 +113,35 @@ if [ "${healthy}" != "1" ]; then
   exit 3
 fi
 
-# --- 5. seed a root folder (no create API in M1) ----------------------------
-echo "==> seeding root folder /library"
-"${COMPOSE[@]}" exec -T foragerr python - <<'PY'
-import sqlite3
-c = sqlite3.connect("/config/foragerr.db", timeout=15)
-c.execute("PRAGMA busy_timeout=15000")
-c.execute("INSERT OR IGNORE INTO root_folders(path) VALUES (?)", ("/library",))
-c.commit()
-c.close()
-print("root folder seeded")
-PY
+# --- 5. register the root folder through the real API (FRG-SER-008) ---------
+# First-run registration end-to-end: POST /api/v1/rootfolder replaces the old
+# direct sqlite INSERT (there was no create API in M1). Idempotent across
+# re-runs against a kept-up stack: a duplicate registration is a 400 naming
+# "already registered" — tolerated, anything else is fatal.
+echo "==> registering root folder /library via POST /api/v1/rootfolder"
+seed_status="$(curl -sS -o "${RUN_DIR}/rootfolder-seed.json" -w '%{http_code}' \
+  -X POST "${FORAGERR_BASE_URL}/api/v1/rootfolder" \
+  -H 'Content-Type: application/json' \
+  -d '{"path": "/library"}')"
+case "${seed_status}" in
+  201)
+    echo "root folder registered"
+    ;;
+  400)
+    if grep -q "already registered" "${RUN_DIR}/rootfolder-seed.json"; then
+      echo "root folder already registered (re-run) — continuing"
+    else
+      echo "!! root folder registration rejected:" >&2
+      cat "${RUN_DIR}/rootfolder-seed.json" >&2
+      exit 3
+    fi
+    ;;
+  *)
+    echo "!! root folder registration failed (HTTP ${seed_status}):" >&2
+    cat "${RUN_DIR}/rootfolder-seed.json" >&2 || true
+    exit 3
+    ;;
+esac
 
 # --- 6. run the suite --------------------------------------------------------
 # Clear any prior run's artifacts FIRST: a crashed Playwright must never be able

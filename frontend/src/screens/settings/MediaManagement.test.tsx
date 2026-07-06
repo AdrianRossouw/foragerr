@@ -10,6 +10,7 @@ import type {
   NamingConfig,
   NamingTokens,
   RenamePreviewEntry,
+  RootFolderResource,
 } from '../../api/types';
 import { MediaManagement } from './MediaManagement';
 
@@ -68,6 +69,11 @@ const SERIES = [
   makeSeriesResource({ id: 7, title: 'Invincible', sort_title: 'invincible' }),
 ];
 
+/** One registered root (FRG-SER-008); free_space null = unreadable path. */
+const ROOT_FOLDERS: RootFolderResource[] = [
+  { id: 1, path: '/comics', free_space: 250_000_000_000 },
+];
+
 const RENAME_ROWS: RenamePreviewEntry[] = [
   {
     issueFileId: 101,
@@ -89,10 +95,28 @@ interface Overrides {
   command?: () => ReturnType<typeof makeCommand>;
   /** The paged command-list the active-rename probe reads (default: empty). */
   commandList?: () => ReturnType<typeof makeCommand>[];
+  /** Root-folder list (FRG-SER-008); defaults to one registered root. */
+  rootFolders?: () => RootFolderResource[];
+  onPostRootFolder?: (init?: FetcherInit) => unknown;
+  onDeleteRootFolder?: (id: number) => unknown;
 }
 
 function resolver(o: Overrides = {}) {
   return (path: string, init?: FetcherInit): unknown => {
+    if (path === '/api/v1/rootfolder') {
+      if (init?.method === 'POST') {
+        if (o.onPostRootFolder) return o.onPostRootFolder(init);
+        const body = init.body as { path: string };
+        return { id: 9, path: body.path, free_space: 1_000_000_000 };
+      }
+      return o.rootFolders ? o.rootFolders() : ROOT_FOLDERS;
+    }
+    const deleteMatch = path.match(/^\/api\/v1\/rootfolder\/(\d+)$/);
+    if (deleteMatch && init?.method === 'DELETE') {
+      return o.onDeleteRootFolder
+        ? o.onDeleteRootFolder(Number(deleteMatch[1]))
+        : undefined;
+    }
     if (path === '/api/v1/config/naming/tokens') {
       if (o.onTokens) return o.onTokens();
       return o.tokens ? o.tokens() : TOKENS;
@@ -562,5 +586,197 @@ describe('FRG-UI-012: reset a template to its shipped default', () => {
 
     // Restored from the endpoint's defaults contract, not a hardcoded string.
     expect(input).toHaveValue(TOKENS.defaults.file_naming_template);
+  });
+});
+
+describe('FRG-UI-012 / FRG-SER-008: root folders are manageable from settings', () => {
+  it('FRG-UI-012 / FRG-SER-008 — the Root Folders section lists registered roots with free space', async () => {
+    const { fetcher } = fakeFetcher(resolver());
+    renderWithProviders(<MediaManagement />, { fetcher });
+
+    const section = await screen.findByTestId('root-folders-section');
+    expect(
+      within(section).getByRole('heading', { name: 'Root Folders' }),
+    ).toBeInTheDocument();
+    const row = await within(section).findByTestId('root-folder-1');
+    expect(within(row).getByText('/comics')).toBeInTheDocument();
+    expect(within(row).getByText('232.8 GB free')).toBeInTheDocument();
+  });
+
+  it('FRG-UI-012 — an unreadable root renders "free space unknown", not a bogus figure', async () => {
+    const { fetcher } = fakeFetcher(
+      resolver({
+        rootFolders: () => [{ id: 3, path: '/mnt/gone', free_space: null }],
+      }),
+    );
+    renderWithProviders(<MediaManagement />, { fetcher });
+
+    const row = await screen.findByTestId('root-folder-3');
+    expect(within(row).getByText('free space unknown')).toBeInTheDocument();
+  });
+
+  it('FRG-UI-012 / FRG-SER-008 — adding a root by path POSTs it and refreshes the list', async () => {
+    const user = userEvent.setup();
+    let rows: RootFolderResource[] = [...ROOT_FOLDERS];
+    const { spy, fetcher } = fakeFetcher(
+      resolver({
+        rootFolders: () => rows,
+        onPostRootFolder: (init) => {
+          const body = init?.body as { path: string };
+          const created = { id: 2, path: body.path, free_space: 5_000_000_000 };
+          rows = [...rows, created];
+          return created;
+        },
+      }),
+    );
+    renderWithProviders(<MediaManagement />, { fetcher });
+
+    await user.type(
+      await screen.findByLabelText('New root folder path'),
+      '/mnt/comics2',
+    );
+    await user.click(screen.getByRole('button', { name: 'Add Root Folder' }));
+
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith(
+        '/api/v1/rootfolder',
+        expect.objectContaining({ method: 'POST', body: { path: '/mnt/comics2' } }),
+      ),
+    );
+    // The invalidated list refetches and the new root renders; the input clears.
+    const row = await screen.findByTestId('root-folder-2');
+    expect(within(row).getByText('/mnt/comics2')).toBeInTheDocument();
+    expect(screen.getByLabelText('New root folder path')).toHaveValue('');
+  });
+
+  it('FRG-UI-012 / FRG-SER-008 — a validation 400 renders the API message verbatim against the input', async () => {
+    const user = userEvent.setup();
+    const { fetcher } = fakeFetcher(
+      resolver({
+        onPostRootFolder: () => {
+          throw new ApiRequestError(
+            400,
+            {
+              message: "path 'relative/comics' must be absolute",
+              errors: [
+                { field: 'path', message: "path 'relative/comics' must be absolute" },
+              ],
+            },
+            '/api/v1/rootfolder',
+          );
+        },
+      }),
+    );
+    renderWithProviders(<MediaManagement />, { fetcher });
+
+    await user.type(
+      await screen.findByLabelText('New root folder path'),
+      'relative/comics',
+    );
+    await user.click(screen.getByRole('button', { name: 'Add Root Folder' }));
+
+    // Verbatim — the exact backend wording, not a paraphrase.
+    const note = await screen.findByTestId('root-folder-add-error');
+    expect(note).toHaveTextContent("path 'relative/comics' must be absolute");
+  });
+
+  it('FRG-UI-012 / FRG-SER-008 — removing an unreferenced root asks for confirmation, then DELETEs', async () => {
+    const user = userEvent.setup();
+    let rows: RootFolderResource[] = [...ROOT_FOLDERS];
+    const { spy, fetcher } = fakeFetcher(
+      resolver({
+        rootFolders: () => rows,
+        onDeleteRootFolder: (id) => {
+          rows = rows.filter((r) => r.id !== id);
+          return undefined;
+        },
+      }),
+    );
+    renderWithProviders(<MediaManagement />, { fetcher });
+
+    await user.click(
+      await screen.findByRole('button', { name: 'Remove root folder /comics' }),
+    );
+    // Nothing deleted yet — this is only the inline confirm step.
+    expect(
+      spy.mock.calls.filter(([, i]) => i?.method === 'DELETE'),
+    ).toHaveLength(0);
+
+    await user.click(screen.getByRole('button', { name: 'Confirm Remove' }));
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith(
+        '/api/v1/rootfolder/1',
+        expect.objectContaining({ method: 'DELETE' }),
+      ),
+    );
+    // The list refetches empty and offers the first-run guidance.
+    await waitFor(() =>
+      expect(screen.queryByTestId('root-folder-1')).not.toBeInTheDocument(),
+    );
+    expect(
+      screen.getByText(/No root folders are registered yet/),
+    ).toBeInTheDocument();
+  });
+
+  it('FRG-UI-012 / FRG-SER-008 — cancelling the confirm never issues the DELETE', async () => {
+    const user = userEvent.setup();
+    const { spy, fetcher } = fakeFetcher(resolver());
+    renderWithProviders(<MediaManagement />, { fetcher });
+
+    await user.click(
+      await screen.findByRole('button', { name: 'Remove root folder /comics' }),
+    );
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(
+      spy.mock.calls.filter(([, i]) => i?.method === 'DELETE'),
+    ).toHaveLength(0);
+    // Back to the plain Remove affordance.
+    expect(
+      screen.getByRole('button', { name: 'Remove root folder /comics' }),
+    ).toBeInTheDocument();
+  });
+
+  it('FRG-UI-012 / FRG-SER-008 — a 409 refusal surfaces its still-referenced reason and keeps the row', async () => {
+    const user = userEvent.setup();
+    const refusal =
+      'root folder 1 is still used by 3 series — remove or relocate them first';
+    const { fetcher } = fakeFetcher(
+      resolver({
+        onDeleteRootFolder: () => {
+          throw new ApiRequestError(
+            409,
+            { message: refusal, errors: [] },
+            '/api/v1/rootfolder/1',
+          );
+        },
+      }),
+    );
+    renderWithProviders(<MediaManagement />, { fetcher });
+
+    await user.click(
+      await screen.findByRole('button', { name: 'Remove root folder /comics' }),
+    );
+    await user.click(screen.getByRole('button', { name: 'Confirm Remove' }));
+
+    const row = await screen.findByTestId('root-folder-1');
+    await waitFor(() =>
+      expect(within(row).getByRole('alert')).toHaveTextContent(refusal),
+    );
+    // The refused root is still listed.
+    expect(within(row).getByText('/comics')).toBeInTheDocument();
+  });
+
+  it('FRG-UI-012 — root-folder actions never arm the save bar (immediate API actions, not form fields)', async () => {
+    const user = userEvent.setup();
+    const { fetcher } = fakeFetcher(resolver());
+    renderWithProviders(<MediaManagement />, { fetcher });
+
+    await user.type(
+      await screen.findByLabelText('New root folder path'),
+      '/mnt/somewhere',
+    );
+    // Typing a root-folder path is not a config edit — the save bar stays inert.
+    expect(screen.getByRole('button', { name: 'No Changes' })).toBeDisabled();
   });
 });

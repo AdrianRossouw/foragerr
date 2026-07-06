@@ -7,11 +7,18 @@ import type {
   SchemaField,
 } from '../../components/schemaForm/schemaTypes';
 import { mapApiError } from '../../components/settings/apiErrors';
-import { useSeriesIndex } from '../../api/hooks';
+import {
+  useCreateRootFolder,
+  useDeleteRootFolder,
+  useRootFolders,
+  useSeriesIndex,
+} from '../../api/hooks';
 import type {
   MediaManagementConfig,
   NamingConfig,
+  RootFolderResource,
 } from '../../api/types';
+import { formatBytes } from '../../lib/format';
 import type { ExampleFields } from './naming/renderExample';
 import { TemplateField } from './naming/TemplateField';
 import { RenamePreviewPanel } from './naming/RenamePreviewPanel';
@@ -361,6 +368,8 @@ export function MediaManagement() {
         }
       />
       <div className={styles.page}>
+        <RootFoldersSection />
+
         {(namingQuery.isLoading || mmQuery.isLoading || values === null) && (
           <p className={styles.stateText}>Loading settings…</p>
         )}
@@ -470,6 +479,165 @@ export function MediaManagement() {
         />
       )}
     </>
+  );
+}
+
+/*
+ * Root Folders (FRG-SER-008 / FRG-UI-012). Deliberately OUTSIDE the save-bar
+ * form: registration and removal are immediate API actions (POST/DELETE
+ * /api/v1/rootfolder), not config fields staged for a PUT — so the section
+ * renders its own card-framed rows, never arms the save bar, and does not
+ * depend on the config singletons having loaded. Validation failures render
+ * the API's field-precise 400 message VERBATIM against the path input;
+ * removal is a two-step inline confirm, and a 409 refusal (root still
+ * referenced by series) surfaces its reason against the row.
+ */
+function RootFoldersSection() {
+  const rootFolders = useRootFolders();
+  const createRootFolder = useCreateRootFolder();
+  const deleteRootFolder = useDeleteRootFolder();
+
+  const [newPath, setNewPath] = useState('');
+  const [addError, setAddError] = useState<string | null>(null);
+  const [confirmingId, setConfirmingId] = useState<number | null>(null);
+  const [removeError, setRemoveError] = useState<{
+    id: number;
+    message: string;
+  } | null>(null);
+
+  const add = async () => {
+    setAddError(null);
+    try {
+      await createRootFolder.mutateAsync({ path: newPath.trim() });
+      setNewPath('');
+    } catch (error) {
+      // The fetcher's ApiRequestError carries the backend's uniform-shape
+      // message verbatim (the field-precise 400 names the exact problem).
+      setAddError(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const remove = async (id: number) => {
+    setConfirmingId(null);
+    setRemoveError(null);
+    try {
+      await deleteRootFolder.mutateAsync(id);
+    } catch (error) {
+      // A 409 refusal names the referencing-series count — shown verbatim.
+      setRemoveError({
+        id,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
+  const rows = rootFolders.data ?? [];
+
+  return (
+    <section className={styles.section} data-testid="root-folders-section">
+      <h2 className={styles.sectionHeading}>Root Folders</h2>
+      <p className={styles.sectionHelp}>
+        Library locations series are stored under. Adding and removing take
+        effect immediately; removing never touches files on disk.
+      </p>
+
+      {rootFolders.isLoading && (
+        <p className={styles.stateText}>Loading root folders…</p>
+      )}
+      {rootFolders.isError && (
+        <p className={styles.fieldError} role="alert">
+          Could not load root folders: {rootFolders.error.message}
+        </p>
+      )}
+      {rootFolders.data && rows.length === 0 && (
+        <p className={styles.stateText}>
+          No root folders are registered yet. Add the folder your comics live
+          in (an absolute path) below.
+        </p>
+      )}
+
+      {rows.length > 0 && (
+        <ul className={styles.rootFolderList}>
+          {rows.map((folder: RootFolderResource) => (
+            <li
+              key={folder.id}
+              className={styles.rootFolderRow}
+              data-testid={`root-folder-${folder.id}`}
+            >
+              <span className={styles.rootFolderPath}>{folder.path}</span>
+              <span className={styles.rootFolderFree}>
+                {folder.free_space !== null
+                  ? `${formatBytes(folder.free_space)} free`
+                  : 'free space unknown'}
+              </span>
+              {confirmingId === folder.id ? (
+                <>
+                  <button
+                    type="button"
+                    className={`${styles.button} ${styles.buttonPrimary}`}
+                    disabled={deleteRootFolder.isPending}
+                    onClick={() => void remove(folder.id)}
+                  >
+                    Confirm Remove
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.button}
+                    onClick={() => setConfirmingId(null)}
+                  >
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className={styles.button}
+                  aria-label={`Remove root folder ${folder.path}`}
+                  onClick={() => {
+                    setRemoveError(null);
+                    setConfirmingId(folder.id);
+                  }}
+                >
+                  Remove
+                </button>
+              )}
+              {removeError?.id === folder.id && (
+                <span className={styles.fieldError} role="alert">
+                  {removeError.message}
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className={styles.rootFolderAddRow}>
+        <input
+          className={styles.rootFolderInput}
+          type="text"
+          aria-label="New root folder path"
+          placeholder="/path/to/comics"
+          value={newPath}
+          onChange={(e) => {
+            setNewPath(e.target.value);
+            setAddError(null);
+          }}
+        />
+        <button
+          type="button"
+          className={`${styles.button} ${styles.buttonPrimary}`}
+          disabled={newPath.trim() === '' || createRootFolder.isPending}
+          onClick={() => void add()}
+        >
+          {createRootFolder.isPending ? 'Adding…' : 'Add Root Folder'}
+        </button>
+      </div>
+      {addError && (
+        <p className={styles.fieldError} role="alert" data-testid="root-folder-add-error">
+          {addError}
+        </p>
+      )}
+    </section>
   );
 }
 

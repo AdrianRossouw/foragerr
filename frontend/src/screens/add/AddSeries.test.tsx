@@ -74,13 +74,17 @@ function defaultLookup(path: string): unknown {
 
 function addFetcher({
   lookup = defaultLookup,
-}: { lookup?: (path: string) => unknown } = {}) {
+  rootFolders = () => mockRootFolders,
+}: {
+  lookup?: (path: string) => unknown;
+  rootFolders?: () => unknown;
+} = {}) {
   return fakeFetcher((path, options) => {
     const method = options?.method ?? 'GET';
     if (method === 'GET' && path.startsWith('/api/v1/series/lookup?term=')) {
       return lookup(path);
     }
-    if (method === 'GET' && path === '/api/v1/rootfolder') return mockRootFolders;
+    if (method === 'GET' && path === '/api/v1/rootfolder') return rootFolders();
     if (method === 'GET' && path === '/api/v1/formatprofile') {
       return mockFormatProfiles;
     }
@@ -97,7 +101,12 @@ function addFetcher({
   });
 }
 
-function renderAdd(overrides: { lookup?: (path: string) => unknown } = {}) {
+function renderAdd(
+  overrides: {
+    lookup?: (path: string) => unknown;
+    rootFolders?: () => unknown;
+  } = {},
+) {
   const { spy, fetcher } = addFetcher(overrides);
   const utils = renderWithProviders(
     <Routes>
@@ -185,6 +194,27 @@ describe('FRG-UI-005: add series', () => {
     expect(
       within(panel).getByRole('checkbox', { name: 'Start search for missing issues' }),
     ).toBeInTheDocument();
+  });
+
+  it('FRG-UI-012 / FRG-SER-008 — with no root folders registered the panel links to Media Management settings instead of a dead end', async () => {
+    renderAdd({ rootFolders: () => [] });
+    const user = await searchFor('saga');
+
+    await waitFor(() =>
+      expect(screen.getByTestId('candidate-40501234')).toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole('button', { name: 'Select Saga' }));
+
+    const note = await screen.findByTestId('add-no-roots');
+    expect(note).toHaveTextContent('No root folders are registered');
+    expect(
+      within(note).getByRole('link', { name: 'Media Management settings' }),
+    ).toHaveAttribute('href', '/settings/media-management');
+    // The dead-end select is gone and the add action stays disabled.
+    expect(
+      screen.queryByRole('combobox', { name: 'Root folder' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId('ft-add-confirm')).toBeDisabled();
   });
 
   it('FRG-UI-005 — confirming the add posts the payload, navigates to detail, and the refresh command is visible in progress', async () => {
