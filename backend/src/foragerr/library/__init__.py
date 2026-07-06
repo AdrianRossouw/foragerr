@@ -8,8 +8,9 @@ schema discipline for the library tables. Public surface:
 - :mod:`foragerr.library.repo` — CRUD helpers, the derived `wanted_issues()`
   selectable (FRG-SER-004 — there is no stored `wanted` column anywhere),
   and per-request `series_statistics()` (FRG-SER-009).
-- :mod:`foragerr.library.paths` — `safe_path_component()`, the M1 series
-  path template, under-root validation, and directory rename.
+- :mod:`foragerr.library.paths` — the M1 series path template, under-root
+  validation, and directory rename. Component sanitization
+  (`safe_path_component()`) is owned by :mod:`foragerr.security.paths`.
 - :mod:`foragerr.library.ordering` — the persisted issue ordering-key
   encoding, built on the shared parser ordering implementation.
 
@@ -33,7 +34,6 @@ from foragerr.library.paths import (
     PathNotUnderRootError,
     build_series_path,
     rename_series_directory,
-    safe_path_component,
     series_folder_name,
     validate_under_root,
 )
@@ -52,7 +52,6 @@ __all__ = [
     "build_series_path",
     "ordering_key_for",
     "rename_series_directory",
-    "safe_path_component",
     "series_folder_name",
     "series_statistics",
     "validate_under_root",

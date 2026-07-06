@@ -12,10 +12,10 @@ from foragerr.library.paths import (
     PathNotUnderRootError,
     build_series_path,
     rename_series_directory,
-    safe_path_component,
     series_folder_name,
     validate_under_root,
 )
+from foragerr.security.paths import safe_path_component
 
 
 @pytest.mark.req("FRG-NFR-012")
