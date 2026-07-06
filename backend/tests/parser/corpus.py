@@ -60,7 +60,7 @@ class Row:
     year: int | None = None
     booktype: str = "issue"
     scan_group: str | None = None
-    # `(fN)` fixed-release marker revision (FRG-PP-014 parser extension)
+    # `(fN)` fixed-release marker revision (duplicate-constraint parser extension)
     fix_revision: int | None = None
     issue_id: str | None = None
     alt_series: str | None = None
@@ -282,9 +282,9 @@ CORPUS: tuple[Row, ...] = (
     # (FRG-IMP-016). The suffixed issue survives; volume stays None.
     Row(78, "Saga TPB 05A (2013).cbz", "Saga", ("FRG-IMP-016", "FRG-IMP-021"),
         issue="5", display="05A", suffix="A", year=2013, booktype="TPB"),
-    # 79-81: `(fN)` fixed-release markers (FRG-PP-014 parser extension; corpus
+    # 79-81: `(fN)` fixed-release markers (duplicate-constraint parser extension; corpus
     # rows carry the FRG-IMP annotation-classification ids per the row policy —
-    # the FRG-PP-014-tagged tests live in test_fix_markers.py).
+    # the requirement-tagged marker tests live in test_fix_markers.py).
     # 79: a trailing marker is captured (and is NOT mistaken for a scan group).
     Row(79, "Batman 404 (1987) (f2).cbz", "Batman", ("FRG-IMP-017", "FRG-IMP-021"),
         issue="404", display="404", year=1987, fix_revision=2,
