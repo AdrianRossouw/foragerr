@@ -236,6 +236,15 @@ class Settings(BaseSettings):
         default=SecretStr(""),
         description="ComicVine API key (secret; empty by default, supply at runtime).",
     )
+    comicvine_base_url: str = Field(
+        default="https://comicvine.gamespot.com/api",
+        description=(
+            "Base URL of the ComicVine API. Defaults to the real service and is "
+            "only overridden to point the metadata client at a fixture server "
+            "(the end-to-end harness, FRG-PROC-010). The outbound egress policy "
+            "(FRG-SEC-001) still applies to whatever host this resolves to."
+        ),
+    )
     comicvine_min_interval_seconds: float = Field(
         default=2.0,
         gt=0,
