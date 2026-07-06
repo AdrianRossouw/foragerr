@@ -48,13 +48,31 @@ auto-deleted. A blocked item is retried automatically whenever its evidence chan
 the next processing cycle picks it up again. A permanently stuck item stays visibly
 blocked until you resolve or remove it.
 
-### Upgrades and the quarantine folder
+### Upgrades, deletions, and the recycle bin
 
-When an import replaces an issue's existing file (an upgrade), the replaced file is
-**moved to `<config>/quarantine/<date>/`, never deleted**. This is M1's stand-in
-for a recycle bin (a fuller recycle-bin feature is planned for M2). If an upgrade
-turns out to be a mistake, the previous file is sitting in quarantine, and its
-location is recorded on the issue's history event.
+When an import replaces an issue's existing file (an upgrade), or you delete a
+library file through the app, the displaced file goes to the **recycle bin** —
+the directory configured as `recycle_bin_path`, organized into dated subfolders
+with collision-safe names. Its location is recorded on the issue's history
+event, so a mistaken upgrade or deletion is recoverable. A housekeeping task
+prunes bin entries older than `recycle_bin_retention_days` (0 keeps them
+forever), and it only ever touches the bin's own dated folders.
+
+**If no recycle bin is configured, displaced files are permanently deleted.**
+Upgrading from M1: your config is migrated automatically with the bin pointed at
+the old `<config>/quarantine` directory, so the M1 keep-everything behavior is
+preserved — files already in quarantine are swept into the bin, and nothing is
+deleted by the upgrade. Fresh installs start with no bin (permanent delete)
+until you set one in Settings → Media Management.
+
+### Renaming existing files
+
+Changing the naming template does not touch files by itself. Use the **rename
+preview** (Settings → Media Management, or a series' Rename Files button) to see
+exactly which files would change, then confirm to execute — the executed renames
+match the preview, each recorded as a history event, and files that would
+collide on the same target name are refused with a visible reason instead of
+overwriting each other.
 
 ## Archive safety checks
 

@@ -46,9 +46,23 @@ any listed release can be grabbed manually.
 
 ## Settings
 
-Settings covers indexers and download clients. Both use the same schema-driven
+Settings covers indexers, download clients, and Media Management. Both use the same schema-driven
 form: the server describes each provider implementation's fields and the UI
 renders them, so a new provider type needs no UI change. Secret fields (API keys)
 are write-only — the form shows that a value is stored but never displays it back.
 Every provider has a Test button that performs a live connectivity check before
 you save.
+
+### Media Management
+
+The Media Management page controls naming and file handling: the rename toggle,
+file and folder naming templates (with a `?` token cheatsheet and a live example
+that recomputes as you type), illegal-character policy, transfer mode, the
+existing-library import mode, and the recycle bin (path + retention). Template
+edits show their effect immediately; nothing changes on disk until you save.
+
+From here (or from a series' **Rename Files** toolbar button) you can open the
+**rename preview**: a list of exactly which files would move from their current
+names to template-rendered names. Nothing is renamed until you confirm, and the
+executed renames match the preview exactly — each one recorded as a history
+event.
