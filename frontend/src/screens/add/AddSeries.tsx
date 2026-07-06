@@ -9,7 +9,8 @@ import {
   useLookup,
   useRootFolders,
 } from '../../api/hooks';
-import type { LookupCandidate } from '../../api/types';
+import { isComicVineAuthError } from '../../api/fetcher';
+import type { LookupCandidate, LookupResponse } from '../../api/types';
 import { MONITOR_STRATEGIES } from '../../api/types';
 import { formatBytes } from '../../lib/format';
 import styles from './AddSeries.module.css';
@@ -33,16 +34,50 @@ export function normalizeLookupTerm(raw: string): string {
 }
 
 /**
- * Does a lookup error message name the ComicVine API key as the cause? The
- * backend maps a ComicVine auth failure to a 503 whose message names both
- * ComicVine and its API key (FRG-API-003); other 503s (upstream down) do not.
- * Kept deliberately narrow to that credential wording so the actionable
- * "check Settings" guidance only fires for a missing/invalid key.
+ * Classify the lookup outcome into the single note that renders (FRG-UI-005):
+ * exactly one outcome state at a time, in precedence order — credential error
+ * (structural, via the errors[] field discriminator) → generic error →
+ * degraded walk that returned nothing (error styling, retry guidance) →
+ * capped result (narrow the term; candidates still render) → incomplete
+ * result (candidates still render) → complete-and-empty → candidates only.
  */
-export function isComicVineAuthMessage(message: string | null | undefined): boolean {
-  if (!message) return false;
-  const m = message.toLowerCase();
-  return m.includes('comicvine') && m.includes('api key');
+function lookupOutcomeNote(
+  isError: boolean,
+  error: unknown,
+  data: LookupResponse | undefined,
+  term: string,
+): { tone: 'error' | 'status' | 'plain'; text: string } | null {
+  if (isError) {
+    return {
+      tone: 'error',
+      text: isComicVineAuthError(error)
+        ? 'ComicVine API key missing or invalid — check Settings.'
+        : 'ComicVine lookup failed. Try again in a moment.',
+    };
+  }
+  if (!data) return null;
+  if (!data.complete && data.records.length === 0) {
+    return {
+      tone: 'error',
+      text: 'ComicVine lookup failed part-way and returned nothing — try again in a moment.',
+    };
+  }
+  if (data.truncated) {
+    return {
+      tone: 'status',
+      text: 'Too many results — ComicVine capped this search. Narrow the term.',
+    };
+  }
+  if (!data.complete) {
+    return {
+      tone: 'status',
+      text: 'Results may be incomplete — ComicVine did not return everything.',
+    };
+  }
+  if (data.records.length === 0) {
+    return { tone: 'plain', text: `No volumes found for “${term}”.` };
+  }
+  return null;
 }
 
 const STRATEGY_LABELS: Record<string, string> = {
@@ -202,16 +237,28 @@ export function AddSeries() {
   const lookup = useLookup(term);
   const addSeries = useAddSeries();
 
-  // A missing/invalid ComicVine key is an actionable credential error, not the
-  // plain "no results" state (FRG-UI-005); every other lookup failure stays a
-  // generic retry message.
-  const isCredentialError =
-    lookup.isError && isComicVineAuthMessage(lookup.error?.message);
+  // A lookup error must never leak stale candidates from a previous outcome:
+  // the results list and the outcome note both derive from this one value.
+  const results = lookup.isError ? undefined : lookup.data;
+  const note = lookupOutcomeNote(lookup.isError, lookup.error, results, term);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
     setSelectedId(null);
-    setTerm(normalizeLookupTerm(input));
+    const next = normalizeLookupTerm(input);
+    // A same-term re-submit after an error or a degraded/capped outcome must
+    // retry for real (FRG-UI-005): setting an identical term re-renders
+    // nothing and never refetches, so refire explicitly. Complete, uncapped
+    // lookups stay cached (staleTime Infinity in useLookup) — re-submitting
+    // those is deliberately a no-op against the rate-limited upstream.
+    const retryable =
+      lookup.isError ||
+      (lookup.data !== undefined &&
+        (!lookup.data.complete || lookup.data.truncated));
+    if (next === term && retryable) {
+      void lookup.refetch();
+    }
+    setTerm(next);
   };
 
   const add = (
@@ -273,27 +320,20 @@ export function AddSeries() {
         </form>
 
         {lookup.isLoading && <p className={styles.stateNote}>Searching ComicVine…</p>}
-        {isCredentialError && (
+        {note?.tone === 'error' && (
           <p className={styles.errorNote} role="alert">
-            ComicVine API key missing or invalid — check Settings.
+            {note.text}
           </p>
         )}
-        {lookup.isError && !isCredentialError && (
-          <p className={styles.errorNote} role="alert">
-            ComicVine lookup failed. Try again in a moment.
-          </p>
-        )}
-        {lookup.data && !lookup.data.complete && (
+        {note?.tone === 'status' && (
           <p className={styles.stateNote} role="status">
-            Results may be incomplete — ComicVine did not return everything.
+            {note.text}
           </p>
         )}
-        {lookup.data && lookup.data.complete && lookup.data.records.length === 0 && (
-          <p className={styles.stateNote}>No volumes found for “{term}”.</p>
-        )}
+        {note?.tone === 'plain' && <p className={styles.stateNote}>{note.text}</p>}
 
         <div className={styles.results}>
-          {lookup.data?.records.map((candidate) => (
+          {results?.records.map((candidate) => (
             <div
               key={candidate.cv_volume_id}
               className={styles.candidateCard}
