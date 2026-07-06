@@ -93,6 +93,7 @@ and removable — deleting one makes that release grabbable again.
 ## Import
 
 Once a download completes and is verified, it enters the import pipeline described in
-`import.md`. As of this writing that pipeline is still being built (see that page for
-current status); until it lands, a completed download can advance to import-pending
-but the file move/rename step is not yet live.
+`import.md`: the file is verified as a structurally safe comic archive, matched to its
+series and issue, checked against the import decision rules, renamed by your naming
+template, and moved into the series folder. Anything that cannot be imported is kept
+and shown as import-blocked with its reasons — see that chapter for the full flow.
