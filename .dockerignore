@@ -3,10 +3,16 @@
 # (tools/build-image.sh) is the enforcing check; this file is the first line.
 
 # Secrets — never send .env into the build context (defence in depth; the scan
-# fails the build if one is present regardless).
+# fails the build if one is present regardless). The recursive `**/` patterns
+# matter: a bare `.env` only matches at the context root, so without them a
+# nested secret like frontend/.env (VITE_* values are inlined into the served
+# bundle) would be COPY'd into the image.
 .env
 .env.*
+**/.env
+**/.env.*
 !.env.example
+!**/.env.example
 
 # VCS / tooling
 .git

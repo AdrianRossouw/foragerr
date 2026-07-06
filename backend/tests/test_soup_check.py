@@ -40,9 +40,12 @@ def test_soup_check_passes_on_committed_register():
     assert problems == []
     assert counts["backend runtime"] > 0
     assert counts["backend tooling"] > 0
-    if has_frontend:
-        assert counts["frontend runtime"] > 0
-        assert counts["frontend tooling"] > 0
+    # frontend/package.json exists on this branch, so the frontend manifest MUST
+    # be detected — a hard assert (not `if has_frontend:`) so a regression in
+    # frontend detection fails loudly instead of silently skipping its rows.
+    assert has_frontend is True
+    assert counts["frontend runtime"] > 0
+    assert counts["frontend tooling"] > 0
 
 
 @pytest.fixture

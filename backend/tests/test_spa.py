@@ -70,6 +70,23 @@ def test_spa_history_fallback_for_client_routes(tmp_path):
 
 
 @pytest.mark.req("FRG-DEP-001")
+def test_spa_fallback_excludes_reserved_backend_prefixes(tmp_path):
+    """An extension-less UNROUTED path under a reserved backend prefix
+    (/api, /opds, /health) keeps its real 404 instead of falling back to the
+    HTML shell — otherwise a mistyped /api/v1/... or /opds/... would answer
+    200 HTML and break the JSON/Atom error contract. A genuine SPA route still
+    renders the shell."""
+    app = FastAPI()
+    register_spa(app, _fake_dist(tmp_path))  # bare app -> default /opds reserved
+    with TestClient(app) as client:
+        assert client.get("/api/v1/does-not-exist").status_code == 404
+        assert client.get("/opds/nope").status_code == 404
+        assert client.get("/health/sub").status_code == 404
+        spa = client.get("/some/spa/route")
+    assert spa.status_code == 200 and "SPA" in spa.text
+
+
+@pytest.mark.req("FRG-DEP-001")
 def test_spa_never_shadows_api_health_or_opds(tmp_path):
     """Mounted on the real app, the SPA must not intercept API / OPDS / health."""
     app = create_app(_settings(tmp_path))

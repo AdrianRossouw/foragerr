@@ -74,6 +74,41 @@ def test_rootfolder_free_space_is_none_for_a_missing_path(client, tmp_path):
     assert rows[0]["free_space"] is None  # stat failure must not fail the list
 
 
+@pytest.mark.req("FRG-SER-008")
+def test_rootfolder_free_space_is_read_off_the_event_loop(client, tmp_path, monkeypatch):
+    """The blocking ``disk_usage`` stat runs in the thread pool, not on the
+    event loop — a hung network mount must not freeze the whole server."""
+    import threading
+
+    from foragerr.api import library_config
+
+    root = tmp_path / "library"
+    root.mkdir()
+    client.portal.call(_create_root_folder, client.app, str(root))
+
+    seen: dict = {}
+    real_offload = library_config.run_in_threadpool
+
+    async def recording_offload(func, *args, **kwargs):
+        seen["func"] = func  # the callable handed to the thread pool
+        seen["loop_thread"] = threading.current_thread()  # awaited on the loop
+
+        def wrapped(*a, **k):
+            seen["exec_thread"] = threading.current_thread()  # ran in the pool
+            return func(*a, **k)
+
+        return await real_offload(wrapped, *args, **kwargs)
+
+    monkeypatch.setattr(library_config, "run_in_threadpool", recording_offload)
+
+    rows = client.get("/api/v1/rootfolder").json()
+    assert rows[0]["free_space"] >= 0
+    # The stat was offloaded (disk_usage), and it executed on a DIFFERENT thread
+    # than the one awaiting it (the event loop) — i.e. off the loop.
+    assert getattr(seen.get("func"), "__name__", "") == "disk_usage"
+    assert seen["exec_thread"] is not seen["loop_thread"]
+
+
 # --- format profiles ---------------------------------------------------------
 
 

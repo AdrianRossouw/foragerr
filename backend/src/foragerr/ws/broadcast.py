@@ -66,8 +66,11 @@ class WsBroadcaster:
         self._debounce = debounce_seconds
         self._queue_maxsize = queue_maxsize
         self._connections: set[Connection] = set()
-        #: (name, action) -> latest resource in the current debounce window.
-        self._pending: dict[tuple[str, str], dict[str, Any]] = {}
+        #: (name, action, identity) -> latest resource in the current debounce
+        #: window. Keying on the resource identity (not just name+action) keeps
+        #: two DISTINCT resources changing in one window from clobbering each
+        #: other — the frontend patches specific rows by id from these payloads.
+        self._pending: dict[tuple[str, str, Any], dict[str, Any]] = {}
         self._flush_handle: asyncio.TimerHandle | None = None
         self._bus: EventBus | None = None
 
@@ -115,8 +118,13 @@ class WsBroadcaster:
         if mapped is None:
             return
         name, action, resource = mapped
-        # Last-wins coalesce: a burst for one (name, action) yields ONE message.
-        self._pending[(name, action)] = resource
+        # Last-wins coalesce PER RESOURCE: a burst of updates for the SAME
+        # resource yields one message, but two different resources each keep
+        # their own — otherwise one row's update is silently lost. Identity is
+        # the resource's id field ("id", else "downloadId"); an id-less payload
+        # coalesces on (name, action) as before.
+        identity = resource.get("id", resource.get("downloadId"))
+        self._pending[(name, action, identity)] = resource
         self._schedule_flush()
 
     def _schedule_flush(self) -> None:
@@ -136,7 +144,7 @@ class WsBroadcaster:
         if not self._pending:
             return
         batch, self._pending = self._pending, {}
-        for (name, action), resource in batch.items():
+        for (name, action, _identity), resource in batch.items():
             text = json.dumps(
                 {"name": name, "action": action, "resource": resource},
                 separators=(",", ":"),

@@ -232,6 +232,36 @@ def test_injected_markup_in_titles_is_escaped_inert(client, tmp_path):
         assert feed.find(f".//{ATOM}entry/{ATOM}title").text == hostile
 
 
+@pytest.mark.req("FRG-OPDS-002")
+def test_control_chars_in_title_do_not_break_the_feed(client, tmp_path):
+    """An XML-1.0-illegal control char (e.g. form-feed \\x0c) in a title must be
+    stripped so the WHOLE feed stays well-formed — one poisoned title must not
+    make a reader reject the entire page."""
+    poisoned = "Bad\x0cTitle\x08End"  # form-feed + backspace: both XML-illegal
+    spec = {
+        "title": poisoned,
+        "cv_volume_id": 77,
+        "issues": [
+            {
+                "cv_issue_id": 7777,
+                "number": "1",
+                "title": poisoned,
+                "files": [{"name": "x 001.cbz", "data": b"bytes"}],
+            }
+        ],
+    }
+    data = _seed(client, tmp_path, [spec])
+    series_id = data["series"][0]["id"]
+
+    for path in ("/opds/series", f"/opds/series/{series_id}"):
+        body = client.get(path).text
+        # The illegal chars are gone and the document parses (no raise).
+        assert "\x0c" not in body and "\x08" not in body
+        feed = ET.fromstring(body)  # would raise if the char slipped through
+        title = feed.find(f".//{ATOM}entry/{ATOM}title").text
+        assert title == "BadTitleEnd"
+
+
 # --- FRG-OPDS-006: pagination + OpenSearch totals --------------------------
 
 

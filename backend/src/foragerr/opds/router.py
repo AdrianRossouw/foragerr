@@ -62,6 +62,22 @@ def _feed_response(feed: Feed, kind: str) -> Response:
     return Response(content=render_feed(feed), media_type=kind)
 
 
+async def _count_and_page(session, stmt, *, order_by, page: int, page_size: int):
+    """Shared count + offset/limit slice for both OPDS feed routes.
+
+    ``foragerr.api.paging.paginate`` does not fit here: it returns the JSON
+    paging envelope, sorts through a per-endpoint whitelist, and ``.scalars()``
+    the rows — whereas the OPDS acquisition feed pages a two-entity join and
+    needs the full ``Result``. This keeps the count/offset/limit logic in ONE
+    place; the caller shapes the returned ``Result`` (``.scalars()`` or
+    ``.all()``). Returns ``(total, result)``; ``total`` is never ``None``."""
+    total = await session.scalar(select(func.count()).select_from(stmt.subquery()))
+    result = await session.execute(
+        stmt.order_by(*order_by).offset((page - 1) * page_size).limit(page_size)
+    )
+    return (total or 0), result
+
+
 def _cover_url(series_id: int) -> str:
     """Local cover-cache endpoint (FRG-META-013) — never a remote CDN URL."""
     return f"/api/v1/series/{series_id}/cover"
@@ -148,20 +164,14 @@ def build_opds_router(base_path: str) -> APIRouter:
         page_size = _effective_page_size(count, settings)
         db = request.app.state.db
         async with db.read_session() as session:
-            total = await session.scalar(select(func.count()).select_from(SeriesRow))
-            total = total or 0
-            rows = (
-                (
-                    await session.execute(
-                        select(SeriesRow)
-                        .order_by(SeriesRow.sort_title, SeriesRow.id)
-                        .offset((page - 1) * page_size)
-                        .limit(page_size)
-                    )
-                )
-                .scalars()
-                .all()
+            total, result = await _count_and_page(
+                session,
+                select(SeriesRow),
+                order_by=(SeriesRow.sort_title, SeriesRow.id),
+                page=page,
+                page_size=page_size,
             )
+            rows = result.scalars().all()
 
         entries = tuple(
             Entry(
@@ -220,14 +230,12 @@ def build_opds_router(base_path: str) -> APIRouter:
                 .join(IssueRow, IssueRow.id == IssueFileRow.issue_id)
                 .where(IssueRow.series_id == series_id)
             )
-            total = await session.scalar(
-                select(func.count()).select_from(base_query.subquery())
-            )
-            total = total or 0
-            result = await session.execute(
-                base_query.order_by(IssueRow.ordering_key, IssueFileRow.id)
-                .offset((page - 1) * page_size)
-                .limit(page_size)
+            total, result = await _count_and_page(
+                session,
+                base_query,
+                order_by=(IssueRow.ordering_key, IssueFileRow.id),
+                page=page,
+                page_size=page_size,
             )
             pairs = result.all()
 

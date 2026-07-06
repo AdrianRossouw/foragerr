@@ -115,6 +115,18 @@ class _Container:
         subprocess.run(["docker", "rm", "-f", self.name], capture_output=True, timeout=30)
 
 
+@pytest.mark.req("FRG-DEP-001")
+def test_dockerignore_excludes_nested_env_files():
+    """A bare ``.env`` pattern only matches at the context root, so a nested
+    secret like ``frontend/.env`` (whose VITE_* values are inlined into the
+    served bundle) would be COPY'd into the image. The recursive ``**/`` forms
+    must be present. (Ungated: static check, no docker daemon needed.)"""
+    text = (REPO_ROOT / ".dockerignore").read_text(encoding="utf-8")
+    assert "**/.env" in text
+    assert "**/.env.*" in text
+    assert "!.env.example" in text  # the template is still allowed through
+
+
 @docker_gate
 @pytest.mark.docker
 @pytest.mark.req("FRG-DEP-001")

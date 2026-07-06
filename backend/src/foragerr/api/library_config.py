@@ -21,6 +21,7 @@ import shutil
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 from sqlalchemy import select
+from starlette.concurrency import run_in_threadpool
 
 from foragerr.library import repo
 from foragerr.quality.models import FormatProfileRow, decode_formats
@@ -56,7 +57,9 @@ async def list_root_folders_endpoint(request: Request) -> list[RootFolderResourc
     async with db.read_session() as session:
         rows = await repo.list_root_folders(session)
     return [
-        RootFolderResource(id=row.id, path=row.path, free_space=_free_space(row.path))
+        RootFolderResource(
+            id=row.id, path=row.path, free_space=await _free_space(row.path)
+        )
         for row in rows
     ]
 
@@ -87,11 +90,16 @@ async def list_format_profiles_endpoint(
     ]
 
 
-def _free_space(path: str) -> int | None:
+async def _free_space(path: str) -> int | None:
     """Free bytes on the filesystem holding ``path``, or ``None`` if it cannot
     be stat'd (missing mount, permission). Never raises — a stat failure must
-    not fail the whole list."""
+    not fail the whole list.
+
+    The ``disk_usage`` syscall is a BLOCKING stat that a hung network mount can
+    stall on indefinitely, so it runs in the thread pool: one wedged root folder
+    must never freeze the event loop and every other request with it."""
     try:
-        return shutil.disk_usage(path).free
+        usage = await run_in_threadpool(shutil.disk_usage, path)
     except OSError:
         return None
+    return usage.free

@@ -19,9 +19,21 @@ import datetime as dt
 from dataclasses import dataclass
 
 
+#: Control characters XML 1.0 forbids even when escaped — the C0 range minus the
+#: three it permits (``\t`` #x09, ``\n`` #x0A, ``\r`` #x0D), plus DEL (#x7F). A
+#: single one of these in a title makes the WHOLE feed non-well-formed, so a
+#: reader rejects the entire page; ``str.translate`` deletes them (mapping each
+#: ordinal to ``None``).
+_XML_ILLEGAL = dict.fromkeys(
+    [*range(0x00, 0x09), 0x0B, 0x0C, *range(0x0E, 0x20), 0x7F], None
+)
+
+
 def _escape(value: str) -> str:
-    """Escape XML element text: ``&`` first, then ``<`` and ``>``."""
-    return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    """Escape XML element text: strip XML-illegal control chars, then ``&``
+    first, then ``<`` and ``>``."""
+    cleaned = value.translate(_XML_ILLEGAL)
+    return cleaned.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def _quoteattr(value: str) -> str:

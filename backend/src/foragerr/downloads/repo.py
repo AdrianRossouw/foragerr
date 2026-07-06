@@ -26,6 +26,8 @@ from foragerr.indexers.repo import (  # generic reuse — do not fork
     register_row_secrets,
     serialize_settings,
 )
+from foragerr.providers.partial import UNSET as _UNSET
+from foragerr.providers.partial import apply_partial_update
 
 logger = logging.getLogger("foragerr.downloads.repo")
 
@@ -70,11 +72,6 @@ async def create_download_client(
     return row
 
 
-#: Sentinel mirroring :data:`foragerr.indexers.repo._UNSET` — "field omitted
-#: (keep stored value)" vs. an explicit ``None`` for a partial PUT (FRG-DL-002).
-_UNSET: object = object()
-
-
 async def get_download_client(db, client_id: int) -> DownloadClientRow | None:
     """Load one download-client row by id (detached), or ``None`` (FRG-DL-002)."""
     async with db.read_session() as session:
@@ -103,17 +100,16 @@ async def update_download_client(
         row = await session.get(DownloadClientRow, client_id)
         if row is None:
             return None
-        if name is not _UNSET:
-            row.name = name  # type: ignore[assignment]
-        if priority is not _UNSET:
-            row.priority = priority  # type: ignore[assignment]
-        if enabled is not _UNSET:
-            row.enabled = enabled  # type: ignore[assignment]
-        if remove_completed_downloads is not _UNSET:
-            row.remove_completed_downloads = remove_completed_downloads  # type: ignore[assignment]
-        if settings is not _UNSET:
-            register_row_secrets(settings)  # type: ignore[arg-type]
-            row.settings = serialize_settings(settings)  # type: ignore[arg-type]
+        apply_partial_update(
+            row,
+            {
+                "name": name,
+                "priority": priority,
+                "enabled": enabled,
+                "remove_completed_downloads": remove_completed_downloads,
+            },
+            settings=settings,
+        )
         await session.flush()
         session.expunge(row)
         return row

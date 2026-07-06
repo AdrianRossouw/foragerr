@@ -22,6 +22,8 @@ from foragerr.db.base import utcnow
 from foragerr.indexers.models import USAGE_PATHS, IndexerRow
 from foragerr.indexers.registry import get_implementation, validate_settings
 from foragerr.logging import register_secret
+from foragerr.providers.partial import UNSET as _UNSET
+from foragerr.providers.partial import apply_partial_update
 
 logger = logging.getLogger("foragerr.indexers.repo")
 
@@ -105,12 +107,6 @@ async def create_indexer(
     return row
 
 
-#: Sentinel for :func:`update_indexer` — distinguishes "field omitted (keep the
-#: stored value)" from an explicit ``None``, so a partial PUT only touches the
-#: fields it actually carries (FRG-IDX-001/002).
-_UNSET: object = object()
-
-
 async def get_indexer(db, indexer_id: int) -> IndexerRow | None:
     """Load one indexer row by id (detached), or ``None`` (FRG-IDX-001)."""
     async with db.read_session() as session:
@@ -142,21 +138,18 @@ async def update_indexer(
         row = await session.get(IndexerRow, indexer_id)
         if row is None:
             return None
-        if name is not _UNSET:
-            row.name = name  # type: ignore[assignment]
-        if priority is not _UNSET:
-            row.priority = priority  # type: ignore[assignment]
-        if enabled is not _UNSET:
-            row.enabled = enabled  # type: ignore[assignment]
-        if enable_rss is not _UNSET:
-            row.enable_rss = enable_rss  # type: ignore[assignment]
-        if enable_auto is not _UNSET:
-            row.enable_auto = enable_auto  # type: ignore[assignment]
-        if enable_interactive is not _UNSET:
-            row.enable_interactive = enable_interactive  # type: ignore[assignment]
-        if settings is not _UNSET:
-            register_row_secrets(settings)  # type: ignore[arg-type]
-            row.settings = serialize_settings(settings)  # type: ignore[arg-type]
+        apply_partial_update(
+            row,
+            {
+                "name": name,
+                "priority": priority,
+                "enabled": enabled,
+                "enable_rss": enable_rss,
+                "enable_auto": enable_auto,
+                "enable_interactive": enable_interactive,
+            },
+            settings=settings,
+        )
         await session.flush()
         session.expunge(row)
         return row

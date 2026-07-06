@@ -119,19 +119,39 @@ async def test_resource_change_is_pushed_without_polling():
 
 
 @pytest.mark.req("FRG-API-010")
-async def test_burst_of_same_name_action_coalesces_to_one_message():
+async def test_burst_of_updates_to_one_resource_coalesces_to_one_message():
     bus = EventBus()
     broadcaster = WsBroadcaster(debounce_seconds=0.05)
     broadcaster.subscribe(bus)
     conn = broadcaster.connect()
 
+    # 25 progress ticks for the SAME download collapse to one last-wins message.
     for i in range(25):
-        bus.publish(_tracked(f"d{i}", i))
+        bus.publish(_tracked("d1", i))
     await asyncio.sleep(0.12)
 
     msgs = _drain(conn)
-    assert len(msgs) == 1  # 25 (queue, updated) events -> ONE broadcast
-    assert msgs[0]["resource"]["downloadId"] == "d24"  # last-wins coalesce
+    assert len(msgs) == 1  # one resource, one broadcast
+    assert msgs[0]["resource"]["downloadId"] == "d1"
+    assert msgs[0]["resource"]["issueId"] == 24  # last-wins coalesce
+
+
+@pytest.mark.req("FRG-API-010")
+async def test_distinct_resources_in_one_window_each_get_a_message():
+    """Two DIFFERENT downloads progressing inside one debounce window must both
+    be delivered — coalescing on (name, action) alone silently drops one row's
+    update, which the frontend patches by id."""
+    bus = EventBus()
+    broadcaster = WsBroadcaster(debounce_seconds=0.05)
+    broadcaster.subscribe(bus)
+    conn = broadcaster.connect()
+
+    bus.publish(_tracked("d1", 1))
+    bus.publish(_tracked("d2", 2))
+    await asyncio.sleep(0.12)
+
+    ids = sorted(m["resource"]["downloadId"] for m in _drain(conn))
+    assert ids == ["d1", "d2"]  # BOTH broadcast; neither clobbers the other
 
 
 @pytest.mark.req("FRG-API-010")

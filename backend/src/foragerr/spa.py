@@ -48,6 +48,23 @@ def resolve_static_dir() -> Path:
 class _SPAStaticFiles(StaticFiles):
     """StaticFiles with history-API fallback to ``index.html`` for SPA routes."""
 
+    def __init__(self, *args, reserved_prefixes: tuple[str, ...] = (), **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        #: Backend mount prefixes (``/api``, ``/opds``, ``/health``) whose
+        #: unrouted paths must NOT masquerade as the SPA shell — a mistyped
+        #: ``/api/v1/...`` or ``/opds/...`` must keep its real 404 so the
+        #: JSON/Atom error contract holds, not answer 200 HTML.
+        self._reserved = tuple(reserved_prefixes)
+
+    def _is_reserved(self, path: str) -> bool:
+        # ``path`` is the request path with the "/" mount prefix stripped
+        # (e.g. "api/v1/x"); compare in leading-slash form against the prefixes.
+        normalized = "/" + path.lstrip("/")
+        return any(
+            normalized == prefix or normalized.startswith(prefix + "/")
+            for prefix in self._reserved
+        )
+
     async def get_response(self, path: str, scope: Scope):
         try:
             return await super().get_response(path, scope)
@@ -55,7 +72,13 @@ class _SPAStaticFiles(StaticFiles):
             # Only a *route* miss falls back to the shell. A missing asset (the
             # request path already has a file suffix, e.g. a stale hashed bundle)
             # keeps its 404 so a broken deploy is not silently masked as the SPA.
-            if exc.status_code == 404 and not Path(path).suffix:
+            # A path under a reserved backend prefix also keeps its 404 so an
+            # unrouted /api or /opds request never answers 200 HTML.
+            if (
+                exc.status_code == 404
+                and not Path(path).suffix
+                and not self._is_reserved(path)
+            ):
                 return await super().get_response("index.html", scope)
             raise
 
@@ -73,6 +96,17 @@ def register_spa(app: FastAPI, dist_dir: Path | None = None) -> bool:
     if not index.is_file():
         logger.info("SPA bundle not found at %s; serving API only", dist_dir)
         return False
-    app.mount("/", _SPAStaticFiles(directory=str(dist_dir), html=True), name="spa")
+    # Reserved backend prefixes never fall back to the SPA shell (see
+    # ``_SPAStaticFiles``). The OPDS base is configurable, so read it from the
+    # app's settings when present (a bare test app may have none — default to
+    # the documented "/opds").
+    settings = getattr(app.state, "settings", None)
+    opds_base = getattr(settings, "opds_base_path", "/opds")
+    reserved = ("/api", "/health", opds_base)
+    app.mount(
+        "/",
+        _SPAStaticFiles(directory=str(dist_dir), html=True, reserved_prefixes=reserved),
+        name="spa",
+    )
     logger.info("serving SPA from %s", dist_dir)
     return True
