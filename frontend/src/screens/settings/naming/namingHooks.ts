@@ -7,6 +7,7 @@ import {
 } from '@tanstack/react-query';
 import { queryKeys } from '../../../api/queryKeys';
 import { useFetcher } from '../../../api/fetcher';
+import { LIVE_COMMAND_STATUSES } from '../../../api/hooks';
 import type {
   ApiPage,
   CommandResource,
@@ -15,9 +16,6 @@ import type {
   NamingTokens,
   RenamePreviewEntry,
 } from '../../../api/types';
-
-/** Command lifecycle statuses that mean a rename is still running. */
-const LIVE_COMMAND_STATUSES = new Set(['queued', 'started']);
 
 /*
  * Data access for the naming / media-management settings page (FRG-UI-012).

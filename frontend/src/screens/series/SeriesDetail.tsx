@@ -20,13 +20,13 @@ import {
 import { RenamePreviewPanel } from '../settings/naming/RenamePreviewPanel';
 import {
   useBulkSetIssuesMonitored,
-  useCommandStatus,
   useDeleteSeries,
   useIssues,
   useRunCommand,
   useSeriesDetail,
   useSetIssueMonitored,
   useUpdateSeries,
+  useWatchedCommand,
 } from '../../api/hooks';
 import { queryKeys } from '../../api/queryKeys';
 import { coverUrl } from '../../api/urls';
@@ -44,14 +44,6 @@ import styles from './SeriesDetail.module.css';
  * Series-level actions ride POST /api/v1/command; monitored toggles persist
  * via the series/issues PUT endpoints and write back into the query cache.
  */
-
-interface ActiveCommand {
-  id: number;
-  label: string;
-}
-
-/** Statuses that mean a command is still live on the backbone. */
-const LIVE_STATUSES = new Set(['queued', 'started']);
 
 function DeleteDialog({
   title,
@@ -189,25 +181,24 @@ export function SeriesDetail() {
   const bulkMonitor = useBulkSetIssuesMonitored(seriesId);
   const runCommand = useRunCommand();
 
+  // When a live command finishes, refresh the data it may have changed.
+  const command = useWatchedCommand(() => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.series.detail(seriesId) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.issues.forSeries(seriesId) });
+  });
+  const { start } = command;
+  const [commandLabel, setCommandLabel] = useState<string | null>(null);
+
   // A refresh command queued by the add flow rides in as router state so the
   // detail screen shows it live on arrival (FRG-UI-005 add scenario).
   const refreshFromAdd = (location.state as { refreshCommandId?: number } | null)
     ?.refreshCommandId;
-  const [activeCommand, setActiveCommand] = useState<ActiveCommand | null>(
-    refreshFromAdd !== undefined ? { id: refreshFromAdd, label: 'Refresh' } : null,
-  );
-  const commandQuery = useCommandStatus(activeCommand?.id ?? null);
-  const commandStatus = commandQuery.data?.status ?? (activeCommand ? 'queued' : null);
-
-  // When a live command finishes, refresh the data it may have changed.
-  const finished =
-    commandStatus !== null && !LIVE_STATUSES.has(commandStatus) ? commandStatus : null;
   useEffect(() => {
-    if (finished) {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.series.detail(seriesId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.issues.forSeries(seriesId) });
+    if (refreshFromAdd !== undefined) {
+      setCommandLabel('Refresh');
+      start(refreshFromAdd);
     }
-  }, [finished, queryClient, seriesId]);
+  }, [refreshFromAdd, start]);
 
   const [selected, setSelected] = useState<ReadonlySet<number>>(new Set());
   const [showDelete, setShowDelete] = useState(false);
@@ -227,7 +218,12 @@ export function SeriesDetail() {
   const dispatch = (label: string, name: string, payload: Record<string, unknown>) => {
     runCommand.mutate(
       { name, payload },
-      { onSuccess: (record) => setActiveCommand({ id: record.id, label }) },
+      {
+        onSuccess: (record) => {
+          setCommandLabel(label);
+          start(record.id);
+        },
+      },
     );
   };
 
@@ -274,9 +270,9 @@ export function SeriesDetail() {
         title={series.title}
         actions={
           <span className={styles.toolbarActions}>
-            {activeCommand && commandStatus && (
+            {commandLabel && command.status && (
               <span className={styles.commandChip} data-testid="command-status">
-                {activeCommand.label}: {commandStatus}
+                {commandLabel}: {command.status}
               </span>
             )}
             <ToolbarButton

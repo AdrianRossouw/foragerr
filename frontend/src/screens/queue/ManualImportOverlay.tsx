@@ -2,7 +2,11 @@ import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Modal } from '../../components/Modal';
 import { ReasonsPopover } from '../../components/ReasonsPopover';
-import { useCommandStatus, useIssues, useSeriesIndex } from '../../api/hooks';
+import {
+  useIssues,
+  useSeriesIndex,
+  useWatchedCommand,
+} from '../../api/hooks';
 import { queryKeys } from '../../api/queryKeys';
 import { ARCHIVE_FORMATS } from '../../api/types';
 import type { ManualImportEntry, ManualImportFileSpec } from '../../api/types';
@@ -14,9 +18,6 @@ import {
   type ManualImportSource,
 } from './manualImportHooks';
 import styles from './ManualImportOverlay.module.css';
-
-/** Command lifecycle statuses that mean the manual-import is still running. */
-const LIVE_STATUSES = new Set(['queued', 'started']);
 
 /** Per-row operator override state, seeded from the API's suggested mapping. */
 interface RowOverride {
@@ -57,7 +58,20 @@ export function ManualImportOverlay({
 
   const [overrides, setOverrides] = useState<Map<string, RowOverride>>(new Map());
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
-  const [commandId, setCommandId] = useState<number | null>(null);
+
+  // The confirm button follows the LIVE command status through the shared
+  // watcher (same machinery as RenamePreviewPanel/LibraryImport): it re-enables
+  // once the command reaches a terminal status, preventing a duplicate POST
+  // while one is running. On completion the candidate list refetches (imported
+  // files leave; still-blocked files re-render with updated reasons) and the
+  // queue view is invalidated — whatever the terminal status, the refetched
+  // rows are the honest per-file truth.
+  const command = useWatchedCommand(() => {
+    void queryClient.invalidateQueries({ queryKey: manualImportKey(source) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.queue.all() });
+  });
+  const { status, running: inProgress } = command;
+  const finished = status !== null && !inProgress ? status : null;
 
   // Seed override + selection state from the candidate list. Runs on first load
   // AND on the post-import refetch (new array reference): imported files drop
@@ -79,23 +93,6 @@ export function ManualImportOverlay({
     setOverrides(nextOverrides);
     setSelected(nextSelected);
   }, [data]);
-
-  // The confirm button follows the LIVE command status, not a one-way flag: it
-  // re-enables once the watched command reaches a terminal status (same guard
-  // as RenamePreviewPanel), preventing a duplicate POST while one is running.
-  const commandQuery = useCommandStatus(commandId);
-  const status = commandQuery.data?.status ?? (commandId !== null ? 'queued' : null);
-  const inProgress = status !== null && LIVE_STATUSES.has(status);
-  const finished = status !== null && !LIVE_STATUSES.has(status) ? status : null;
-
-  useEffect(() => {
-    if (!finished) return;
-    // The command imported the picked files: refetch this source's candidates
-    // (imported leave; still-blocked re-render) and invalidate the queue view.
-    void queryClient.invalidateQueries({ queryKey: manualImportKey(source) });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.queue.all() });
-    setCommandId(null);
-  }, [finished, queryClient, source]);
 
   const seedFor = (entry: ManualImportEntry): RowOverride => ({
     seriesId: entry.suggestedSeriesId,
@@ -150,7 +147,7 @@ export function ManualImportOverlay({
         files,
         downloadId: source.kind === 'download' ? source.downloadId : undefined,
       },
-      { onSuccess: (cmd) => setCommandId(cmd.id) },
+      { onSuccess: (cmd) => command.start(cmd.id) },
     );
   };
 

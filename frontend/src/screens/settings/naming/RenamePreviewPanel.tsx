@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { useCommandStatus } from '../../../api/hooks';
+import { useWatchedCommand } from '../../../api/hooks';
 import { queryKeys } from '../../../api/queryKeys';
 import {
   useActiveRenameSeriesCommand,
@@ -14,11 +14,9 @@ import styles from './MediaManagement.module.css';
  * preview (GET /rename) lists the existing -> new path diffs; NOTHING touches
  * disk until the operator explicitly confirms, which POSTs /rename to enqueue
  * the rename-series command. The command's progress surfaces through the shared
- * command machinery (useCommandStatus), and on completion the preview + the
+ * command machinery (useWatchedCommand), and on completion the preview + the
  * affected series/issues caches are invalidated.
  */
-
-const LIVE_STATUSES = new Set(['queued', 'started']);
 
 /** Last path segment, for a compact old -> new basename diff. */
 function basename(path: string): string {
@@ -40,35 +38,34 @@ export function RenamePreviewPanel({
   const preview = useRenamePreview(seriesId);
   const execute = useExecuteRename();
   const queryClient = useQueryClient();
-  const [commandId, setCommandId] = useState<number | null>(null);
+
+  // The Confirm button follows the LIVE command status through the shared
+  // watcher, not a one-way "we clicked" flag: once the watched command reaches
+  // a terminal status it is no longer in progress, so the button reflects
+  // completion instead of sticking on "Renaming…". On completion the preview +
+  // the affected series/issues caches refresh (a rename touched their paths).
+  const command = useWatchedCommand(() => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.rename.forSeries(seriesId) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.series.detail(seriesId) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.issues.forSeries(seriesId) });
+  });
+  const { status, running: inProgress, start } = command;
+  const finished = status !== null && !inProgress ? status : null;
 
   // A rename-series command for THIS series can already be running from a
-  // previous open of this (transient) panel — consult the server so Confirm
-  // stays disabled across a close+reopen instead of re-arming a duplicate.
+  // previous open of this (transient) panel — consult the server and adopt it,
+  // so Confirm stays disabled across a close+reopen instead of re-arming a
+  // duplicate.
   const activeCommand = useActiveRenameSeriesCommand(seriesId);
-  const watchedId = commandId ?? activeCommand.data?.id ?? null;
-
-  const commandQuery = useCommandStatus(watchedId);
-  const status = commandQuery.data?.status ?? (watchedId !== null ? 'queued' : null);
-  // The Confirm button follows the LIVE command status, not a one-way "we
-  // clicked" flag: once the watched command reaches a terminal status it is no
-  // longer in progress, so the button reflects completion instead of sticking
-  // on "Renaming…" (the old `confirmed` flag was never reset).
-  const inProgress = status !== null && LIVE_STATUSES.has(status);
-  const finished = status !== null && !LIVE_STATUSES.has(status) ? status : null;
-
+  const activeId = activeCommand.data?.id ?? null;
   useEffect(() => {
-    if (finished) {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.rename.forSeries(seriesId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.series.detail(seriesId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.issues.forSeries(seriesId) });
-    }
-  }, [finished, queryClient, seriesId]);
+    if (activeId !== null) start(activeId);
+  }, [activeId, start]);
 
   const rows = preview.data ?? [];
 
   const onConfirm = () => {
-    execute.mutate(seriesId, { onSuccess: (cmd) => setCommandId(cmd.id) });
+    execute.mutate(seriesId, { onSuccess: (cmd) => start(cmd.id) });
   };
 
   return (
