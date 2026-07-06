@@ -66,7 +66,7 @@
 
 ## 7. Docs, traceability, gate
 
-- [ ] 7.1 Manual: web-ui.md History/Wanted/Blocklist + SeriesDetail deletes;
+- [x] 7.1 Manual: web-ui.md History/Wanted/Blocklist + SeriesDetail deletes;
       reading-opds.md Recent + search; import.md delete promise fulfilled;
       library.md 501 note replaced. [FRG-PROC-011]
 - [ ] 7.2 Security docs: OPDS search delta (untrusted query input); RISK-040
