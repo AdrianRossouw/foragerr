@@ -54,10 +54,10 @@
 
 ## 5. E2E — unconfigured-key negative path (UAT gap, Adrian 2026-07-06)
 
-- [ ] 5.1 Parametrize the ComicVine key in `e2e/compose.yaml` as
+- [x] 5.1 Parametrize the ComicVine key in `e2e/compose.yaml` as
       `${E2E_CV_API_KEY-e2e-example-key}` (unset → fixture key; explicitly
       empty passes through) and add `e2e/tests/zz-unconfigured.spec.ts`: recreate
       the app container with an empty key, search on Add Series, assert the
       credential-error state renders (not "no results"); mockhub already 401s
       keyless requests. Update e2e README coverage list. [FRG-UI-005, FRG-PROC-010]
-- [ ] 5.2 Full `bash e2e/run.sh` green including the new scenario. [FRG-PROC-010]
+- [x] 5.2 Full `bash e2e/run.sh` green including the new scenario. [FRG-PROC-010]
