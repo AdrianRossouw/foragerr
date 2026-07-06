@@ -35,7 +35,7 @@ import type {
  */
 
 /** Backend page-size cap (FRG-API-006: pageSize le=200). */
-const MAX_PAGE_SIZE = 200;
+export const MAX_PAGE_SIZE = 200;
 
 /**
  * Walk every page of a paged endpoint and return the flattened records. The
@@ -43,7 +43,7 @@ const MAX_PAGE_SIZE = 200;
  * totalRecords OR a page comes back empty (defensive against a drifting total).
  * `pageUrl` builds the request path for a 1-based page number.
  */
-async function fetchAllPages<T>(
+export async function fetchAllPages<T>(
   fetcher: Fetcher,
   pageUrl: (page: number) => string,
 ): Promise<T[]> {

@@ -3,6 +3,7 @@ import { AppShell } from './components/AppShell';
 import { LibraryIndex } from './screens/library/LibraryIndex';
 import { SeriesDetail } from './screens/series/SeriesDetail';
 import { AddSeries } from './screens/add/AddSeries';
+import { LibraryImport } from './screens/library-import/LibraryImport';
 import { QueueScreen } from './screens/queue/QueueScreen';
 import { IndexerSettings } from './routes/settings/IndexerSettings';
 import { DownloadClientSettings } from './routes/settings/DownloadClientSettings';
@@ -21,6 +22,7 @@ export function App() {
         <Route index element={<LibraryIndex />} />
         <Route path="series/:id" element={<SeriesDetail />} />
         <Route path="add" element={<AddSeries />} />
+        <Route path="library-import" element={<LibraryImport />} />
         <Route path="queue" element={<QueueScreen />} />
         <Route path="settings/indexers" element={<IndexerSettings />} />
         <Route

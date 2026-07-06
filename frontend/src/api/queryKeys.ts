@@ -70,6 +70,14 @@ export const queryKeys = {
   formatProfile: {
     all: () => ['formatprofile'] as const,
   },
+  // Library-import staging groups (FRG-UI-015), mirroring the source-keyed
+  // GET /api/v1/library-import?rootFolderId=. Keyed per root folder so a scan
+  // or execute command invalidates exactly the root it staged.
+  libraryImport: {
+    all: () => ['library-import'] as const,
+    forRoot: (rootFolderId: number) =>
+      ['library-import', rootFolderId] as const,
+  },
   // ComicVine lookup deliberately does NOT live under the ['series'] prefix
   // (its path is /api/v1/series/lookup): the WebSocketBridge invalidates
   // ['series'] on every series push, and a prefix-matched lookup query would

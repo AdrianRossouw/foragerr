@@ -375,3 +375,42 @@ export interface ManualImportFileSpec {
 
 /** The archive formats the override select offers (backend ARCHIVE_EXTENSIONS). */
 export const ARCHIVE_FORMATS = ['cbz', 'cbr', 'cb7', 'cbt', 'pdf'] as const;
+
+/*
+ * Library-import staging shapes (FRG-IMP-023 / FRG-UI-015). GET
+ * /api/v1/library-import returns the persisted scan groups for one root folder
+ * in the shared paging envelope; the UI consumes the NORMALIZED
+ * `LibraryImportGroup` below (toLibraryImportGroup in libraryImportHooks.ts
+ * tolerates camelCase or snake_case wire fields until the backend contract is
+ * pinned).
+ */
+
+/** Staging lifecycle of one scanned folder group (design decision 2). */
+export type LibraryImportGroupState =
+  | 'proposed'
+  | 'confirmed'
+  | 'no_match'
+  | 'imported'
+  | 'skipped';
+
+/** One staged library-import group, normalized for the UI. */
+export interface LibraryImportGroup {
+  id: number;
+  /** The parser's normalized series-name grouping key. */
+  matchingKey: string;
+  /** Absolute folder the group's files live under. */
+  folder: string;
+  files: string[];
+  /** Parse confidence, normalized to 0..1. */
+  confidence: number;
+  proposedCvVolumeId: number | null;
+  confirmedCvVolumeId: number | null;
+  state: LibraryImportGroupState;
+  /** Proposal presentation fields (null when there is no match). */
+  name: string | null;
+  startYear: number | null;
+  publisher: string | null;
+  imageUrl: string | null;
+  /** Verbatim per-group blocked reasons from the last execute — never re-sorted. */
+  rejections: string[];
+}
