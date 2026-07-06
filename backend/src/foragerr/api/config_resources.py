@@ -179,8 +179,20 @@ def _comicvine_source(settings: Settings) -> str:
     effective object cannot say which source won (design decision 2). A non-empty
     env var ⇒ ``"environment"`` (it also outranks the file); else a non-empty
     file/effective value ⇒ ``"file"``; else ``"unset"``.
+
+    The scan is CASE-INSENSITIVE and skips empty values to match pydantic's
+    effective behavior: pydantic-settings matches env names case-insensitively,
+    so a lowercase ``foragerr_comicvine_api_key`` shadows the file just as the
+    exact-uppercase spelling does — an exact ``os.environ.get`` would miss it and
+    report ``"file"``/``"unset"`` while the env value actually wins, producing a
+    silently-ineffective editor (GET/PUT share this helper). Empty env values are
+    ignored here to mirror ``env_ignore_empty=True`` on ``Settings`` (an empty
+    ``FORAGERR_COMICVINE_API_KEY=""`` does NOT shadow the file key).
     """
-    if os.environ.get(COMICVINE_KEY_ENV_VAR):
+    if any(
+        k.upper() == COMICVINE_KEY_ENV_VAR and v
+        for k, v in os.environ.items()
+    ):
         return "environment"
     if settings.comicvine_api_key.get_secret_value():
         return "file"
@@ -291,7 +303,7 @@ async def comicvine_test(request: Request) -> ComicVineTestResponse:
     factory = comicvine_factory(settings)
     try:
         async with ComicVineClient(settings, factory) as cv:
-            await cv.suggest_series(_COMICVINE_TEST_TERM)
+            result = await cv.suggest_series(_COMICVINE_TEST_TERM)
     except ComicVineAuthError as exc:
         # Static message + static log line — never interpolate the key or the
         # exception's raw text, so no credential value can reach body or log.
@@ -304,6 +316,22 @@ async def comicvine_test(request: Request) -> ComicVineTestResponse:
     except ComicVineError as exc:
         logger.warning("comicvine connectivity test failed: %s", type(exc).__name__)
         raise ApiError(400, f"comicvine test failed: {exc}") from exc
+
+    # suggest_series swallows every NON-auth upstream failure (5xx, timeout,
+    # rate-limit, malformed) into complete=False rather than raising — so the
+    # except ComicVineError branch above is unreachable on this path, and a
+    # naive "no exception ⇒ success" would report a broken service as healthy.
+    # Treat an incomplete result as a reachability failure with a STATIC message
+    # (no dynamic interpolation: defense-in-depth against a redacted-but-present
+    # URL-with-key slipping into the body, even though OutboundHttpError text is
+    # pre-redacted).
+    if not result.complete:
+        logger.warning("comicvine connectivity test failed: upstream unreachable or errored")
+        raise ApiError(
+            400,
+            "comicvine test failed: service unreachable or returned an error",
+            field=None,
+        )
 
     return ComicVineTestResponse(
         success=True, message="ComicVine reachable; credentials accepted"

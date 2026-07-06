@@ -73,16 +73,31 @@ class _CVRecorder:
     this handler over a stub resolver + recording transport (no DNS, no
     network), so a test can assert exactly which key reached ComicVine."""
 
-    def __init__(self, *, auth_fail: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        auth_fail: bool = False,
+        server_error: bool = False,
+        raise_timeout: bool = False,
+    ) -> None:
         self.auth_fail = auth_fail
+        self.server_error = server_error
+        self.raise_timeout = raise_timeout
         self.seen_keys: list[str] = []
 
     def handler(self):
         def _handle(request: httpx.Request) -> httpx.Response:
             query = parse_qs(urlsplit(str(request.url)).query)
             self.seen_keys.append(query.get("api_key", [""])[0])
+            if self.raise_timeout:
+                # A transport-level timeout: suggest_series wraps every non-auth
+                # upstream failure into complete=False (ComicVineUnavailable),
+                # rather than raising.
+                raise httpx.ReadTimeout("simulated timeout", request=request)
             if self.auth_fail:
                 return httpx.Response(401, content=b"invalid api key")
+            if self.server_error:
+                return httpx.Response(500, content=b"upstream boom")
             body = {"status_code": 1, "results": [], "number_of_total_results": 0}
             return httpx.Response(200, content=json.dumps(body).encode())
 
@@ -267,6 +282,117 @@ def test_connectivity_test_auth_failure(tmp_path, monkeypatch, caplog):
     # Neither the response body nor any log line carries the key value.
     assert _KEY not in resp.text
     assert _KEY not in "\n".join(r.getMessage() for r in caplog.records)
+
+
+_TEST_STATIC_MESSAGE = (
+    "comicvine test failed: service unreachable or returned an error"
+)
+
+
+@pytest.mark.req("FRG-API-018")
+def test_connectivity_test_upstream_500_reports_failure(tmp_path, monkeypatch, caplog):
+    """A 5xx from ComicVine must NOT degrade to a 200 success. suggest_series
+    swallows every non-auth upstream error into complete=False, so the endpoint
+    inspects the result and returns a field-null 400 with a STATIC message."""
+    cfg = tmp_path / "cfg"
+    cfg.mkdir()
+    settings = make_settings(
+        cfg, comicvine_api_key=_KEY, comicvine_min_interval_seconds=0.25
+    )
+    app = create_app(settings)
+    recorder = _CVRecorder(server_error=True)
+    _patch_cv(monkeypatch, recorder)
+    with TestClient(app) as client:
+        with caplog.at_level(logging.WARNING):
+            resp = client.post("/api/v1/config/comicvine/test")
+    assert resp.status_code == 400
+    body = resp.json()
+    assert body["message"] == _TEST_STATIC_MESSAGE
+    # field is null (whole-operation failure, not a field-precise one).
+    assert body["errors"] == []
+    # The static message carries no dynamic upstream text or key material.
+    assert _KEY not in resp.text
+    assert "500" not in resp.text
+    assert _KEY not in "\n".join(r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.req("FRG-API-018")
+def test_connectivity_test_upstream_timeout_reports_failure(tmp_path, monkeypatch):
+    """A transport timeout (ComicVineUnavailable) takes the same honest path as
+    a 5xx: complete=False ⇒ field-null 400 with the static message."""
+    cfg = tmp_path / "cfg"
+    cfg.mkdir()
+    settings = make_settings(
+        cfg, comicvine_api_key=_KEY, comicvine_min_interval_seconds=0.25
+    )
+    app = create_app(settings)
+    recorder = _CVRecorder(raise_timeout=True)
+    _patch_cv(monkeypatch, recorder)
+    with TestClient(app) as client:
+        resp = client.post("/api/v1/config/comicvine/test")
+    assert resp.status_code == 400
+    body = resp.json()
+    assert body["message"] == _TEST_STATIC_MESSAGE
+    assert body["errors"] == []
+    assert _KEY not in resp.text
+
+
+# --- Env-source detection matches pydantic's effective behavior (FRG-API-018)
+
+
+@pytest.mark.req("FRG-API-018")
+@pytest.mark.req("FRG-META-002")
+def test_lowercase_env_spelling_is_detected_as_environment(client, monkeypatch):
+    """pydantic-settings matches env names case-insensitively, so a lowercase
+    ``foragerr_comicvine_api_key`` shadows the file just as the uppercase
+    spelling does. The source helper must scan case-insensitively or it would
+    report ``file``/``unset`` while the env value actually wins — a silently
+    ineffective editor. GET reports ``environment``; PUT is rejected 409."""
+    monkeypatch.setenv("foragerr_comicvine_api_key", _KEY)
+    get = client.get("/api/v1/config/general")
+    assert get.json() == {
+        "comicvine_api_key": {"configured": True, "source": "environment"}
+    }
+    assert _KEY not in get.text
+    put = client.put(
+        "/api/v1/config/general", json={"comicvine_api_key": "new-value"}
+    )
+    assert put.status_code == 409
+    assert "FORAGERR_COMICVINE_API_KEY" in put.json()["message"]
+
+
+@pytest.mark.req("FRG-API-018")
+@pytest.mark.req("FRG-META-002")
+def test_empty_env_does_not_shadow_file_key(tmp_path, monkeypatch):
+    """An EMPTY ``FORAGERR_COMICVINE_API_KEY=""`` must not shadow the file key:
+    ``env_ignore_empty=True`` makes pydantic ignore it (the effective key is the
+    file's), and the source helper skips empty env values to match — reporting
+    ``file`` and allowing an effective PUT."""
+    monkeypatch.setenv("FORAGERR_COMICVINE_API_KEY", "")
+    cfg = tmp_path / "cfg"
+    cfg.mkdir()
+    settings = make_settings(
+        cfg, comicvine_api_key=_KEY, comicvine_min_interval_seconds=0.25
+    )
+    app = create_app(settings)
+    # The empty env value did not shadow the file: the effective key is the file's.
+    assert app.state.settings.comicvine_api_key.get_secret_value() == _KEY
+    recorder = _CVRecorder()
+    _patch_cv(monkeypatch, recorder)
+    with TestClient(app) as client:
+        assert client.get("/api/v1/config/general").json() == {
+            "comicvine_api_key": {"configured": True, "source": "file"}
+        }
+        # PUT is allowed (not env-managed) and applies live.
+        new_key = "CV-NEW-KEY-xyz789"
+        put = client.put(
+            "/api/v1/config/general", json={"comicvine_api_key": new_key}
+        )
+        assert put.status_code == 200
+        assert (
+            client.app.state.settings.comicvine_api_key.get_secret_value()
+            == new_key
+        )
 
 
 @pytest.mark.req("FRG-API-018")

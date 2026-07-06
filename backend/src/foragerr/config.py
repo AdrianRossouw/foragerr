@@ -139,7 +139,9 @@ def _file_template_round_trips(template: str) -> bool:
 class Settings(BaseSettings):
     """Effective foragerr configuration (env > config.yaml > defaults)."""
 
-    model_config = SettingsConfigDict(env_prefix="FORAGERR_", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="FORAGERR_", extra="ignore", env_ignore_empty=True
+    )
 
     config_dir: Path = Field(
         default=DEFAULT_CONFIG_DIR,

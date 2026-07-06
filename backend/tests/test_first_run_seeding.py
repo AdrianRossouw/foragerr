@@ -235,6 +235,52 @@ async def test_crash_before_marker_does_not_double_seed(db):
     assert await is_seed_complete(db) is True
 
 
+@pytest.mark.req("FRG-DEP-013")
+async def test_crash_with_only_indexer_present_seeds_just_the_client(db):
+    """Asymmetric partial state: a prior boot inserted the indexer but crashed
+    before the client (marker still unset). The next startup inserts ONLY the
+    missing client — the per-row existence guards are independent — with no
+    duplicate indexer, and sets the marker."""
+    await create_indexer(
+        db,
+        name=SEEDED_INDEXER_NAME,
+        implementation=GETCOMICS_IMPLEMENTATION,
+        settings=GetComicsSettings(),
+        enabled=True,
+    )
+    assert _ddl_clients(await list_download_clients(db)) == []  # client absent
+    assert await is_seed_complete(db) is False
+
+    await seed_first_run_defaults(db)
+
+    # The missing client was created; the pre-existing indexer was not duplicated.
+    assert len(_getcomics_indexers(await list_indexers(db))) == 1
+    assert len(_ddl_clients(await list_download_clients(db))) == 1
+    assert await is_seed_complete(db) is True
+
+
+@pytest.mark.req("FRG-DEP-013")
+async def test_crash_with_only_client_present_seeds_just_the_indexer(db):
+    """The reverse asymmetric state: the client is present but the indexer is
+    absent. The next startup inserts ONLY the missing indexer, no duplicate
+    client, and sets the marker."""
+    await create_download_client(
+        db,
+        name=SEEDED_INDEXER_NAME,
+        implementation=DDL_CLIENT_IMPLEMENTATION,
+        settings=BuiltinDdlSettings(),
+        enabled=True,
+    )
+    assert _getcomics_indexers(await list_indexers(db)) == []  # indexer absent
+    assert await is_seed_complete(db) is False
+
+    await seed_first_run_defaults(db)
+
+    assert len(_getcomics_indexers(await list_indexers(db))) == 1
+    assert len(_ddl_clients(await list_download_clients(db))) == 1
+    assert await is_seed_complete(db) is True
+
+
 # --------------------------------------------------------------------------- #
 # End-to-end: the startup hook wired into create_app's lifespan                 #
 # --------------------------------------------------------------------------- #

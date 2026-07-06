@@ -238,6 +238,9 @@ test('FRG-PROC-010 FRG-OPDS-001 FRG-OPDS-002 FRG-OPDS-003 FRG-OPDS-005: OPDS nav
   expect(body.equals(readFileSync(CBZ_SOURCE))).toBe(true);
 });
 
+// FORAGERR_SABNZBD_API_KEY here is a HARNESS-ONLY gate variable for opting into
+// the live-SAB tier — it is unrelated to app config. The app no longer reads any
+// app-wide SABnzbd key env var; SABnzbd credentials are per-download-client rows.
 const liveSab = process.env.E2E_LIVE_SAB === '1' && !!process.env.FORAGERR_SABNZBD_API_KEY;
 test(liveSab
   ? 'FRG-PROC-010: live SABnzbd tier grabs a real NZB through to import'
