@@ -1,6 +1,6 @@
 import { useMemo, useState, type KeyboardEvent } from 'react';
-import { ApiRequestError } from '../../api/fetcher';
 import { SchemaForm } from '../schemaForm/SchemaForm';
+import { mapApiError } from './apiErrors';
 import type {
   FieldValue,
   FieldValues,
@@ -74,35 +74,6 @@ function settingsPayload(fields: SchemaField[], values: FieldValues): FieldValue
     out[field.name] = value;
   }
   return out;
-}
-
-/** Map the uniform 4xx body onto specific fields (strip the `settings.`
- * prefix the backend uses for settings-model errors). */
-function mapApiError(
-  error: unknown,
-  knownFields: ReadonlySet<string>,
-): { fieldErrors: Record<string, string>; formError: string | null } {
-  if (!(error instanceof ApiRequestError) || !error.body) {
-    return {
-      fieldErrors: {},
-      formError: error instanceof Error ? error.message : 'Request failed',
-    };
-  }
-  const fieldErrors: Record<string, string> = {};
-  const unmatched: string[] = [];
-  for (const entry of error.body.errors) {
-    const name = entry.field?.replace(/^settings\./, '');
-    if (name && knownFields.has(name)) {
-      fieldErrors[name] = entry.message;
-    } else {
-      unmatched.push(entry.message);
-    }
-  }
-  const formError =
-    Object.keys(fieldErrors).length === 0 || unmatched.length > 0
-      ? [error.body.message, ...unmatched].filter(Boolean).join(' — ')
-      : null;
-  return { fieldErrors, formError };
 }
 
 export function ProviderModal({

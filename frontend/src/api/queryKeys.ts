@@ -41,6 +41,17 @@ export const queryKeys = {
   rootFolder: {
     all: () => ['rootfolder'] as const,
   },
+  // Config singletons (FRG-API-013) + the shared token vocabulary (FRG-UI-012),
+  // mirroring GET /api/v1/config/{naming,mediamanagement,naming/tokens}.
+  config: {
+    naming: () => ['config', 'naming'] as const,
+    mediaManagement: () => ['config', 'mediamanagement'] as const,
+    namingTokens: () => ['config', 'naming', 'tokens'] as const,
+  },
+  // Per-series rename preview (FRG-PP-012), mirroring GET /api/v1/rename.
+  rename: {
+    forSeries: (seriesId: number) => ['rename', seriesId] as const,
+  },
   formatProfile: {
     all: () => ['formatprofile'] as const,
   },
