@@ -75,5 +75,5 @@
 - [x] 6.4 e2e: extend the spine (or a scenario) with a minimal library-import
       pass over a fixture folder (add negative: scan with no roots configured).
       [FRG-PROC-010]
-- [ ] 6.5 Suites green; 8-angle + Codex gate; fixes; archive; --no-ff merge;
+- [x] 6.5 Suites green; 8-angle + Codex gate; fixes; archive; --no-ff merge;
       main suites; tag v0.2.3. [FRG-PROC-007]
