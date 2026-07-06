@@ -1000,7 +1000,10 @@ async def import_candidate(
             if not decision.approved:
                 data["reasons"] = list(decision.reasons)
                 failed = decision.failed
-                history.record_event(
+                # Deduped (RISK-040, FRG-API-011): the tracking loop re-feeds a
+                # still-blocked download every cycle; an identical repeated
+                # outcome for the same download must not accrete another row.
+                await history.record_event_deduped(
                     session,
                     event_type=(
                         history.EVENT_IMPORT_FAILED
@@ -1072,7 +1075,9 @@ async def import_candidate(
             exc,
         )
         reason = f"import failed placing the file on disk: {exc}"
-        history.record_event(
+        # Deduped like the rejection path above (RISK-040): a persistent IO
+        # failure re-blocks identically on every retry cycle.
+        await history.record_event_deduped(
             session,
             event_type=history.EVENT_IMPORT_BLOCKED,
             download_id=candidate.download_id,

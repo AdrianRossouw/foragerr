@@ -109,6 +109,75 @@ def record_event(
     return row
 
 
+#: Event types eligible for duplicate-row suppression (RISK-040, FRG-API-011):
+#: the tracking loop deliberately re-feeds a still-completed blocked/failed
+#: download every cycle (retry-on-evidence-change), so only THESE outcomes can
+#: legitimately recur with a byte-identical payload for one download.
+_DEDUPED_EVENT_TYPES: frozenset[str] = frozenset(
+    {EVENT_IMPORT_BLOCKED, EVENT_IMPORT_FAILED}
+)
+
+
+async def record_event_deduped(
+    session: AsyncSession,
+    *,
+    event_type: str,
+    series_id: int | None = None,
+    issue_id: int | None = None,
+    download_id: str | None = None,
+    source_title: str | None = None,
+    source: str | None = None,
+    data: dict[str, Any] | None = None,
+    quarantine_path: str | None = None,
+    now: dt.datetime | None = None,
+) -> ImportHistoryRow | None:
+    """:func:`record_event`, suppressing an identical repeated blocked outcome.
+
+    RISK-040 (FRG-API-011): the retry loop re-runs a permanently blocked
+    download through the pipeline every tracking cycle, and each run used to
+    accrete one more identical ``import_blocked`` row. For ``import_blocked`` /
+    ``import_failed`` events carrying a ``download_id``, the newest such row for
+    that download is consulted first: when its ``event_type`` AND its canonical
+    ``data`` string (sorted-keys JSON, so string equality is byte equality)
+    match this event exactly, the write is skipped and ``None`` is returned.
+    Any change in the payload — new reasons, new evidence — writes normally, as
+    do events without a ``download_id`` and every other event type.
+    """
+    if download_id is not None and event_type in _DEDUPED_EVENT_TYPES:
+        serialized = None if data is None else json.dumps(data, sort_keys=True)
+        newest = (
+            await session.execute(
+                select(ImportHistoryRow)
+                .where(
+                    ImportHistoryRow.download_id == download_id,
+                    ImportHistoryRow.event_type.in_(_DEDUPED_EVENT_TYPES),
+                )
+                .order_by(
+                    ImportHistoryRow.created_at.desc(), ImportHistoryRow.id.desc()
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if (
+            newest is not None
+            and newest.event_type == event_type
+            and newest.data == serialized
+        ):
+            return None
+    return record_event(
+        session,
+        event_type=event_type,
+        series_id=series_id,
+        issue_id=issue_id,
+        download_id=download_id,
+        source_title=source_title,
+        source=source,
+        data=data,
+        quarantine_path=quarantine_path,
+        now=now,
+    )
+
+
 def decode_data(raw: str | None) -> dict[str, Any]:
     """Decode a stored ``data`` JSON payload (never raises; ``{}`` on garbage)."""
     if not raw:
@@ -177,4 +246,5 @@ __all__ = [
     "events_for_download",
     "events_for_issue",
     "record_event",
+    "record_event_deduped",
 ]

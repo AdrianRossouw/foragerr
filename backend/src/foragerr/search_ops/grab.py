@@ -186,6 +186,7 @@ async def _handle_grab_release(
     from foragerr.downloads.models import SOURCE_DDL, SOURCE_INDEXER, GrabHistoryRow
     from foragerr.downloads.registry import PROTOCOL_DDL
     from foragerr.downloads.resolver import protocol_for_grab, resolve_client_for
+    from foragerr.importer import history as import_history
     from foragerr.providers.backoff import ProviderBackoff
 
     factory = make_download_factory(ctx.settings)
@@ -254,6 +255,27 @@ async def _handle_grab_release(
             protocol=protocol,
             source=source,
             client_id=client_id,
+            now=now,
+        )
+        # The user-facing `grabbed` history event (FRG-API-011): written in the
+        # SAME transaction as the grab_history rows, so history and the
+        # operational match-key table can never disagree about a grab. The
+        # `import_history` table is the single feed the /history endpoint
+        # reads; grab_history keeps its tracking/match-key role unchanged.
+        import_history.record_event(
+            session,
+            event_type=import_history.EVENT_GRABBED,
+            series_id=command.series_id,
+            issue_id=command.issue_id,
+            download_id=download_id,
+            source_title=command.title,
+            source=import_history.SOURCE_DOWNLOAD,
+            data={
+                "indexer": command.indexer_name,
+                "protocol": protocol,
+                "guid": command.guid,
+                "size": command.size_bytes,
+            },
             now=now,
         )
 

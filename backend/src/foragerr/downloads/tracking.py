@@ -64,6 +64,7 @@ from foragerr.downloads.state import (
     TrackedDownloadState,
 )
 from foragerr.events import Event
+from foragerr.importer import history as import_history
 from foragerr.library.models import IssueRow, SeriesRow
 from foragerr.parser import parse
 from foragerr.providers.backoff import ProviderBackoff
@@ -503,12 +504,36 @@ async def process_failures(
                 .all()
             )
             issues = _affected_issues(row, grabs)
+            message = "; ".join(decode_messages(row.status_messages)) or None
             write_blocklist_row(
                 session,
                 row=row,
                 grabs=grabs,
                 now=now,
-                message="; ".join(decode_messages(row.status_messages)) or None,
+                message=message,
+            )
+            first_grab = grabs[0] if grabs else None
+            # The user-facing `download_failed` history event (FRG-API-011):
+            # written in the SAME transaction as the blocklist row, so the
+            # single-source /history feed and the blocklist can never disagree
+            # about a failure.
+            import_history.record_event(
+                session,
+                event_type=import_history.EVENT_DOWNLOAD_FAILED,
+                series_id=row.series_id,
+                issue_id=row.issue_id,
+                download_id=row.download_id,
+                source_title=(first_grab.title if first_grab else row.title),
+                source=import_history.SOURCE_DOWNLOAD,
+                data={
+                    "downloadId": row.download_id,
+                    "message": message,
+                    "indexer": (
+                        first_grab.indexer_name if first_grab else row.indexer_name
+                    ),
+                    "protocol": (first_grab.protocol if first_grab else row.protocol),
+                },
+                now=now,
             )
             row.state = TrackedDownloadState.FAILED.value
             row.status = TRACKED_STATUS_ERROR
