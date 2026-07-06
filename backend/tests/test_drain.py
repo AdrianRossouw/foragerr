@@ -132,8 +132,9 @@ def test_full_app_lifecycle_starts_runs_and_drains_cleanly(config_dir):
         # release-cache prune tasks (m1-search-indexers), the m1-downloads
         # tracking refresh (FRG-DL-007) + DDL queue drainer (ddl area), the
         # m1-import-pipeline completed-download drain (FRG-DL-009, flows area),
-        # and the scheduled DB+config backup task (FRG-DB-009,
-        # m2-ops-health-backups).
+        # the scheduled DB+config backup task (FRG-DB-009,
+        # m2-ops-health-backups), and the weekly pull-refresh task
+        # (FRG-PULL-006, m3-pull-backbone).
         assert app.state.scheduler.task_names() == [
             "backlog-search",
             "backup-database",
@@ -141,6 +142,7 @@ def test_full_app_lifecycle_starts_runs_and_drains_cleanly(config_dir):
             "process-ddl-queue",
             "process-imports",
             "prune-release-cache",
+            "pull-refresh",
             "track-downloads",
         ]
 

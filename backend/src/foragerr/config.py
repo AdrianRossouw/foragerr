@@ -424,6 +424,41 @@ class Settings(BaseSettings):
             "different release (FRG-DL-013, the self-healing loop). On by default."
         ),
     )
+    pull_enabled: bool = Field(
+        default=False,
+        description=(
+            "Enable the weekly-pull external source fetch (FRG-PULL-002). OFF by "
+            "default — the weekly view (FRG-PULL-001) works from local library "
+            "metadata alone, and the external walksoftly source is opt-in optional "
+            "enrichment. When false the scheduled pull-refresh task no-ops cleanly "
+            "and no third-party traffic is issued."
+        ),
+    )
+    pull_source_url: str = Field(
+        default="https://walksoftly.itsaninja.party/newcomics.php",
+        description=(
+            "URL of the external weekly-pull JSON source (FRG-PULL-002): the "
+            "walksoftly / League-of-Comic-Geeks-derived API. Fetched over the "
+            "hardened 'external' egress profile (FRG-SEC-001) — a loopback/private/"
+            "link-local host is refused per-hop and surfaced as a degraded source, "
+            "never used to reach an internal host. Only fetched when pull_enabled "
+            "is true; an empty value disables the fetch."
+        ),
+    )
+    pull_refresh_interval_seconds: int = Field(
+        default=14400,
+        ge=1,
+        description=(
+            "How often the scheduled pull-refresh task fetches the current + "
+            "previous release weeks, stores them, matches to the library, and "
+            "triggers refresh-series for matched-but-missing issues (FRG-PULL-006). "
+            "Default 4 hours (14400 s); clamped UP to a documented 1 hour (3600 s) "
+            "floor at task registration to protect the unofficial third-party "
+            "source — a smaller value is raised to the floor, not rejected. A "
+            "manual force-run (POST /api/v1/system/task/pull-refresh) bypasses the "
+            "interval gate and runs immediately."
+        ),
+    )
     opds_base_path: str = Field(
         default="/opds",
         description=(

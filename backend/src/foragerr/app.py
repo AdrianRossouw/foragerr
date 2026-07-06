@@ -289,6 +289,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(pull_router, prefix="/api/v1")
 
+    # --- pull refresh (m3-pull-backbone, area D): importing the module registers
+    #     the pull-refresh command + handler (fetch → store → match →
+    #     refresh-series trigger, FRG-PULL-005/006). Register the scheduled
+    #     weekly-pull task, interval from config (default 4 h, min-clamped to
+    #     1 h). Runs after register_scheduler above (which creates
+    #     app.state.scheduler). Manual force-refresh is the generic FRG-SCHED-007
+    #     surface (POST /api/v1/system/task/pull-refresh), which bypasses the
+    #     scheduler's interval gate (the re-poll throttle). ---
+    import foragerr.pull.commands  # noqa: F401 — command/handler registration
+    from foragerr.pull.commands import register_pull_refresh_task
+
+    async def _register_pull_refresh_task(app: FastAPI) -> None:
+        await register_pull_refresh_task(app.state.scheduler, app.state.settings)
+
+    app.state.startup_hooks.append(_register_pull_refresh_task)
+
     # --- import flows (m1-import-pipeline, area: flows): importing the module
     #     registers ProcessImportsCommand + handler (FRG-DL-009/010); register
     #     the ~1-minute pp-pool drain that runs the completed downloads through
