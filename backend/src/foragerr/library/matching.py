@@ -84,6 +84,43 @@ def match_issue_id(issue: Issue, issue_index: list[tuple[int, Issue]]) -> int | 
     return None
 
 
+# --- junk rules (FRG-IMP-022) -------------------------------------------------
+#
+# One predicate pair applied INSIDE the shared walk, so every consumer — series
+# scan, rescan, manual import, library import — inherits identical junk rules
+# (m2-existing-library-import design decision 1). Zero-byte skipping happens at
+# walk time (the stat is already taken for size); the decision-time
+# ``JunkFilterSpec`` size floor remains the second gate.
+
+#: Unpack-temp directory prefix (SABnzbd/NZBGet style ``_UNPACK_*``/``_unpack*``
+#: folders holding partially-extracted content — never library material).
+_UNPACK_PREFIX = "_unpack"
+
+
+def is_junk_dir(name: str) -> bool:
+    """Whether a directory entry is junk the walk must never descend into.
+
+    Junk directories: dot-directories (including the AppleDouble
+    ``.AppleDouble`` tree), Synology ``@eaDir`` thumbnail trees, and
+    unpack-temp folders (``_UNPACK_*``-style, case-insensitive).
+    """
+    return (
+        name.startswith(".")
+        or name == "@eaDir"
+        or name.lower().startswith(_UNPACK_PREFIX)
+    )
+
+
+def is_junk_file(name: str, size: int) -> bool:
+    """Whether a file entry is junk the walk must skip.
+
+    Junk files: dotfiles — which subsumes ``._*`` AppleDouble resource forks —
+    and zero-byte files (an empty "archive" is a placeholder or a botched copy,
+    never a comic).
+    """
+    return name.startswith(".") or size == 0
+
+
 def iter_archive_files(
     root: str,
     extensions: Iterable[str],
@@ -97,19 +134,28 @@ def iter_archive_files(
     ``0`` = files directly in ``root``); ``None`` walks the whole tree (the
     library scanner's behaviour). A file that races deletion during the walk is
     skipped rather than raising.
+
+    Junk skipping (FRG-IMP-022): junk directories (:func:`is_junk_dir`) are
+    pruned — never descended into — and junk files (:func:`is_junk_file`:
+    dotfiles/resource forks, zero-byte files) are never yielded. Extensions are
+    matched case-insensitively, so an uppercase ``.CBZ`` is still recognized.
     """
     base = Path(root)
     if base.is_file():
         try:
-            return [(str(base), base.stat().st_size)]
+            size = base.stat().st_size
         except OSError:
             return []
+        if is_junk_file(base.name, size):
+            return []
+        return [(str(base), size)]
     if not base.exists():
         return []
     exts = {e.lower().lstrip(".") for e in extensions}
     out: list[tuple[str, int]] = []
     base_depth = str(base).rstrip(os.sep).count(os.sep)
     for dirpath, dirs, files in os.walk(base):
+        dirs[:] = [d for d in dirs if not is_junk_dir(d)]
         if max_depth is not None:
             depth = dirpath.rstrip(os.sep).count(os.sep) - base_depth
             if depth >= max_depth:
@@ -120,14 +166,19 @@ def iter_archive_files(
                 continue
             full = os.path.join(dirpath, name)
             try:
-                out.append((full, os.path.getsize(full)))
-            except OSError:  # pragma: no cover - racing deletion
+                size = os.path.getsize(full)
+            except OSError:  # racing deletion mid-walk: skip, never fail
                 continue
+            if is_junk_file(name, size):
+                continue
+            out.append((full, size))
     return out
 
 
 __all__ = [
     "build_issue_index",
+    "is_junk_dir",
+    "is_junk_file",
     "issue_equal",
     "iter_archive_files",
     "match_issue_id",

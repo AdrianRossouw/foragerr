@@ -50,6 +50,13 @@ class ImportContext:
     file_template: str = DEFAULT_FILE_TEMPLATE
     folder_template: str = DEFAULT_FOLDER_TEMPLATE
     transfer_mode: fileops.TransferMode = fileops.TransferMode.MOVE
+    #: How an existing-library import treats files already under the library
+    #: (FRG-IMP-023, m2-existing-library-import design decision 4): ``in_place``
+    #: (default) registers a candidate that is already at its computed
+    #: destination — or anywhere under the series folder when renaming is
+    #: disabled — WITHOUT ``place_file``; ``move`` routes every candidate
+    #: through the normal placement/rename path exactly as downloads do.
+    library_import_mode: str = "in_place"
     #: Recycle-bin root for upgrade-replaced files (FRG-PP-013). ``""`` = the
     #: superseded file is permanently deleted on replacement (no bin configured).
     recycle_bin_path: str = ""
@@ -97,6 +104,7 @@ _SETTINGS_TO_CTX: dict[str, str] = {
     "comicinfo_tag_on_import": "comicinfo_tag_enabled",
     "duplicate_constraint": "duplicate_constraint",
     "duplicate_dump_path": "duplicate_dump_path",
+    "library_import_mode": "library_import_mode",
 }
 
 

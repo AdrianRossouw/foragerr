@@ -15,10 +15,13 @@ from foragerr.db.migrations import current_revision
 def test_import_history_table_and_columns_present(tmp_path):
     cfg = tmp_path / "cfg"
     cfg.mkdir()
-    prepare_database(cfg)
+    result = prepare_database(cfg)
     db_path = cfg / DB_FILENAME
 
-    assert current_revision(db_path) == "0006_import_history"
+    # The chain includes the change-6 revision and the DB lands at head (this
+    # test pins the 0006 schema, not whatever later changes appended).
+    assert "0006_import_history" in result.applied
+    assert current_revision(db_path) == result.head_revision
 
     with sqlite3.connect(db_path) as conn:
         tables = {

@@ -61,10 +61,12 @@ from foragerr.importer.models import ImportHistoryRow
 from foragerr.naming import RenameFields, render_filename
 from foragerr.importer.sources import (
     SOURCE_DOWNLOAD,
+    SOURCE_LIBRARY,
     SOURCE_MANUAL,
     SOURCE_RESCAN,
     CompletedDownloadSource,
     ImportCandidate,
+    LibraryImportSource,
     ManualImportSource,
     ManualOverride,
     RescanSource,
@@ -141,7 +143,12 @@ async def _run_fs(ctx: ImportContext, func, *args, **kwargs):
 
 
 async def gather(
-    source: CompletedDownloadSource | RescanSource | ManualImportSource,
+    source: (
+        CompletedDownloadSource
+        | RescanSource
+        | ManualImportSource
+        | LibraryImportSource
+    ),
     session: AsyncSession,
     ctx: ImportContext,
 ) -> list[ImportCandidate]:
@@ -200,7 +207,8 @@ async def _resolve_override(
     context — is in scope. An override naming a non-existent or mismatched entity
     returns ``None`` (dropped, not trusted) so the file falls back to the
     heuristic rather than fabricating a mapping. A series-only override cannot
-    resolve a concrete issue, so it too is ignored.
+    resolve a concrete issue here; :func:`reconcile` handles it separately
+    (series pinned, issue matched heuristically within it — FRG-IMP-023).
     """
     if override.issue_id is None:
         return None
@@ -215,6 +223,31 @@ async def _resolve_override(
     ):
         return None  # out of scope for a series-pinned manual folder
     return issue_row.series_id, issue_row.id
+
+
+async def _resolve_series_override(
+    session: AsyncSession, candidate: ImportCandidate, override: ManualOverride
+) -> int | None:
+    """Validate a SERIES-ONLY override: the pinned series id, or ``None``.
+
+    A series-only override (a library-import group's confirmed volume,
+    FRG-IMP-023) pins WHICH series the file belongs to — human intent beats the
+    filename's series parse, exactly like a full override — while the concrete
+    issue mapping stays heuristic/embedded within that series. Same trust rules
+    as :func:`_resolve_override`: a non-existent series, or one outside a scoped
+    candidate's scope, is dropped rather than trusted.
+    """
+    if override.series_id is None or override.issue_id is not None:
+        return None
+    series = await session.get(SeriesRow, override.series_id)
+    if series is None:
+        return None
+    if (
+        candidate.series_scope_id is not None
+        and series.id != candidate.series_scope_id
+    ):
+        return None
+    return series.id
 
 
 async def _embedded_issue(session: AsyncSession, embedded) -> IssueRow | None:
@@ -306,6 +339,21 @@ async def reconcile(
             evidence.provenance["series"] = PROV_MANUAL_OVERRIDE
             evidence.provenance["issue"] = PROV_MANUAL_OVERRIDE
             return resolved
+        # 1b. series-only override (FRG-IMP-023): the series is pinned by human
+        #     intent — bypassing the series-title heuristic entirely, so a
+        #     corrected/confirmed volume wins even when the filename disagrees
+        #     with the ComicVine title — while the ISSUE is still matched
+        #     heuristically within that series. No issue match → fall through
+        #     (the embedded layer may yet resolve it within scope; otherwise
+        #     the file blocks visibly as unmatched, never guessed).
+        pinned_series = await _resolve_series_override(session, candidate, override)
+        if pinned_series is not None and evidence.issue is not None:
+            issue_id = await _match_issue_in_series(
+                session, pinned_series, evidence.issue, ctx
+            )
+            if issue_id is not None:
+                evidence.provenance["series"] = PROV_MANUAL_OVERRIDE
+                return pinned_series, issue_id
 
     base_series, base_issue, base_source = await _reconcile_base(
         session, candidate, evidence, ctx
@@ -569,6 +617,34 @@ def build_fields(series: SeriesRow, issue: IssueRow, evidence: Evidence) -> Rena
 # --- stage 4: execute --------------------------------------------------------
 
 
+def _register_in_place(
+    candidate: ImportCandidate, series: SeriesRow, dest_path: Path, ctx: ImportContext
+) -> bool:
+    """Whether this candidate is registered at its EXISTING path without any
+    ``place_file`` (FRG-IMP-023, m2-existing-library-import design decision 4).
+
+    True only in ``library_import_mode == "in_place"`` (the default) and only
+    when the file is already where placement would put it: its current path IS
+    the computed destination, or — with renaming disabled, where the original
+    name is kept — it already lives anywhere under the series folder. ``move``
+    mode (and every candidate arriving from outside the series folder, e.g. a
+    download staging dir) routes through ``place_file`` exactly as before.
+    Mode is per-run data on the context, never a branch on ``source_kind``
+    (FRG-PP-001).
+    """
+    if ctx.library_import_mode != "in_place":
+        return False
+    local = Path(candidate.local_path)
+    if os.path.realpath(local) == os.path.realpath(dest_path):
+        return True
+    if not ctx.rename_enabled:
+        try:
+            return local.resolve().is_relative_to(Path(series.path).resolve())
+        except OSError:  # pragma: no cover - unresolvable path: fall through
+            return False
+    return False
+
+
 async def execute(
     session: AsyncSession,
     candidate: ImportCandidate,
@@ -613,15 +689,21 @@ async def execute(
 
     # 1. IRREVERSIBLE MOVE FIRST — before any DB mutation or quarantine, off the
     #    event loop. os.replace overwrites an existing destination, so placing
-    #    ahead of the row swap never collides.
-    placed = await _run_fs(
-        ctx,
-        fileops.place_file,
-        candidate.local_path,
-        dest_path,
-        mode=ctx.transfer_mode,
-        margin_bytes=ctx.free_space_margin_bytes,
-    )
+    #    ahead of the row swap never collides. In-place library imports
+    #    (FRG-IMP-023): a candidate already at its destination — or under the
+    #    series folder with renaming disabled — is registered at its existing
+    #    path with NO move/copy/rename at all (design decision 4).
+    if _register_in_place(candidate, series, dest_path, ctx):
+        placed = Path(candidate.local_path)
+    else:
+        placed = await _run_fs(
+            ctx,
+            fileops.place_file,
+            candidate.local_path,
+            dest_path,
+            mode=ctx.transfer_mode,
+            margin_bytes=ctx.free_space_margin_bytes,
+        )
     size = placed.stat().st_size
 
     # 2. Only now that the new file is durable: send the superseded file to the
@@ -716,6 +798,7 @@ _PROVENANCE_BY_KIND: dict[str, str] = {
     SOURCE_DOWNLOAD: history.SOURCE_DOWNLOAD,
     SOURCE_RESCAN: history.SOURCE_RESCAN,
     SOURCE_MANUAL: history.SOURCE_MANUAL,
+    SOURCE_LIBRARY: history.SOURCE_LIBRARY,
 }
 
 
