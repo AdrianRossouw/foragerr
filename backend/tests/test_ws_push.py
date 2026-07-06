@@ -394,3 +394,7 @@ def test_ws_endpoint_delivers_a_push_over_the_real_asgi_stack(tmp_path):
                 if msg == expected:
                     break
             assert expected in received, f"push never arrived; saw {received!r}"
+            # Close explicitly from the client side so the endpoint observes the
+            # disconnect and skips its own close() — keeping the portal teardown
+            # (this `with` block's __exit__) from racing a double close.
+            ws.close()

@@ -23,13 +23,17 @@ from fastapi import WebSocket, WebSocketDisconnect
 from foragerr.ws.broadcast import pump
 
 
-async def _drain_incoming(websocket: WebSocket) -> None:
-    """Consume inbound frames only to observe the client closing the socket."""
+async def _drain_incoming(websocket: WebSocket) -> bool:
+    """Consume inbound frames until the client closes the socket.
+
+    Returns ``True`` when the client has disconnected (so the caller must not
+    try to close an already-gone socket), ``False`` only if cancelled before
+    that (the caller is tearing us down for another reason)."""
     try:
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
-        return
+        return True
 
 
 async def ws_endpoint(websocket: WebSocket) -> None:
@@ -42,7 +46,7 @@ async def ws_endpoint(websocket: WebSocket) -> None:
     # queue and is delivered once the pump starts.
     conn = broadcaster.connect()
     pump_task: asyncio.Future[None] | None = None
-    recv_task: asyncio.Future[None] | None = None
+    recv_task: asyncio.Future[bool] | None = None
     try:
         await websocket.accept()
         pump_task = asyncio.ensure_future(pump(conn, websocket.send_text))
@@ -54,14 +58,28 @@ async def ws_endpoint(websocket: WebSocket) -> None:
         )
     finally:
         broadcaster.disconnect(conn)
+        # Did the CLIENT already disconnect? If so the socket is gone and
+        # closing it again races the ASGI teardown — under the test portal that
+        # surfaces as a CancelledError escaping this coroutine. Only WE close,
+        # and only when the client is still connected (a slow-client pump drop).
+        client_gone = bool(
+            recv_task is not None
+            and recv_task.done()
+            and not recv_task.cancelled()
+            and recv_task.result()
+        )
         tasks = [t for t in (pump_task, recv_task) if t is not None]
         for task in tasks:
             if not task.done():
                 task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
-        with contextlib.suppress(Exception):
-            await websocket.close()
+        if not client_gone:
+            # BaseException (incl. CancelledError from closing an already-torn-
+            # down socket) must not escape endpoint teardown; a genuine
+            # cancellation of this coroutine still lands at the awaits above.
+            with contextlib.suppress(BaseException):
+                await websocket.close()
 
 
 __all__ = ["ws_endpoint"]
