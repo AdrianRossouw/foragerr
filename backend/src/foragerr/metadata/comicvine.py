@@ -86,6 +86,14 @@ def split_csv(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+def _name_filter(term: str) -> str:
+    """Neutralise CV ``filter`` metacharacters in a raw search term so it
+    cannot inject additional filter fields (``,`` separates fields, ``:``
+    separates field:value) — shared by :meth:`ComicVineClient.search_series`
+    and :meth:`ComicVineClient.suggest_series`."""
+    return term.replace(",", " ").replace(":", " ").strip()
+
+
 @lru_cache(maxsize=1)
 def user_agent() -> str:
     """The honest ``foragerr/<version>`` User-Agent (resolved once)."""
@@ -155,9 +163,7 @@ class ComicVineClient:
         """Search volumes by name; return bounded, plausibility-annotated
         candidates with ignored-publisher volumes removed (FRG-META-007)."""
         query = term.strip()
-        # Neutralise CV filter metacharacters so the query cannot inject
-        # additional filter fields (`,` separates fields, `:` field:value).
-        filter_value = query.replace(",", " ").replace(":", " ").strip()
+        filter_value = _name_filter(query)
         base_params = {
             "field_list": SEARCH_VOLUME_FIELDS,
             "filter": f"name:{filter_value}",
@@ -207,8 +213,7 @@ class ComicVineClient:
         candidates, rather than raising — there is only one page to lose.
         """
         query = term.strip()
-        # Neutralise CV filter metacharacters exactly as `search_series` does.
-        filter_value = query.replace(",", " ").replace(":", " ").strip()
+        filter_value = _name_filter(query)
         params = {
             "field_list": SEARCH_VOLUME_FIELDS,
             "filter": f"name:{filter_value}",
