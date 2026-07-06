@@ -112,6 +112,57 @@ describe('FRG-UI-014: manual import overlay', () => {
     await user.click(checkbox);
     await user.click(screen.getByRole('button', { name: 'Import 1 selected' }));
 
+    // Opened from a blocked download → the POST carries that downloadId so the
+    // backend re-evaluates with download scope (AlreadyImportedSpec etc.).
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith(
+        '/api/v1/manual-import',
+        expect.objectContaining({
+          method: 'POST',
+          body: {
+            downloadId: 'SABnzbd_nzo_920',
+            files: [
+              {
+                path: '/dl/SABnzbd_nzo_920/mystery.cbr',
+                seriesId: 7,
+                issueId: 71,
+                format: 'cbr',
+              },
+            ],
+          },
+        }),
+      ),
+    );
+  });
+
+  it('FRG-UI-014 — a path-picker overlay POSTs without a downloadId (no download scope)', async () => {
+    const { spy, fetcher } = fakeFetcher(
+      makeResolver({
+        list: () => [
+          makeManualEntry({
+            path: '/comics/_unsorted/Invincible 001.cbz',
+            approved: true,
+            suggestedSeriesId: 7,
+            suggestedIssueId: 71,
+            format: 'cbz',
+          }),
+        ],
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(
+      <ManualImportOverlay
+        source={{ kind: 'path', path: '/comics/_unsorted' }}
+        onClose={() => {}}
+      />,
+      { fetcher },
+    );
+
+    // The approved row is preselected — import straight away.
+    await screen.findByTestId('manual-row-Invincible 001.cbz');
+    await user.click(await screen.findByRole('button', { name: 'Import 1 selected' }));
+
+    // Opened via the path picker → the POST body is JUST { files }, no downloadId.
     await waitFor(() =>
       expect(spy).toHaveBeenCalledWith(
         '/api/v1/manual-import',
@@ -120,10 +171,10 @@ describe('FRG-UI-014: manual import overlay', () => {
           body: {
             files: [
               {
-                path: '/dl/SABnzbd_nzo_920/mystery.cbr',
+                path: '/comics/_unsorted/Invincible 001.cbz',
                 seriesId: 7,
                 issueId: 71,
-                format: 'cbr',
+                format: 'cbz',
               },
             ],
           },
@@ -254,13 +305,15 @@ describe('FRG-UI-014: manual import overlay', () => {
     const confirm = await screen.findByRole('button', { name: 'Import 1 selected' });
     await user.click(confirm);
 
-    // Posts the corrected mapping (suggested series/issue/format carried through).
+    // Posts the corrected mapping (suggested series/issue/format carried
+    // through) plus the download scope, since this overlay was opened for one.
     await waitFor(() =>
       expect(spy).toHaveBeenCalledWith(
         '/api/v1/manual-import',
         expect.objectContaining({
           method: 'POST',
           body: {
+            downloadId: 'nzo_5',
             files: [
               {
                 path: '/comics/Invincible (2003)/Invincible 001.cbz',

@@ -1,29 +1,6 @@
+/* Table skeleton is shared with InteractiveSearchOverlay via composes. */
 .table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--font-size-base);
-}
-
-.table th {
-  text-align: left;
-  padding: var(--spacing-sm) var(--spacing-md);
-  color: var(--text-muted);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  border-bottom: 1px solid var(--surface-border);
-  white-space: nowrap;
-}
-
-.table td {
-  padding: var(--spacing-sm) var(--spacing-md);
-  border-bottom: 1px solid var(--surface-border);
-  vertical-align: middle;
-}
-
-.table tbody tr:hover {
-  background: var(--surface-card-hover);
+  composes: table from '../../components/decisionOverlay.module.css';
 }
 
 .fileCell {
@@ -44,36 +21,19 @@
   color: var(--text-secondary);
 }
 
-/* --- Decision chips --- */
+/* --- Decision chips (base shared; blocked variant is manual-import only) --- */
 
 .chip {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--spacing-xs);
-  padding: 2px var(--spacing-sm);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
-  white-space: nowrap;
-  border: 1px solid transparent;
+  composes: chip from '../../components/decisionOverlay.module.css';
 }
 
 .chipApproved {
-  color: var(--color-success);
-  border-color: var(--color-success);
+  composes: chipApproved from '../../components/decisionOverlay.module.css';
 }
 
 .chipBlocked {
   color: var(--color-danger);
   border-color: var(--color-danger);
-}
-
-.rejectionList {
-  margin: 0;
-  padding-left: var(--spacing-md);
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-xs);
 }
 
 /* --- Override controls --- */
@@ -111,24 +71,14 @@
   white-space: nowrap;
 }
 
-/* --- States / banners --- */
+/* --- States / banners (shared with InteractiveSearchOverlay) --- */
 
 .state {
-  padding: var(--spacing-xl) var(--spacing-md);
-  color: var(--text-secondary);
-  text-align: center;
+  composes: state from '../../components/decisionOverlay.module.css';
 }
 
 .errorBanner {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-md);
-  margin-bottom: var(--spacing-md);
-  padding: var(--spacing-sm) var(--spacing-md);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--color-danger);
-  background: rgba(240, 80, 80, 0.12);
-  color: var(--text-primary);
+  composes: errorBanner from '../../components/decisionOverlay.module.css';
 }
 
 /* --- Footer --- */

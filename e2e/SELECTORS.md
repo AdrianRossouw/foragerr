@@ -11,7 +11,8 @@ text/role selection is brittle (FRG-PROC-010, design decision 4).
 | testid | element | why it exists |
 | --- | --- | --- |
 | `ft-add-confirm` | add-series confirm button (`AddSeries.tsx`) | its visible label is the dynamic series name (`Add Saga`), so text selection is unstable |
-| `ft-rejections-<guid>` | verbatim rejection-reason `<ul>` inside the interactive-search popover (`InteractiveSearchOverlay.tsx`) | the reasons are otherwise unlabelled `<li>`s nested in a popover; the harness reads them to assert verbatim rendering (FRG-UI-007) |
+| `ft-rejections-<guid>` | verbatim rejection-reason `<ul>` inside the interactive-search popover (`ReasonsPopover.tsx`, rendered by `InteractiveSearchOverlay.tsx`) | the reasons are otherwise unlabelled `<li>`s nested in a popover; the harness reads them to assert verbatim rendering (FRG-UI-007) |
+| `ft-manual-rejections-<name>` | verbatim rejection-reason `<ul>` inside the manual-import popover (`ReasonsPopover.tsx`, rendered by `ManualImportOverlay.tsx`) | same shape as `ft-rejections`, keyed by candidate file name; the harness reads it to assert a blocked file's verbatim reasons (FRG-UI-014) |
 
 Keep this list minimal. Prefer an existing hook or an accessible name before
 adding a new `ft-*` id.
@@ -28,7 +29,13 @@ These already exist in the frontend and are treated as a contract by the suite:
   `command-status`.
 - **Interactive search overlay**: `release-row-<guid>`; button "Grab \<title\>";
   the rejection chip (opens the popover carrying `ft-rejections-<guid>`).
-- **Queue** (`/queue`): `queue-row-<id>`; `queue-progress-<id>`.
+- **Queue** (`/queue`): `queue-row-<id>`; `queue-progress-<id>`; an
+  `import_blocked` row's button "Manual import \<title\>".
+- **Manual-import overlay** (`ManualImportOverlay.tsx`): `manual-row-<name>`;
+  per-row checkbox "Select \<name\>", comboboxes "Series/Issue/Format for
+  \<name\>"; the rejection chip (opens the popover carrying
+  `ft-manual-rejections-<name>`); `manual-embedded-<name>`; footer
+  `manual-command-status`, `manual-import-error`, `manual-import-confirm`.
 - **Library index** (`/`): series links by title; `library-poster-grid` /
   `library-table`.
 - **Settings → indexers** (`/settings/indexers`): `provider-card-<id>`, button

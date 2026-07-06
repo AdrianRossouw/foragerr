@@ -33,6 +33,17 @@ export type ManualImportSource =
   | { kind: 'path'; path: string }
   | { kind: 'download'; downloadId: string };
 
+/**
+ * The POST /manual-import request. `files` carries the operator-corrected
+ * mappings; `downloadId` is present ONLY when the overlay was opened for a
+ * blocked download, so the backend re-evaluates with download scope. A
+ * path-picker overlay omits it entirely.
+ */
+export interface ExecuteManualImportInput {
+  files: ManualImportFileSpec[];
+  downloadId?: string;
+}
+
 /** The query key mirroring a source's `?path=` XOR `?downloadId=` URL. */
 export function manualImportKey(source: ManualImportSource) {
   return source.kind === 'path'
@@ -73,14 +84,16 @@ export function useManualImportCandidates(
 export function useExecuteManualImport(): UseMutationResult<
   CommandResource,
   Error,
-  ManualImportFileSpec[]
+  ExecuteManualImportInput
 > {
   const fetcher = useFetcher();
   return useMutation({
-    mutationFn: (files: ManualImportFileSpec[]) =>
+    mutationFn: ({ files, downloadId }: ExecuteManualImportInput) =>
       fetcher<CommandResource>('/api/v1/manual-import', {
         method: 'POST',
-        body: { files },
+        // Only send downloadId when opened for a blocked download; the
+        // path-picker entry point posts just the corrected files.
+        body: downloadId === undefined ? { files } : { downloadId, files },
       }),
   });
 }

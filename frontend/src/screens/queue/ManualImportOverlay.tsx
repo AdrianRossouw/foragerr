@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Modal } from '../../components/Modal';
-import { Popover } from '../../components/Popover';
+import { ReasonsPopover } from '../../components/ReasonsPopover';
 import { useCommandStatus, useIssues, useSeriesIndex } from '../../api/hooks';
 import { queryKeys } from '../../api/queryKeys';
 import { ARCHIVE_FORMATS } from '../../api/types';
@@ -142,7 +142,16 @@ export function ManualImportOverlay({
         format: ov.format,
       };
     });
-    execute.mutate(files, { onSuccess: (cmd) => setCommandId(cmd.id) });
+    // When the overlay was opened for a blocked download, carry that
+    // downloadId so the backend re-evaluates with download scope (e.g.
+    // AlreadyImportedSpec); a path-picker overlay omits it.
+    execute.mutate(
+      {
+        files,
+        downloadId: source.kind === 'download' ? source.downloadId : undefined,
+      },
+      { onSuccess: (cmd) => setCommandId(cmd.id) },
+    );
   };
 
   const seriesOptions = seriesIndex.data ?? [];
@@ -272,22 +281,13 @@ function CandidateRow({
         {entry.approved ? (
           <span className={`${styles.chip} ${styles.chipApproved}`}>Approved</span>
         ) : (
-          <Popover
-            trigger={
-              <span className={`${styles.chip} ${styles.chipBlocked}`}>! Blocked</span>
-            }
+          <ReasonsPopover
+            reasons={entry.rejections}
             label={`${entry.name} — show reasons`}
-          >
-            {/* Verbatim reasons, in the pipeline's order — never paraphrased. */}
-            <ul
-              className={styles.rejectionList}
-              data-testid={`manual-rejections-${entry.name}`}
-            >
-              {entry.rejections.map((reason) => (
-                <li key={reason}>{reason}</li>
-              ))}
-            </ul>
-          </Popover>
+            chipClassName={`${styles.chip} ${styles.chipBlocked}`}
+            chipContent={<>! Blocked</>}
+            listTestId={`ft-manual-rejections-${entry.name}`}
+          />
         )}
       </td>
       <td className={styles.fileCell}>
