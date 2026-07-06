@@ -37,18 +37,6 @@ import styles from './naming/MediaManagement.module.css';
  * launches from here.
  */
 
-/**
- * FRG-PP-014 duplicate-handling fields (constraint + dump folder), served and
- * accepted by GET/PUT /config/mediamanagement. A local extension of the shared
- * `MediaManagementConfig` type so this change stays confined to the settings
- * screen; fold these two fields into `api/types.ts` alongside the
- * library-import types when that change lands.
- */
-export type MediaManagementConfigWithDuplicates = MediaManagementConfig & {
-  duplicate_constraint: string;
-  duplicate_dump_path: string;
-};
-
 // Sample issue driving the live example line — display data (representative
 // values keyed by canonical field), NOT a token list; the token names come from
 // the backend vocabulary (GET /config/naming/tokens).
@@ -124,6 +112,28 @@ const IMPORT_FIELDS: SchemaField[] = [
       { value: 'move', name: 'Move' },
     ],
   },
+  {
+    order: 2,
+    name: 'library_import_proposal_cap',
+    type: 'number',
+    label: 'Library Import Proposal Cap',
+    help: 'Maximum number of ComicVine match proposals a single library-import scan fetches. Folder groups beyond the cap stage without a proposal — search them from the review screen.',
+    required: false,
+    secret: false,
+    advanced: false,
+    selectOptions: [],
+  },
+  {
+    order: 3,
+    name: 'library_import_similarity_floor',
+    type: 'number',
+    label: 'Library Import Similarity Floor',
+    help: 'Minimum name similarity (0 to 1) before a library-import scan proposes a ComicVine match on its own. Folder groups below the floor stage as no-match for manual search.',
+    required: false,
+    secret: false,
+    advanced: false,
+    selectOptions: [],
+  },
 ];
 
 const RECYCLE_FIELDS: SchemaField[] = [
@@ -189,6 +199,8 @@ const NAMING_NAMES = [
 const MM_NAMES = [
   'import_transfer_mode',
   'library_import_mode',
+  'library_import_proposal_cap',
+  'library_import_similarity_floor',
   'recycle_bin_path',
   'recycle_bin_retention_days',
   'duplicate_constraint',
@@ -211,9 +223,7 @@ function baselineValues(
  * server's `0` forever (the save round-trips 0 back, but the '' in the form
  * state keeps the save bar armed), a dirty-loop the operator cannot clear.
  */
-function normalize(
-  values: FieldValues,
-): NamingConfig & MediaManagementConfigWithDuplicates {
+function normalize(values: FieldValues): NamingConfig & MediaManagementConfig {
   return {
     rename_enabled: values.rename_enabled === true,
     file_naming_template: String(values.file_naming_template ?? ''),
@@ -221,6 +231,9 @@ function normalize(
     replace_illegal_characters: values.replace_illegal_characters === true,
     import_transfer_mode: String(values.import_transfer_mode ?? ''),
     library_import_mode: String(values.library_import_mode ?? ''),
+    library_import_proposal_cap: Number(values.library_import_proposal_cap) || 0,
+    library_import_similarity_floor:
+      Number(values.library_import_similarity_floor) || 0,
     recycle_bin_path: String(values.recycle_bin_path ?? ''),
     recycle_bin_retention_days: Number(values.recycle_bin_retention_days) || 0,
     duplicate_constraint: String(values.duplicate_constraint ?? 'larger-size'),
@@ -309,9 +322,11 @@ export function MediaManagement() {
       }
     }
     if (mmDirty) {
-      const body: MediaManagementConfigWithDuplicates = {
+      const body: MediaManagementConfig = {
         import_transfer_mode: norm.import_transfer_mode,
         library_import_mode: norm.library_import_mode,
+        library_import_proposal_cap: norm.library_import_proposal_cap,
+        library_import_similarity_floor: norm.library_import_similarity_floor,
         recycle_bin_path: norm.recycle_bin_path,
         recycle_bin_retention_days: norm.recycle_bin_retention_days,
         duplicate_constraint: norm.duplicate_constraint,

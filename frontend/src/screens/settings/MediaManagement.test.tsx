@@ -6,14 +6,12 @@ import { fakeFetcher } from '../../test/fakeFetcher';
 import { ApiRequestError, type FetcherInit } from '../../api/fetcher';
 import { makeCommand, makeSeriesResource, pageOf } from '../../test/mockData';
 import type {
+  MediaManagementConfig,
   NamingConfig,
   NamingTokens,
   RenamePreviewEntry,
 } from '../../api/types';
-import {
-  MediaManagement,
-  type MediaManagementConfigWithDuplicates,
-} from './MediaManagement';
+import { MediaManagement } from './MediaManagement';
 
 /*
  * FRG-UI-012 — the media-management / naming settings screen. Every delta-spec
@@ -32,9 +30,11 @@ const NAMING: NamingConfig = {
   replace_illegal_characters: true,
 };
 
-const MM: MediaManagementConfigWithDuplicates = {
+const MM: MediaManagementConfig = {
   import_transfer_mode: 'move',
   library_import_mode: 'in_place',
+  library_import_proposal_cap: 25,
+  library_import_similarity_floor: 0.55,
   recycle_bin_path: '',
   recycle_bin_retention_days: 0,
   duplicate_constraint: 'larger-size',
@@ -79,7 +79,7 @@ const RENAME_ROWS: RenamePreviewEntry[] = [
 
 interface Overrides {
   naming?: () => NamingConfig;
-  mm?: () => MediaManagementConfigWithDuplicates;
+  mm?: () => MediaManagementConfig;
   tokens?: () => NamingTokens;
   onTokens?: () => unknown;
   onPutNaming?: (init?: FetcherInit) => unknown;
@@ -105,7 +105,7 @@ function resolver(o: Overrides = {}) {
     }
     if (path === '/api/v1/config/mediamanagement') {
       if (init?.method === 'PUT') {
-        return o.onPutMm ? o.onPutMm(init) : (init.body as MediaManagementConfigWithDuplicates);
+        return o.onPutMm ? o.onPutMm(init) : (init.body as MediaManagementConfig);
       }
       return o.mm ? o.mm() : MM;
     }
@@ -268,6 +268,52 @@ describe('FRG-PP-014: duplicate handling settings', () => {
     await waitFor(() =>
       expect(within(field).getByRole('alert')).toHaveTextContent(
         'not a writable directory',
+      ),
+    );
+  });
+});
+
+describe('FRG-IMP-023: library-import scan tuning settings', () => {
+  it('FRG-IMP-023 — the proposal cap and similarity floor render in the Importing section, seeded from the GET', async () => {
+    const { fetcher } = fakeFetcher(resolver());
+    renderWithProviders(<MediaManagement />, { fetcher });
+
+    const cap = await screen.findByTestId(
+      'schema-field-library_import_proposal_cap',
+    );
+    expect(within(cap).getByLabelText('Library Import Proposal Cap')).toHaveValue(25);
+    const floor = screen.getByTestId(
+      'schema-field-library_import_similarity_floor',
+    );
+    expect(
+      within(floor).getByLabelText('Library Import Similarity Floor'),
+    ).toHaveValue(0.55);
+    expect(screen.getByRole('heading', { name: 'Importing' })).toBeInTheDocument();
+  });
+
+  it('FRG-IMP-023 — changing the cap and floor persists both through the media-management PUT', async () => {
+    const user = userEvent.setup();
+    const { spy, fetcher } = fakeFetcher(resolver());
+    renderWithProviders(<MediaManagement />, { fetcher });
+
+    const cap = await screen.findByLabelText('Library Import Proposal Cap');
+    await user.clear(cap);
+    await user.type(cap, '100');
+    const floor = screen.getByLabelText('Library Import Similarity Floor');
+    await user.clear(floor);
+    await user.type(floor, '0.8');
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith(
+        '/api/v1/config/mediamanagement',
+        expect.objectContaining({
+          method: 'PUT',
+          body: expect.objectContaining({
+            library_import_proposal_cap: 100,
+            library_import_similarity_floor: 0.8,
+          }),
+        }),
       ),
     );
   });
