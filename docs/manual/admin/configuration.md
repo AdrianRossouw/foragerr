@@ -72,7 +72,9 @@ under the top level of `config.yaml`.
 | `folder_naming_template` | `FORAGERR_FOLDER_NAMING_TEMPLATE` | `{Series Title} ({Year})` | Token template for series folders. |
 | `replace_illegal_characters` | `FORAGERR_REPLACE_ILLEGAL_CHARACTERS` | `true` | Replace filesystem-illegal characters in rendered names (off = strip). |
 | `import_transfer_mode` | `FORAGERR_IMPORT_TRANSFER_MODE` | `move` | How download imports place files: `move`, `copy`, or `hardlink` (falls back to copy across volumes). |
-| `library_import_mode` | `FORAGERR_LIBRARY_IMPORT_MODE` | `in_place` | How the existing-library import (M2 change 3) treats files already under a root: `in_place` (never moved) or `move`. |
+| `library_import_mode` | `FORAGERR_LIBRARY_IMPORT_MODE` | `in_place` | How the existing-library import treats files already under a root: `in_place` (never moved) or `move`. |
+| `duplicate_constraint` | `FORAGERR_DUPLICATE_CONSTRAINT` | `larger-size` | Same-format-rank duplicate arbitration: `larger-size` or `preferred-format`. Fixed-release markers (`(f1)`/`(f2)`) always win. Profile-rank upgrades/downgrades are unaffected. |
+| `duplicate_dump_path` | `FORAGERR_DUPLICATE_DUMP_PATH` | *(empty)* | Directory losing duplicate files are moved to (dated subfolders). **Empty = the normal recycle/delete path applies.** Never pruned by recycle-bin retention. |
 | `recycle_bin_path` | `FORAGERR_RECYCLE_BIN_PATH` | *(empty)* | Directory upgrade-replaced and user-deleted files are moved to. **Empty = permanently delete.** Must be writable when set; destinations are confinement-checked. |
 | `recycle_bin_retention_days` | `FORAGERR_RECYCLE_BIN_RETENTION_DAYS` | `0` | Days before housekeeping permanently prunes bin entries. `0` = keep forever. |
 | `config_backup_retention` | `FORAGERR_CONFIG_BACKUP_RETENTION` | `3` | Pre-migration `config.yaml` backups kept under `backups/`. |

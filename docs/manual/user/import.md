@@ -160,6 +160,45 @@ a fresh `ComicInfo.xml` into each imported cbz from the matched ComicVine
 record — rewritten atomically, and never at the cost of the import: if tagging
 fails, the file lands untagged with a warning in history.
 
+## Importing an existing library
+
+The **Library Import** screen (sidebar → Library Import) ingests a collection
+that predates foragerr. Pick a configured root folder and run a scan: the walk
+enumerates comic files under it (skipping junk — AppleDouble/`@eaDir`
+directories, `._` resource forks, dotfiles, zero-byte files, unpack-temp
+folders), removes database records for files that vanished from disk, and
+groups everything unmapped by normalized series name. Each group is staged with
+its file count, parse confidence, and — when a plausible match exists — a
+proposed ComicVine volume (poster, name, year, publisher). Staging is
+persisted, so the review survives a restart; scans propose matches for a
+bounded number of groups per run (the rest defer to a re-scan, and say so).
+
+Review the groups: confirm proposals, correct one via the inline ComicVine
+search, or skip a group. Groups the scan could not parse or match are staged
+with the reason visible and are never imported on a guess — they need an
+explicit choice. Executing the import creates each confirmed group's series and
+runs its files through the same import pipeline as everything else (same safety
+checks, same history events). With `library_import_mode: in_place` (the
+default) files already under the series folder are registered where they are —
+nothing is moved or renamed unless renaming is enabled; with `move` they route
+through the normal placement/renaming path. Re-running the scan re-checks the
+root: confirmed and skipped decisions carry forward, and files that imported
+are never staged again.
+
+## Duplicate handling
+
+When an incoming file targets an issue that already has a file, the format
+profile decides first, exactly as before: a higher-ranked format imports as an
+upgrade, a lower-ranked one is rejected. Only a **same-rank tie** invokes the
+duplicate constraint (`duplicate_constraint`): `larger-size` (default — the
+strictly bigger file wins) or `preferred-format`. Explicit fixed-release
+markers in filenames (`(f1)`, `(f2)`, ...) always win over either constraint —
+a fixed release never loses to an unfixed one — and the decision and its
+reason are recorded in import history. If `duplicate_dump_path` is set, the
+losing file moves into a dated subfolder there instead of being deleted or
+recycled; the dump folder is deliberately not a recycle bin, so retention
+pruning never touches it.
+
 ## Rescanning a series
 
 A per-series rescan walks the series folder on disk and routes every comic file it
