@@ -1,0 +1,384 @@
+"""Completed-download import drain + post-import client cleanup (FRG-DL-009/010).
+
+This is the *flows* half of change 6: it drives change-5's tracked downloads
+through the (frozen) change-6 import pipeline and owns the tracked-download state
+transitions the pipeline itself deliberately does not touch.
+
+``ProcessImportsCommand`` runs on the ``pp`` (post-processing) worker pool on a
+~1-minute cadence, concurrently with change-5's ``TrackDownloadsCommand`` on the
+``download`` pool. It drains items sitting in ``import_pending`` (and recovers a
+stale ``importing`` row left by a crashed run):
+
+    import_pending → importing → imported                     (all files imported)
+                              → import_blocked (with reasons)  (some/all rejected)
+                              → failed_pending                 (corrupt archive)
+
+The claim is *status-guarded* (design decision 9): the transition to ``importing``
+is an ``UPDATE ... WHERE state IN (import_pending, importing)`` whose ``rowcount``
+must be 1. Because every write goes through the single ``write_session()`` writer
+lock (FRG-DB-006) and SQLite's ``BEGIN IMMEDIATE``, no other writer can interleave
+between the guard's read and its write — so a row TrackDownloadsCommand has just
+moved to ``failed_pending`` (or that another worker claimed) fails the guard and
+is skipped, never double-processed and never regressed back into a
+``CHANGE5_DRIVEN_STATES`` value. Once a row is ``importing`` it sits in change-5's
+``_TERMINAL_STATES`` set, so TrackDownloadsCommand will not advance it while the
+pipeline runs.
+
+Blocked/failed downloads are never lost and never auto-deleted (FRG-DL-009): the
+source file stays in place, the reasons persist on the tracked row and as an
+``import_history`` event, and the item is re-drained on a later run once
+TrackDownloadsCommand re-reports the client's still-completed item as
+``import_pending`` (the retry-on-evidence-change path).
+
+Post-import client cleanup (FRG-DL-010) runs only after a row reaches ``imported``
+and only when the owning client's ``remove_completed_downloads`` flag is set —
+otherwise the item is merely ``mark_imported``-ed so it is not reprocessed. It
+runs *after* the import transaction commits, so client data is never removed
+before the ``issue_files`` row is durable.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import json
+import logging
+from typing import ClassVar, Literal
+
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from foragerr.commands.registry import BaseCommand, register_command, register_handler
+from foragerr.commands.service import HandlerContext
+from foragerr.config import Settings
+from foragerr.db import Database, queue_event, utcnow
+from foragerr.downloads.models import DownloadClientRow, TrackedDownloadRow
+from foragerr.downloads.repo import load_mappings
+from foragerr.downloads.state import (
+    TRACKED_STATUS_ERROR,
+    TRACKED_STATUS_OK,
+    TRACKED_STATUS_WARNING,
+    TrackedDownloadState,
+)
+from foragerr.downloads.tracking import (
+    TrackedStateChanged,
+    build_client_for_id,
+    process_failures,
+)
+from foragerr.importer import (
+    CompletedDownloadSource,
+    ImportContext,
+    ImportOutcome,
+    ImportStatus,
+    gather,
+    import_candidate,
+)
+from foragerr.library import repo
+
+logger = logging.getLogger("foragerr.downloads.imports")
+
+#: ~1-minute cadence, mirroring TrackDownloadsCommand; a module constant (like
+#: the ddl area) so no config-schema change is needed for M1.
+PROCESS_IMPORTS_INTERVAL = 60
+PROCESS_IMPORTS_MIN_INTERVAL = 60
+PROCESS_IMPORTS_TASK = "process-imports"
+
+#: States ProcessImportsCommand may claim into ``importing``: a freshly completed
+#: download, or a stale ``importing`` row a crashed run left behind (safe to redo
+#: — the pipeline's already-imported spec guards a committed import). It never
+#: claims ``import_blocked`` — TrackDownloadsCommand re-feeds a still-completed
+#: blocked item back to ``import_pending``, which is the retry-on-evidence path.
+_CLAIMABLE = (
+    TrackedDownloadState.IMPORT_PENDING.value,
+    TrackedDownloadState.IMPORTING.value,
+)
+
+
+def _encode_messages(messages: list[str]) -> str | None:
+    """Encode tracked-download status messages (mirrors ``tracking._encode_messages``)."""
+    return json.dumps(messages) if messages else None
+
+
+async def build_import_context(
+    db: Database, settings: Settings | None, *, now: dt.datetime
+) -> ImportContext:
+    """Assemble the per-run :class:`ImportContext` for the completed-download drain.
+
+    ``library_root`` is only a free-space-probe fallback here (execution targets
+    the resolved series' own folder), so the first configured root folder — or
+    the config dir when none exists yet — is a safe default. ``reference_year``
+    feeds the evidence parser; the run's wall-clock year is the right anchor for a
+    freshly downloaded release.
+    """
+    config_dir = str(settings.config_dir) if settings is not None else "."
+    async with db.read_session() as session:
+        roots = await repo.list_root_folders(session)
+    library_root = roots[0].path if roots else config_dir
+    return ImportContext(
+        library_root=library_root,
+        config_dir=config_dir,
+        reference_year=now.year,
+        now=now,
+    )
+
+
+@register_command
+class ProcessImportsCommand(BaseCommand):
+    """Drain completed downloads through the shared import pipeline (FRG-DL-009).
+
+    On the ``pp`` pool (size 1, serialized with the DDL-queue drain), scheduled
+    ~every minute. Serialized within its own exclusivity group so two drains never
+    overlap — which lets the claim safely also recover a stale ``importing`` row.
+    """
+
+    name: Literal["process-imports"] = "process-imports"
+    workload_class: ClassVar[str] = "pp"
+    exclusivity_group: ClassVar[str | None] = "process-imports"
+
+
+@register_handler("process-imports")
+async def _handle_process_imports(
+    command: ProcessImportsCommand, ctx: HandlerContext
+) -> str:
+    return await process_imports(ctx.db, ctx.settings, commands=ctx.commands)
+
+
+async def process_imports(
+    db: Database,
+    settings: Settings | None,
+    *,
+    commands=None,
+    now: dt.datetime | None = None,
+) -> str:
+    """Drain every claimable completed download through the pipeline (FRG-DL-009).
+
+    Returns an ``"imported=N blocked=M failed=K"`` summary (the command's
+    job-history result). Each download is processed independently: a failure in
+    one never rolls back another's committed import.
+    """
+    now = now or utcnow()
+    ctx = await build_import_context(db, settings, now=now)
+
+    # Snapshot the claimable rows up front (read-only); the per-row guarded claim
+    # re-checks state, so a row that changes between snapshot and claim is skipped.
+    async with db.read_session() as session:
+        row_ids = (
+            (
+                await session.execute(
+                    select(TrackedDownloadRow.id).where(
+                        TrackedDownloadRow.state.in_(_CLAIMABLE)
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    imported = blocked = failed = 0
+    for row_id in row_ids:
+        state = await _process_one(
+            db, settings, ctx, row_id=row_id, commands=commands
+        )
+        if state is TrackedDownloadState.IMPORTED:
+            imported += 1
+        elif state is TrackedDownloadState.IMPORT_BLOCKED:
+            blocked += 1
+        elif state is TrackedDownloadState.FAILED_PENDING:
+            failed += 1
+
+    summary = f"imported={imported} blocked={blocked} failed={failed}"
+    logger.info("process-imports: %s", summary)
+    return summary
+
+
+async def _process_one(
+    db: Database,
+    settings: Settings | None,
+    ctx: ImportContext,
+    *,
+    row_id: int,
+    commands,
+) -> TrackedDownloadState | None:
+    """Claim, drain, finalize, and clean up one completed download.
+
+    Returns the terminal tracked state applied, or ``None`` when the row could not
+    be claimed (raced / vanished / no output path).
+    """
+    # 1. Status-guarded claim: import_pending|importing -> importing, atomically.
+    async with db.write_session() as session:
+        result = await session.execute(
+            update(TrackedDownloadRow)
+            .where(
+                TrackedDownloadRow.id == row_id,
+                TrackedDownloadRow.state.in_(_CLAIMABLE),
+            )
+            .values(state=TrackedDownloadState.IMPORTING.value, updated_at=ctx.now)
+        )
+        if result.rowcount != 1:
+            return None  # raced with TrackDownloads / already claimed / removed
+        row = await session.get(TrackedDownloadRow, row_id)
+        download_id = row.download_id
+        client_id = row.client_id
+        client_title = row.title
+        output_path = row.output_path
+
+    if not output_path:
+        # Claimed but nothing to import from: block, never lose it.
+        final_state, status, messages = _resolve_final([], [], no_output=True)
+        async with db.write_session() as session:
+            await _apply_state(session, row_id, final_state, status, messages, ctx.now)
+        return final_state
+
+    # 2. Build the source (mappings passed as data — FRG-PP-008) and gather
+    #    candidates in a read session (the filesystem walk holds no write lock).
+    mappings = await load_mappings(db, client_id) if client_id is not None else []
+    source = CompletedDownloadSource(
+        download_id=download_id,
+        output_path=output_path,
+        client_id=client_id,
+        client_title=client_title,
+        mappings=tuple(mappings),
+    )
+    async with db.read_session() as session:
+        candidates = await gather(source, session, ctx)
+
+    # 3. Import every candidate in ONE write session so each issue_files row and
+    #    its history event land atomically with the final state transition.
+    outcomes: list[ImportOutcome] = []
+    async with db.write_session() as session:
+        for candidate in candidates:
+            outcomes.append(await import_candidate(session, candidate, ctx))
+        final_state, status, messages = _resolve_final(
+            candidates, outcomes, no_output=False
+        )
+        await _apply_state(session, row_id, final_state, status, messages, ctx.now)
+
+    # 4. Post-commit side-effects — OUTSIDE the write lock so they can open their
+    #    own sessions (the writer lock is not re-entrant): change-5 failure loop
+    #    on a corrupt archive, or FRG-DL-010 client cleanup on success.
+    if final_state is TrackedDownloadState.IMPORTED:
+        await _post_import_cleanup(
+            db, settings, client_id=client_id, download_id=download_id
+        )
+    elif final_state is TrackedDownloadState.FAILED_PENDING:
+        await process_failures(db, commands=commands, settings=settings, now=ctx.now)
+
+    return final_state
+
+
+def _resolve_final(
+    candidates, outcomes: list[ImportOutcome], *, no_output: bool
+) -> tuple[TrackedDownloadState, str, list[str]]:
+    """Fold per-file outcomes into one tracked (state, status, messages) verdict.
+
+    Precedence: any corrupt/invalid archive fails the whole download (→ change-5
+    failed handling); otherwise every file must import for ``imported``; anything
+    short of that (including zero importable files) blocks with per-file reasons —
+    never lost (FRG-DL-009).
+    """
+    if no_output or not outcomes:
+        return (
+            TrackedDownloadState.IMPORT_BLOCKED,
+            TRACKED_STATUS_WARNING,
+            ["no importable files found under the completed download path"],
+        )
+    if any(o.status is ImportStatus.FAILED for o in outcomes):
+        messages = [
+            f"{o.candidate.file_name}: {reason}"
+            for o in outcomes
+            if o.status is ImportStatus.FAILED
+            for reason in (o.reasons or ("archive failed validation",))
+        ]
+        return TrackedDownloadState.FAILED_PENDING, TRACKED_STATUS_ERROR, messages
+    if all(o.status is ImportStatus.IMPORTED for o in outcomes):
+        return TrackedDownloadState.IMPORTED, TRACKED_STATUS_OK, []
+    messages = [
+        f"{o.candidate.file_name}: {reason}"
+        for o in outcomes
+        if o.status is ImportStatus.BLOCKED
+        for reason in (o.reasons or ("blocked",))
+    ]
+    return TrackedDownloadState.IMPORT_BLOCKED, TRACKED_STATUS_WARNING, messages
+
+
+async def _apply_state(
+    session: AsyncSession,
+    row_id: int,
+    final_state: TrackedDownloadState,
+    status: str,
+    messages: list[str],
+    now: dt.datetime,
+) -> None:
+    """Write the terminal tracked-download transition inside the caller's session.
+
+    Lands in the SAME transaction as the pipeline's issue_files/history rows, so
+    the queue state and the imported file commit atomically. A row de-tracked
+    mid-flight (manual queue remove) is left alone.
+    """
+    row = await session.get(TrackedDownloadRow, row_id)
+    if row is None:
+        return
+    row.state = final_state.value
+    row.status = status
+    row.status_messages = _encode_messages(messages)
+    row.updated_at = now
+    queue_event(
+        session,
+        TrackedStateChanged(
+            download_id=row.download_id,
+            state=row.state,
+            status=row.status,
+            series_id=row.series_id,
+            issue_id=row.issue_id,
+        ),
+    )
+
+
+async def _post_import_cleanup(
+    db: Database,
+    settings: Settings | None,
+    *,
+    client_id: int | None,
+    download_id: str,
+) -> None:
+    """Remove or mark-imported the client item after a successful import (FRG-DL-010).
+
+    Gated on the per-client ``remove_completed_downloads`` flag: enabled →
+    ``remove(item, delete_data=True)`` (which also drops DDL staging, since that
+    only happens after import success); disabled → ``mark_imported(item)`` so the
+    item is never reprocessed but its data (and DDL staging) is retained. Purely
+    best-effort — a client hiccup must never undo the durable import.
+    """
+    if client_id is None:
+        return
+    async with db.read_session() as session:
+        client_row = await session.get(DownloadClientRow, client_id)
+    remove_completed = bool(
+        client_row.remove_completed_downloads if client_row is not None else False
+    )
+    try:
+        client = await build_client_for_id(db, client_id, settings=settings)
+        if client is None:
+            return
+        for item in await client.get_items():
+            if item.download_id != download_id:
+                continue
+            if remove_completed:
+                await client.remove(item, delete_data=True)
+            else:
+                await client.mark_imported(item)
+            return
+    except Exception:  # noqa: BLE001 — cleanup failure must not undo the import
+        logger.warning(
+            "process-imports: post-import client cleanup failed; import stands",
+            extra={"client_id": client_id, "download_id": download_id},
+        )
+
+
+__all__ = [
+    "PROCESS_IMPORTS_INTERVAL",
+    "PROCESS_IMPORTS_MIN_INTERVAL",
+    "PROCESS_IMPORTS_TASK",
+    "ProcessImportsCommand",
+    "build_import_context",
+    "process_imports",
+]

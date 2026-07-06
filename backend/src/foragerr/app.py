@@ -206,6 +206,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.state.startup_hooks.append(_register_tracking_task)
 
+    # --- import flows (m1-import-pipeline, area: flows): importing the module
+    #     registers ProcessImportsCommand + handler (FRG-DL-009/010); register
+    #     the ~1-minute pp-pool drain that runs the completed downloads through
+    #     the shared import pipeline. ---
+    import foragerr.downloads.imports  # noqa: F401 — command/handler registration
+    from foragerr.downloads.imports import (
+        PROCESS_IMPORTS_INTERVAL,
+        PROCESS_IMPORTS_MIN_INTERVAL,
+        PROCESS_IMPORTS_TASK,
+    )
+
+    async def _register_process_imports_task(app: FastAPI) -> None:
+        await app.state.scheduler.register_task(
+            PROCESS_IMPORTS_TASK,
+            PROCESS_IMPORTS_TASK,
+            interval_seconds=PROCESS_IMPORTS_INTERVAL,
+            min_interval_seconds=PROCESS_IMPORTS_MIN_INTERVAL,
+        )
+
+    app.state.startup_hooks.append(_register_process_imports_task)
+
     # --- ddl area (m1-downloads, area: ddl): importing registers the DDL
     #     client factory, the GetComics search provider, and the
     #     process-ddl-queue command; the task drains the persistent queue. ---
