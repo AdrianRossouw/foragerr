@@ -94,9 +94,17 @@ export function lookupOutcomeNote(
  * the SAME structural discriminator `lookupOutcomeNote` used to pick the
  * message (`isComicVineAuthError`, never message prose) — this is layered on
  * top of its precedence logic as a rendering-only concern, not a change to
- * which outcome wins.
+ * which outcome wins. Exported so `LibraryImport`'s inline `GroupLookup` —
+ * which already reuses `lookupOutcomeNote` wholesale — renders the identical
+ * credential-error link rather than a parallel copy.
  */
-function OutcomeErrorText({ error, text }: { error: unknown; text: string }) {
+export function OutcomeErrorText({
+  error,
+  text,
+}: {
+  error: unknown;
+  text: string;
+}) {
   if (isComicVineAuthError(error)) {
     return (
       <>

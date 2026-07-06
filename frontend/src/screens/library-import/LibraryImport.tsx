@@ -17,6 +17,7 @@ import type { LibraryImportGroup } from '../../api/types';
 import {
   lookupOutcomeNote,
   normalizeLookupTerm,
+  OutcomeErrorText,
   STRATEGY_LABELS,
 } from '../add/AddSeries';
 import {
@@ -507,8 +508,11 @@ function GroupCard({
  * Inline ComicVine lookup for correcting/setting one group's match. Reuses the
  * add screen's lookup machinery wholesale: the same envelope classification
  * (credential / degraded / capped / incomplete / empty via lookupOutcomeNote),
- * the same term normalization, and the same explicit same-term retry after a
- * retryable outcome. Picking a candidate PATCHes the override.
+ * the same term normalization, the same explicit same-term retry after a
+ * retryable outcome, and (FRG-UI-020) the same `OutcomeErrorText` render —
+ * a credential failure links to Settings -> General exactly like the add
+ * screen, not a parallel copy of the prose. Picking a candidate PATCHes the
+ * override.
  */
 function GroupLookup({
   folderName,
@@ -561,7 +565,7 @@ function GroupLookup({
       )}
       {note?.tone === 'error' && (
         <p className={styles.errorNote} role="alert">
-          {note.text}
+          <OutcomeErrorText error={lookup.error} text={note.text} />
         </p>
       )}
       {note?.tone === 'status' && (
