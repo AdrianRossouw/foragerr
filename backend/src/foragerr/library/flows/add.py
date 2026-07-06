@@ -26,6 +26,7 @@ from foragerr.library.paths import (
     validate_under_root,
 )
 from foragerr.metadata import (
+    COMICVINE_CREDENTIAL_MESSAGE,
     ComicVineAuthError,
     ComicVineClient,
     ComicVineError,
@@ -49,11 +50,13 @@ class AddSeriesResult:
 
     ``series`` is the persisted row (detached but fully loaded — safe to read
     scalar attributes); ``refresh_command_id`` is the id of the enqueued
-    ``refresh-series`` command, which the API layer echoes in its 201 body.
+    ``refresh-series`` command, which the API layer echoes in its 201 body —
+    ``None`` when the caller opted out via ``enqueue_refresh=False`` (it owns
+    the refresh itself, e.g. the library-import flow's direct awaited refresh).
     """
 
     series: SeriesRow
-    refresh_command_id: int
+    refresh_command_id: int | None
 
 
 async def add_series(
@@ -68,6 +71,7 @@ async def add_series(
     monitor_new_items: str = "all",
     search_on_add: bool = False,
     path_override: str | None = None,
+    enqueue_refresh: bool = True,
     factory: HttpClientFactory | None = None,
 ) -> AddSeriesResult:
     """Validate and add a series, then enqueue its refresh chain.
@@ -83,7 +87,10 @@ async def add_series(
     On success: persists the series (with ``add_options`` encoding the
     strategy / monitor-new-items policy / search-on-add flag as canonical
     JSON) inside one write transaction, then enqueues
-    ``refresh-series`` for it.
+    ``refresh-series`` for it — unless ``enqueue_refresh=False``, for callers
+    that run the refresh themselves (the library-import flow awaits it
+    directly so files can match issues deterministically; enqueuing here too
+    would double every ComicVine fetch and scan).
     """
     validate_monitor_strategy(monitor_strategy)
     validate_monitor_new_items(monitor_new_items)
@@ -95,14 +102,13 @@ async def add_series(
         async with ComicVineClient(settings, factory) as cv:
             record: SeriesRecord = await cv.get_volume(cv_volume_id)
     except ComicVineAuthError as exc:
-        # Credential failure gets the same actionable wording the lookup
-        # endpoint surfaces (m2-lookup-error-surfacing design, Decision 5) —
+        # Credential failure gets the ONE shared actionable wording every
+        # surface uses (m2-lookup-error-surfacing design, Decision 5) —
         # static text, never the exception's own message, so no key material
         # can leak into the validation error.
         raise SeriesValidationError(
             f"comicvine volume {cv_volume_id} could not be fetched: "
-            "ComicVine rejected the API key (missing or invalid) — "
-            "set comicvine_api_key"
+            f"{COMICVINE_CREDENTIAL_MESSAGE}"
         ) from exc
     except ComicVineError as exc:
         # Unavailable / malformed / rate-limited all reject cleanly —
@@ -169,6 +175,8 @@ async def add_series(
         )
 
     # --- enqueue the refresh chain (after commit) --------------------------
+    if not enqueue_refresh:
+        return AddSeriesResult(series=series, refresh_command_id=None)
     refresh = await commands.enqueue(
         "refresh-series", {"series_id": series.id}, triggered_by="add-series"
     )

@@ -33,8 +33,12 @@ const NAMING: NamingConfig = {
 const MM: MediaManagementConfig = {
   import_transfer_mode: 'move',
   library_import_mode: 'in_place',
+  library_import_proposal_cap: 25,
+  library_import_similarity_floor: 0.55,
   recycle_bin_path: '',
   recycle_bin_retention_days: 0,
+  duplicate_constraint: 'larger-size',
+  duplicate_dump_path: '',
 };
 
 const TOKENS: NamingTokens = {
@@ -185,6 +189,132 @@ describe('FRG-UI-012: standard fields via SchemaForm + save', () => {
     // The form is back to its saved state — the save bar disarms, not stuck dirty.
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'No Changes' })).toBeDisabled(),
+    );
+  });
+});
+
+describe('FRG-PP-014: duplicate handling settings', () => {
+  it('FRG-PP-014 — the duplicate constraint and dump folder fields render in the Duplicate Handling section', async () => {
+    const { fetcher } = fakeFetcher(resolver());
+    renderWithProviders(<MediaManagement />, { fetcher });
+
+    const constraint = await screen.findByTestId('schema-field-duplicate_constraint');
+    const select = within(constraint).getByLabelText('Duplicate Constraint');
+    expect(select.tagName).toBe('SELECT');
+    // Seeded from the GET (larger-size is the documented default).
+    expect(select).toHaveValue('larger-size');
+    expect(within(constraint).getByRole('option', { name: 'Preferred format' })).toBeInTheDocument();
+    expect(screen.getByTestId('schema-field-duplicate_dump_path')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Duplicate Handling' })).toBeInTheDocument();
+  });
+
+  it('FRG-PP-014 — changing the constraint and dump folder persists both through the media-management PUT', async () => {
+    const user = userEvent.setup();
+    const { spy, fetcher } = fakeFetcher(resolver());
+    renderWithProviders(<MediaManagement />, { fetcher });
+
+    const constraint = await screen.findByTestId('schema-field-duplicate_constraint');
+    await user.selectOptions(
+      within(constraint).getByLabelText('Duplicate Constraint'),
+      'preferred-format',
+    );
+    await user.type(
+      screen.getByLabelText('Duplicate Dump Folder'),
+      '/comics/.duplicates',
+    );
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith(
+        '/api/v1/config/mediamanagement',
+        expect.objectContaining({
+          method: 'PUT',
+          body: expect.objectContaining({
+            duplicate_constraint: 'preferred-format',
+            duplicate_dump_path: '/comics/.duplicates',
+          }),
+        }),
+      ),
+    );
+  });
+
+  it('FRG-PP-014 — a field-precise 4xx on the dump folder attaches to its field', async () => {
+    const user = userEvent.setup();
+    const { fetcher } = fakeFetcher(
+      resolver({
+        onPutMm: () => {
+          throw new ApiRequestError(
+            400,
+            {
+              message: 'config validation failed',
+              errors: [
+                {
+                  field: 'settings.duplicate_dump_path',
+                  message: 'path /nope does not exist and its parent is not a writable directory',
+                },
+              ],
+            },
+            '/api/v1/config/mediamanagement',
+          );
+        },
+      }),
+    );
+    renderWithProviders(<MediaManagement />, { fetcher });
+
+    await user.type(await screen.findByLabelText('Duplicate Dump Folder'), '/nope');
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    const field = screen.getByTestId('schema-field-duplicate_dump_path');
+    await waitFor(() =>
+      expect(within(field).getByRole('alert')).toHaveTextContent(
+        'not a writable directory',
+      ),
+    );
+  });
+});
+
+describe('FRG-IMP-023: library-import scan tuning settings', () => {
+  it('FRG-IMP-023 — the proposal cap and similarity floor render in the Importing section, seeded from the GET', async () => {
+    const { fetcher } = fakeFetcher(resolver());
+    renderWithProviders(<MediaManagement />, { fetcher });
+
+    const cap = await screen.findByTestId(
+      'schema-field-library_import_proposal_cap',
+    );
+    expect(within(cap).getByLabelText('Library Import Proposal Cap')).toHaveValue(25);
+    const floor = screen.getByTestId(
+      'schema-field-library_import_similarity_floor',
+    );
+    expect(
+      within(floor).getByLabelText('Library Import Similarity Floor'),
+    ).toHaveValue(0.55);
+    expect(screen.getByRole('heading', { name: 'Importing' })).toBeInTheDocument();
+  });
+
+  it('FRG-IMP-023 — changing the cap and floor persists both through the media-management PUT', async () => {
+    const user = userEvent.setup();
+    const { spy, fetcher } = fakeFetcher(resolver());
+    renderWithProviders(<MediaManagement />, { fetcher });
+
+    const cap = await screen.findByLabelText('Library Import Proposal Cap');
+    await user.clear(cap);
+    await user.type(cap, '100');
+    const floor = screen.getByLabelText('Library Import Similarity Floor');
+    await user.clear(floor);
+    await user.type(floor, '0.8');
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith(
+        '/api/v1/config/mediamanagement',
+        expect.objectContaining({
+          method: 'PUT',
+          body: expect.objectContaining({
+            library_import_proposal_cap: 100,
+            library_import_similarity_floor: 0.8,
+          }),
+        }),
+      ),
     );
   });
 });

@@ -144,6 +144,29 @@ async def test_rescan_records_unmatched_in_report_and_leaves_file(
     assert await _issue_files(db, sid) == []
 
 
+@pytest.mark.req("FRG-IMP-022")
+@pytest.mark.req("FRG-PP-005")
+async def test_rescan_surfaces_zero_byte_file_as_a_visible_block(
+    db, settings, root_folder_id, format_profile_id, tmp_path
+):
+    """A zero-byte archive is NOT walk-skipped: it enumerates and lands in the
+    rescan report as a visible block with the junk-floor reason (FRG-PP-005) —
+    never a silent absence."""
+    sid, _iid, sdir = await _mk_series(db, tmp_path, root_folder_id, format_profile_id)
+    empty = sdir / "Spawn 001 (2024).cbz"
+    empty.write_bytes(b"")
+
+    report = await rescan_series(db, settings, sid)
+
+    assert report.imported == ()
+    assert len(report.blocked) == 1
+    name, reasons = report.blocked[0]
+    assert name == "Spawn 001 (2024).cbz"
+    assert any("junk" in r or "sample" in r for r in reasons)
+    assert os.path.exists(empty)  # left in place for the operator
+    assert await _issue_files(db, sid) == []
+
+
 @pytest.mark.req("FRG-SER-010")
 async def test_rescan_skips_already_linked_files(
     db, settings, root_folder_id, format_profile_id, tmp_path

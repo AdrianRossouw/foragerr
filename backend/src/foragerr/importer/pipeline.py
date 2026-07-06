@@ -43,7 +43,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from foragerr.importer import fileops, history
 from foragerr.importer.context import ImportContext
-from foragerr.importer.decisions import ImportDecision, ImportEvaluation, decide
+from foragerr.importer.decisions import (
+    ImportDecision,
+    ImportEvaluation,
+    decide,
+    duplicate_win_reason,
+    same_rung,
+)
 from foragerr.importer.evidence import (
     PROV_COMICINFO,
     PROV_COMICINFO_CONFLICT,
@@ -55,10 +61,12 @@ from foragerr.importer.models import ImportHistoryRow
 from foragerr.naming import RenameFields, render_filename
 from foragerr.importer.sources import (
     SOURCE_DOWNLOAD,
+    SOURCE_LIBRARY,
     SOURCE_MANUAL,
     SOURCE_RESCAN,
     CompletedDownloadSource,
     ImportCandidate,
+    LibraryImportSource,
     ManualImportSource,
     ManualOverride,
     RescanSource,
@@ -70,6 +78,7 @@ from foragerr.metadata.comicinfo import (
     read_embedded_metadata,
     tag_cbz,
 )
+from foragerr.parser import parse
 from foragerr.parser.result import Booktype, IssueClassification
 from foragerr.quality.models import FormatProfileRow, decode_formats
 from foragerr.security.archives import inspect_archive
@@ -110,6 +119,10 @@ class ExecuteResult:
     size: int
     quarantine_path: str | None
     upgraded: bool
+    #: Why the incoming file won a same-rung duplicate tie (FRG-PP-014), or
+    #: ``None`` for a fresh import / profile-order upgrade. Recorded on the
+    #: replacement history event so the outcome and its reason are visible.
+    duplicate_reason: str | None = None
 
 
 async def _run_fs(ctx: ImportContext, func, *args, **kwargs):
@@ -130,7 +143,12 @@ async def _run_fs(ctx: ImportContext, func, *args, **kwargs):
 
 
 async def gather(
-    source: CompletedDownloadSource | RescanSource | ManualImportSource,
+    source: (
+        CompletedDownloadSource
+        | RescanSource
+        | ManualImportSource
+        | LibraryImportSource
+    ),
     session: AsyncSession,
     ctx: ImportContext,
 ) -> list[ImportCandidate]:
@@ -189,7 +207,8 @@ async def _resolve_override(
     context — is in scope. An override naming a non-existent or mismatched entity
     returns ``None`` (dropped, not trusted) so the file falls back to the
     heuristic rather than fabricating a mapping. A series-only override cannot
-    resolve a concrete issue, so it too is ignored.
+    resolve a concrete issue here; :func:`reconcile` handles it separately
+    (series pinned, issue matched heuristically within it — FRG-IMP-023).
     """
     if override.issue_id is None:
         return None
@@ -204,6 +223,31 @@ async def _resolve_override(
     ):
         return None  # out of scope for a series-pinned manual folder
     return issue_row.series_id, issue_row.id
+
+
+async def _resolve_series_override(
+    session: AsyncSession, candidate: ImportCandidate, override: ManualOverride
+) -> int | None:
+    """Validate a SERIES-ONLY override: the pinned series id, or ``None``.
+
+    A series-only override (a library-import group's confirmed volume,
+    FRG-IMP-023) pins WHICH series the file belongs to — human intent beats the
+    filename's series parse, exactly like a full override — while the concrete
+    issue mapping stays heuristic/embedded within that series. Same trust rules
+    as :func:`_resolve_override`: a non-existent series, or one outside a scoped
+    candidate's scope, is dropped rather than trusted.
+    """
+    if override.series_id is None or override.issue_id is not None:
+        return None
+    series = await session.get(SeriesRow, override.series_id)
+    if series is None:
+        return None
+    if (
+        candidate.series_scope_id is not None
+        and series.id != candidate.series_scope_id
+    ):
+        return None
+    return series.id
 
 
 async def _embedded_issue(session: AsyncSession, embedded) -> IssueRow | None:
@@ -295,6 +339,37 @@ async def reconcile(
             evidence.provenance["series"] = PROV_MANUAL_OVERRIDE
             evidence.provenance["issue"] = PROV_MANUAL_OVERRIDE
             return resolved
+        # 1b. series-only override (FRG-IMP-023): the series is pinned by human
+        #     intent — bypassing the series-title heuristic entirely, so a
+        #     corrected/confirmed volume wins even when the filename disagrees
+        #     with the ComicVine title — while the ISSUE mapping keeps ch2's
+        #     exact precedence (FRG-IMP-024): a VERIFIED embedded ComicVine id
+        #     resolving INSIDE the pinned series beats the filename heuristic
+        #     (a mis-numbered file imports as its embedded issue); one
+        #     resolving OUTSIDE it never silently wins and never silently
+        #     loses — the conflict is recorded so EmbeddedIdConflictSpec
+        #     blocks the file for review. No issue match → fall through
+        #     (the file blocks visibly as unmatched, never guessed).
+        pinned_series = await _resolve_series_override(session, candidate, override)
+        if pinned_series is not None:
+            issue_row = await _embedded_issue(session, embedded)
+            if issue_row is not None and issue_row.series_id == pinned_series:
+                evidence.provenance["series"] = PROV_MANUAL_OVERRIDE
+                evidence.provenance["issue"] = PROV_COMICINFO
+                return pinned_series, issue_row.id
+            if issue_row is not None:
+                # Resolvable, but to an issue OUTSIDE the human-confirmed
+                # series: surface the disagreement (blocks), don't mis-file.
+                evidence.provenance[PROV_COMICINFO_CONFLICT] = str(
+                    embedded.cv_issue_id
+                )
+            if evidence.issue is not None:
+                issue_id = await _match_issue_in_series(
+                    session, pinned_series, evidence.issue, ctx
+                )
+                if issue_id is not None:
+                    evidence.provenance["series"] = PROV_MANUAL_OVERRIDE
+                    return pinned_series, issue_id
 
     base_series, base_issue, base_source = await _reconcile_base(
         session, candidate, evidence, ctx
@@ -457,6 +532,8 @@ async def build_evaluation(
 
     existing_path: str | None = None
     existing_format: str | None = None
+    existing_size: int | None = None
+    existing_fix_revision: int | None = None
     ladder: tuple[str, ...] = ()
     dest_dir = ctx.library_root
     if series_id is not None:
@@ -477,6 +554,16 @@ async def build_evaluation(
         if existing is not None:
             existing_path = existing.path
             existing_format = _ext(existing.path)
+            existing_size = existing.size
+            # The existing file's `(fN)` fixed-release marker (FRG-PP-014):
+            # the persisted row value first — renaming strips the marker from
+            # the placed basename, so the row is the durable carrier — with a
+            # stored-basename parse as the legacy-row fallback.
+            existing_fix_revision = existing.fix_revision
+            if existing_fix_revision is None:
+                existing_fix_revision = parse(
+                    Path(existing.path).name, reference_year=ctx.reference_year
+                ).fix_revision
 
     free = ctx.free_space_probe(dest_dir or ctx.library_root)
 
@@ -505,6 +592,10 @@ async def build_evaluation(
         embedded_cv_issue_id=embedded.cv_issue_id if embedded is not None else None,
         embedded_verified=evidence.provenance.get("issue") == PROV_COMICINFO,
         comicinfo_conflict=PROV_COMICINFO_CONFLICT in evidence.provenance,
+        existing_size=existing_size,
+        existing_fix_revision=existing_fix_revision,
+        new_fix_revision=evidence.fix_revision,
+        duplicate_constraint=ctx.duplicate_constraint,
     )
 
 
@@ -546,6 +637,57 @@ def build_fields(series: SeriesRow, issue: IssueRow, evidence: Evidence) -> Rena
 # --- stage 4: execute --------------------------------------------------------
 
 
+def _register_in_place(
+    candidate: ImportCandidate, series: SeriesRow, dest_path: Path, ctx: ImportContext
+) -> bool:
+    """Whether this candidate is registered at its EXISTING path without any
+    ``place_file`` (FRG-IMP-023, m2-existing-library-import design decision 4).
+
+    True only for a LIBRARY-IMPORT candidate (``source_kind`` guard, the same
+    data-carried discriminator ``execute``'s move-cleanup uses — the decision
+    logic itself never forks) in ``library_import_mode == "in_place"`` (the
+    default), and only when the file is already where placement would put it:
+    its current path IS the computed destination, or — with renaming disabled,
+    where the original name is kept — it already lives anywhere under the
+    series folder. ``library_import_mode`` is consumed ONLY at this
+    library-import placement seam: every other source (download, rescan,
+    manual) routes through ``place_file`` exactly as it did before the mode
+    existed, so a rescan of a nested file with renaming disabled still moves
+    it to its computed destination. ``move`` mode (and every candidate
+    arriving from outside the series folder, e.g. a download staging dir)
+    routes through ``place_file`` as before.
+    """
+    if (
+        candidate.source_kind != SOURCE_LIBRARY
+        or ctx.library_import_mode != "in_place"
+    ):
+        return False
+    local = Path(candidate.local_path)
+    if os.path.realpath(local) == os.path.realpath(dest_path):
+        return True
+    if not ctx.rename_enabled:
+        try:
+            return local.resolve().is_relative_to(Path(series.path).resolve())
+        except OSError:  # pragma: no cover - unresolvable path: fall through
+            return False
+    return False
+
+
+def _same_physical_file(a: str, b: str | os.PathLike[str]) -> bool:
+    """Whether two paths denote the SAME physical file, symlink-tolerant.
+
+    ``os.path.samefile`` (device+inode) when both paths exist; otherwise (the
+    replacement target may not exist yet) a resolved-``realpath`` comparison.
+    Raw-string comparison is never enough here: a series path reached through a
+    symlinked walk root names the same file under a different string, and
+    treating that as "different" disposes of the very file being registered.
+    """
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return os.path.realpath(a) == os.path.realpath(os.fspath(b))
+
+
 async def execute(
     session: AsyncSession,
     candidate: ImportCandidate,
@@ -569,6 +711,16 @@ async def execute(
     so a ``place_file`` failure rolled back the restored old row while the file
     was already gone — a vanished path that the next rescan removed, silently
     reverting the issue to Wanted. The FS-heavy copy runs through ``ctx.offload``.
+
+    **The one deliberate exception (FRG-PP-014):** a replacement whose rendered
+    destination is the existing file's OWN path (the default template is
+    deterministic per issue, so every same-name re-grab replacement lands here).
+    Placing first would let ``place_file``'s ``os.replace`` silently overwrite
+    the loser — destroying the never-deleted guarantee — so for that case alone
+    the loser is disposed of (dump/recycle/delete per the normal rules) BEFORE
+    the placement. A crash between the two steps leaves the loser recoverable
+    in the dump/recycle bin and the incoming file still in staging; the rolled-
+    back row points at the now-vacated path, which the next rescan reconciles.
     """
     assert ev.series_id is not None and ev.issue_id is not None
     series = await session.get(SeriesRow, ev.series_id)
@@ -588,49 +740,106 @@ async def execute(
     # via safe_join so the constructed path can never escape the series root.
     dest_path = safe_join(series.path, new_name)
 
-    # 1. IRREVERSIBLE MOVE FIRST — before any DB mutation or quarantine, off the
-    #    event loop. os.replace overwrites an existing destination, so placing
-    #    ahead of the row swap never collides.
-    placed = await _run_fs(
-        ctx,
-        fileops.place_file,
-        candidate.local_path,
-        dest_path,
-        mode=ctx.transfer_mode,
-        margin_bytes=ctx.free_space_margin_bytes,
+    # Replacement bookkeeping, computed BEFORE anything moves: a replacement
+    # whose target is the existing file's own physical path must dispose of the
+    # loser first (see the docstring's FRG-PP-014 exception), and an "existing"
+    # file that IS the candidate (a symlink-aliased path naming the same inode)
+    # must never be disposed of at all — it is the file being imported. All
+    # comparisons are physical (samefile/realpath), never raw strings.
+    existing = ev.existing_file_path
+    existing_present = existing is not None and os.path.exists(existing)
+    in_place = _register_in_place(candidate, series, dest_path, ctx)
+    source_is_existing = existing_present and _same_physical_file(
+        existing, candidate.local_path
     )
-    size = placed.stat().st_size
-
-    # 2. Only now that the new file is durable: send the superseded file to the
-    #    recycle bin (FRG-PP-013) — or permanently delete it when no bin is
-    #    configured — and drop its stale row, then add the new row. If any of
-    #    this rolls back, the placed file's id tag keeps it recoverable.
+    dest_is_existing = (
+        existing_present
+        and not in_place
+        and _same_physical_file(existing, str(dest_path))
+    )
+    # A replacement at the SAME profile rung is a duplicate resolution
+    # (FRG-PP-014) — the decision engine only approves such a candidate when
+    # DuplicateConstraintSpec let it win the tie. Its loser goes to the
+    # duplicate-dump folder when one is configured; a profile-order UPGRADE
+    # keeps the recycle/delete disposal unchanged.
+    duplicate_resolution = existing_present and same_rung(ev)
+    duplicate_reason = duplicate_win_reason(ev) if duplicate_resolution else None
     quarantine_path: str | None = None
     upgraded = False
-    if (
-        ev.existing_file_path is not None
-        and ev.existing_file_path != str(placed)
-        and os.path.exists(ev.existing_file_path)
-    ):
-        if ctx.recycle_bin_path:
-            quarantine_path = str(
+
+    async def _dispose_existing() -> str | None:
+        """Dump / recycle / permanently delete the replaced file (FRG-PP-013/014).
+
+        Returns the quarantine destination, or ``None`` for a permanent delete
+        (recorded on the history event with no recycle path)."""
+        if duplicate_resolution and ctx.duplicate_dump_path:
+            return str(
                 await _run_fs(
-                    ctx,
-                    fileops.recycle_file,
-                    ev.existing_file_path,
-                    ctx.recycle_bin_path,
+                    ctx, fileops.dump_file, existing, ctx.duplicate_dump_path,
                     now=ctx.now,
                 )
             )
-        else:
-            # No bin configured: permanently delete the replaced file, but still
-            # record the replacement (with no recycle path) on the history event.
-            await _run_fs(ctx, os.remove, ev.existing_file_path)
-            quarantine_path = None
-        upgraded = True
+        if ctx.recycle_bin_path:
+            return str(
+                await _run_fs(
+                    ctx, fileops.recycle_file, existing, ctx.recycle_bin_path,
+                    now=ctx.now,
+                )
+            )
+        await _run_fs(ctx, os.remove, existing)
+        return None
+
+    if in_place:
+        # In-place library import (FRG-IMP-023): the candidate is registered at
+        # its existing path with NO move/copy/rename at all (design decision 4).
+        # A tracked existing file that is the SAME physical file as the
+        # candidate is the file being registered — nothing to dispose of, only
+        # its row is swapped below; a genuinely different file is disposed of
+        # per the normal replacement rules.
+        placed = Path(candidate.local_path)
+        if existing_present:
+            if not source_is_existing:
+                quarantine_path = await _dispose_existing()
+            upgraded = True
+    else:
+        if dest_is_existing and not source_is_existing:
+            # The rendered destination IS the existing file's path: the loser
+            # leaves (dump/recycle/delete) BEFORE place_file can overwrite it
+            # (FRG-PP-014 — the loser is never silently destroyed). Crash
+            # between the steps: loser already safe, incoming still in staging.
+            quarantine_path = await _dispose_existing()
+        # 1. IRREVERSIBLE MOVE — before any DB mutation and (same-path case
+        #    aside) before any disposal, off the event loop (see the
+        #    docstring's FRG-PP-010 ordering).
+        placed = await _run_fs(
+            ctx,
+            fileops.place_file,
+            candidate.local_path,
+            dest_path,
+            mode=ctx.transfer_mode,
+            margin_bytes=ctx.free_space_margin_bytes,
+        )
+        # 2. Only now that the new file is durable: send the superseded file to
+        #    the recycle bin (FRG-PP-013) — or the duplicate dump, or permanent
+        #    deletion when no bin is configured. If any of the row work below
+        #    rolls back, the placed file's id tag keeps it recoverable. A
+        #    source that IS the tracked existing file (an aliased path being
+        #    renamed onto its computed destination) has nothing to dispose of —
+        #    the move above already relocated it.
+        if existing_present:
+            if not dest_is_existing and not source_is_existing:
+                quarantine_path = await _dispose_existing()
+            upgraded = True
+    size = placed.stat().st_size
+
+    # Drop the replaced/stale row so the new insert can never violate the
+    # unique-path constraint: after a replacement (including the same-path and
+    # aliased-path cases above), and equally when a vanished file's stale row
+    # still squats on the exact path just placed.
+    if existing is not None and (upgraded or existing == str(placed)):
         old_row = (
             await session.execute(
-                select(IssueFileRow).where(IssueFileRow.path == ev.existing_file_path)
+                select(IssueFileRow).where(IssueFileRow.path == existing)
             )
         ).scalars().first()
         if old_row is not None:
@@ -655,12 +864,19 @@ async def execute(
     file_row = await repo.add_issue_file(
         session, issue_id=issue.id, path=str(placed), size=size, added_at=ctx.now
     )
+    # Persist the winner's `(fN)` fixed-release marker on the row (FRG-PP-014):
+    # renaming strips the marker from the placed basename, so the row — not the
+    # on-disk name — is what future duplicate contests read. Legacy rows stay
+    # NULL and fall back to the basename parse in build_evaluation.
+    file_row.fix_revision = ev.new_fix_revision
+    await session.flush()
     return ExecuteResult(
         imported_path=str(placed),
         issue_file_id=file_row.id,
         size=size,
         quarantine_path=quarantine_path,
         upgraded=upgraded,
+        duplicate_reason=duplicate_reason,
     )
 
 
@@ -673,6 +889,7 @@ _PROVENANCE_BY_KIND: dict[str, str] = {
     SOURCE_DOWNLOAD: history.SOURCE_DOWNLOAD,
     SOURCE_RESCAN: history.SOURCE_RESCAN,
     SOURCE_MANUAL: history.SOURCE_MANUAL,
+    SOURCE_LIBRARY: history.SOURCE_LIBRARY,
 }
 
 
@@ -809,6 +1026,10 @@ async def import_candidate(
             result = await execute(session, candidate, ev, ctx)
             data["imported_path"] = result.imported_path
             data["size"] = result.size
+            if result.duplicate_reason is not None:
+                # FRG-PP-014: the same-rung duplicate outcome carries its reason
+                # into history, mirroring the rejection-side reason list.
+                data["duplicate_reason"] = result.duplicate_reason
             history.record_event(
                 session,
                 event_type=(

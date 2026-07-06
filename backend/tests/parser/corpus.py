@@ -60,6 +60,8 @@ class Row:
     year: int | None = None
     booktype: str = "issue"
     scan_group: str | None = None
+    # `(fN)` fixed-release marker revision (duplicate-constraint parser extension)
+    fix_revision: int | None = None
     issue_id: str | None = None
     alt_series: str | None = None
     alt_issue_title: str | None = None
@@ -280,7 +282,26 @@ CORPUS: tuple[Row, ...] = (
     # (FRG-IMP-016). The suffixed issue survives; volume stays None.
     Row(78, "Saga TPB 05A (2013).cbz", "Saga", ("FRG-IMP-016", "FRG-IMP-021"),
         issue="5", display="05A", suffix="A", year=2013, booktype="TPB"),
+    # 79-81: `(fN)` fixed-release markers (duplicate-constraint parser extension; corpus
+    # rows carry the FRG-IMP annotation-classification ids per the row policy —
+    # the requirement-tagged marker tests live in test_fix_markers.py).
+    # 79: a trailing marker is captured (and is NOT mistaken for a scan group).
+    Row(79, "Batman 404 (1987) (f2).cbz", "Batman", ("FRG-IMP-017", "FRG-IMP-021"),
+        issue="404", display="404", year=1987, fix_revision=2,
+        annotations_contain=(("fix-marker", "f2"),)),
+    # 80: scene shape — the marker sits among trailing groups and the real scan
+    # group still wins the trailing-annotation selection.
+    Row(80, "Saga 055 (2019) (Digital) (f1) (Son of Ultron-Empire).cbz", "Saga",
+        ("FRG-IMP-017", "FRG-IMP-021"),
+        issue="55", display="055", year=2019, scan_group="Son of Ultron-Empire",
+        fix_revision=1,
+        annotations_contain=(("edition", "Digital"), ("fix-marker", "f1"))),
+    # 81: title-plausibility guard — an `(f1)` group BEFORE the issue is title
+    # context, never a fix marker (fix_revision stays None, kind stays generic).
+    Row(81, "Batman (f1) 404 (1987).cbz", "Batman", ("FRG-IMP-017", "FRG-IMP-021"),
+        issue="404", display="404", year=1987,
+        annotations_contain=(("generic", "f1"),)),
 )
 
-assert len(CORPUS) == 78
-assert [r.n for r in CORPUS] == list(range(1, 79))
+assert len(CORPUS) == 81
+assert [r.n for r in CORPUS] == list(range(1, 82))

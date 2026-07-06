@@ -28,8 +28,10 @@ verified (see `downloads.md`). For each one it:
    structurally valid (see below); it must not look like a sample/junk file; the
    destination volume must have enough free space (with a safety margin); the issue
    must not already have this file; and if the issue already has a *different*
-   file, the new one must be an upgrade under your profile — an equal-or-worse file
-   is blocked as "not an upgrade".
+   file, the new one must be an upgrade under your profile — a worse file is
+   blocked as "not an upgrade", and a file of *equal* format rank goes to the
+   duplicate constraint (see "Duplicate handling" below) instead of an automatic
+   block.
 4. **Executes** the import: the file is renamed according to your naming template
    and moved into the series folder, the issue gains a file record, the download is
    marked imported, and — only after all of that succeeded, and only if the client's
@@ -159,6 +161,48 @@ With `comicinfo_tag_on_import` enabled (off by default), foragerr also *writes*
 a fresh `ComicInfo.xml` into each imported cbz from the matched ComicVine
 record — rewritten atomically, and never at the cost of the import: if tagging
 fails, the file lands untagged with a warning in history.
+
+## Importing an existing library
+
+The **Library Import** screen (sidebar → Library Import) ingests a collection
+that predates foragerr. Pick a configured root folder and run a scan: the walk
+enumerates comic files under it (skipping junk — AppleDouble/`@eaDir`
+directories, `._` resource forks, dotfiles, `_unpack_`-prefixed temp folders —
+zero-byte files are not silently skipped; they surface as visibly blocked),
+removes database records for files that vanished from disk, and
+groups everything unmapped by normalized series name. Groups appear as soon as
+the walk finishes; ComicVine match proposals (poster, name, year, publisher)
+then attach group by group. Staging is persisted, so the review survives a
+restart; one scan proposes matches for a bounded number of groups
+(`library_import_proposal_cap`, default 50 — each proposal is a rate-limited
+live search). Proposals already attached carry forward across re-scans, so a
+re-scan spends its budget on groups that don't have one yet.
+
+Review the groups: confirm proposals, correct one via the inline ComicVine
+search, or skip a group. Groups the scan could not parse or match are staged
+with the reason visible and are never imported on a guess — they need an
+explicit choice. Executing the import creates each confirmed group's series and
+runs its files through the same import pipeline as everything else (same safety
+checks, same history events). With `library_import_mode: in_place` (the
+default) files already under the series folder are registered where they are —
+nothing is moved or renamed unless renaming is enabled; with `move` they route
+through the normal placement/renaming path. Re-running the scan re-checks the
+root: confirmed and skipped decisions carry forward, and files that imported
+are never staged again.
+
+## Duplicate handling
+
+When an incoming file targets an issue that already has a file, the format
+profile decides first, exactly as before: a higher-ranked format imports as an
+upgrade, a lower-ranked one is rejected. Only a **same-rank tie** invokes the
+duplicate constraint (`duplicate_constraint`): `larger-size` (default — the
+strictly bigger file wins) or `preferred-format`. Explicit fixed-release
+markers in filenames (`(f1)`, `(f2)`, ...) always win over either constraint —
+a fixed release never loses to an unfixed one — and the decision and its
+reason are recorded in import history. If `duplicate_dump_path` is set, the
+losing file moves into a dated subfolder there instead of being deleted or
+recycled; the dump folder is deliberately not a recycle bin, so retention
+pruning never touches it.
 
 ## Rescanning a series
 

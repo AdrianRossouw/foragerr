@@ -99,16 +99,27 @@ class MediaManagementConfig(BaseModel):
 
     import_transfer_mode: str
     library_import_mode: str
+    # Library-import scan tuning (FRG-IMP-023): per-run proposal cap + the
+    # plausibility floor for attaching a proposed ComicVine match.
+    library_import_proposal_cap: int
+    library_import_similarity_floor: float
     recycle_bin_path: str
     recycle_bin_retention_days: int
+    # Same-rung duplicate handling (FRG-PP-014): constraint + optional dump root.
+    duplicate_constraint: str
+    duplicate_dump_path: str
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "MediaManagementConfig":
         return cls(
             import_transfer_mode=settings.import_transfer_mode,
             library_import_mode=settings.library_import_mode,
+            library_import_proposal_cap=settings.library_import_proposal_cap,
+            library_import_similarity_floor=settings.library_import_similarity_floor,
             recycle_bin_path=settings.recycle_bin_path,
             recycle_bin_retention_days=settings.recycle_bin_retention_days,
+            duplicate_constraint=settings.duplicate_constraint,
+            duplicate_dump_path=settings.duplicate_dump_path,
         )
 
 

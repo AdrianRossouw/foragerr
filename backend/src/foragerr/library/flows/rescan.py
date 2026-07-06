@@ -26,11 +26,8 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
-import os
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, ClassVar, Literal
-
-from sqlalchemy import select
 
 from foragerr.commands.registry import BaseCommand, register_command, register_handler
 from foragerr.commands.service import HandlerContext
@@ -46,7 +43,7 @@ from foragerr.importer import (
     media_management_fields,
 )
 from foragerr.library import repo
-from foragerr.library.models import IssueFileRow, IssueRow
+from foragerr.library.flows import reconcile
 
 logger = logging.getLogger("foragerr.library.flows.rescan")
 
@@ -117,17 +114,9 @@ async def rescan_series(
             return RescanReport(series_id, (), (), 0, 0, 0)
         walk_path = path_override or series.path
         reference_year = series.start_year or now.year
-        # Existing issue-files for this series, for the vanished-file scan.
-        existing = (
-            (
-                await session.execute(
-                    select(IssueFileRow.id, IssueFileRow.path)
-                    .join(IssueRow, IssueFileRow.issue_id == IssueRow.id)
-                    .where(IssueRow.series_id == series_id)
-                )
-            )
-            .all()
-        )
+        # Existing issue-files for this series, for the vanished-file scan
+        # (shared root/series reconciliation helpers, FRG-IMP-022).
+        existing = await reconcile.issue_file_paths_for_series(session, series_id)
 
     ctx = ImportContext(
         library_root=series.path,
@@ -139,10 +128,11 @@ async def rescan_series(
     )
 
     # Which linked files have vanished (checked off the loop when offloaded).
-    def _vanished() -> list[int]:
-        return [fid for fid, path in existing if not os.path.exists(path)]
-
-    vanished_ids = await offload(_vanished) if offload is not None else _vanished()
+    vanished_ids = (
+        await offload(reconcile.vanished_file_ids, existing)
+        if offload is not None
+        else reconcile.vanished_file_ids(existing)
+    )
 
     # Untracked files under the series path → pipeline candidates (read-only walk).
     source = RescanSource(series_id=series_id, path_override=path_override)
@@ -153,8 +143,7 @@ async def rescan_series(
     blocked: list[tuple[str, tuple[str, ...]]] = []
     async with db.write_session() as session:
         # 1. Vanished-file cleanup → derived Wanted restoration (FRG-SER-010).
-        for fid in vanished_ids:
-            await repo.remove_issue_file(session, fid)
+        await reconcile.remove_issue_files(session, vanished_ids)
         # 2. Route every untracked file through the ONE shared pipeline.
         for candidate in candidates:
             outcome = await import_candidate(session, candidate, ctx)

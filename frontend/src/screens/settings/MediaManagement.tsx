@@ -112,6 +112,28 @@ const IMPORT_FIELDS: SchemaField[] = [
       { value: 'move', name: 'Move' },
     ],
   },
+  {
+    order: 2,
+    name: 'library_import_proposal_cap',
+    type: 'number',
+    label: 'Library Import Proposal Cap',
+    help: 'Maximum number of ComicVine match proposals a single library-import scan fetches. Folder groups beyond the cap stage without a proposal — search them from the review screen.',
+    required: false,
+    secret: false,
+    advanced: false,
+    selectOptions: [],
+  },
+  {
+    order: 3,
+    name: 'library_import_similarity_floor',
+    type: 'number',
+    label: 'Library Import Similarity Floor',
+    help: 'Minimum name similarity (0 to 1) before a library-import scan proposes a ComicVine match on its own. Folder groups below the floor stage as no-match for manual search.',
+    required: false,
+    secret: false,
+    advanced: false,
+    selectOptions: [],
+  },
 ];
 
 const RECYCLE_FIELDS: SchemaField[] = [
@@ -139,6 +161,34 @@ const RECYCLE_FIELDS: SchemaField[] = [
   },
 ];
 
+const DUPLICATE_FIELDS: SchemaField[] = [
+  {
+    order: 0,
+    name: 'duplicate_constraint',
+    type: 'textbox',
+    label: 'Duplicate Constraint',
+    help: 'How a duplicate at the same format-profile rung is resolved. Fixed releases ((f1)/(f2)) always win; profile upgrades are unaffected.',
+    required: true,
+    secret: false,
+    advanced: false,
+    selectOptions: [
+      { value: 'larger-size', name: 'Larger size' },
+      { value: 'preferred-format', name: 'Preferred format' },
+    ],
+  },
+  {
+    order: 1,
+    name: 'duplicate_dump_path',
+    type: 'textbox',
+    label: 'Duplicate Dump Folder',
+    help: 'Directory the losing duplicate is moved to (dated subfolders) instead of being deleted or recycled. Leave blank to use the normal replaced-file handling. Never pruned.',
+    required: false,
+    secret: false,
+    advanced: false,
+    selectOptions: [],
+  },
+];
+
 const NAMING_NAMES = [
   'rename_enabled',
   'file_naming_template',
@@ -149,8 +199,12 @@ const NAMING_NAMES = [
 const MM_NAMES = [
   'import_transfer_mode',
   'library_import_mode',
+  'library_import_proposal_cap',
+  'library_import_similarity_floor',
   'recycle_bin_path',
   'recycle_bin_retention_days',
+  'duplicate_constraint',
+  'duplicate_dump_path',
 ] as const;
 
 const KNOWN_FIELDS: ReadonlySet<string> = new Set([...NAMING_NAMES, ...MM_NAMES]);
@@ -177,8 +231,13 @@ function normalize(values: FieldValues): NamingConfig & MediaManagementConfig {
     replace_illegal_characters: values.replace_illegal_characters === true,
     import_transfer_mode: String(values.import_transfer_mode ?? ''),
     library_import_mode: String(values.library_import_mode ?? ''),
+    library_import_proposal_cap: Number(values.library_import_proposal_cap) || 0,
+    library_import_similarity_floor:
+      Number(values.library_import_similarity_floor) || 0,
     recycle_bin_path: String(values.recycle_bin_path ?? ''),
     recycle_bin_retention_days: Number(values.recycle_bin_retention_days) || 0,
+    duplicate_constraint: String(values.duplicate_constraint ?? 'larger-size'),
+    duplicate_dump_path: String(values.duplicate_dump_path ?? ''),
   };
 }
 
@@ -266,8 +325,12 @@ export function MediaManagement() {
       const body: MediaManagementConfig = {
         import_transfer_mode: norm.import_transfer_mode,
         library_import_mode: norm.library_import_mode,
+        library_import_proposal_cap: norm.library_import_proposal_cap,
+        library_import_similarity_floor: norm.library_import_similarity_floor,
         recycle_bin_path: norm.recycle_bin_path,
         recycle_bin_retention_days: norm.recycle_bin_retention_days,
+        duplicate_constraint: norm.duplicate_constraint,
+        duplicate_dump_path: norm.duplicate_dump_path,
       };
       try {
         await putMm.mutateAsync(body);
@@ -365,6 +428,16 @@ export function MediaManagement() {
               <h2 className={styles.sectionHeading}>Recycle Bin</h2>
               <SchemaForm
                 fields={RECYCLE_FIELDS}
+                values={values}
+                onChange={onChange}
+                errors={fieldErrors}
+              />
+            </section>
+
+            <section className={styles.section}>
+              <h2 className={styles.sectionHeading}>Duplicate Handling</h2>
+              <SchemaForm
+                fields={DUPLICATE_FIELDS}
                 values={values}
                 onChange={onChange}
                 errors={fieldErrors}

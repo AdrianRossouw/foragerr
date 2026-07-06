@@ -314,6 +314,13 @@ export interface MediaManagementConfig {
   library_import_mode: string;
   recycle_bin_path: string;
   recycle_bin_retention_days: number;
+  /** FRG-PP-014 duplicate handling: same-rung resolution + loser dump folder. */
+  duplicate_constraint: string;
+  duplicate_dump_path: string;
+  /** FRG-IMP-023 library-import scan tuning: max ComicVine proposals per scan. */
+  library_import_proposal_cap: number;
+  /** Minimum name similarity (0..1) before a scan proposes a match itself. */
+  library_import_similarity_floor: number;
 }
 
 /**
@@ -375,3 +382,46 @@ export interface ManualImportFileSpec {
 
 /** The archive formats the override select offers (backend ARCHIVE_EXTENSIONS). */
 export const ARCHIVE_FORMATS = ['cbz', 'cbr', 'cb7', 'cbt', 'pdf'] as const;
+
+/*
+ * Library-import staging shapes (FRG-IMP-023 / FRG-UI-015). GET
+ * /api/v1/library-import returns the persisted scan groups for one root folder
+ * in the shared paging envelope. Field names are the backend's camelCase JSON
+ * VERBATIM (the manual-import resource convention) — the contract is pinned,
+ * so `LibraryImportGroup` types the wire shape directly.
+ */
+
+/** Staging lifecycle of one scanned folder group (design decision 2). */
+export type LibraryImportGroupState =
+  | 'proposed'
+  | 'confirmed'
+  | 'no_match'
+  | 'imported'
+  | 'skipped';
+
+/** One staged library-import group, exactly as the wire carries it. */
+export interface LibraryImportGroup {
+  id: number;
+  /** The parser's normalized series-name grouping key. */
+  matchingKey: string;
+  /** Absolute folder the group's files live under. */
+  folder: string;
+  /** File entries; the API serves {path,name,size} objects. Only the count
+   * and names are rendered, so entries are kept structural. */
+  files: { path: string; name: string; size: number }[];
+  /** Parse confidence, 0..1. */
+  confidence: number;
+  proposedCvVolumeId: number | null;
+  confirmedCvVolumeId: number | null;
+  state: LibraryImportGroupState;
+  /** Proposal presentation fields (null when there is no match). */
+  name: string | null;
+  startYear: number | null;
+  publisher: string | null;
+  imageUrl: string | null;
+  /** Verbatim per-file blocked reasons from the last execute — never re-sorted. */
+  rejections: string[];
+  /** Human outcome summary (no-match reason, "imported=N blocked=M", add
+   * failure) — rendered verbatim on the group card when present. */
+  message: string | null;
+}

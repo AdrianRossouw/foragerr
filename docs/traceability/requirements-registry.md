@@ -171,8 +171,8 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-IMP-019 | Series title output and alternate title splits | imp | implemented | M1 |
 | FRG-IMP-020 | Total, collision-free issue ordering keys | imp | implemented | M1 |
 | FRG-IMP-021 | Corpus-driven regression suite | imp | implemented | M1 |
-| FRG-IMP-022 | Library scan walk | imp | approved | M2 |
-| FRG-IMP-023 | Existing-library import staging and review | imp | approved | M2 |
+| FRG-IMP-022 | Library scan walk | imp | implemented | M2 |
+| FRG-IMP-023 | Existing-library import staging and review | imp | implemented | M2 |
 | FRG-IMP-024 | Embedded metadata read during import | imp | implemented | M2 |
 | FRG-IMP-025 | Story-arc reading-order prefix | imp | approved | B |
 | FRG-PP-001 | Single shared import pipeline | pp | implemented | M1 |
@@ -188,7 +188,7 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-PP-011 | Import history events | pp | implemented | M1 |
 | FRG-PP-012 | Rename preview before execution | pp | implemented | M2 |
 | FRG-PP-013 | Upgrades and deletions via recycle bin | pp | implemented | M2 |
-| FRG-PP-014 | Duplicate constraint handling | pp | approved | M2 |
+| FRG-PP-014 | Duplicate constraint handling | pp | implemented | M2 |
 | FRG-PP-015 | Failed-download blocklist and auto re-search | pp | withdrawn | — |
 | FRG-PP-016 | Manual import resolution | pp | implemented | M2 |
 | FRG-PP-017 | ComicInfo.xml tagging on import | pp | implemented | M2 |
@@ -224,7 +224,7 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-UI-012 | Settings: media management and naming with rename preview | ui | implemented | M2 |
 | FRG-UI-013 | Settings: notifications | ui | approved | B |
 | FRG-UI-014 | Manual import overlay | ui | implemented | M2 |
-| FRG-UI-015 | Library import (existing files) flow | ui | approved | M2 |
+| FRG-UI-015 | Library import (existing files) flow | ui | implemented | M2 |
 | FRG-UI-016 | System status and tasks screens | ui | approved | M2 |
 | FRG-UI-017 | Blocklist screen | ui | approved | M2 |
 | FRG-UI-018 | Weekly pull / calendar view | ui | approved | M3 |

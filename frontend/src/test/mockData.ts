@@ -3,6 +3,7 @@ import type {
   CommandResource,
   FormatProfileResource,
   IssueResource,
+  LibraryImportGroup,
   LookupCandidate,
   ManualImportEntry,
   QueuePageResponse,
@@ -367,6 +368,43 @@ export const mockManualCandidates: ManualImportEntry[] = [
     format: 'cbr',
   }),
 ];
+
+/**
+ * One staged library-import group exactly as GET /api/v1/library-import
+ * serializes it (the pinned camelCase wire contract).
+ */
+export function makeLibraryImportGroup(
+  overrides: Partial<LibraryImportGroup> & Pick<LibraryImportGroup, 'id'>,
+): LibraryImportGroup {
+  const id = overrides.id;
+  return {
+    matchingKey: `series ${id}`,
+    folder: `/comics/Series ${id}`,
+    files: [
+      {
+        path: `/comics/Series ${id}/Series ${id} 001.cbz`,
+        name: `Series ${id} 001.cbz`,
+        size: 25_000_000,
+      },
+      {
+        path: `/comics/Series ${id}/Series ${id} 002.cbz`,
+        name: `Series ${id} 002.cbz`,
+        size: 26_000_000,
+      },
+    ],
+    confidence: 0.9,
+    proposedCvVolumeId: 40501234,
+    confirmedCvVolumeId: null,
+    state: 'proposed',
+    name: 'Saga',
+    startYear: 2012,
+    publisher: 'Image',
+    imageUrl: null,
+    rejections: [],
+    message: null,
+    ...overrides,
+  };
+}
 
 export const mockSeriesCreated: SeriesCreatedResource = {
   ...makeSeriesResource({

@@ -173,6 +173,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(manual_import_router, prefix="/api/v1")
 
+    # --- library import (m2-existing-library-import): the scan/execute
+    #     commands + handlers registered via the ``foragerr.library.flows``
+    #     import above (FRG-IMP-022/023); mount the staging review endpoints. ---
+    from foragerr.api.library_import import router as library_import_router
+
+    app.include_router(library_import_router, prefix="/api/v1")
+
     # --- search integration (m1-search-indexers, area 3): importing registers
     #     the search / grab / prune commands + handlers (FRG-SRCH-008/009/014,
     #     FRG-API-008); mount the interactive-search release router; register

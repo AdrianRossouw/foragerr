@@ -736,6 +736,37 @@ parsed (ComicInfo.xml read, FRG-IMP-024) and archives are REWRITTEN in-process
   filesystem paths are unreachable, and the folder walk is the same bounded
   intake the rescan uses.
 
+### 2026-07-06 — m2-existing-library-import (M2 change 3)
+
+No new listener, credential, or parser of untrusted input — the change composes
+existing hardened surfaces. Disposition:
+
+- **New API endpoints (`/api/v1/library-import/*`, FRG-IMP-023)**: user input is
+  only ever a `rootFolderId` / `groupId` / `cvVolumeId` — no endpoint accepts a
+  filesystem path, so the FRG-SEC-004 containment posture is inherited without a
+  new confinement surface. Match overrides are validated live against ComicVine
+  (`get_volume`) before persisting; an unfetchable volume is a 400, a credential
+  failure is the static 503 (no key material).
+- **Scan walk (FRG-IMP-022)**: the same bounded `iter_archive_files` intake every
+  other flow uses, now with junk skipping — walk-time exclusion of dot/AppleDouble/
+  unpack-temp artifacts shrinks the set of attacker-influencable names that reach
+  the parser; depth bound and race tolerance unchanged. Scan is file-read-only;
+  the execute command holds the same `IMPORT_FILE_MUTATION_GROUP` exclusivity as
+  every file-mutating flow.
+- **Staged imports execute through the SAME `import_candidate` pipeline**: the
+  confirmed series mapping enters as an override (mapping only) — the archive/
+  junk/space/duplicate safety specs still bind, so a hostile file in a scanned
+  library folder gets exactly the manual-import trust treatment (visible block,
+  never a force path). Embedded-ComicInfo trust rules from change 2 apply
+  unchanged.
+- **Duplicate dump folder (FRG-PP-014)**: destinations are built with the same
+  `safe_join` confinement as the recycle bin (dated subdirs, collision suffixes,
+  no overwrite); the dump root is deliberately NOT a recycle bin (no marker), so
+  retention pruning can never delete under it. `duplicate_dump_path` shares the
+  recycle-bin path validation (writable dir under operator control).
+- **Fixed-release marker parsing**: a bounded regex token rule on the existing
+  crash-safe parser (corpus + fuzz discipline apply); no new input channel.
+
 ## Coverage summary
 
 - **Well covered by the five drafts** (mitigation named, no new requirement needed): OPDS

@@ -77,9 +77,16 @@ async def test_add_auth_failure_surfaces_credential_message(
             commands=commands,
             factory=factory,
         )
+    from foragerr.metadata import COMICVINE_CREDENTIAL_MESSAGE
+
     assert str(excinfo.value) == (
-        "comicvine volume 42 could not be fetched: ComicVine rejected the "
-        "API key (missing or invalid) — set comicvine_api_key"
+        f"comicvine volume 42 could not be fetched: {COMICVINE_CREDENTIAL_MESSAGE}"
+    )
+    # The shared constant itself stays the exact byte-identical sentence the
+    # frontend keys its credential classification on.
+    assert COMICVINE_CREDENTIAL_MESSAGE == (
+        "ComicVine rejected the API key (missing or invalid) "
+        "\u2014 set comicvine_api_key"
     )
     # the key value (flows_settings default) never leaks into the message
     assert "CV-SECRET-KEY-abc123" not in str(excinfo.value)

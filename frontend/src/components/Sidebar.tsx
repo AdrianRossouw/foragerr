@@ -20,6 +20,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/', label: 'Series' },
       { to: '/add', label: 'Add New' },
+      { to: '/library-import', label: 'Library Import' },
     ],
   },
   {

@@ -32,6 +32,15 @@ class RejectionKind(Enum):
     FAILED = "failed"
 
 
+#: Duplicate-constraint vocabulary (FRG-PP-014). ``larger-size`` (default): an
+#: incoming same-rung file must be strictly larger than the existing file to
+#: replace it. ``preferred-format``: the format-profile preference decides — and
+#: since a same-rung tie means the preference is already satisfied, the existing
+#: file is kept.
+DUPLICATE_CONSTRAINT_LARGER_SIZE = "larger-size"
+DUPLICATE_CONSTRAINT_PREFERRED_FORMAT = "preferred-format"
+
+
 @dataclass(frozen=True, slots=True)
 class ImportRejection:
     """One spec's user-visible reason for rejecting a candidate (FRG-PP-005)."""
@@ -74,6 +83,14 @@ class ImportEvaluation:
     embedded_cv_issue_id: int | None = None
     embedded_verified: bool = False
     comicinfo_conflict: bool = False
+    #: Same-rung duplicate arbitration inputs (FRG-PP-014): the existing file's
+    #: recorded size, both sides' `(fN)` fixed-release marker revisions
+    #: (``None`` = unfixed), and the configured constraint. Read only by
+    #: :class:`DuplicateConstraintSpec`.
+    existing_size: int | None = None
+    existing_fix_revision: int | None = None
+    new_fix_revision: int | None = None
+    duplicate_constraint: str = DUPLICATE_CONSTRAINT_LARGER_SIZE
 
 
 class ImportSpec:
@@ -203,6 +220,12 @@ class UpgradeAllowedSpec(ImportSpec):
     def evaluate(self, ev: ImportEvaluation) -> ImportRejection | None:
         if ev.mapping_warning is not None or ev.existing_file_path is None:
             return None  # no existing file → nothing to upgrade over
+        if same_rung(ev):
+            # A same-rung tie is DuplicateConstraintSpec's case alone
+            # (FRG-PP-014): the two specs partition on same_rung(), keeping this
+            # spec's > (accept) / < (reject) verdicts byte-identical to the
+            # pre-PP-014 engine.
+            return None
         new_rank = _rank(ev.new_format, ev.format_ladder)
         old_rank = _rank(ev.existing_format, ev.format_ladder)
         if new_rank > old_rank:
@@ -212,6 +235,70 @@ class UpgradeAllowedSpec(ImportSpec):
                 f"an existing file ({ev.existing_format or 'unknown'} format) is "
                 f"already present and this {ev.new_format or 'unknown'} file is not "
                 "an upgrade over it"
+            ),
+            spec=self.name,
+        )
+
+
+class DuplicateConstraintSpec(ImportSpec):
+    """Arbitrates ONLY the same-rung duplicate (FRG-PP-014): an incoming file
+    whose format ties the existing file on the profile ladder. Profile-order
+    upgrades and downgrades remain :class:`UpgradeAllowedSpec`'s (unchanged)
+    verdicts — the two specs partition on :func:`same_rung`, so exactly one of
+    them ever speaks for a given existing-file case.
+
+    Tie order: `(fN)` fixed-release markers first (a higher revision always
+    wins; an unfixed file never beats a fixed one; equal markers fall through),
+    then the configured constraint — ``larger-size`` (default: the incoming
+    file must be strictly larger to replace) or ``preferred-format`` (the
+    profile preference decides, and a same-rung tie means it is already
+    satisfied, so the existing file is kept)."""
+
+    name = "duplicate-constraint"
+
+    def evaluate(self, ev: ImportEvaluation) -> ImportRejection | None:
+        if ev.mapping_warning is not None or ev.existing_file_path is None:
+            return None
+        if not same_rung(ev):
+            return None  # a profile-order upgrade/downgrade — never a tie
+        new_fix = ev.new_fix_revision or 0
+        old_fix = ev.existing_fix_revision or 0
+        if new_fix > old_fix:
+            return None  # a newer fixed release always wins the tie
+        if new_fix < old_fix:
+            new_desc = f"(f{new_fix}) file" if new_fix else "unfixed file"
+            return ImportRejection(
+                reason=(
+                    f"the existing file is a newer fixed release (f{old_fix}) "
+                    f"than this {new_desc} — fixed releases always win the "
+                    "duplicate tie"
+                ),
+                spec=self.name,
+            )
+        if ev.duplicate_constraint == DUPLICATE_CONSTRAINT_PREFERRED_FORMAT:
+            return ImportRejection(
+                reason=(
+                    f"an existing file ({ev.existing_format or 'unknown'} format) "
+                    "already satisfies the format preference at the same rung — "
+                    "duplicate constraint 'preferred-format' keeps the existing "
+                    "file"
+                ),
+                spec=self.name,
+            )
+        # larger-size (default): the incoming file must be strictly larger. An
+        # unknown existing size conservatively keeps the existing file.
+        if ev.existing_size is not None and ev.size > ev.existing_size:
+            return None
+        existing_desc = (
+            f"{ev.existing_size} bytes"
+            if ev.existing_size is not None
+            else "unknown size"
+        )
+        return ImportRejection(
+            reason=(
+                "an existing file of the same format rung is already present "
+                f"and this file ({ev.size} bytes) is not larger than it "
+                f"({existing_desc}) — duplicate constraint 'larger-size'"
             ),
             spec=self.name,
         )
@@ -227,8 +314,44 @@ def _rank(fmt: str | None, ladder: tuple[str, ...]) -> int:
         return -1
 
 
+def same_rung(ev: ImportEvaluation) -> bool:
+    """True when an existing file ties the incoming one on the profile ladder —
+    the (and only the) case :class:`DuplicateConstraintSpec` arbitrates
+    (FRG-PP-014). Also used by the pipeline's execute to tell a duplicate
+    resolution from a profile upgrade when disposing of the replaced file.
+
+    A tie requires BOTH sides to hold a real rung (rank >= 0): a pair the
+    ladder cannot rank at all (format absent from the ladder, an empty ladder,
+    a missing format) is NOT a same-rung tie — it stays
+    :class:`UpgradeAllowedSpec`'s pre-PP-014 "not an upgrade" rejection rather
+    than silently becoming a size contest between incomparable formats."""
+    if ev.existing_file_path is None:
+        return False
+    new_rank = _rank(ev.new_format, ev.format_ladder)
+    return new_rank >= 0 and new_rank == _rank(ev.existing_format, ev.format_ladder)
+
+
+def duplicate_win_reason(ev: ImportEvaluation) -> str:
+    """Why the incoming file won a same-rung duplicate tie (FRG-PP-014) — the
+    acceptance-side counterpart of :class:`DuplicateConstraintSpec`'s rejection
+    reasons, recorded on the replacement history event so the outcome and its
+    reason are both visible."""
+    new_fix = ev.new_fix_revision or 0
+    old_fix = ev.existing_fix_revision or 0
+    if new_fix > old_fix:
+        old_desc = f"f{old_fix}" if old_fix else "the unfixed existing file"
+        return (
+            f"duplicate tie won by fixed-release marker: f{new_fix} beats "
+            f"{old_desc}"
+        )
+    return (
+        f"duplicate tie won under the 'larger-size' constraint: {ev.size} bytes "
+        f"replaces {ev.existing_size} bytes"
+    )
+
+
 def default_specs() -> tuple[ImportSpec, ...]:
-    """The M1 import specification set, in evaluation order (all run)."""
+    """The import specification set, in evaluation order (all run)."""
     return (
         RemotePathMappedSpec(),
         MappedToIssueSpec(),
@@ -238,6 +361,7 @@ def default_specs() -> tuple[ImportSpec, ...]:
         FreeSpaceSpec(),
         AlreadyImportedSpec(),
         UpgradeAllowedSpec(),
+        DuplicateConstraintSpec(),
     )
 
 
@@ -282,6 +406,9 @@ def decide(
 __all__ = [
     "AlreadyImportedSpec",
     "ArchiveValidSpec",
+    "DUPLICATE_CONSTRAINT_LARGER_SIZE",
+    "DUPLICATE_CONSTRAINT_PREFERRED_FORMAT",
+    "DuplicateConstraintSpec",
     "EmbeddedIdConflictSpec",
     "FreeSpaceSpec",
     "ImportDecision",
@@ -295,4 +422,6 @@ __all__ = [
     "UpgradeAllowedSpec",
     "decide",
     "default_specs",
+    "duplicate_win_reason",
+    "same_rung",
 ]

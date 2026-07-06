@@ -61,6 +61,8 @@ class Evidence:
     volume_year: int | None = None
     booktype: Booktype = Booktype.ISSUE
     release_group: str | None = None
+    #: `(fN)` fixed-release marker revision (FRG-PP-014); ``None`` = unfixed.
+    fix_revision: int | None = None
     issue_id: str | None = None
     #: field name → layer that supplied it (LAYER_* / PROV_ISSUE_ID_TAG).
     provenance: dict[str, str] = field(default_factory=dict)
@@ -119,6 +121,7 @@ def aggregate(
     volume_ordinal = pick("volume_ordinal", lambda r: r.volume_ordinal)
     volume_year = pick("volume_year", lambda r: r.volume_year)
     release_group = pick("release_group", lambda r: r.scan_group)
+    fix_revision = pick("fix_revision", lambda r: r.fix_revision)
 
     booktype_val = pick("booktype", lambda r: r.booktype if r.booktype is not Booktype.ISSUE else None)
     booktype = booktype_val if booktype_val is not None else Booktype.ISSUE
@@ -142,6 +145,7 @@ def aggregate(
         volume_year=volume_year,
         booktype=booktype,
         release_group=release_group,
+        fix_revision=fix_revision,
         issue_id=issue_id,
         provenance=provenance,
         layers=layers,

@@ -257,6 +257,59 @@ async def test_stale_importing_row_recovers_orphaned_move(db, tmp_path):
 
 
 @pytest.mark.req("FRG-DL-009")
+@pytest.mark.req("FRG-IMP-022")
+async def test_recovering_zero_byte_grab_is_not_marked_imported(db, tmp_path):
+    """A stale `importing` claim whose output dir holds ONLY a zero-byte file:
+    the zero-byte file must ENUMERATE from the walk and fail visibly through
+    the pipeline. Were it walk-skipped, the source would look empty and the
+    crash-recovery reconciliation (Case A: the issue already has a durable
+    file from an earlier import) would mark the failed zero-byte grab as
+    IMPORTED."""
+    from foragerr.library import repo
+    from tracking_support import FakeCommands
+
+    series_id, issue_id = await seed_library(db, tmp_path)
+    # The issue already has a durable file from an EARLIER import.
+    series_path = tmp_path / "lib-root" / "Spawn"
+    series_path.mkdir(parents=True, exist_ok=True)
+    earlier = series_path / "Spawn 001 (2024).cbz"
+    make_large_cbz(earlier)
+    async with db.write_session() as session:
+        await repo.add_issue_file(
+            session, issue_id=issue_id, path=str(earlier), size=earlier.stat().st_size
+        )
+    # The crashed grab's output dir holds only a zero-byte "archive".
+    src = tmp_path / "downloads" / "zero"
+    src.mkdir(parents=True, exist_ok=True)
+    (src / "Spawn 001 (2024).cbz").write_bytes(b"")
+
+    await insert_grab_history(
+        db, download_id="d-zero", series_id=series_id, issue_id=issue_id
+    )
+    await insert_tracked(
+        db,
+        download_id="d-zero",
+        state=TrackedDownloadState.IMPORTING,  # stale claim left by a crash
+        client_id=None,
+        series_id=series_id,
+        issue_id=issue_id,
+    )
+    async with db.write_session() as session:
+        (await tracked_by_download_id_session(session, "d-zero")).output_path = str(src)
+
+    summary = await process_imports(db, None, commands=FakeCommands(), now=_NOW)
+
+    # The zero-byte grab is a failed/blocked download with visible reasons —
+    # NEVER reconciled to imported off the earlier file's presence.
+    assert "imported=0" in summary
+    row = await tracked_by_download_id(db, "d-zero")
+    assert row.state != TrackedDownloadState.IMPORTED.value
+    events = await _history(db, "d-zero")
+    assert not any(e.event_type == history.EVENT_IMPORTED for e in events)
+    assert os.path.exists(earlier)  # the earlier durable file is untouched
+
+
+@pytest.mark.req("FRG-DL-009")
 async def test_one_rows_failure_does_not_abort_the_drain_batch(db, tmp_path, monkeypatch):
     # Two pending rows; the first raises an unexpected error inside _process_one.
     # The drain must isolate it (left for next cycle) and still import the second,

@@ -37,6 +37,20 @@ that hit the result cap says so and advises a narrower term. Re-searching the
 same term always retries for real. Only a fully completed search with zero
 matches shows the plain no-results state.
 
+## Library Import
+
+Library Import (sidebar) mass-ingests an existing collection: pick a root
+folder, run a scan, and review the staged series groups — each with file count,
+parse confidence, and a proposed ComicVine match (poster, name, year,
+publisher) or an explicit no-match state. Confirm or skip groups, correct a
+match with the inline ComicVine search, then execute with batch add options
+(format profile, monitoring, search-on-add). Each group reports its outcome —
+imported, or blocked with the pipeline's verbatim reasons. Groups without a
+plausible match are never importable on a guess, an unconfigured-roots state
+points you at Settings, and a scan that finds nothing to import says so. See
+`import.md` for how the scan, in-place registration, and re-scan semantics
+work.
+
 ## Queue
 
 The Queue screen shows every tracked download live: state (queued, downloading,
@@ -72,7 +86,9 @@ you save.
 The Media Management page controls naming and file handling: the rename toggle,
 file and folder naming templates (with a `?` token cheatsheet and a live example
 that recomputes as you type), illegal-character policy, transfer mode, the
-existing-library import mode, and the recycle bin (path + retention). Template
+existing-library import mode, the recycle bin (path + retention), and duplicate
+handling (the same-rank constraint and optional duplicate-dump folder —
+`import.md` §Duplicate handling). Template
 edits show their effect immediately; nothing changes on disk until you save.
 
 From here (or from a series' **Rename Files** toolbar button) you can open the
