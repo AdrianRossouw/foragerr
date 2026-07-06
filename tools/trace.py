@@ -88,7 +88,12 @@ def commit_refs():
 
 def test_tags():
     tags = defaultdict(list)
-    for pattern in ('backend/tests/**/*.py', 'frontend/src/**/*.test.*', 'frontend/src/**/*.spec.*'):
+    for pattern in (
+        'backend/tests/**/*.py',
+        'frontend/src/**/*.test.*',
+        'frontend/src/**/*.spec.*',
+        'e2e/tests/**/*.spec.*',  # FRG ids in Playwright test titles (FRG-PROC-010)
+    ):
         for f in ROOT.glob(pattern):
             for rid in set(ID_RE.findall(f.read_text(errors='ignore'))):
                 tags[rid].append(str(f.relative_to(ROOT)))
