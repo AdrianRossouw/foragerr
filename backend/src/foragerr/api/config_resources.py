@@ -25,8 +25,48 @@ from pydantic import BaseModel, ValidationError
 from foragerr.api.errors import error_body
 from foragerr.config import CONFIG_FILENAME, Settings
 from foragerr.logging import register_secret
+from foragerr.naming import (
+    DEFAULT_FILE_TEMPLATE,
+    DEFAULT_FOLDER_TEMPLATE,
+    _TOKEN_ALIASES,
+)
 
 router = APIRouter(prefix="/config", tags=["config"])
+
+
+class NamingTokens(BaseModel):
+    """The shared naming-token vocabulary (FRG-API-013, FRG-UI-012).
+
+    A read-only projection of the one canonical token table
+    (:data:`foragerr.naming._TOKEN_ALIASES`) so the settings UI's live example
+    preview and its ``?`` token-help popover both render from the SAME
+    definition the server renders with — never a hand-maintained duplicate
+    list. ``aliases`` maps every accepted (casefolded) token name to its
+    canonical field key; ``defaults`` carries the default templates so the UI
+    can seed / reset without hardcoding them.
+    """
+
+    aliases: dict[str, str]
+    defaults: dict[str, str]
+
+
+@router.get("/naming/tokens", response_model=NamingTokens)
+async def get_naming_tokens() -> NamingTokens:
+    """Return the shared token vocabulary the naming templates accept.
+
+    Read-only and config-independent — the vocabulary is a property of the
+    renderer, not of the stored settings — so no ``Request``/settings access is
+    needed. Sourced verbatim from :data:`foragerr.naming._TOKEN_ALIASES` (which
+    ``importer.renamer`` re-exports), keeping the UI and the server on one
+    definition (design decision 11).
+    """
+    return NamingTokens(
+        aliases=dict(_TOKEN_ALIASES),
+        defaults={
+            "file_naming_template": DEFAULT_FILE_TEMPLATE,
+            "folder_naming_template": DEFAULT_FOLDER_TEMPLATE,
+        },
+    )
 
 
 class NamingConfig(BaseModel):

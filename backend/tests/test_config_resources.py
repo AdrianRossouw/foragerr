@@ -167,6 +167,26 @@ def test_rename_execute_endpoint_enqueues_the_rename_command(client, tmp_path):
 
 
 @pytest.mark.req("FRG-API-013")
+@pytest.mark.req("FRG-UI-012")
+def test_get_naming_tokens_exposes_the_shared_vocabulary(client):
+    """The token endpoint mirrors the one canonical alias table verbatim so the
+    settings UI never hand-maintains a duplicate token list (design decision 11)."""
+    from foragerr.naming import DEFAULT_FILE_TEMPLATE, _TOKEN_ALIASES
+
+    resp = client.get("/api/v1/config/naming/tokens")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert set(body) == {"aliases", "defaults"}
+    # Byte-for-byte the same table the renderer resolves tokens with.
+    assert body["aliases"] == _TOKEN_ALIASES
+    # A representative alias → canonical field mapping is present.
+    assert body["aliases"]["series title"] == "series_title"
+    assert body["aliases"]["issue number"] == "issue"
+    # The default templates are carried so the UI can seed without duplicating.
+    assert body["defaults"]["file_naming_template"] == DEFAULT_FILE_TEMPLATE
+
+
+@pytest.mark.req("FRG-API-013")
 def test_no_secret_field_transits_the_config_resources(client, settings):
     secret_names = set(settings.secret_fields())
     assert secret_names  # there are secrets in the model
