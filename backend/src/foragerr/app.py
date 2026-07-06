@@ -165,6 +165,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(config_resources_router, prefix="/api/v1")
     app.include_router(rename_router, prefix="/api/v1")
 
+    # --- manual import (m2-manual-import): importing the module registers the
+    #     manual-import pp-pool command + handler (FRG-PP-016); mount the
+    #     list/execute endpoints (FRG-API-015) under /api/v1. ---
+    import foragerr.downloads.manual_import  # noqa: F401 — command/handler registration
+    from foragerr.api.manual_import import router as manual_import_router
+
+    app.include_router(manual_import_router, prefix="/api/v1")
+
     # --- search integration (m1-search-indexers, area 3): importing registers
     #     the search / grab / prune commands + handlers (FRG-SRCH-008/009/014,
     #     FRG-API-008); mount the interactive-search release router; register
