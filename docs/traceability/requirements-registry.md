@@ -211,7 +211,7 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-API-015 | Manual import endpoint | api | implemented | M2 |
 | FRG-API-016 | Parse debug endpoint | api | approved | B |
 | FRG-API-017 | ComicVine suggest (bounded lookup variant) | api | implemented | M2 |
-| FRG-API-018 | ComicVine credential settings resource | api | proposed | M2 |
+| FRG-API-018 | ComicVine credential settings resource | api | implemented | M2 |
 | FRG-UI-001 | SPA architecture: server state via React Query + WS invalidation | ui | implemented | M1 |
 | FRG-UI-002 | Design token layer with ant/foraging theme | ui | implemented | M1 |
 | FRG-UI-003 | Library index screen | ui | implemented | M1 |
@@ -231,7 +231,7 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-UI-017 | Blocklist screen | ui | implemented | M2 |
 | FRG-UI-018 | Weekly pull / calendar view | ui | approved | M3 |
 | FRG-UI-019 | Global header quick-search over the local library | ui | implemented | M2 |
-| FRG-UI-020 | Settings: General with ComicVine metadata credential | ui | proposed | M2 |
+| FRG-UI-020 | Settings: General with ComicVine metadata credential | ui | implemented | M2 |
 | FRG-OPDS-001 | OPDS 1.2 Atom catalog with navigation root | opds | implemented | M1 |
 | FRG-OPDS-002 | Acquisition feeds with per-entry metadata | opds | implemented | M1 |
 | FRG-OPDS-003 | Library-id-based file resolution only (no client-supplied paths) | opds | implemented | M1 |
@@ -290,7 +290,7 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-DEP-010 | version and build info | dep | implemented | M1 |
 | FRG-DEP-011 | Tailscale-scoped exposure | dep | implemented | M1 |
 | FRG-DEP-012 | secrets-stripped diagnostic bundle | dep | approved | B |
-| FRG-DEP-013 | First-run default DDL provider seeding | dep | proposed | M2 |
+| FRG-DEP-013 | First-run default DDL provider seeding | dep | implemented | M2 |
 | FRG-AUTH-001 | M1/M2 no-auth accepted risk | auth | implemented | M1 |
 | FRG-AUTH-002 | single-user web login | auth | approved | M5 |
 | FRG-AUTH-003 | password storage with modern KDF | auth | approved | M5 |

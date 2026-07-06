@@ -90,10 +90,10 @@ Every requirement gets at least one tagged test (FRG-PROC-004): pytest
       default-enabled, with the review trigger. No new FRG-SEC requirement; no
       egress/allowlist change (getcomics already on `KNOWN_DDL_HOSTS`, default
       base_url public). [FRG-PROC-006]
-- [ ] D.3 Registry flips (FRG-API-018, FRG-UI-020, FRG-DEP-013 → implemented;
+- [x] D.3 Registry flips (FRG-API-018, FRG-UI-020, FRG-DEP-013 → implemented;
       FRG-DEP-003, FRG-META-002 stay implemented) + traceability matrix regen +
       `tools/soup_check.py` exit 0 (no SOUP change expected). [FRG-PROC-004,
       FRG-PROC-005, FRG-PROC-012]
-- [ ] D.4 Suites green (backend + frontend + e2e); pre-merge review cycle
+- [x] D.4 Suites green (backend + frontend + e2e); pre-merge review cycle
       (`/code-review` + `/simplify`) + gate angles; fixes; archive; `--no-ff` merge
       with full suite green; main suites; tag. [FRG-PROC-007]
