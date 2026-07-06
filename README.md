@@ -2,8 +2,8 @@
 
 A private, Sonarr-style comic management tool replacing Mylar: library import and
 renaming, ComicVine metadata, Newznab indexers (DogNZB, NZB.su), SABnzbd and
-built-in direct-download (DDL) acquisition, and (planned) an OPDS server for iPad
-reading over Tailscale. There is no built-in reader.
+built-in direct-download (DDL) acquisition, and an OPDS server for iPad reading
+over Tailscale. There is no built-in reader.
 
 foragerr is **not released publicly** — it runs on one owner's home server for
 personal use. It doubles as a working demonstration of regulated software
@@ -17,9 +17,9 @@ day-to-day usage and configuration, see the [manual](docs/manual/index.md).
 ## Stack
 
 - **Backend**: Python (FastAPI), SQLite.
-- **Frontend**: React + TypeScript (not yet built — see Installation below).
-- **Deployment target**: Docker on a home server, linuxserver.io image conventions
-  (not yet packaged — see Installation below).
+- **Frontend**: React + TypeScript single-page app, served by the backend.
+- **Deployment**: a single Docker image built to linuxserver.io conventions
+  (see Installation below).
 
 ## Security & regulatory posture
 
@@ -74,15 +74,26 @@ are enforced.
 
 ## Installation
 
-foragerr does not yet have a packaged install path — the Docker image and
-deployment tooling are being built under OpenSpec change `m1-ui-opds-deploy` and
-have not merged yet. Until then:
+There is no published registry image — build it from the repository and run it
+with one `/config` volume:
 
-- See `docs/manual/admin/` for configuration, secrets handling, and the
-  Tailscale-only network posture that applies regardless of how you run the
-  application.
-- See `docs/manual/admin/deployment.md` for the packaging design that is committed
-  in spec but not yet implemented.
+```bash
+tools/build-image.sh --tag foragerr:latest   # secret-scans the context, then docker build
+docker run -d --name foragerr \
+  -e PUID=1000 -e PGID=1000 -e TZ=Europe/Amsterdam \
+  -v /srv/foragerr/config:/config \
+  -v /srv/media/comics:/comics \
+  -v /srv/downloads:/downloads \
+  -p 100.x.y.z:8789:8789 \
+  foragerr:latest
+```
 
-Full installation instructions will replace this section once the deployment
-change lands.
+Bind the port to your **tailnet address** (`100.x.y.z`), never a public
+interface — foragerr has no authentication and its only supported exposure model
+is Tailscale-only (`RISK-020`). Full instructions, a compose example, secrets
+handling, and the network posture live in the admin manual:
+
+- `docs/manual/admin/deployment.md` — image build, run, upgrade, health checks
+- `docs/manual/admin/configuration.md` — every setting and its env override
+- `docs/manual/admin/secrets.md` — API keys (ComicVine, indexers, SABnzbd)
+- `docs/manual/admin/network.md` — the Tailscale-only exposure model
