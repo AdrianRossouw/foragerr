@@ -1,0 +1,110 @@
+/* Settings -> General (FRG-UI-020). Same Sonarr settings school as the
+ * media-management page (save-bar, underlined section headings), a bespoke
+ * small module so this screen never depends on another config screen's
+ * private stylesheet. */
+
+.page {
+  padding: var(--spacing-lg);
+  max-width: var(--layout-content-max-width);
+}
+
+.section {
+  margin-bottom: var(--spacing-xl);
+}
+
+.sectionHeading {
+  font-size: var(--font-size-heading);
+  font-weight: var(--font-weight-normal);
+  padding-bottom: var(--spacing-sm);
+  margin: 0 0 var(--spacing-md);
+  border-bottom: 1px solid var(--surface-border);
+}
+
+.sectionHelp {
+  color: var(--text-secondary);
+  margin: 0 0 var(--spacing-md);
+  font-size: var(--font-size-base);
+}
+
+.stateText {
+  color: var(--text-secondary);
+}
+
+.saveButton {
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--color-accent);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  color: var(--color-accent-contrast);
+  font-size: var(--font-size-base);
+  cursor: pointer;
+}
+
+.saveButton:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+}
+
+.saveButton:disabled {
+  background: var(--surface-card);
+  border-color: var(--surface-border);
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.button {
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--surface-card);
+  color: var(--text-primary);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-base);
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--surface-card-hover);
+}
+
+.button:disabled {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.envNote {
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--surface-card);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--font-size-base);
+}
+
+.envNote code {
+  font-family: var(--font-family-mono);
+  color: var(--text-primary);
+}
+
+.fieldError {
+  margin-top: var(--spacing-xs);
+  color: var(--color-danger);
+  font-size: var(--font-size-sm);
+}
+
+.formError {
+  margin-top: var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-sm);
+  color: var(--color-danger);
+  font-size: var(--font-size-base);
+}
+
+.testSuccess {
+  margin-top: var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--text-primary);
+  font-size: var(--font-size-base);
+}

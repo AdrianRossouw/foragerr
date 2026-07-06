@@ -374,6 +374,29 @@ export interface NamingTokens {
   defaults: Record<string, string>;
 }
 
+/**
+ * GET/PUT /api/v1/config/general — the ComicVine credential settings resource
+ * (FRG-API-018). The key VALUE never appears in either response; only its
+ * configured status and source (`unset` | `file` | `environment`) do. When
+ * `source` is `environment`, `FORAGERR_COMICVINE_API_KEY` outranks any
+ * file/UI-written value, so the settings screen renders read-only instead of
+ * a silently-shadowed editor.
+ */
+export type ComicVineKeySource = 'unset' | 'file' | 'environment';
+
+export interface ComicVineConfig {
+  comicvine_api_key: {
+    configured: boolean;
+    source: ComicVineKeySource;
+  };
+}
+
+/** POST /api/v1/config/comicvine/test result (FRG-API-018) — never the key. */
+export interface ComicVineTestResult {
+  success: boolean;
+  message: string;
+}
+
 /** One row of GET /api/v1/rename?seriesId= — a file whose name WOULD change. */
 export interface RenamePreviewEntry {
   issueFileId: number;
