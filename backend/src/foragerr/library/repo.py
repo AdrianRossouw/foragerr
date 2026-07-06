@@ -38,6 +38,32 @@ async def list_root_folders(session: AsyncSession) -> list[RootFolderRow]:
     return list(result.scalars().all())
 
 
+async def get_root_folder(session: AsyncSession, root_folder_id: int) -> RootFolderRow | None:
+    return await session.get(RootFolderRow, root_folder_id)
+
+
+async def count_series_for_root(session: AsyncSession, root_folder_id: int) -> int:
+    """How many series currently reference this root (FRG-SER-008).
+
+    Guards :func:`delete_root_folder`: a root still in use by any series must
+    not be removed (the series' stored paths would dangle)."""
+    count = await session.scalar(
+        select(func.count())
+        .select_from(SeriesRow)
+        .where(SeriesRow.root_folder_id == root_folder_id)
+    )
+    return count or 0
+
+
+async def delete_root_folder(session: AsyncSession, root_folder_id: int) -> None:
+    """Delete the root-folder row only — never touches files on disk
+    (FRG-SER-008). Callers resolve the not-found / still-referenced guards
+    (both API-layer concerns) before calling this."""
+    row = await session.get(RootFolderRow, root_folder_id)
+    if row is not None:
+        await session.delete(row)
+
+
 # --- series ---------------------------------------------------------------
 
 

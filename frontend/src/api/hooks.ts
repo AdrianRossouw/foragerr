@@ -149,6 +149,46 @@ export function useRootFolders(): UseQueryResult<RootFolderResource[]> {
   });
 }
 
+/**
+ * POST /api/v1/rootfolder — register a new root folder (FRG-SER-008). A
+ * validation failure rejects with an `ApiRequestError` whose body carries the
+ * backend's field-precise 400 verbatim; the settings screen renders that
+ * message against the path input. On success the rootfolder list is invalidated.
+ */
+export function useCreateRootFolder(): UseMutationResult<
+  RootFolderResource,
+  Error,
+  { path: string }
+> {
+  const fetcher = useFetcher();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { path: string }) =>
+      fetcher<RootFolderResource>('/api/v1/rootfolder', {
+        method: 'POST',
+        body,
+      }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: queryKeys.rootFolder.all() }),
+  });
+}
+
+/**
+ * DELETE /api/v1/rootfolder/{id} — remove a root folder (FRG-SER-008). The
+ * backend refuses (409) while any series references it, carrying the count in
+ * its message; the caller surfaces that reason. On success the list refreshes.
+ */
+export function useDeleteRootFolder(): UseMutationResult<void, Error, number> {
+  const fetcher = useFetcher();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) =>
+      fetcher<void>(`/api/v1/rootfolder/${id}`, { method: 'DELETE' }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: queryKeys.rootFolder.all() }),
+  });
+}
+
 /** Format profiles for the add-flow picker (FRG-UI-005). */
 export function useFormatProfiles(): UseQueryResult<FormatProfileResource[]> {
   const fetcher = useFetcher();

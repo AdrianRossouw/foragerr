@@ -14,10 +14,11 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from foragerr.app import create_app
 from foragerr.library import repo
-from foragerr.quality.models import DEFAULT_PROFILE_NAME
+from foragerr.quality.models import DEFAULT_PROFILE_NAME, FormatProfileRow
 from http_support import make_settings
 
 
@@ -38,6 +39,26 @@ def client(settings):
 async def _create_root_folder(app, path: str) -> int:
     async with app.state.db.write_session() as session:
         row = await repo.create_root_folder(session, path)
+        return row.id
+
+
+async def _create_series_under_root(app, root_folder_id: int, path: str) -> int:
+    """Persist a minimal series row referencing ``root_folder_id`` (the delete
+    guard's precondition) — bypasses the add flow (no ComicVine call)."""
+    async with app.state.db.write_session() as session:
+        default_profile_id = await session.scalar(
+            select(FormatProfileRow.id).where(
+                FormatProfileRow.name == DEFAULT_PROFILE_NAME
+            )
+        )
+        row = await repo.create_series(
+            session,
+            cv_volume_id=4050 + root_folder_id,
+            title="Guarded Series",
+            format_profile_id=default_profile_id,
+            root_folder_id=root_folder_id,
+            path=path,
+        )
         return row.id
 
 
@@ -107,6 +128,139 @@ def test_rootfolder_free_space_is_read_off_the_event_loop(client, tmp_path, monk
     # than the one awaiting it (the event loop) — i.e. off the loop.
     assert getattr(seen.get("func"), "__name__", "") == "disk_usage"
     assert seen["exec_thread"] is not seen["loop_thread"]
+
+
+# --- root-folder registration (POST) -----------------------------------------
+
+
+@pytest.mark.req("FRG-SER-008")
+def test_rootfolder_post_registers_an_absolute_writable_directory(client, tmp_path):
+    root = tmp_path / "library"
+    root.mkdir()
+
+    resp = client.post("/api/v1/rootfolder", json={"path": str(root)})
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["path"] == str(root)
+    assert body["id"] >= 1
+    assert isinstance(body["free_space"], int) and body["free_space"] >= 0
+
+    # It is immediately listed.
+    listed = client.get("/api/v1/rootfolder").json()
+    assert [r["path"] for r in listed] == [str(root)]
+
+
+@pytest.mark.req("FRG-SER-008")
+def test_rootfolder_post_rejects_a_relative_path(client):
+    resp = client.post("/api/v1/rootfolder", json={"path": "relative/library"})
+    assert resp.status_code == 400
+    assert resp.json()["errors"] == [
+        {"field": "path", "message": "path 'relative/library' must be absolute"}
+    ]
+
+
+@pytest.mark.req("FRG-SER-008")
+def test_rootfolder_post_rejects_a_missing_directory(client, tmp_path):
+    missing = tmp_path / "gone"  # never created
+    resp = client.post("/api/v1/rootfolder", json={"path": str(missing)})
+    assert resp.status_code == 400
+    err = resp.json()["errors"][0]
+    assert err["field"] == "path"
+    assert "is not an existing directory" in err["message"]
+
+
+@pytest.mark.req("FRG-SER-008")
+def test_rootfolder_post_rejects_an_unwritable_directory(client, tmp_path):
+    root = tmp_path / "readonly"
+    root.mkdir(mode=0o500)
+    try:
+        resp = client.post("/api/v1/rootfolder", json={"path": str(root)})
+        assert resp.status_code == 400
+        err = resp.json()["errors"][0]
+        assert err["field"] == "path"
+        assert "is not writable" in err["message"]
+    finally:
+        root.chmod(0o700)  # let pytest's tmp_path cleanup remove it
+
+
+@pytest.mark.req("FRG-SER-008")
+def test_rootfolder_post_rejects_a_duplicate(client, tmp_path):
+    root = tmp_path / "library"
+    root.mkdir()
+    assert client.post("/api/v1/rootfolder", json={"path": str(root)}).status_code == 201
+
+    resp = client.post("/api/v1/rootfolder", json={"path": str(root)})
+    assert resp.status_code == 400
+    assert "already registered" in resp.json()["errors"][0]["message"]
+
+
+@pytest.mark.req("FRG-SER-008")
+def test_rootfolder_post_rejects_a_path_nested_under_an_existing_root(client, tmp_path):
+    parent = tmp_path / "library"
+    child = parent / "marvel"
+    child.mkdir(parents=True)
+    assert client.post("/api/v1/rootfolder", json={"path": str(parent)}).status_code == 201
+
+    resp = client.post("/api/v1/rootfolder", json={"path": str(child)})
+    assert resp.status_code == 400
+    err = resp.json()["errors"][0]
+    assert err["field"] == "path"
+    assert "inside an existing root folder" in err["message"]
+
+
+@pytest.mark.req("FRG-SER-008")
+def test_rootfolder_post_rejects_a_path_containing_an_existing_root(client, tmp_path):
+    parent = tmp_path / "library"
+    child = parent / "marvel"
+    child.mkdir(parents=True)
+    assert client.post("/api/v1/rootfolder", json={"path": str(child)}).status_code == 201
+
+    resp = client.post("/api/v1/rootfolder", json={"path": str(parent)})
+    assert resp.status_code == 400
+    err = resp.json()["errors"][0]
+    assert err["field"] == "path"
+    assert "contains an existing root folder" in err["message"]
+
+
+# --- root-folder removal (DELETE) --------------------------------------------
+
+
+@pytest.mark.req("FRG-SER-008")
+def test_rootfolder_delete_unknown_id_is_404(client):
+    resp = client.delete("/api/v1/rootfolder/999")
+    assert resp.status_code == 404
+
+
+@pytest.mark.req("FRG-SER-008")
+def test_rootfolder_delete_removes_an_unreferenced_root_leaving_files(client, tmp_path):
+    root = tmp_path / "library"
+    root.mkdir()
+    keeper = root / "keep.cbz"
+    keeper.write_bytes(b"comic")
+    rid = client.post("/api/v1/rootfolder", json={"path": str(root)}).json()["id"]
+
+    resp = client.delete(f"/api/v1/rootfolder/{rid}")
+    assert resp.status_code == 204
+    assert client.get("/api/v1/rootfolder").json() == []
+    # Files on disk are untouched — only the row was removed.
+    assert keeper.exists()
+    assert root.exists()
+
+
+@pytest.mark.req("FRG-SER-008")
+def test_rootfolder_delete_refuses_while_a_series_references_it(client, tmp_path):
+    root = tmp_path / "library"
+    root.mkdir()
+    rid = client.post("/api/v1/rootfolder", json={"path": str(root)}).json()["id"]
+    client.portal.call(
+        _create_series_under_root, client.app, rid, str(root / "Guarded Series (2020)")
+    )
+
+    resp = client.delete(f"/api/v1/rootfolder/{rid}")
+    assert resp.status_code == 409
+    assert "1 series" in resp.json()["message"]
+    # It is still registered — the refusal changed nothing.
+    assert len(client.get("/api/v1/rootfolder").json()) == 1
 
 
 # --- format profiles ---------------------------------------------------------

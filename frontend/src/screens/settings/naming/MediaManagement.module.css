@@ -352,3 +352,54 @@
   color: var(--color-danger);
   font-size: var(--font-size-base);
 }
+
+/* --- Root folders (FRG-SER-008 / FRG-UI-012) --- */
+/* Immediate API actions, not save-bar form fields: card-framed rows so the
+ * section reads as its own thing next to the schema-form sections. */
+
+.rootFolderList {
+  list-style: none;
+  margin: 0 0 var(--spacing-md);
+  padding: 0;
+}
+
+.rootFolderRow {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  margin-bottom: var(--spacing-sm);
+}
+
+.rootFolderPath {
+  font-family: var(--font-mono, monospace);
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+
+.rootFolderFree {
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+}
+
+.rootFolderAddRow {
+  display: flex;
+  gap: var(--spacing-sm);
+  align-items: center;
+}
+
+.rootFolderInput {
+  flex: 1;
+  max-width: 420px;
+  padding: var(--spacing-sm);
+  background: var(--surface-page);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-base);
+}
