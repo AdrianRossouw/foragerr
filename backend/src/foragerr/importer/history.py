@@ -67,6 +67,9 @@ SOURCE_RESCAN = "rescan"
 #: folder through the shared pipeline, FRG-PP-016). Data only — the decision and
 #: file-op logic never read the source kind.
 SOURCE_MANUAL = "manual"
+#: An existing-library mass import (a confirmed library-import staging group
+#: routed through the shared pipeline, FRG-IMP-023). Data only, like the rest.
+SOURCE_LIBRARY = "library-import"
 
 
 def record_event(
@@ -166,6 +169,7 @@ __all__ = [
     "EVENT_UPGRADE_REPLACED",
     "IMPORT_EVENT_TYPES",
     "SOURCE_DOWNLOAD",
+    "SOURCE_LIBRARY",
     "SOURCE_MANUAL",
     "SOURCE_RESCAN",
     "all_events",

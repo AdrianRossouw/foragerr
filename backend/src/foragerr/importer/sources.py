@@ -34,7 +34,12 @@ from foragerr.importer.context import ImportContext
 # Source-kind discriminators carried on the candidate (data, not a type switch).
 # Canonically owned by :mod:`foragerr.importer.history` (the provenance column
 # uses the same values); re-exported here so callers keep one import site.
-from foragerr.importer.history import SOURCE_DOWNLOAD, SOURCE_MANUAL, SOURCE_RESCAN
+from foragerr.importer.history import (
+    SOURCE_DOWNLOAD,
+    SOURCE_LIBRARY,
+    SOURCE_MANUAL,
+    SOURCE_RESCAN,
+)
 from foragerr.library import matching
 from foragerr.library.models import IssueFileRow, IssueRow, SeriesRow
 
@@ -274,12 +279,73 @@ class ManualImportSource:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class LibraryImportSource:
+    """The existing-library mass-import intake (FRG-IMP-023).
+
+    Produces the SAME neutral :class:`ImportCandidate` list every other source
+    produces — nothing downstream forks — following :class:`ManualImportSource`'s
+    shape: an explicit file list plus overrides, stamped
+    ``source_kind = SOURCE_LIBRARY``. The library-import flow builds one source
+    per CONFIRMED staging group after creating (or finding) the group's series,
+    injecting the resolved ``series_id`` here — the importer never imports flow
+    code (design decision 8).
+
+    Each candidate pins the group's confirmed series two ways: a series-only
+    :class:`ManualOverride` (human intent — the confirmed/corrected volume wins
+    even when the filename parse disagrees with the ComicVine title) and
+    ``series_scope_id`` (so the embedded-ComicInfo layer and the filename
+    heuristic stay confined to this series). The ISSUE mapping deliberately
+    stays heuristic/embedded — the user confirmed a series match, not a
+    per-file issue mapping — and safety specs run in full as always.
+    """
+
+    series_id: int
+    files: tuple[str, ...] = ()
+    #: The group's folder (cleanup boundary + candidate container root).
+    container_root: str | None = None
+
+    async def gather(
+        self, session: AsyncSession, ctx: ImportContext
+    ) -> list[ImportCandidate]:
+        """Produce candidates for the group's still-present files.
+
+        A file that vanished between scan and execute is skipped (never an
+        error — the staging re-check re-runs the scan); a deleted series
+        (raced between add and import) yields nothing.
+        """
+        series = await session.get(SeriesRow, self.series_id)
+        if series is None:
+            return []
+        out: list[ImportCandidate] = []
+        for path in self.files:
+            try:
+                size = os.path.getsize(path)
+            except OSError:
+                continue  # vanished since the scan staged it
+            out.append(
+                ImportCandidate(
+                    source_kind=SOURCE_LIBRARY,
+                    local_path=path,
+                    size=size,
+                    file_name=Path(path).name,
+                    folder_name=Path(path).parent.name or None,
+                    container_root=self.container_root or str(Path(path).parent),
+                    series_scope_id=self.series_id,
+                    override=ManualOverride(series_id=self.series_id),
+                )
+            )
+        return out
+
+
 __all__ = [
     "SOURCE_DOWNLOAD",
+    "SOURCE_LIBRARY",
     "SOURCE_MANUAL",
     "SOURCE_RESCAN",
     "CompletedDownloadSource",
     "ImportCandidate",
+    "LibraryImportSource",
     "ManualImportSource",
     "ManualOverride",
     "RescanSource",
