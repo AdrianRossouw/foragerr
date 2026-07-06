@@ -1,65 +1,27 @@
-"""Safe path components, the M1 series-folder template, and path moves.
+"""The M1 series-folder template and series-directory moves (FRG-SER-008).
 
-Implements the path-construction half of design decisions 10/11
-(FRG-SER-008, FRG-NFR-012): series folder names are built only from
-sanitized components — never raw ComicVine titles — and any per-series path
-override must resolve under a registered root folder. Full filesystem
-confinement beyond component sanitization (safe-join against a resolved
-root, symlink escape, etc.) is explicitly out of scope here — that is
-FRG-SEC-004, owned by change 6's renaming engine; this module only owns
-safe *construction* of a path from trusted components (a root folder path)
-plus one untrusted title string.
+Implements the path-construction half of design decisions 10/11: series folder
+names are built only from sanitized components — never raw ComicVine titles —
+and any per-series path override must resolve under a registered root folder.
+
+Component sanitization itself is *not* owned here: `safe_path_component` was
+relocated to :mod:`foragerr.security.paths` under single ownership (FRG-SEC-004,
+change 6 design decision 5). The series-folder *template* is likewise no longer
+rendered here: change 6 moves that to the one token renaming engine
+(:func:`foragerr.importer.renamer.render_series_folder`, SER-008 template
+ownership transfer, FRG-PP-010). :func:`series_folder_name` now delegates to it,
+byte-for-byte unchanged for existing rows. Systematic destination-path
+confinement (safe-join) lives in ``security.paths``.
 """
 
 from __future__ import annotations
 
 import os
-import re
 from pathlib import Path
-
-#: Windows/DOS reserved device names — reserved with or without an extension
-#: (``CON``, ``CON.txt``, and even ``CON.tar.gz`` are all unwritable on
-#: Windows), so the check is against the segment before the *first* dot.
-_RESERVED_NAMES = frozenset(
-    {"CON", "PRN", "AUX", "NUL"}
-    | {f"COM{i}" for i in range(1, 10)}
-    | {f"LPT{i}" for i in range(1, 10)}
-)
-
-_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 
 
 class PathNotUnderRootError(ValueError):
     """A series path does not resolve under any registered root folder."""
-
-
-def safe_path_component(raw: str | None, *, fallback: str = "untitled") -> str:
-    """Reduce ``raw`` to one filesystem-safe path *segment* (FRG-NFR-012).
-
-    - Path separators (``/``, ``\\``) are replaced with spaces, so an
-      embedded traversal sequence like ``../`` can never introduce a real
-      directory boundary once this segment is joined onto a root path.
-    - Control characters (including CR/LF) are stripped.
-    - Runs of whitespace collapse to single spaces.
-    - Leading/trailing dots and spaces are stripped (the Windows/NTFS
-      trailing-dot-or-space rule; this also fully erases inputs that are
-      pure traversal sequences like ``..`` or ``../..``, since after
-      separator-replacement they contain only dots and spaces).
-    - Windows reserved device names are de-reserved with a leading
-      underscore, matched with or without a following extension.
-    - Never returns an empty string — falls back to ``fallback``.
-    """
-    text = raw or ""
-    text = text.replace("/", " ").replace("\\", " ")
-    text = _CONTROL_RE.sub(" ", text)
-    text = " ".join(text.split())
-    text = text.strip(" .")
-    if not text:
-        text = fallback
-    stem = text.split(".", 1)[0].upper()
-    if stem in _RESERVED_NAMES:
-        text = f"_{text}"
-    return text
 
 
 def series_folder_name(title: str, start_year: int | None) -> str:
@@ -69,11 +31,14 @@ def series_folder_name(title: str, start_year: int | None) -> str:
     the schema (a defensive allowance beyond the spec, which assumes it is
     always known from ComicVine) — when absent the year suffix is simply
     omitted rather than rendering a placeholder.
+
+    Rendered by the change-6 token engine (SER-008 ownership transfer,
+    FRG-PP-010): this is a thin delegation so there is exactly one implementation
+    of the series-folder template, with no behaviour change for existing rows.
     """
-    safe_title = safe_path_component(title)
-    if start_year is None:
-        return safe_title
-    return f"{safe_title} ({start_year})"
+    from foragerr.importer.renamer import render_series_folder
+
+    return render_series_folder(title, start_year)
 
 
 def build_series_path(root_folder_path: str | Path, title: str, start_year: int | None) -> Path:

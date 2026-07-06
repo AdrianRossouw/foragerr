@@ -36,6 +36,11 @@ from foragerr.library.flows._common import (
 from foragerr.library.flows.add import AddSeriesResult, add_series
 from foragerr.library.flows.edit_delete import delete_series, edit_series
 from foragerr.library.flows.refresh import refresh_series
+from foragerr.library.flows.rescan import (
+    RescanReport,
+    RescanSeriesCommand,
+    rescan_series,
+)
 from foragerr.library.flows.scan import scan_series
 
 # Import for the handler-registration side effect (``@register_handler``).
@@ -48,6 +53,8 @@ __all__ = [
     "MAX_ALIAS_LENGTH",
     "MONITOR_STRATEGIES",
     "RefreshSeriesCommand",
+    "RescanReport",
+    "RescanSeriesCommand",
     "ScanSeriesCommand",
     "SeriesNotFoundError",
     "SeriesRefreshed",
@@ -62,5 +69,6 @@ __all__ = [
     "encode_add_options",
     "encode_aliases",
     "refresh_series",
+    "rescan_series",
     "scan_series",
 ]

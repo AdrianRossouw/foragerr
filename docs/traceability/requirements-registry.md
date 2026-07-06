@@ -13,7 +13,7 @@ Also: `deferred` (approved, explicitly parked), `withdrawn` (kept for history).
 
 Milestones: `M1` vertical slice · `M2` own your library (existing-collection
 import, manual import, naming preview, daily-use screens, backups, NFR
-hardening, quality trio) · `M3` comics-native (weekly pull list + discovery,
+hardening; quality trio parked to B 2026-07-06) · `M3` comics-native (weekly pull list + discovery,
 volume grouping, trade typing, OPDS page streaming — grouping/trade ids
 allocated at proposal time) · `M4` sources (Humble Bundle importer — ids
 allocated at proposal time) · `M5` authentication · `B` backlog · `—` process
@@ -37,6 +37,7 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-PROC-009 | Spec approval gate | dev-process | active | — |
 | FRG-PROC-011 | Manual kept in sync with the application | dev-process | active | — |
 | FRG-PROC-012 | SOUP register | dev-process | active | — |
+| FRG-PROC-013 | Release tagging | dev-process | active | — |
 | FRG-SER-001 | Series entity from ComicVine volume | ser | implemented | M1 |
 | FRG-SER-002 | Issue entity | ser | implemented | M1 |
 | FRG-SER-003 | Two-level monitored flags | ser | implemented | M1 |
@@ -46,7 +47,7 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-SER-007 | Monitor-new-items policy | ser | implemented | M1 |
 | FRG-SER-008 | Root folders and series paths | ser | implemented | M1 |
 | FRG-SER-009 | Series statistics | ser | implemented | M1 |
-| FRG-SER-010 | Per-series disk rescan | ser | approved | M1 |
+| FRG-SER-010 | Per-series disk rescan | ser | implemented | M1 |
 | FRG-SER-011 | Annuals and specials as typed issues | ser | approved | B |
 | FRG-SER-012 | Continuing/Ended status maintenance | ser | approved | B |
 | FRG-SER-013 | Per-series overrides survive refresh | ser | approved | B |
@@ -119,8 +120,8 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-DL-006 | Grab history with download-id join key | dl | implemented | M1 |
 | FRG-DL-007 | Tracked-download state machine | dl | implemented | M1 |
 | FRG-DL-008 | Queue view from tracked downloads | dl | implemented | M1 |
-| FRG-DL-009 | Completed download handling | dl | approved | M1 |
-| FRG-DL-010 | Post-import client cleanup | dl | approved | M1 |
+| FRG-DL-009 | Completed download handling | dl | implemented | M1 |
+| FRG-DL-010 | Post-import client cleanup | dl | implemented | M1 |
 | FRG-DL-011 | Failed download handling | dl | implemented | M1 |
 | FRG-DL-012 | Blocklist | dl | implemented | M1 |
 | FRG-DL-013 | Automatic re-search after failure | dl | implemented | M1 |
@@ -173,17 +174,17 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-IMP-023 | Existing-library import staging and review | imp | approved | M2 |
 | FRG-IMP-024 | Embedded metadata read during import | imp | approved | M2 |
 | FRG-IMP-025 | Story-arc reading-order prefix | imp | approved | B |
-| FRG-PP-001 | Single shared import pipeline | pp | approved | M1 |
-| FRG-PP-002 | Completed-download handling state machine | pp | approved | M1 |
-| FRG-PP-003 | Grab reconciliation by download ID | pp | approved | M1 |
-| FRG-PP-004 | Import evidence aggregation | pp | approved | M1 |
-| FRG-PP-005 | Import decision specifications with visible reasons | pp | approved | M1 |
-| FRG-PP-006 | Archive validity verification | pp | approved | M1 |
-| FRG-PP-007 | Safe file operations | pp | approved | M1 |
-| FRG-PP-008 | Remote path mapping | pp | approved | M1 |
-| FRG-PP-009 | Token-based renaming engine | pp | approved | M1 |
-| FRG-PP-010 | Folder templates and folder lifecycle | pp | approved | M1 |
-| FRG-PP-011 | Import history events | pp | approved | M1 |
+| FRG-PP-001 | Single shared import pipeline | pp | implemented | M1 |
+| FRG-PP-002 | Completed-download handling state machine | pp | implemented | M1 |
+| FRG-PP-003 | Grab reconciliation by download ID | pp | implemented | M1 |
+| FRG-PP-004 | Import evidence aggregation | pp | implemented | M1 |
+| FRG-PP-005 | Import decision specifications with visible reasons | pp | implemented | M1 |
+| FRG-PP-006 | Archive validity verification | pp | implemented | M1 |
+| FRG-PP-007 | Safe file operations | pp | implemented | M1 |
+| FRG-PP-008 | Remote path mapping | pp | implemented | M1 |
+| FRG-PP-009 | Token-based renaming engine | pp | implemented | M1 |
+| FRG-PP-010 | Folder templates and folder lifecycle | pp | implemented | M1 |
+| FRG-PP-011 | Import history events | pp | implemented | M1 |
 | FRG-PP-012 | Rename preview before execution | pp | approved | M2 |
 | FRG-PP-013 | Upgrades and deletions via recycle bin | pp | approved | M2 |
 | FRG-PP-014 | Duplicate constraint handling | pp | approved | M2 |
@@ -309,12 +310,12 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-NFR-013 | resource footprint | nfr | approved | B |
 | FRG-SEC-001 | SSRF egress controls for server-side fetches | sec | implemented | M1 |
 | FRG-SEC-002 | Hardened XML parsing (XXE / entity-expansion) | sec | implemented | M1 |
-| FRG-SEC-003 | Archive-processing safety (bomb / zip-slip limits) | sec | approved | M1 |
-| FRG-SEC-004 | Filesystem path confinement (safe-join) | sec | approved | M1 |
+| FRG-SEC-003 | Archive-processing safety (bomb / zip-slip limits) | sec | implemented | M1 |
+| FRG-SEC-004 | Filesystem path confinement (safe-join) | sec | implemented | M1 |
 | FRG-SEC-005 | CSRF stance and WebSocket Origin validation | sec | approved | M5 |
 | FRG-NFR-014 | Listener request resource limits | nfr | approved | M2 |
 | FRG-QUAL-001 | Format profile entity | qual | implemented | M1 |
 | FRG-QUAL-002 | Default profile seeded on first run | qual | implemented | M1 |
-| FRG-QUAL-003 | Release preferred-term scoring | qual | approved | M2 |
-| FRG-QUAL-004 | Per-profile size bounds | qual | approved | M2 |
-| FRG-QUAL-005 | Profile management UI and API | qual | approved | M2 |
+| FRG-QUAL-003 | Release preferred-term scoring | qual | approved | B |
+| FRG-QUAL-004 | Per-profile size bounds | qual | approved | B |
+| FRG-QUAL-005 | Profile management UI and API | qual | approved | B |

@@ -557,6 +557,77 @@ Pixeldrain never reach the downloader), pack/booktype recognition (FRG-DDL-014).
 No new STRIDE categories; COMP 5/6 sections above remain accurate with the M1
 subset now implemented. Residual/open items are tracked above, not re-litigated.
 
+### 2026-07-06 — m1-import-pipeline (change 6 of Phase 3)
+
+The change this model was waiting for on two of its named gaps: untrusted archives
+are now systematically opened at import time (COMP 7), and destination-path
+construction became systematic (COMP 9). FRG-SEC-003/004 land here. Disposition:
+
+**COMP 7 — Archive handling (import arm live)**
+
+- **G-4 closed for the import path** (`T-ARCH-1`/`T-ARCH-2`/`T-ARCH-4`, RISK-010/
+  005/030): `security.archives.inspect_archive` is the single shared entry point
+  the pipeline's archive-valid decision calls (FRG-SEC-003). All caps are enforced
+  on *declared* central-directory metadata before any decompression: member count,
+  per-member and total decompressed size, nesting depth 0 (archive-in-archive
+  forbidden in M1). Member names in the zip-slip family (absolute, drive-qualified,
+  `..`-escaping, backslash-normalized) are rejected, as are symlink entries and
+  encrypted archives; a cbz must contain ≥1 image entry. The utility never
+  extracts and never raises on hostile input — every rejection is a typed, logged
+  `ArchiveReport` the pipeline attaches to the candidate, routing corrupt/password
+  archives to failed-download handling → blocklist → re-search (the change-5 loop).
+  Hostile corpus (bomb, nested bomb, slip names, symlink, huge member, encrypted)
+  committed as fixtures.
+- **The honest-flag latent** (found at this gate, fixed a6d29e4): `ok=True` on a
+  magic-only cbr/cb7 means "passed the M1 import validity gate", NOT "members
+  vetted". `ArchiveReport` now carries `listed` and `safe_to_extract` — the latter
+  `True` only when every member was enumerated AND passed the name/symlink/
+  nesting/size rules. Any future extractor (FRG-DDL-015 pack extraction, OPDS page
+  streaming, cover extraction, tagging) must gate on `safe_to_extract`, never `ok`.
+- **Documented residuals (M1-safe: nothing extracts anywhere)**: the RAR listing
+  path checks names/sizes/nesting/count but NOT symlink members or RAR encryption
+  flags; with `rarfile` absent a CBR passes on magic alone (design decision 4).
+  `T-ARCH-3` (PIL truncated-image) is untouched — no image decoding happens at
+  import; that arm stays with cover extraction / OPDS streaming.
+
+**COMP 9 — Renamer / file mover (now live)**
+
+- **G-4a closed** (`T-FILE-2`, RISK-019): `security.paths.safe_join(root, *parts)`
+  (FRG-SEC-004) is the only sanctioned constructor for destination paths.
+  `safe_path_component` relocated here — ONE module owns path safety, no second
+  sanitizer copy exists (scenario-tested). Every untrusted part is reduced to a
+  single separator-free segment, then the assembled path is realpath-resolved and
+  confinement-checked against the root, which also catches escape through a
+  pre-existing symlink in the tree; escapes raise `PathConfinementError`. The
+  renamer renders folder templates into *segments* handed to `safe_join`. OPDS
+  (change 7) swaps onto this same utility when it merges main.
+- **`T-FILE-3` implemented** (FRG-PP-007): `place_file` is the one mover —
+  same-device atomic `os.replace`, else copy-to-temp *in the destination dir* +
+  fsync + size-verify + atomic promote + only-then delete source; a failure at any
+  step removes the temp, so no partial ever appears at a final path and the source
+  is never lost. Free-space guard (size + margin) runs before any bytes move.
+  Upgrades quarantine the superseded file under `<config>/quarantine/<date>/`
+  (never deleted — the M1 recycle-bin stand-in); the round-trip renaming contract
+  is property-tested so every rendered name re-parses to the same issue identity.
+
+**COMP 12 — Import concurrency / crash-consistency (the gate's atomicity cluster)**
+
+The 9-angle gate review found a real cluster of file-move-inside-rollback-able-
+transaction hazards; all fixed (4c943e6, 1b6c3c0, cd9ee93) + regression-tested,
+recorded on RISK-032: status-guarded atomic row claim; irreversible on-disk move
+ordered BEFORE the DB row swap; per-candidate SAVEPOINT isolation (an escaping
+filesystem error becomes BLOCKED, never poisons a sibling's committed row); crash
+recovery reconciles FS↔DB and *adopts* an already-placed file instead of orphaning
+it; drain and rescan share a file-mutation exclusivity group (double-import safety
+no longer rests on pool size 1); manual queue remove refuses (409) an actively-
+importing item; per-row failure isolation in the drain.
+
+**New accepted latent** — RISK-040: a still-completed `import_blocked` item is
+re-fed to `import_pending` every tracking cycle (the deliberate retry-on-evidence-
+change path); each failed retry writes a fresh `import_blocked` history event, so a
+permanently stuck item accretes history rows until the user acts. Accepted for M1
+(loudly visible in the queue; slow growth); dedup/pruning at the M2 history UI.
+
 ## Coverage summary
 
 - **Well covered by the five drafts** (mitigation named, no new requirement needed): OPDS

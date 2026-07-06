@@ -44,9 +44,10 @@ software project would treat as controlled artifacts:
   a review trigger, not silently deferred.
 - **A SOUP register.** Third-party runtime dependencies are tracked as SOUP
   (Software of Unknown Provenance, in IEC 62304 terms) in
-  `docs/security/soup-register.md`: version constraint, source, purpose, and a
-  known-anomaly review note per dependency, kept in sync whenever a dependency is
-  added, removed, or upgraded.
+  `docs/security/soup-register.md`: version constraint, source, purpose, and
+  license per dependency, kept in sync whenever a dependency is added, removed,
+  or upgraded. Systematic anomaly/vulnerability review is deferred until
+  network-connected CI exists (see the register's methodology note).
 - **A manual kept in sync with the application.** `docs/manual/` is a controlled
   artifact: a change that alters documented behavior updates the affected manual
   section in the same change, before merge — see `docs/manual/index.md`'s currency

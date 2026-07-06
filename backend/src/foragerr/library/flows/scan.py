@@ -13,8 +13,7 @@ from __future__ import annotations
 import datetime as dt
 import logging
 import os
-from pathlib import Path
-from typing import Any, Awaitable, Callable, Iterator
+from typing import Any, Awaitable, Callable
 
 from sqlalchemy import select
 
@@ -22,9 +21,8 @@ from foragerr.commands.registry import register_handler
 from foragerr.commands.service import HandlerContext
 from foragerr.config import Settings
 from foragerr.db import Database
-from foragerr.library import repo
+from foragerr.library import matching, repo
 from foragerr.library.models import IssueFileRow, IssueRow
-from foragerr.library.ordering import parse_issue_number
 from foragerr.parser import ParseMode, ParseResult, parse
 from foragerr.parser.result import Issue
 from foragerr.parser.vocab import ARCHIVE_EXTENSIONS
@@ -75,9 +73,7 @@ async def scan_series(
 
     # Precompute each issue's parsed number once (same shape the filename
     # parser produces), so matching is a cheap in-memory comparison.
-    issue_index = [
-        (issue.id, parse_issue_number(issue.issue_number)) for issue in issues
-    ]
+    issue_index = matching.build_issue_index(issues)
 
     files = (
         await offload(_collect_archive_files, series_path)
@@ -126,78 +122,23 @@ def _match_issue(
 
     A file matches when its parsed series-title matching key aligns with the
     series' stored key AND its parsed issue equals a stored issue's parsed
-    number (value + suffix + name + infinity)."""
+    number (value + suffix + name + infinity) — the shared
+    :mod:`foragerr.library.matching` rules the importer uses too."""
     if not parsed.success or parsed.issue is None or parsed.matching_key is None:
         return None
-    if not _series_title_matches(parsed.matching_key, series_key):
+    if not matching.series_title_matches(parsed.matching_key, series_key):
         return None
-    for issue_id, issue_number in issue_index:
-        if _issue_equal(parsed.issue, issue_number):
-            return issue_id
-    return None
-
-
-def _series_title_matches(parsed_key: str, series_key: str) -> bool:
-    """Loose series-title match: exact, or the parsed key's tokens are a
-    subset of the series key's (tolerates the parser under-extracting a
-    subtitle/extra word the full ComicVine title carries).
-
-    Deliberately NOT symmetric: allowing the series key to be a subset of the
-    parsed key (the other direction) would let a short registered series name
-    swallow a misfiled file that actually belongs to a different, longer
-    series sharing that name as a prefix — a common pattern in comics
-    ("Batman" / "Batman Beyond", "X-Men" / "X-Men Legacy", "Avengers" /
-    "Avengers Academy", ...). Since scan already scopes the walk to one
-    series' own folder, only the narrower direction is safe to tolerate.
-    """
-    if not parsed_key or not series_key:
-        return False
-    if parsed_key == series_key:
-        return True
-    parsed_tokens = set(parsed_key.split())
-    series_tokens = set(series_key.split())
-    return parsed_tokens <= series_tokens
-
-
-def _issue_equal(a: Issue, b: Issue) -> bool:
-    return (
-        a.value == b.value
-        and a.suffix == b.suffix
-        and a.is_infinity == b.is_infinity
-        and _norm_name(a.name) == _norm_name(b.name)
-    )
-
-
-def _norm_name(name: str | None) -> str | None:
-    return name.casefold() if name else None
+    return matching.match_issue_id(parsed.issue, issue_index)
 
 
 # --- filesystem -------------------------------------------------------------
 
 
 def _collect_archive_files(series_path: str) -> list[tuple[str, int]]:
-    """Materialize :func:`_iter_archive_files` — a plain function so it can
-    be handed to ``offload``/``asyncio.to_thread`` as a callable."""
-    return list(_iter_archive_files(series_path))
-
-
-def _iter_archive_files(series_path: str) -> Iterator[tuple[str, int]]:
-    """Yield ``(absolute_path, size)`` for every comic-archive file under the
-    series folder (recursively). A non-existent folder yields nothing."""
-    base = Path(series_path)
-    if not base.exists():
-        return
-    for dirpath, _dirs, files in os.walk(base):
-        for name in files:
-            ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
-            if ext not in ARCHIVE_EXTENSIONS:
-                continue
-            full = os.path.join(dirpath, name)
-            try:
-                size = os.path.getsize(full)
-            except OSError:  # pragma: no cover - racing deletion
-                continue
-            yield full, size
+    """The recursive series-folder archive walk (shared
+    :func:`foragerr.library.matching.iter_archive_files`), materialized as a
+    plain function so it can be handed to ``offload``/``asyncio.to_thread``."""
+    return matching.iter_archive_files(series_path, ARCHIVE_EXTENSIONS)
 
 
 # --- command handler --------------------------------------------------------

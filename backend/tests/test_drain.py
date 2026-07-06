@@ -129,12 +129,14 @@ def test_full_app_lifecycle_starts_runs_and_drains_cleanly(config_dir):
         assert app.state.db is not None
         assert app.state.commands.health()["status"] == "up"
         # housekeeping (sched area), the search area's scheduled backlog +
-        # release-cache prune tasks (m1-search-indexers), and the m1-downloads
-        # tracking refresh (FRG-DL-007) + DDL queue drainer (ddl area).
+        # release-cache prune tasks (m1-search-indexers), the m1-downloads
+        # tracking refresh (FRG-DL-007) + DDL queue drainer (ddl area), and the
+        # m1-import-pipeline completed-download drain (FRG-DL-009, flows area).
         assert app.state.scheduler.task_names() == [
             "backlog-search",
             "housekeeping",
             "process-ddl-queue",
+            "process-imports",
             "prune-release-cache",
             "track-downloads",
         ]

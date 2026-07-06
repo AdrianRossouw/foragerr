@@ -13,7 +13,7 @@ milestone change that implements each requirement (FRG-PROC-003, FRG-PROC-009).
 
 Notifications SHALL be implemented as provider rows (implementation name + typed settings serialized per the provider pattern) behind a single notifier interface, such that adding a new channel requires only a backend implementation class and no frontend or event-pipeline changes.
 
-- **Milestone**: M2
+- **Milestone**: B
 - **Source**: sonarr-architecture.md §2.1 ThingiProvider pattern + §7.2 schema endpoints; mylar-feature-surface.md §6 (ten hardcoded agents — the anti-pattern being replaced).
 - **Notes**: Foundation requirement for the area. Depends on the API provider-schema requirement; the UI notifications screen is drafted under UI.
 
@@ -26,7 +26,7 @@ Notifications SHALL be implemented as provider rows (implementation name + typed
 
 Each configured notifier connection SHALL independently opt in to each notification event type, covering at least: on grab (release snatched), on import (download imported), on upgrade (existing file replaced), on download failure, on health issue, and on test; events not opted into SHALL NOT be delivered to that connection.
 
-- **Milestone**: M2
+- **Milestone**: B
 - **Source**: mylar-feature-surface.md §6 (per-agent `_ONSNATCH` gates; on-snatch / on-PP-complete / on-metatag-error events); sonarr-architecture.md §5.3 (EpisodeImportedEvent → notifications), §4.6 (DownloadFailedEvent).
 - **Notes**: Event set deliberately extends Mylar's three (adds upgrade, failure, health) following Sonarr's event model; "metatagging error" folds into a general failure/health event rather than a bespoke type — divergence noted.
 
@@ -39,7 +39,7 @@ Each configured notifier connection SHALL independently opt in to each notificat
 
 Notification messages SHALL include, per event type, at least: series title, issue number/title, and for grab events the indexer, release title, and size; for import events the final format and an upgrade indicator; for failure events the failure reason — rendered per-channel within that channel's formatting limits.
 
-- **Milestone**: M2
+- **Milestone**: B
 - **Source**: sonarr-architecture.md §4.3 grab history data dict (indexer, size, url), §7.3 HistoryResource fields; mylar-feature-surface.md §6.
 - **Notes**: Keeps payload requirements channel-agnostic; per-channel niceties (embeds, markdown) are implementation detail, except cover images (separate requirement, B).
 
@@ -52,7 +52,7 @@ Notification messages SHALL include, per event type, at least: series title, iss
 
 Every notifier connection SHALL support a test action (via the provider test endpoint) that sends a real test message through the configured channel and returns structured success/failure including the transport error on failure.
 
-- **Milestone**: M2
+- **Milestone**: B
 - **Source**: mylar-feature-surface.md §6 (per-agent test endpoints, webserve.py:8197-8311); sonarr-architecture.md §7.2 (`POST /<provider>/test`).
 - **Notes**: Rides on the API provider test requirement; listed separately so the NOTIF area owns the per-channel delivery semantics.
 
@@ -65,7 +65,7 @@ Every notifier connection SHALL support a test action (via the provider test end
 
 The initial release of notifications SHALL include working implementations for: generic webhook (JSON POST), Discord, Telegram, Pushover, and email (SMTP with TLS and authentication).
 
-- **Milestone**: M2
+- **Milestone**: B
 - **Source**: mylar-feature-surface.md §6 (Mylar's ten agents; Discord/Telegram/Pushover/Email are the overlap chosen) and §(b) NOTIF candidate ("at least one push channel (e.g. webhook/Discord/Telegram/email)").
 - **Notes**: Generic webhook is the escape hatch that makes every other service reachable day one. Selection rationale: highest-usage modern channels + email as lowest-common-denominator.
 
@@ -91,7 +91,7 @@ The notifier abstraction SHALL accommodate later addition of the remaining Mylar
 
 Notification delivery SHALL be asynchronous and isolated from the pipeline that raised the event: a slow or failing channel SHALL NOT block or fail grabs, imports, or commands; delivery failures SHALL be logged and repeated failures surfaced as a health warning for that connection.
 
-- **Milestone**: M2
+- **Milestone**: B
 - **Source**: sonarr-architecture.md §6.1 (handlers isolated, fire-and-forget async handlers), §6.2 asyncio equivalent; mylar-feature-surface.md §6 (no such isolation stated — hardening divergence).
 - **Notes**: The event-bus mechanics belong to the backbone area; this owns the NOTIF-specific guarantee and health surfacing.
 

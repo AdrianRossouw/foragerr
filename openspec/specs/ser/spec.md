@@ -6,9 +6,7 @@ Baseline requirements for series & library management, mined from the
 Phase 1 reference research (`docs/research/`). Baseline depth per the Phase 2 scope
 decision: SHALL + coarse acceptance; scenario-level elaboration happens in the
 milestone change that implements each requirement (FRG-PROC-003, FRG-PROC-009).
-
 ## Requirements
-
 ### Requirement: FRG-SER-001 — Series entity from ComicVine volume
 
 The system SHALL persist each watched series as a record keyed by its ComicVine volume ID, storing at minimum title, clean/sort title, publisher, start year, status (continuing/ended), overview, cover image reference, path, root folder, format-profile reference, monitored flag, added timestamp, and last-metadata-sync timestamp, with the ComicVine volume ID unique across the library.
@@ -235,10 +233,25 @@ The system SHALL provide a per-series rescan command that re-enumerates files un
 - **Source**: sonarr-architecture.md §5.5 (DiskScanService, shared pipeline); mylar-feature-surface.md capability map SER (forceRescan).
 - **Notes**: The import pipeline itself is the IMP/PP area's requirement; SER owns the trigger, cleanup of vanished files, and statistics refresh. Runs automatically after metadata refresh and on demand.
 
-#### Scenario: Baseline acceptance
+#### Scenario: RescanSeries walks the series path and routes untracked files through the shared pipeline
 
-- **WHEN** this requirement is verified against the implementation
-- **THEN** Deleting a file on disk then rescanning clears its issue-file record and returns the issue to Wanted; dropping a correctly named file into the folder and rescanning links it.
+- **WHEN** RescanSeriesCommand runs for a series and enumerates files under its (possibly overridden) path to a bounded depth using the shared extension list
+- **THEN** files already linked to an issue-file record are skipped and every remaining file is routed through the same shared import pipeline used by completed-download handling, with no separate rescan-only import path
+
+#### Scenario: Vanished files are cleared and the issue returns to Wanted
+
+- **WHEN** a file backing an existing issue-file record no longer exists on disk at rescan time
+- **THEN** that issue-file record is removed and the now-fileless monitored issue returns to the derived Wanted state
+
+#### Scenario: A correctly named dropped-in file is linked and stats update immediately
+
+- **WHEN** a correctly named file is dropped into the series folder and a rescan is run
+- **THEN** the file is matched and a new issue_files row is created, and per-series statistics (have/total, size on disk) reflect the new record immediately via derivation with no manual recount
+
+#### Scenario: Unmatched or blocked files are recorded in a per-series rescan report
+
+- **WHEN** a rescanned file cannot be matched to an issue or is rejected by the shared pipeline
+- **THEN** it is recorded in a per-series rescan report with its reason rather than silently ignored, leaving the file in place for the operator to resolve
 
 ### Requirement: FRG-SER-011 — Annuals and specials as typed issues
 
@@ -314,3 +327,4 @@ The system SHALL support bulk operations over a selected set of series: set moni
 
 - **WHEN** this requirement is verified against the implementation
 - **THEN** Selecting three series and applying "unmonitor" updates all three in one API call.
+

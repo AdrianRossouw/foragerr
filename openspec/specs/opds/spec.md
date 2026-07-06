@@ -108,7 +108,7 @@ The catalog SHALL either (a) advertise an OpenSearch description link, serve a v
 
 Issue entries SHALL carry an OPDS-PSE 1.0 link (`rel="http://vaemendis.net/opds-pse/stream"`, namespace `http://vaemendis.net/opds-pse/ns`) with `{pageNumber}`/`{maxWidth}` URI template placeholders and an accurate `pse:count`, and the stream endpoint SHALL return the requested single page image (bounds-checked, resolved via library id per the resolution requirement) with optional server-side downscaling to `maxWidth` and a correct image Content-Type.
 
-- **Milestone**: M2
+- **Milestone**: M3
 - **Source**: mylar-opds.md §2(b) (`_Stream`, PSE template, scale_image), §6.
 - **Notes**: M1 relies on whole-file download (sufficient for iPad reading over Tailscale); PSE is the M2 streaming upgrade. Whether Panels/Chunky prefer PSE vs whole-file is an OPEN QUESTION (below) — do not reorder milestones without answering it.
 
@@ -121,7 +121,7 @@ Issue entries SHALL carry an OPDS-PSE 1.0 link (`rel="http://vaemendis.net/opds-
 
 Per-issue page counts (`pse:count`) and page listings SHALL be computed once (at import or first access) and persisted/cached, so that neither feed rendering nor repeated stream requests re-enumerate archive contents; cache entries SHALL invalidate when the underlying file changes.
 
-- **Milestone**: M2
+- **Milestone**: M3
 - **Source**: mylar-opds.md §5 W3, §6 ("compute pse:count lazily/cached, not by opening every archive on every feed render").
 - **Notes**: Pairs with PSE; import pipeline (IMP area) is the natural producer of page counts — dedup hint for the orchestrator.
 
@@ -134,7 +134,7 @@ Per-issue page counts (`pse:count`) and page listings SHALL be computed once (at
 
 Pages within an archive SHALL be served in natural (numeric-aware) order of member names — `2.jpg` before `10.jpg` regardless of zero-padding — considering only recognized image members (jpg/jpeg/png/webp) and ignoring directories and non-image files.
 
-- **Milestone**: M2
+- **Milestone**: M3
 - **Source**: mylar-opds.md §2 (sorted namelist), §5 W5 (naive lexical sort), §6.
 - **Notes**: Ships with PSE (page order is invisible to whole-file download). Same natural-sort must be used for page-count computation so counts and indexes agree.
 
@@ -147,7 +147,7 @@ Pages within an archive SHALL be served in natural (numeric-aware) order of memb
 
 Issue entries SHALL emit both `http://opds-spec.org/image` and `.../image/thumbnail` links; when no stored remote cover URL exists, the server SHALL fall back to a locally generated cover (first page extracted at import time, resized, cached) so that no downloadable entry is cover-less, and thumbnail URLs SHALL resolve without requiring client access to third-party hosts.
 
-- **Milestone**: M2
+- **Milestone**: M3
 - **Source**: mylar-opds.md §2 (covers reuse remote CV URLs; one-offs cover-less; `extract_image` exists but unused), §5/§6.
 - **Notes**: Divergence from Mylar (hotlinked CV URLs). Serving covers locally also stops leaking client requests to ComicVine's CDN. Cover extraction/caching may share the IMP-area cover cache.
 
@@ -160,7 +160,7 @@ Issue entries SHALL emit both `http://opds-spec.org/image` and `.../image/thumbn
 
 OPDS archive-opening and image-scaling operations SHALL enforce configurable resource limits — maximum archive member count and per-page decompressed size, image pixel-dimension caps before PIL decode, and per-request time bounds — rejecting requests that exceed them with a 4xx/5xx rather than exhausting memory/CPU.
 
-- **Milestone**: M2
+- **Milestone**: M3
 - **Source**: mylar-opds.md §5 S5 (zip-bomb/decompression exposure, `LOAD_TRUNCATED_IMAGES`), §6 resource limits.
 - **Notes**: Untrusted-parser attack surface → FRG-PROC-006 security docs update required in the implementing change. Applies wherever archives are opened (shared with IMP) — orchestrator may hoist to a cross-area requirement.
 

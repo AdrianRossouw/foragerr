@@ -208,33 +208,52 @@ async def delete_queue_item(
     blocklist: bool = Query(False),
     deleteData: bool = Query(False),
 ) -> dict[str, object]:
-    """Manually remove a queue item (FRG-DL-008, FRG-API-007).
+    """Manually remove a queue item (FRG-DL-008, FRG-API-007, FRG-DL-010).
 
     Removes the tracked row, instructs the client to remove the download (and its
     data when ``deleteData=true``), and writes a blocklist row when
     ``blocklist=true``. The client removal is best-effort — an unreachable client
     never blocks the queue cleanup — but blocklisting + de-tracking always happen.
+
+    An item that is actively ``importing`` is refused (409): the post-processing
+    drain holds it and is moving its files, so deleting the client's data now
+    would yank files out from under an in-flight import. De-tracking is done
+    FIRST under a write-lock guard that excludes ``importing`` (so a drain cannot
+    claim it in the window), and only THEN is the client told to drop the data —
+    once de-tracked, no drain can pick the item up.
     """
     db = request.app.state.db
     settings = request.app.state.settings
     now = utcnow()
+    importing = TrackedDownloadState.IMPORTING.value
 
     async with db.read_session() as session:
         row = await session.get(TrackedDownloadRow, queue_id)
         if row is None:
             raise ApiError(404, f"queue item {queue_id} not found")
+        if row.state == importing:
+            raise ApiError(
+                409, "import in progress for this item; try again once it completes"
+            )
         download_id = row.download_id
         client_id = row.client_id
 
-    await _instruct_client_remove(db, settings, client_id, download_id, deleteData)
-
+    # De-track first, guarded against a drain that flipped it to importing between
+    # our read and this write. Once the row is gone the drain can never claim it.
     async with db.write_session() as session:
         row = await session.get(TrackedDownloadRow, queue_id)
         if row is None:
             raise ApiError(404, f"queue item {queue_id} not found")
+        if row.state == importing:
+            raise ApiError(
+                409, "import in progress for this item; try again once it completes"
+            )
         if blocklist:
             await _write_manual_blocklist(session, row, now)
         await session.delete(row)
+
+    # Safe now: the item is de-tracked, so deleting client data cannot race a drain.
+    await _instruct_client_remove(db, settings, client_id, download_id, deleteData)
 
     return {"id": queue_id, "removed": True, "blocklisted": blocklist}
 
