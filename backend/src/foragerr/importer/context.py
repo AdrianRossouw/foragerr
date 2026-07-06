@@ -40,11 +40,17 @@ DEFAULT_MAX_WALK_DEPTH = 8
 #: pool size (``workers_pp`` may be up to 4) — double-import safety must not rest
 #: on the pool being size 1 (FRG-SER-010).
 #:
-#: Homed on this dependency-light leaf (re-exported unchanged from
-#: ``foragerr.importer.__init__``) so a flows module that only needs the group
-#: string + :class:`ImportContext` (e.g. ``library.flows.rename``) can import it
-#: without dragging in the whole pipeline + ORM registration (FRG-NFR-001 seam
-#: de-couple). The value is byte-identical to the historical package constant.
+#: Defined on this dependency-light leaf (and re-exported unchanged from
+#: ``foragerr.importer.__init__``) for definition-site clarity: a flows module
+#: that only needs the group string + :class:`ImportContext` (e.g.
+#: ``library.flows.rename``) imports it from here. This is NOT an import-cost
+#: decouple — importing ``foragerr.importer.context`` still executes the
+#: ``foragerr.importer`` package ``__init__`` (Python parent-package semantics),
+#: which loads the full pipeline + ORM registration regardless. The actual
+#: cycle protection is the isolated-importability regression guard in
+#: ``tests/test_nfr_startup.py`` (FRG-NFR-001), which imports each leaf as the
+#: sole entry point in a fresh subprocess. The value is byte-identical to the
+#: historical package constant.
 IMPORT_FILE_MUTATION_GROUP = "import-file-mutation"
 
 

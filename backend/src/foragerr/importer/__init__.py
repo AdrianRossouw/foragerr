@@ -58,8 +58,11 @@ from foragerr.importer.sources import (
 #: pool size (``workers_pp`` may be up to 4) — double-import safety must not rest
 #: on the pool being size 1 (FRG-SER-010). Canonically defined on the
 #: dependency-light :mod:`foragerr.importer.context` leaf and re-exported here
-#: unchanged (byte-identical public API) so flows modules needing only the group
-#: string can import the leaf without the full pipeline (FRG-NFR-001).
+#: unchanged (byte-identical public API) for definition-site clarity — NOT for
+#: import cost: importing the leaf still executes this package ``__init__``
+#: (parent-package semantics), so it loads the full pipeline either way. The
+#: import-cycle protection is the subprocess sole-entry-point guard in
+#: ``tests/test_nfr_startup.py`` (FRG-NFR-001).
 
 __all__ = [
     "IMPORT_FILE_MUTATION_GROUP",
