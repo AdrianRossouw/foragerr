@@ -91,5 +91,5 @@
       grab→import, wanted lists a missing issue, OPDS recent serves the file)
       are DEFERRED to the approved m2-search-autosuggest change — requirement
       evidence is complete via tagged backend/frontend tests. [FRG-PROC-010]
-- [ ] 7.5 Suites green; 8-angle + Codex gate; fixes; archive; --no-ff merge;
+- [x] 7.5 Suites green; 8-angle + Codex gate; fixes; archive; --no-ff merge;
       main suites; tag v0.2.4. [FRG-PROC-007]
