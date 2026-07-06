@@ -76,6 +76,15 @@ class ArchiveReport:
     rejection ``ok`` is ``False`` with a machine ``reason_code`` and a
     human-readable ``reason``. ``note`` records a non-fatal caveat (e.g. CBR
     listed by magic only because :mod:`rarfile` is absent).
+
+    ``listed`` / ``safe_to_extract`` are DISTINCT from ``ok``. ``ok`` means "this
+    passed the M1 import validity check"; a magic-only rar/7z (no member listing
+    available) is ``ok=True`` but its members were never vetted for the zip-slip
+    / symlink / nesting / size rules. ``listed`` records whether every member was
+    actually enumerated, and ``safe_to_extract`` is only ``True`` when the archive
+    was both fully listed AND every member passed those rules — so a future
+    extractor must gate on ``safe_to_extract``, never on ``ok`` alone, and cannot
+    mistake an unlistable container for "members vetted" (FRG-SEC-003).
     """
 
     ok: bool
@@ -88,6 +97,11 @@ class ArchiveReport:
     note: str | None = None
     #: Per-member offending name, when a member-name rejection applies.
     offending_member: str | None = field(default=None)
+    #: Every member was enumerated from the central directory.
+    listed: bool = False
+    #: Fully listed AND every member passed the name/symlink/nesting/size vetting
+    #: — the only honest signal a future extractor may trust (never ``ok`` alone).
+    safe_to_extract: bool = False
 
 
 def _reject(
@@ -279,6 +293,8 @@ def _inspect_zip(
         member_count=member_count,
         total_uncompressed=total,
         image_count=image_count,
+        listed=True,
+        safe_to_extract=True,  # every member enumerated + vetted above
     )
 
 
@@ -367,6 +383,8 @@ def _inspect_rar(path: Path, limits: ArchiveLimits) -> ArchiveReport:
         member_count=member_count,
         total_uncompressed=total,
         image_count=image_count,
+        listed=True,
+        safe_to_extract=True,  # rarfile enumerated + vetted every member
     )
 
 

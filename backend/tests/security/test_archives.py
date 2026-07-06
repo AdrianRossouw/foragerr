@@ -91,6 +91,29 @@ def test_cb7_passes_on_magic_only_in_m1(tmp_path):
     assert report.kind == "7z"
 
 
+@pytest.mark.req("FRG-SEC-003")
+def test_safe_to_extract_distinguishes_vetted_from_magic_only(tmp_path):
+    # A fully-listed + vetted zip is honestly safe to extract; a magic-only
+    # container (7z, or magic-only cbr) is ok=True but NOT safe_to_extract, so a
+    # future extractor can never mistake an unlistable archive for "members
+    # vetted". listed/safe_to_extract are distinct from ok.
+    cbz = _write_zip(tmp_path / "ok.cbz", [("page01.jpg", _PNG)])
+    zip_report = inspect_archive(cbz)
+    assert zip_report.ok and zip_report.listed and zip_report.safe_to_extract
+
+    cb7 = tmp_path / "book.cb7"
+    cb7.write_bytes(b"7z\xbc\xaf\x27\x1c" + b"\x00" * 64)
+    magic_report = inspect_archive(cb7)
+    assert magic_report.ok  # passes the M1 validity gate
+    assert not magic_report.listed  # but no member was enumerated
+    assert not magic_report.safe_to_extract  # so extraction must not trust it
+
+    # A rejected archive is likewise never safe to extract.
+    bad = _write_zip(tmp_path / "noimg.cbz", [("readme.txt", b"hello")])
+    bad_report = inspect_archive(bad)
+    assert not bad_report.ok and not bad_report.safe_to_extract
+
+
 # --- hostile corpus: each artifact is a typed, bounded rejection -------------
 
 
