@@ -6,14 +6,14 @@ Every requirement gets at least one tagged test (FRG-PROC-004): pytest
 
 ## A. Backend — config surface + ComicVine credential settings API
 
-- [ ] A.1 Remove the three dead global credential fields (`dognzb_api_key`,
+- [x] A.1 Remove the three dead global credential fields (`dognzb_api_key`,
       `nzbsu_api_key`, `sabnzbd_api_key`) from `Settings` in
       `backend/src/foragerr/config.py`. Tagged tests: the generated documented
       `config.yaml` contains none of the three keys and still contains the
       `comicvine_api_key` placeholder; a `config.yaml` carrying all three stale
       keys loads cleanly with a logged unknown-key warning (no startup failure).
       [FRG-DEP-003]
-- [ ] A.2 New ComicVine credential settings resource (e.g. `GET/PUT
+- [x] A.2 New ComicVine credential settings resource (e.g. `GET/PUT
       /api/v1/config/general`): GET returns `{configured, source ∈
       unset|file|environment}` and NEVER the key value, reading
       `os.environ["FORAGERR_COMICVINE_API_KEY"]` to distinguish env from file. PUT
@@ -25,11 +25,11 @@ Every requirement gets at least one tagged test (FRG-PROC-004): pytest
       the value + reports each source; PUT persists + applies live (no restart) +
       no key in body/log; blank keeps stored; env-set → read-only rejection.
       [FRG-API-018]
-- [ ] A.3 ComicVine connectivity-test action (e.g. `POST
+- [x] A.3 ComicVine connectivity-test action (e.g. `POST
       /api/v1/config/comicvine/test`) exercising the effective key and returning a
       success/failure result without leaking the key. Tagged test: success and
       failure results; no key in body/log. [FRG-API-018]
-- [ ] A.4 Live-apply verification for the metadata client: assert a UI-written key
+- [x] A.4 Live-apply verification for the metadata client: assert a UI-written key
       is used by the next ComicVine request without a restart (per-request client
       reads `app.state.settings`), and that an env-set key stays effective. Tagged
       tests per the FRG-META-002 delta scenarios (live-apply; env precedence
@@ -37,13 +37,13 @@ Every requirement gets at least one tagged test (FRG-PROC-004): pytest
 
 ## B. Backend — first-run default DDL provider seeding
 
-- [ ] B.1 Forward-only Alembic migration adding the first-run seed marker (a
+- [x] B.1 Forward-only Alembic migration adding the first-run seed marker (a
       singleton meta/app-state row), and pre-setting it as already-seeded for an
       established database (default heuristic: any pre-existing
       `indexers`/`download_clients`/`series` row) so an upgrade never injects
       providers. Tagged test: fresh DB leaves the marker unset; a DB with existing
       user config has the marker pre-set. [FRG-DEP-013]
-- [ ] B.2 Startup provisioning step (runs after `import foragerr.ddl` populates the
+- [x] B.2 Startup provisioning step (runs after `import foragerr.ddl` populates the
       registry and after migrations): if the marker is unset, seed one enabled
       GetComics indexer row (`implementation="getcomics"`, `protocol="ddl"`,
       `GetComicsSettings()` defaults) and one enabled built-in DDL client row
@@ -56,7 +56,7 @@ Every requirement gets at least one tagged test (FRG-PROC-004): pytest
 
 ## C. Frontend — Settings → General section + AddSeries link
 
-- [ ] C.1 New Settings → General screen (bespoke config-singleton / MediaManagement
+- [x] C.1 New Settings → General screen (bespoke config-singleton / MediaManagement
       pattern): a masked write-only ComicVine key field (SchemaForm password
       widget — never echo stored value, `••••••••` when set, omit blank on save), a
       Test button on the `useTestProvider` pattern, and the env-managed read-only
@@ -65,7 +65,7 @@ Every requirement gets at least one tagged test (FRG-PROC-004): pytest
       and read/write/test hooks (namingHooks pattern). Vitest (ID in name): masked
       + write-only + blank-keeps-stored; save persists; Test reports success/
       failure without the key; env source → read-only. [FRG-UI-020]
-- [ ] C.2 Link the ComicVine credential-error guidance to the new section: wrap the
+- [x] C.2 Link the ComicVine credential-error guidance to the new section: wrap the
       "check Settings" prose in `AddSeries.tsx` and `LibraryImport.tsx` in a
       `<Link to="/settings/general">` (mirroring the existing no-root-folders link),
       keeping the `field="comicvine_api_key"` classifier. Vitest: the credential
@@ -73,7 +73,7 @@ Every requirement gets at least one tagged test (FRG-PROC-004): pytest
 
 ## D. Docs, security, traceability, gate
 
-- [ ] D.1 Manual (FRG-PROC-011): `docs/manual/admin/secrets.md` +
+- [x] D.1 Manual (FRG-PROC-011): `docs/manual/admin/secrets.md` +
       `docs/manual/admin/configuration.md` drop the three removed
       `dognzb_api_key`/`nzbsu_api_key`/`sabnzbd_api_key` rows and reword "four
       secret-typed settings"; `configuration.md` documents the UI ComicVine-key
@@ -82,7 +82,7 @@ Every requirement gets at least one tagged test (FRG-PROC-004): pytest
       the UI key path; `docs/manual/user/downloads.md` (and/or `search.md`)
       documents the default-on GetComics/built-in-DDL first-run pair. Review
       `README.md` labelling. [FRG-PROC-011]
-- [ ] D.2 Security (FRG-PROC-006): `docs/security/` delta — (a) STRIDE note on the
+- [x] D.2 Security (FRG-PROC-006): `docs/security/` delta — (a) STRIDE note on the
       new ComicVine key-write endpoint (write-only over the API, log-redaction on
       write, no new residual beyond RISK-020 no-auth + RISK-013 plaintext-at-rest);
       (b) threat-model COMP-6 note + risk-register update recording that default-on
