@@ -314,6 +314,13 @@ export interface MediaManagementConfig {
   library_import_mode: string;
   recycle_bin_path: string;
   recycle_bin_retention_days: number;
+  /** FRG-PP-014 duplicate handling: same-rung resolution + loser dump folder. */
+  duplicate_constraint: string;
+  duplicate_dump_path: string;
+  /** FRG-IMP-023 library-import scan tuning: max ComicVine proposals per scan. */
+  library_import_proposal_cap: number;
+  /** Minimum name similarity (0..1) before a scan proposes a match itself. */
+  library_import_similarity_floor: number;
 }
 
 /**
@@ -379,10 +386,9 @@ export const ARCHIVE_FORMATS = ['cbz', 'cbr', 'cb7', 'cbt', 'pdf'] as const;
 /*
  * Library-import staging shapes (FRG-IMP-023 / FRG-UI-015). GET
  * /api/v1/library-import returns the persisted scan groups for one root folder
- * in the shared paging envelope; the UI consumes the NORMALIZED
- * `LibraryImportGroup` below (toLibraryImportGroup in libraryImportHooks.ts
- * tolerates camelCase or snake_case wire fields until the backend contract is
- * pinned).
+ * in the shared paging envelope. Field names are the backend's camelCase JSON
+ * VERBATIM (the manual-import resource convention) — the contract is pinned,
+ * so `LibraryImportGroup` types the wire shape directly.
  */
 
 /** Staging lifecycle of one scanned folder group (design decision 2). */
@@ -393,7 +399,7 @@ export type LibraryImportGroupState =
   | 'imported'
   | 'skipped';
 
-/** One staged library-import group, normalized for the UI. */
+/** One staged library-import group, exactly as the wire carries it. */
 export interface LibraryImportGroup {
   id: number;
   /** The parser's normalized series-name grouping key. */
@@ -403,7 +409,7 @@ export interface LibraryImportGroup {
   /** File entries; the API serves {path,name,size} objects. Only the count
    * and names are rendered, so entries are kept structural. */
   files: { path: string; name: string; size: number }[];
-  /** Parse confidence, normalized to 0..1. */
+  /** Parse confidence, 0..1. */
   confidence: number;
   proposedCvVolumeId: number | null;
   confirmedCvVolumeId: number | null;
@@ -413,6 +419,9 @@ export interface LibraryImportGroup {
   startYear: number | null;
   publisher: string | null;
   imageUrl: string | null;
-  /** Verbatim per-group blocked reasons from the last execute — never re-sorted. */
+  /** Verbatim per-file blocked reasons from the last execute — never re-sorted. */
   rejections: string[];
+  /** Human outcome summary (no-match reason, "imported=N blocked=M", add
+   * failure) — rendered verbatim on the group card when present. */
+  message: string | null;
 }

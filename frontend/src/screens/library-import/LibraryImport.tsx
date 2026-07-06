@@ -5,11 +5,12 @@ import { Toolbar } from '../../components/Toolbar';
 import { Poster } from '../../components/Poster';
 import { ReasonsPopover } from '../../components/ReasonsPopover';
 import {
-  useCommandStatus,
   useFormatProfiles,
   useLookup,
   useRootFolders,
+  useWatchedCommand,
 } from '../../api/hooks';
+import { isComicVineAuthError } from '../../api/fetcher';
 import { queryKeys } from '../../api/queryKeys';
 import { MONITOR_STRATEGIES } from '../../api/types';
 import type { LibraryImportGroup } from '../../api/types';
@@ -28,9 +29,6 @@ import {
 } from './libraryImportHooks';
 import styles from './LibraryImport.module.css';
 
-/** Command lifecycle statuses that mean a watched command is still running. */
-const LIVE_STATUSES = new Set(['queued', 'started']);
-
 /**
  * Library import (FRG-UI-015): scan a configured root folder for unmapped
  * series folders (as a watched `library-import-scan` command), review the
@@ -41,33 +39,22 @@ const LIVE_STATUSES = new Set(['queued', 'started']);
  * reasons verbatim, à la the manual-import overlay).
  */
 
+/** Failed-command notes, repo error-note style. Commands carry no message here. */
+const SCAN_FAILED_NOTE =
+  'Scan failed — the scan command did not complete. Check the logs, then scan again.';
+const IMPORT_FAILED_NOTE =
+  'Import failed — the import command did not complete. Check the logs for details.';
+
 /**
- * Watch one dispatched command à la ManualImportOverlay: `start(id)` after the
- * POST, a live status chip while it runs, and `onFinished` exactly once when
- * it reaches a terminal status (then the watcher resets).
+ * The library-import endpoints do live ComicVine work (proposals, override
+ * validation), so a credential failure surfaces as the structural 503 marked
+ * with `comicvine_api_key` (FRG-UI-005 convention) — render the same Settings
+ * guidance as the add flow instead of the raw message.
  */
-function useWatchedCommand(onFinished: (status: string) => void): {
-  status: string | null;
-  running: boolean;
-  start: (commandId: number) => void;
-} {
-  const [commandId, setCommandId] = useState<number | null>(null);
-  const commandQuery = useCommandStatus(commandId);
-  const status = commandQuery.data?.status ?? (commandId !== null ? 'queued' : null);
-  const running = status !== null && LIVE_STATUSES.has(status);
-  const finished = status !== null && !running ? status : null;
-
-  // Ref'd callback: the effect must fire once per terminal transition, not on
-  // every render where the caller's inline closure gets a new identity.
-  const onFinishedRef = useRef(onFinished);
-  onFinishedRef.current = onFinished;
-  useEffect(() => {
-    if (!finished) return;
-    setCommandId(null);
-    onFinishedRef.current(finished);
-  }, [finished]);
-
-  return { status, running, start: setCommandId };
+function errorText(error: Error): string {
+  return isComicVineAuthError(error)
+    ? 'ComicVine API key missing or invalid — check Settings.'
+    : error.message;
 }
 
 /**
@@ -97,25 +84,46 @@ export function LibraryImport() {
   const execute = useExecuteLibraryImport();
 
   // Roots whose scan completed THIS session: distinguishes "scan found nothing
-  // (fully mapped)" from "nothing staged yet — run a scan" when the list is empty.
+  // (fully mapped)" from "nothing staged yet — run a scan" when the list is
+  // empty. Session-scoped wording ONLY — the staged rows themselves refetch on
+  // every mount, so the list is always honest even after this set is lost.
   const [scannedRoots, setScannedRoots] = useState<ReadonlySet<number>>(new Set());
   const [selected, setSelected] = useState<ReadonlySet<number>>(new Set());
+  // Terminal-'failed' notes for the two watched commands (cleared on restart).
+  const [scanFailure, setScanFailure] = useState<string | null>(null);
+  const [executeFailure, setExecuteFailure] = useState<string | null>(null);
 
   // The root a running scan was started for — invalidate THAT root's staging
   // on completion even if the picker moved meanwhile.
   const scanRootRef = useRef<number | null>(null);
-  const scanCommand = useWatchedCommand(() => {
+  const scanCommand = useWatchedCommand((status) => {
+    if (status !== 'completed') {
+      // A failed scan staged nothing trustworthy: say so, and do NOT mark the
+      // root scanned (that would render a false "everything is already mapped").
+      setScanFailure(SCAN_FAILED_NOTE);
+      return;
+    }
     const scannedId = scanRootRef.current;
     if (scannedId === null) return;
     setScannedRoots((prev) => new Set(prev).add(scannedId));
     void queryClient.invalidateQueries({ queryKey: libraryImportKey(scannedId) });
   });
 
-  const executeCommand = useWatchedCommand(() => {
+  // The root a running execute was started for — pinned exactly like the scan
+  // root, so completion invalidates the staging the command actually wrote
+  // even if the picker moved mid-command.
+  const executeRootRef = useRef<number | null>(null);
+  const executeCommand = useWatchedCommand((status) => {
+    if (status !== 'completed') {
+      // A failed execute must not pass silently.
+      setExecuteFailure(IMPORT_FAILED_NOTE);
+      return;
+    }
     // Per-group outcomes live in the staging rows; imported groups created
     // series, so the library index is stale too.
-    if (rootId !== null) {
-      void queryClient.invalidateQueries({ queryKey: libraryImportKey(rootId) });
+    const executedId = executeRootRef.current;
+    if (executedId !== null) {
+      void queryClient.invalidateQueries({ queryKey: libraryImportKey(executedId) });
     }
     void queryClient.invalidateQueries({
       queryKey: queryKeys.series.all(),
@@ -124,17 +132,25 @@ export function LibraryImport() {
   });
 
   // Seed the selection from the staged list: importable groups preselect (the
-  // manual-import overlay's convention). Runs on first load and on each
-  // post-command/PATCH refetch — imported/skipped groups drop out, corrected
-  // groups become selected. staleTime Infinity means no refetch ever clobbers
-  // the set behind the user's back.
+  // manual-import overlay's convention) — but only ids newly BECOME selectable
+  // (first load, a correction landing, a fresh scan). Every PATCH invalidates
+  // and refetches this list, so reseeding wholesale would silently re-tick a
+  // group the user just deselected; tracking seen-selectable ids keeps an
+  // explicit deselection standing across confirms/skips/refetches.
+  const seenSelectableRef = useRef<Set<number>>(new Set());
   useEffect(() => {
     if (!groupsQuery.data) return;
-    const next = new Set<number>();
+    const seen = seenSelectableRef.current;
+    const newlySelectable: number[] = [];
     for (const group of groupsQuery.data) {
-      if (isSelectable(group)) next.add(group.id);
+      if (isSelectable(group) && !seen.has(group.id)) {
+        seen.add(group.id);
+        newlySelectable.push(group.id);
+      }
     }
-    setSelected(next);
+    if (newlySelectable.length > 0) {
+      setSelected((prev) => new Set([...prev, ...newlySelectable]));
+    }
   }, [groupsQuery.data]);
 
   const toggleSelected = (groupId: number) =>
@@ -148,6 +164,7 @@ export function LibraryImport() {
   const startScan = () => {
     if (rootId === null) return;
     scanRootRef.current = rootId;
+    setScanFailure(null);
     scan.mutate(
       { rootFolderId: rootId },
       { onSuccess: (cmd) => scanCommand.start(cmd.id) },
@@ -224,7 +241,12 @@ export function LibraryImport() {
             </div>
             {scan.isError && (
               <p role="alert" className={styles.errorNote}>
-                Scan failed: {scan.error.message}
+                Scan failed: {errorText(scan.error)}
+              </p>
+            )}
+            {scanFailure && (
+              <p role="alert" className={styles.errorNote} data-testid="li-scan-failed">
+                {scanFailure}
               </p>
             )}
 
@@ -233,7 +255,7 @@ export function LibraryImport() {
             )}
             {groupsQuery.isError && (
               <p role="alert" className={styles.errorNote}>
-                Could not load staged scan results: {groupsQuery.error.message}
+                Could not load staged scan results: {errorText(groupsQuery.error)}
               </p>
             )}
 
@@ -272,7 +294,14 @@ export function LibraryImport() {
             )}
             {patchGroup.isError && (
               <p role="alert" className={styles.errorNote}>
-                Update failed: {patchGroup.error.message}
+                Update failed: {errorText(patchGroup.error)}
+              </p>
+            )}
+            {/* Rendered at screen level, not inside the batch panel: the panel
+                unmounts when nothing is selected, and a failure must not vanish. */}
+            {executeFailure && (
+              <p role="alert" className={styles.errorNote} data-testid="li-import-failed">
+                {executeFailure}
               </p>
             )}
 
@@ -282,13 +311,18 @@ export function LibraryImport() {
                 count={picked.length}
                 busy={execute.isPending || executeCommand.running}
                 status={executeCommand.status}
-                error={execute.isError ? execute.error.message : null}
-                onImport={(addOptions) =>
+                error={execute.isError ? errorText(execute.error) : null}
+                onImport={(addOptions) => {
+                  // Pin the executed root NOW (like the scan does): completion
+                  // must invalidate the staging the command wrote, not
+                  // whichever root the picker shows by then.
+                  executeRootRef.current = rootId;
+                  setExecuteFailure(null);
                   execute.mutate(
                     { groupIds: picked.map((group) => group.id), addOptions },
                     { onSuccess: (cmd) => executeCommand.start(cmd.id) },
-                  )
-                }
+                  );
+                }}
               />
             )}
           </>
@@ -310,8 +344,9 @@ function GroupBadge({
     return <span className={`${styles.chip} ${styles.chipGood}`}>Imported</span>;
   }
   if (group.rejections.length > 0) {
-    // A selected group the execute command could not import: its verbatim
-    // reasons render through the shared popover (manual-import presentation).
+    // Blocked whenever per-file rejections exist and the group did not import:
+    // its verbatim reasons render through the shared popover (manual-import
+    // presentation).
     return (
       <ReasonsPopover
         reasons={group.rejections}
@@ -379,6 +414,14 @@ function GroupCard({
         </span>
         <GroupBadge group={group} folderName={folderName} />
       </div>
+
+      {/* The backend's human outcome summary (no-match reason, "imported=N
+          blocked=M", add failure) renders verbatim whenever present. */}
+      {group.message && (
+        <p className={styles.groupMessage} data-testid={`li-message-${group.id}`}>
+          {group.message}
+        </p>
+      )}
 
       {hasMatch && (
         <div className={styles.proposal}>

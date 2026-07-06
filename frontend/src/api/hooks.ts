@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import {
   useMutation,
   useQuery,
@@ -176,6 +177,44 @@ export function useCommandStatus(
         : false;
     },
   });
+}
+
+/** Command lifecycle statuses that mean a watched command is still running. */
+export const LIVE_COMMAND_STATUSES: ReadonlySet<string> = new Set([
+  'queued',
+  'started',
+]);
+
+/**
+ * Watch one dispatched command: `start(id)` after the POST, a live status
+ * while it runs, and `onFinished(terminalStatus)` exactly once when it reaches
+ * a terminal status. Callers MUST branch on the status — a `failed` command
+ * completed nothing, so success-only cache invalidations and "done" UI belong
+ * behind a `status === 'completed'` check. The terminal status stays visible
+ * (`status` is not reset) so chips can keep showing e.g. "completed"; a later
+ * `start` watches the new command.
+ */
+export function useWatchedCommand(onFinished: (status: string) => void): {
+  status: string | null;
+  running: boolean;
+  start: (commandId: number) => void;
+} {
+  const [commandId, setCommandId] = useState<number | null>(null);
+  const commandQuery = useCommandStatus(commandId);
+  const status = commandQuery.data?.status ?? (commandId !== null ? 'queued' : null);
+  const running = status !== null && LIVE_COMMAND_STATUSES.has(status);
+  const finished = status !== null && !running ? status : null;
+
+  // Ref'd callback: the effect must fire once per terminal transition, not on
+  // every render where the caller's inline closure gets a new identity.
+  const onFinishedRef = useRef(onFinished);
+  onFinishedRef.current = onFinished;
+  useEffect(() => {
+    if (!finished) return;
+    onFinishedRef.current(finished);
+  }, [finished]);
+
+  return { status, running, start: setCommandId };
 }
 
 export function useQueuePage(page: number): UseQueryResult<QueueItem[]> {

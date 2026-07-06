@@ -1,8 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../../test/renderWithProviders';
 import { fakeFetcher } from '../../test/fakeFetcher';
+import { createQueryClient } from '../../queryClient';
 import {
   makeCommand,
   makeLibraryImportGroup,
@@ -203,38 +204,19 @@ describe('FRG-UI-015: scan and review proposed matches', () => {
     );
   });
 
-  it('FRG-UI-015 — group fields arriving snake_case normalize onto the same rendering', async () => {
-    // The backend serializer may follow the snake_case series resources; the
-    // normalizer must accept either spelling (types stay tolerant).
-    const rawSnake = {
-      id: 9,
-      matching_key: 'saga',
-      folder: '/comics/Saga (2012)',
-      files: ['/comics/Saga (2012)/Saga 001.cbz'],
-      confidence: 0.42,
-      proposed_cv_volume_id: 40501234,
-      confirmed_cv_volume_id: null,
-      state: 'proposed',
-      name: 'Saga',
-      start_year: 2012,
-      publisher: 'Image',
-      image_url: null,
-      blocked_reasons: [],
-    };
-    expect(toLibraryImportGroup(rawSnake).matchingKey).toBe('saga');
-
-    const { fetcher } = fakeFetcher(makeResolver({ groups: () => [rawSnake] }));
-    renderWithProviders(<LibraryImport />, { fetcher });
-
-    const card = await screen.findByTestId('li-group-9');
-    expect(within(card).getByText('Confidence 42%')).toBeInTheDocument();
-    expect(within(card).getByText('Saga')).toBeInTheDocument();
-    expect(within(card).getByText('(2012)')).toBeInTheDocument();
-    expect(within(card).getByText('Image')).toBeInTheDocument();
-    // A proposed group with a volume attached is selectable.
+  it('FRG-UI-015 — the wire shape is the pinned camelCase contract; only confidence is clamped into 0..1', () => {
+    // No spelling tolerance: the typed wire group passes through verbatim…
+    const wire = makeLibraryImportGroup({ id: 9, confidence: 0.42 });
+    expect(toLibraryImportGroup(wire)).toEqual(wire);
+    // …except confidence, clamped so display math can never overflow 0..100%.
     expect(
-      screen.getByRole('checkbox', { name: 'Select Saga (2012)' }),
-    ).toBeEnabled();
+      toLibraryImportGroup(makeLibraryImportGroup({ id: 9, confidence: 1.2 }))
+        .confidence,
+    ).toBe(1);
+    expect(
+      toLibraryImportGroup(makeLibraryImportGroup({ id: 9, confidence: -0.2 }))
+        .confidence,
+    ).toBe(0);
   });
 });
 
@@ -429,10 +411,16 @@ describe('FRG-UI-015: bulk add with batch options and per-group outcomes', () =>
             ? [proposedGroup, confirmedGroup]
             : [
                 // Post-execute staging: one imported, one blocked with
-                // verbatim reasons from the shared pipeline.
-                makeLibraryImportGroup({ ...proposedGroup, state: 'imported' }),
+                // verbatim per-file reasons + human summaries from the shared
+                // pipeline.
+                makeLibraryImportGroup({
+                  ...proposedGroup,
+                  state: 'imported',
+                  message: 'imported=2 blocked=0',
+                }),
                 makeLibraryImportGroup({
                   ...confirmedGroup,
+                  message: 'imported=0 blocked=1',
                   rejections: [
                     'Destination file already exists',
                     'Format not allowed by profile',
@@ -485,14 +473,22 @@ describe('FRG-UI-015: bulk add with batch options and per-group outcomes', () =>
       }),
     );
 
-    // The command completes -> per-group outcomes render: imported...
+    // The command completes -> per-group outcomes render: imported (with the
+    // backend's human summary visible on the card)...
     const importedCard = await screen.findByTestId('li-group-2');
     await waitFor(() =>
       expect(within(importedCard).getByText('Imported')).toBeInTheDocument(),
     );
+    expect(within(importedCard).getByTestId('li-message-2')).toHaveTextContent(
+      'imported=2 blocked=0',
+    );
 
-    // ...and blocked, whose verbatim reasons open via the shared popover.
+    // ...and blocked, whose verbatim per-file reasons (the `rejections`
+    // contract field) open via the shared popover, with its summary visible.
     const blockedCard = screen.getByTestId('li-group-4');
+    expect(within(blockedCard).getByTestId('li-message-4')).toHaveTextContent(
+      'imported=0 blocked=1',
+    );
     await user.click(
       within(blockedCard).getByRole('button', { name: 'Bone — show reasons' }),
     );
@@ -518,5 +514,175 @@ describe('FRG-UI-015: bulk add with batch options and per-group outcomes', () =>
     expect(
       screen.getByRole('checkbox', { name: 'Select Unknown Mini' }),
     ).not.toBeChecked();
+  });
+
+  it('FRG-UI-015 — completion invalidates the staging of the root the execute ran for, even after switching roots mid-command', async () => {
+    let resolveExec!: (value: unknown) => void;
+    const pendingExec = new Promise((resolve) => {
+      resolveExec = resolve;
+    });
+    const { fetcher } = fakeFetcher(
+      makeResolver({
+        // Call 1 = root 1's staging; later calls (root 2) stage nothing.
+        groups: (call) => (call === 1 ? [proposedGroup] : []),
+        command: (id) =>
+          id === 82 ? pendingExec : makeCommand({ id, status: 'completed' }),
+      }),
+    );
+    const client = createQueryClient();
+    const invalidateSpy = vi.spyOn(client, 'invalidateQueries');
+    const user = userEvent.setup();
+    renderWithProviders(<LibraryImport />, { fetcher, client });
+
+    await screen.findByTestId('li-group-2');
+    await user.click(
+      await screen.findByRole('button', { name: 'Import 1 selected' }),
+    );
+    await screen.findByTestId('li-import-status');
+
+    // The picker moves to another root while the command is still running...
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: 'Root folder' }),
+      '2',
+    );
+    await screen.findByTestId('li-empty-unscanned');
+
+    // ...and completion still refreshes the EXECUTED root's staging (root 1),
+    // not whichever root the picker happens to show by then.
+    resolveExec(
+      makeCommand({ id: 82, name: 'library-import', status: 'completed' }),
+    );
+    await waitFor(() =>
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: ['library-import', 1],
+      }),
+    );
+    expect(invalidateSpy).not.toHaveBeenCalledWith({
+      queryKey: ['library-import', 2],
+    });
+  });
+});
+
+describe('FRG-UI-015: failed commands are surfaced, never mistaken for success', () => {
+  it('FRG-UI-015 — a failed scan renders an error note and never claims the root is fully mapped', async () => {
+    const { fetcher } = fakeFetcher(
+      makeResolver({
+        groups: () => [],
+        command: (id) =>
+          makeCommand({ id, name: 'library-import-scan', status: 'failed' }),
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<LibraryImport />, { fetcher });
+
+    await screen.findByTestId('li-empty-unscanned');
+    await user.click(screen.getByTestId('li-scan'));
+
+    const note = await screen.findByTestId('li-scan-failed');
+    expect(note).toHaveTextContent(
+      'Scan failed — the scan command did not complete. Check the logs, then scan again.',
+    );
+    expect(note).toHaveAttribute('role', 'alert');
+    // The failure is NOT a successful empty scan: the wording stays honest.
+    expect(screen.queryByTestId('li-empty-mapped')).not.toBeInTheDocument();
+    expect(screen.getByTestId('li-empty-unscanned')).toBeInTheDocument();
+  });
+
+  it('FRG-UI-015 — a failed execute renders an error note instead of passing silently', async () => {
+    const { spy, fetcher } = fakeFetcher(
+      makeResolver({
+        groups: () => [proposedGroup],
+        command: (id) =>
+          id === 82
+            ? makeCommand({ id, name: 'library-import', status: 'failed' })
+            : makeCommand({ id, status: 'completed' }),
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<LibraryImport />, { fetcher });
+
+    await screen.findByTestId('li-group-2');
+    await user.click(
+      await screen.findByRole('button', { name: 'Import 1 selected' }),
+    );
+
+    const note = await screen.findByTestId('li-import-failed');
+    expect(note).toHaveTextContent(
+      'Import failed — the import command did not complete. Check the logs for details.',
+    );
+    expect(note).toHaveAttribute('role', 'alert');
+    // Failure runs no success flow: the staged list was fetched only on mount.
+    expect(
+      spy.mock.calls.filter(
+        ([path]) =>
+          typeof path === 'string' &&
+          path.startsWith('/api/v1/library-import?'),
+      ),
+    ).toHaveLength(1);
+  });
+});
+
+describe('FRG-UI-015: review-session state survives refetches and remounts', () => {
+  it('FRG-UI-015 — an explicit deselection survives skipping another group (the PATCH refetch does not reseed it)', async () => {
+    const otherGroup = makeLibraryImportGroup({
+      id: 5,
+      folder: '/comics/Bone',
+      matchingKey: 'bone',
+      name: 'Bone',
+    });
+    const { fetcher } = fakeFetcher(
+      makeResolver({
+        groups: (call) =>
+          call === 1
+            ? [proposedGroup, otherGroup]
+            : [
+                proposedGroup,
+                makeLibraryImportGroup({ ...otherGroup, state: 'skipped' }),
+              ],
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<LibraryImport />, { fetcher });
+
+    // Both importable groups preselect; the user unticks Saga...
+    await screen.findByTestId('li-group-2');
+    const saga = screen.getByRole('checkbox', { name: 'Select Saga (2012)' });
+    expect(saga).toBeChecked();
+    await user.click(saga);
+    expect(saga).not.toBeChecked();
+
+    // ...then skips Bone, which invalidates and refetches the staged list.
+    await user.click(
+      within(screen.getByTestId('li-group-5')).getByRole('button', {
+        name: 'Skip',
+      }),
+    );
+    await waitFor(() =>
+      expect(
+        within(screen.getByTestId('li-group-5')).getByText('Skipped'),
+      ).toBeInTheDocument(),
+    );
+
+    // The refetch seeds only NEWLY selectable groups — the explicit
+    // deselection stands.
+    expect(
+      screen.getByRole('checkbox', { name: 'Select Saga (2012)' }),
+    ).not.toBeChecked();
+  });
+
+  it('FRG-UI-015 — staged results refetch on mount, so a command that finished while the screen was closed shows up on return', async () => {
+    const client = createQueryClient();
+    const { fetcher } = fakeFetcher(
+      makeResolver({ groups: (call) => (call === 1 ? [] : [proposedGroup]) }),
+    );
+    // First visit: nothing staged yet; the user navigates away.
+    const first = renderWithProviders(<LibraryImport />, { fetcher, client });
+    await screen.findByTestId('li-empty-unscanned');
+    first.unmount();
+
+    // A scan finished while the screen was unmounted (no watcher alive).
+    // Returning must refetch — never serve the stale empty list forever.
+    renderWithProviders(<LibraryImport />, { fetcher, client });
+    expect(await screen.findByTestId('li-group-2')).toBeInTheDocument();
   });
 });
