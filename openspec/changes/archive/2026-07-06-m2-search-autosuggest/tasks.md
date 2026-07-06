@@ -67,9 +67,9 @@ worktrees per FRG-PROC-008). Every requirement gets at least one tagged test
       fuzzy matcher adds a dependency, update `docs/security/soup-register.md` in
       the SAME change and keep `tools/soup_check.py` at exit 0 (default: no SOUP
       change). [FRG-PROC-006, FRG-PROC-012]
-- [ ] D.3 Registry flips (FRG-API-017, FRG-UI-019 → implemented; FRG-UI-005 stays
+- [x] D.3 Registry flips (FRG-API-017, FRG-UI-019 → implemented; FRG-UI-005 stays
       implemented) + traceability matrix regen + `tools/soup_check.py` exit 0.
       [FRG-PROC-004, FRG-PROC-005]
-- [ ] D.4 Suites green (backend + frontend + e2e); pre-merge review cycle
+- [x] D.4 Suites green (backend + frontend + e2e); pre-merge review cycle
       (`/code-review` + `/simplify`) + gate angles; fixes; archive; `--no-ff`
       merge with full suite green; main suites; tag. [FRG-PROC-007]
