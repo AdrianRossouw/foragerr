@@ -1,7 +1,8 @@
+import { useEffect, useState } from 'react';
 import { Toolbar } from '../../components/Toolbar';
 import { useHealthWarnings, useSystemHealth } from '../../api/hooks';
 import type { ComponentHealthState, HealthStateType } from '../../api/types';
-import { formatEta } from '../../lib/format';
+import { formatDate, formatEta } from '../../lib/format';
 import styles from './System.module.css';
 
 /**
@@ -12,6 +13,12 @@ import styles from './System.module.css';
  * 7), so a component that recovers clears on the next poll without a manual
  * refresh or restart. An empty warnings list renders an explicit "all
  * healthy" state, distinct from the loading/error states.
+ *
+ * A sustained poll failure does NOT blank a screen that already has retained
+ * (stale) data — react-query keeps the last-good `data` around across a
+ * failed refetch, so the full "Could not load" state is reserved for when
+ * there is genuinely nothing to show yet; otherwise the stale table stays up
+ * with a dismissable banner (FRG-UI-016).
  */
 
 const WARNING_CHIP_CLASS: Record<HealthStateType, string> = {
@@ -38,17 +45,44 @@ export function HealthScreen() {
 
   const isLoading = warningsQuery.isLoading || componentsQuery.isLoading;
   const isError = warningsQuery.isError || componentsQuery.isError;
+  // Retained (possibly stale) data from either query — react-query keeps the
+  // last successful result across a failed background refetch.
+  const hasData = warningsQuery.data !== undefined && componentsQuery.data !== undefined;
   const warnings = warningsQuery.data ?? [];
   const components = componentsQuery.data ?? [];
+
+  const [staleBannerDismissed, setStaleBannerDismissed] = useState(false);
+  // Reset the dismissal once the poll recovers, so a LATER failure shows the
+  // banner again instead of staying silently dismissed forever.
+  useEffect(() => {
+    if (!isError) setStaleBannerDismissed(false);
+  }, [isError]);
 
   return (
     <>
       <Toolbar title="System — Health" />
       <div className={styles.page}>
         {isLoading && <p className={styles.state}>Loading system health…</p>}
-        {isError && <p className={styles.state}>Could not load system health.</p>}
+        {/* The full error state is reserved for "nothing to show at all" — a
+            sustained poll failure with data already on screen renders that
+            (possibly stale) data instead, with the banner below. */}
+        {isError && !hasData && (
+          <p className={styles.state}>Could not load system health.</p>
+        )}
+        {isError && hasData && !staleBannerDismissed && (
+          <p className={styles.staleBanner} role="status" data-testid="health-stale-banner">
+            Health data may be stale — last update failed.
+            <button
+              type="button"
+              className={styles.staleBannerDismiss}
+              onClick={() => setStaleBannerDismissed(true)}
+            >
+              Dismiss
+            </button>
+          </p>
+        )}
 
-        {!isLoading && !isError && (
+        {hasData && (
           <>
             <section className={styles.section}>
               <h2 className={styles.sectionHeading}>Warnings</h2>
@@ -113,8 +147,8 @@ export function HealthScreen() {
                           {COMPONENT_STATE_LABEL[component.state]}
                         </span>
                       </td>
-                      <td className={styles.muted}>{component.last_success ?? '—'}</td>
-                      <td className={styles.muted}>{component.last_failure ?? '—'}</td>
+                      <td className={styles.muted}>{formatDate(component.last_success)}</td>
+                      <td className={styles.muted}>{formatDate(component.last_failure)}</td>
                       <td className={styles.muted}>
                         {component.disabled_until
                           ? formatEta(component.disabled_until)

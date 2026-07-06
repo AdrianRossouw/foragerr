@@ -290,15 +290,29 @@ export const LIVE_COMMAND_STATUSES: ReadonlySet<string> = new Set([
  * behind a `status === 'completed'` check. The terminal status stays visible
  * (`status` is not reset) so chips can keep showing e.g. "completed"; a later
  * `start` watches the new command.
+ *
+ * `error` covers the WATCH path itself failing (the `GET /command/{id}` poll
+ * erroring, as opposed to the command it is watching finishing with
+ * `status: 'failed'`): without this, `status` would stay stuck at the
+ * optimistic `'queued'` fallback forever (no data ever arrives to overwrite
+ * it) and `running` would never clear, wedging the row's button disabled.
+ * On a persistent poll error `status` becomes the synthetic terminal value
+ * `'error'` (surfaced by the same chip that renders any other status) and
+ * `running` clears like any other terminal transition; `error` carries the
+ * message for a caller that wants to show more than the bare chip.
  */
 export function useWatchedCommand(onFinished: (status: string) => void): {
   status: string | null;
   running: boolean;
+  error: string | null;
   start: (commandId: number) => void;
 } {
   const [commandId, setCommandId] = useState<number | null>(null);
   const commandQuery = useCommandStatus(commandId);
-  const status = commandQuery.data?.status ?? (commandId !== null ? 'queued' : null);
+  const watchFailed = commandQuery.isError;
+  const status = watchFailed
+    ? 'error'
+    : commandQuery.data?.status ?? (commandId !== null ? 'queued' : null);
   const running = status !== null && LIVE_COMMAND_STATUSES.has(status);
   const finished = status !== null && !running ? status : null;
 
@@ -311,7 +325,12 @@ export function useWatchedCommand(onFinished: (status: string) => void): {
     onFinishedRef.current(finished);
   }, [finished]);
 
-  return { status, running, start: setCommandId };
+  return {
+    status,
+    running,
+    error: watchFailed ? (commandQuery.error?.message ?? 'Could not check task status.') : null,
+    start: setCommandId,
+  };
 }
 
 /*
@@ -828,8 +847,12 @@ export function useForceRunTask(): UseMutationResult<CommandResource, Error, str
   const fetcher = useFetcher();
   const queryClient = useQueryClient();
   return useMutation({
+    // Defensive: task names are registry slugs today (no reserved URL
+    // characters), but the name still rides straight into a path segment.
     mutationFn: (name: string) =>
-      fetcher<CommandResource>(`/api/v1/system/task/${name}`, { method: 'POST' }),
+      fetcher<CommandResource>(`/api/v1/system/task/${encodeURIComponent(name)}`, {
+        method: 'POST',
+      }),
     onSuccess: () =>
       void queryClient.invalidateQueries({ queryKey: queryKeys.system.tasks() }),
   });
