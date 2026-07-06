@@ -40,4 +40,5 @@ markers = [
     "req(id): maps test to requirement",
     "docker: integration test that requires a docker daemon (skipped by default)",
     "live: integration test that requires live news-server credentials (skipped by default)",
+    "soak: slow perf/budget test gated on FORAGERR_RUN_SOAK=1 (skipped by default)",
 ]

@@ -34,6 +34,19 @@ DEFAULT_JUNK_SIZE_FLOOR_BYTES = 100 * 1024
 #: Maximum directory depth a rescan/download walk descends (bounded walk).
 DEFAULT_MAX_WALK_DEPTH = 8
 
+#: Shared command exclusivity group for every file-mutating importer command
+#: (the completed-download drain AND the per-series rescan). Both carry it so at
+#: most one library-mutating importer runs at a time regardless of the ``pp``
+#: pool size (``workers_pp`` may be up to 4) — double-import safety must not rest
+#: on the pool being size 1 (FRG-SER-010).
+#:
+#: Homed on this dependency-light leaf (re-exported unchanged from
+#: ``foragerr.importer.__init__``) so a flows module that only needs the group
+#: string + :class:`ImportContext` (e.g. ``library.flows.rename``) can import it
+#: without dragging in the whole pipeline + ORM registration (FRG-NFR-001 seam
+#: de-couple). The value is byte-identical to the historical package constant.
+IMPORT_FILE_MUTATION_GROUP = "import-file-mutation"
+
 
 @dataclass(frozen=True, slots=True)
 class ImportContext:
@@ -132,6 +145,7 @@ def media_management_fields(settings: Any) -> dict[str, Any]:
 __all__ = [
     "DEFAULT_JUNK_SIZE_FLOOR_BYTES",
     "DEFAULT_MAX_WALK_DEPTH",
+    "IMPORT_FILE_MUTATION_GROUP",
     "ImportContext",
     "OffloadFn",
     "media_management_fields",
