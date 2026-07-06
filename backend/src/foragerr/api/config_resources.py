@@ -15,6 +15,8 @@ surface.
 from __future__ import annotations
 
 import asyncio
+import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -23,17 +25,35 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
 
-from foragerr.api.errors import error_body
+from foragerr.api.errors import ApiError, error_body
 from foragerr.config import CONFIG_FILENAME, Settings, render_documented_config
 from foragerr.config_migrations import atomic_write_text
+from foragerr.library.flows import comicvine_factory
 from foragerr.logging import register_secret
+from foragerr.metadata import ComicVineAuthError, ComicVineClient, ComicVineError
+from foragerr.metadata.errors import COMICVINE_CREDENTIAL_MESSAGE
 from foragerr.naming import (
     DEFAULT_FILE_TEMPLATE,
     DEFAULT_FOLDER_TEMPLATE,
     _TOKEN_ALIASES,
 )
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/config", tags=["config"])
+
+#: The environment variable that supplies the ComicVine key and, per pydantic
+#: precedence, outranks the config-file value (``config.py`` env-over-file
+#: source ordering). The credential resource reads it DIRECTLY (not through the
+#: collapsed ``Settings`` object) — the one place in the app that must tell an
+#: env-supplied key from a file-supplied one, because the effective ``Settings``
+#: object cannot say which source won.
+COMICVINE_KEY_ENV_VAR = "FORAGERR_COMICVINE_API_KEY"
+
+#: A neutral, cheap probe term for the connectivity test (a single-page suggest
+#: search) — it exercises the effective key against ComicVine without persisting
+#: anything and without depending on any particular library content.
+_COMICVINE_TEST_TERM = "batman"
 
 #: Serializes the read-modify-write-reload of ``config.yaml`` across concurrent
 #: PUTs to ANY config resource, so two overlapping updates can't lost-update each
@@ -145,6 +165,177 @@ async def get_media_management(request: Request) -> MediaManagementConfig:
 async def put_media_management(body: MediaManagementConfig, request: Request):
     """Validate + persist media-management settings, re-loading app.state.settings."""
     return await _apply(request, body.model_dump(), MediaManagementConfig)
+
+
+# --- ComicVine credential settings resource (FRG-API-018) -------------------
+
+
+def _comicvine_source(settings: Settings) -> str:
+    """Report where the effective ComicVine key comes from (never its value).
+
+    Reads ``FORAGERR_COMICVINE_API_KEY`` from the environment DIRECTLY — the one
+    place that must distinguish an env-supplied key from a file-supplied one,
+    because pydantic collapses both into ``settings.comicvine_api_key`` and the
+    effective object cannot say which source won (design decision 2). A non-empty
+    env var ⇒ ``"environment"`` (it also outranks the file); else a non-empty
+    file/effective value ⇒ ``"file"``; else ``"unset"``.
+
+    The scan is CASE-INSENSITIVE and skips empty values to match pydantic's
+    effective behavior: pydantic-settings matches env names case-insensitively,
+    so a lowercase ``foragerr_comicvine_api_key`` shadows the file just as the
+    exact-uppercase spelling does — an exact ``os.environ.get`` would miss it and
+    report ``"file"``/``"unset"`` while the env value actually wins, producing a
+    silently-ineffective editor (GET/PUT share this helper). Empty env values are
+    ignored here to mirror ``env_ignore_empty=True`` on ``Settings`` (an empty
+    ``FORAGERR_COMICVINE_API_KEY=""`` does NOT shadow the file key).
+    """
+    if any(
+        k.upper() == COMICVINE_KEY_ENV_VAR and v
+        for k, v in os.environ.items()
+    ):
+        return "environment"
+    if settings.comicvine_api_key.get_secret_value():
+        return "file"
+    return "unset"
+
+
+class ComicVineKeyStatus(BaseModel):
+    """Configured-state + source for the ComicVine key — NEVER the value."""
+
+    configured: bool
+    #: One of ``"unset"``, ``"file"`` (set in ``config.yaml``), or
+    #: ``"environment"`` (set via ``FORAGERR_COMICVINE_API_KEY``).
+    source: str
+
+
+class GeneralConfig(BaseModel):
+    """The Settings → General resource: the ComicVine credential STATUS only.
+
+    A write-only credential surface — the read reports whether the key is
+    configured and its source but never returns the key value or any substring
+    of it (FRG-API-018 / FRG-META-002).
+    """
+
+    comicvine_api_key: ComicVineKeyStatus
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> "GeneralConfig":
+        source = _comicvine_source(settings)
+        return cls(
+            comicvine_api_key=ComicVineKeyStatus(
+                configured=source != "unset", source=source
+            )
+        )
+
+
+class GeneralConfigUpdate(BaseModel):
+    """PUT body for the General resource: the ComicVine key, write-only.
+
+    A blank value means "leave the stored key unchanged" (the write-only
+    "leave blank to keep" convention provider secret fields use), NOT "clear
+    it" — so an unchanged form save never wipes the key.
+    """
+
+    comicvine_api_key: str = ""
+
+
+class ComicVineTestResponse(BaseModel):
+    """A passing ComicVine connectivity/credential test result (never the key)."""
+
+    success: bool
+    message: str
+
+
+@router.get("/general", response_model=GeneralConfig)
+async def get_general(request: Request) -> GeneralConfig:
+    """Report the ComicVine key's configured status + source (FRG-API-018).
+
+    Never returns the key value: only ``{configured, source}``."""
+    return GeneralConfig.from_settings(request.app.state.settings)
+
+
+@router.put("/general", response_model=GeneralConfig)
+async def put_general(body: GeneralConfigUpdate, request: Request):
+    """Persist a UI-written ComicVine key and apply it live (FRG-API-018).
+
+    - When the key is env-supplied (``source == "environment"``) the update is
+      REJECTED as environment-managed (a 409 naming the env var) rather than
+      persisting a value the environment would shadow on reload — no
+      silently-ineffective editor (design decision 4).
+    - A BLANK key keeps the currently-stored value (write-only "leave blank to
+      keep"); nothing is written.
+    - A non-blank key is merged into ``config.yaml`` through the documented
+      writer via the shared ``_apply`` read-modify-write-reload, which swaps
+      ``app.state.settings`` (live-apply, no restart) and re-registers the
+      secret with the log-redaction filter.
+    """
+    current: Settings = request.app.state.settings
+    if _comicvine_source(current) == "environment":
+        raise ApiError(
+            409,
+            "the ComicVine API key is managed by the "
+            f"{COMICVINE_KEY_ENV_VAR} environment variable, which takes "
+            "precedence over the config file; unset it to edit the key here",
+            field="comicvine_api_key",
+        )
+
+    key = body.comicvine_api_key.strip()
+    if not key:
+        # Blank ⇒ keep the stored value; report the (unchanged) current status.
+        return GeneralConfig.from_settings(current)
+
+    return await _apply(request, {"comicvine_api_key": key}, GeneralConfig)
+
+
+@router.post("/comicvine/test", response_model=ComicVineTestResponse)
+async def comicvine_test(request: Request) -> ComicVineTestResponse:
+    """Validate the EFFECTIVE ComicVine key against ComicVine (FRG-API-018).
+
+    Mirrors the indexer test-button contract (FRG-IDX-003): a passing result is
+    a 200 ``{success, message}``; a credential failure is a field-precise 400
+    (``field="comicvine_api_key"``) carrying the shared static credential
+    sentence, and any other reachability failure a generic 400. Persists
+    NOTHING and NEVER puts the key value in the response body or a log line —
+    the auth path logs one static line and raises the static message, never the
+    key or the raw upstream text.
+    """
+    settings = request.app.state.settings
+    factory = comicvine_factory(settings)
+    try:
+        async with ComicVineClient(settings, factory) as cv:
+            result = await cv.suggest_series(_COMICVINE_TEST_TERM)
+    except ComicVineAuthError as exc:
+        # Static message + static log line — never interpolate the key or the
+        # exception's raw text, so no credential value can reach body or log.
+        logger.warning("comicvine connectivity test rejected: API key missing or invalid")
+        raise ApiError(
+            400,
+            f"comicvine test failed: {COMICVINE_CREDENTIAL_MESSAGE}",
+            field="comicvine_api_key",
+        ) from exc
+    except ComicVineError as exc:
+        logger.warning("comicvine connectivity test failed: %s", type(exc).__name__)
+        raise ApiError(400, f"comicvine test failed: {exc}") from exc
+
+    # suggest_series swallows every NON-auth upstream failure (5xx, timeout,
+    # rate-limit, malformed) into complete=False rather than raising — so the
+    # except ComicVineError branch above is unreachable on this path, and a
+    # naive "no exception ⇒ success" would report a broken service as healthy.
+    # Treat an incomplete result as a reachability failure with a STATIC message
+    # (no dynamic interpolation: defense-in-depth against a redacted-but-present
+    # URL-with-key slipping into the body, even though OutboundHttpError text is
+    # pre-redacted).
+    if not result.complete:
+        logger.warning("comicvine connectivity test failed: upstream unreachable or errored")
+        raise ApiError(
+            400,
+            "comicvine test failed: service unreachable or returned an error",
+            field=None,
+        )
+
+    return ComicVineTestResponse(
+        success=True, message="ComicVine reachable; credentials accepted"
+    )
 
 
 async def _apply(request: Request, updates: dict[str, Any], resource: type[BaseModel]):

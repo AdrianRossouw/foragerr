@@ -334,15 +334,29 @@ describe('FRG-UI-005: lookup outcome states', () => {
     await searchFor('saga');
 
     await waitFor(() =>
-      expect(
-        screen.getByText('ComicVine API key missing or invalid — check Settings.'),
-      ).toBeInTheDocument(),
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'ComicVine API key missing or invalid — check Settings.',
+      ),
     );
-    expect(screen.getByRole('alert')).toBeInTheDocument();
     // The credential error must NOT be dressed up as "no results".
     expect(screen.queryByText(/No volumes found/)).not.toBeInTheDocument();
     // ...nor as the generic retry error.
     expect(screen.queryByText(/Try again in a moment/)).not.toBeInTheDocument();
+  });
+
+  it('FRG-UI-020 — the credential-error guidance links to Settings -> General', async () => {
+    renderAdd({
+      lookup: () => {
+        throw cvAuthError();
+      },
+    });
+    await searchFor('saga');
+
+    const alert = await screen.findByRole('alert');
+    expect(within(alert).getByRole('link', { name: 'check Settings' })).toHaveAttribute(
+      'href',
+      '/settings/general',
+    );
   });
 
   it('FRG-UI-005 — credential detection is structural (errors[] field), not message prose', () => {
@@ -886,11 +900,9 @@ describe('FRG-UI-005 / FRG-UI-019: autosuggest / quick-search seam (gate review)
     await searchFor('saga');
 
     await waitFor(() =>
-      expect(
-        screen.getByText(
-          'ComicVine API key missing or invalid — check Settings.',
-        ),
-      ).toBeInTheDocument(),
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'ComicVine API key missing or invalid — check Settings.',
+      ),
     );
     // Suggest is suppressed post-submit, so the lookup's alert is not
     // duplicated by an identical suggest credential alert.

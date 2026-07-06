@@ -73,6 +73,11 @@ export const queryKeys = {
     naming: () => ['config', 'naming'] as const,
     mediaManagement: () => ['config', 'mediamanagement'] as const,
     namingTokens: () => ['config', 'namingTokens'] as const,
+    // The ComicVine credential settings resource (FRG-API-018), mirroring
+    // GET/PUT /api/v1/config/general. A successful PUT replaces this cache
+    // entry directly (`setQueryData`), which is what "invalidates" the
+    // credential status for any screen reading it next.
+    general: () => ['config', 'general'] as const,
   },
   // Per-series rename preview (FRG-PP-012), mirroring GET /api/v1/rename.
   rename: {

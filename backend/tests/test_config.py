@@ -130,6 +130,52 @@ def test_secrets_have_no_baked_in_defaults(config_dir):
     assert not set(parsed) & set(secrets)
 
 
+@pytest.mark.req("FRG-DEP-003")
+def test_documented_config_omits_the_removed_credential_fields(config_dir):
+    """The documented surface advertises no global credential no component
+    consumes (m2-first-run-defaults): the three vestigial DogNZB/NZB.su/SAB
+    global key placeholders are gone; the only global secret placeholder left is
+    comicvine_api_key."""
+    from foragerr.config import render_documented_config
+
+    text = render_documented_config()
+    for removed in ("dognzb_api_key", "nzbsu_api_key", "sabnzbd_api_key"):
+        assert removed not in text, f"{removed} must not appear in the documented config"
+        assert removed not in Settings.model_fields
+    # The one legitimately-global secret placeholder remains.
+    assert 'comicvine_api_key: ""' in text
+    assert "comicvine_api_key" in Settings.model_fields
+
+
+@pytest.mark.req("FRG-DEP-003")
+def test_stale_removed_credential_keys_keep_an_existing_config_loading(
+    config_dir, caplog
+):
+    """An existing config.yaml still carrying the removed global credential keys
+    loads cleanly: the unknown keys are ignored with a logged warning (not a
+    startup failure) and no removed field is reintroduced as an effective
+    setting."""
+    (config_dir / CONFIG_FILENAME).write_text(
+        "log_level: DEBUG\n"
+        'dognzb_api_key: "stale-dog"\n'
+        'nzbsu_api_key: "stale-nzbsu"\n'
+        'sabnzbd_api_key: "stale-sab"\n',
+        encoding="utf-8",
+    )
+    with caplog.at_level(logging.WARNING):
+        settings = load_settings()
+
+    # Startup succeeded and the real setting still took effect.
+    assert settings.log_level == "DEBUG"
+    # The unknown keys were logged as ignored...
+    warning = "\n".join(r.getMessage() for r in caplog.records)
+    assert "ignoring unknown key" in warning
+    for stale in ("dognzb_api_key", "nzbsu_api_key", "sabnzbd_api_key"):
+        assert stale in warning
+        # ...and no removed field is reintroduced as an effective setting.
+        assert not hasattr(settings, stale)
+
+
 # --------------------------------------------------------------------------
 # FRG-DEP-006 — log level configurable at runtime (file/env, no rebuild)
 # --------------------------------------------------------------------------

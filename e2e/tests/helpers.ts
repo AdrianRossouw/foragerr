@@ -1,7 +1,15 @@
 import type { APIRequestContext } from '@playwright/test';
 
 /** Enabled providers pointing at mockhub (resolved inside the compose network).
- *  Idempotent: safe to call again on a serial-group retry. */
+ *  Idempotent: safe to call again on a serial-group retry.
+ *
+ *  NOTE (FRG-DEP-013): the app now seeds a default "GetComics" indexer + a
+ *  "GetComics" DDL download-client on first run, so an e2e run carries a
+ *  DUPLICATE getcomics provider alongside the 'mock-getcomics' one created here.
+ *  Assertions over the provider lists must therefore stay EXISTENTIAL (match by
+ *  name / .some(), never exact counts). The seeded row is neutral only because
+ *  the compose `getcomics.org` -> mockhub alias (compose.yaml:81) keeps its
+ *  https://getcomics.org base_url inside the hermetic network. */
 export async function createProviders(api: APIRequestContext): Promise<void> {
   const indexers = await (await api.get('/api/v1/indexer')).json();
   const names = new Set((indexers as any[]).map((i) => i.name));

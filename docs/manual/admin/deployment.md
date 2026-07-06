@@ -201,7 +201,8 @@ services:
       TZ: "Europe/Amsterdam"
       # Secrets come from the host environment / an env_file — never commit them.
       FORAGERR_COMICVINE_API_KEY: "${FORAGERR_COMICVINE_API_KEY}"
-      FORAGERR_SABNZBD_API_KEY: "${FORAGERR_SABNZBD_API_KEY}"
+      # Download-client and indexer credentials (SABnzbd, DogNZB, NZB.su, …) are
+      # per-provider settings entered in the UI, not app-wide env vars.
     volumes:
       - /srv/foragerr/config:/config
       - /srv/media/comics:/comics

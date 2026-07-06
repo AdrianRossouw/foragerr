@@ -35,6 +35,11 @@ def settings(tmp_path: Path):
 def client(settings):
     app = create_app(settings)
     with TestClient(app) as c:
+        # First-run seeding (FRG-DEP-013) provisions a default GetComics indexer
+        # at startup. Delete any seeded rows so these CRUD tests exercise a clean
+        # slate; the persisted seed marker stays set, so nothing is re-seeded.
+        for row in c.get("/api/v1/indexer").json():
+            c.delete(f"/api/v1/indexer/{row['id']}")
         yield c
 
 

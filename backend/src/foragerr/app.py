@@ -319,6 +319,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.state.startup_hooks.append(_register_ddl_tasks)
 
+    # --- first-run seeding (m2-first-run-defaults, area B): seed the default
+    #     keyless GetComics indexer + built-in DDL client once per database,
+    #     gated on a persisted marker (FRG-DEP-013). Appended as a startup hook
+    #     so it runs AFTER the db area's migration/engine startup hook (which
+    #     ran migrations and set app.state.db) and after the ``import
+    #     foragerr.ddl`` above has populated the getcomics/ddl registry. ---
+    from foragerr.db.first_run import first_run_seed_startup_hook
+
+    app.state.startup_hooks.append(first_run_seed_startup_hook)
+
     # --- ws area (m1-ui-opds-deploy, area: ws): mount /api/v1/ws and, at
     #     startup, subscribe the broadcaster to app.state.events (created by
     #     register_scheduler above, so this MUST follow it) (FRG-API-010). ---

@@ -6,6 +6,21 @@ interface, so the rest of foragerr — the queue view, tracking, import handoff,
 failure handling — treats them identically. There is no separate "DDL world"; a DDL
 grab looks like any other download except for its protocol/client fields.
 
+**A fresh install ships with the GetComics/DDL pair already enabled** — no
+credentials are needed for either usenet indexer or download client, so a brand
+new instance can search and download immediately. This is a deliberate
+default-on choice: the GetComics indexer and the built-in DDL client are seeded
+once, on first startup against a genuinely empty database, both enabled. This
+means outbound scraping of a third-party site (getcomics.org) happens without
+you opting in first. Delete the seeded indexer and/or download client (Settings
+→ Indexers / Download Clients) if you don't want this — deleting one is
+permanent, it is never re-created. See `docs/security/threat-model.md` (the
+`m2-first-run-defaults` delta) and RISK-015/RISK-016 in
+`docs/security/risk-register.md` for the accepted risk this default-on posture
+now carries (single hardcoded upstream; scraping-automation ToS considerations).
+SABnzbd and any Newznab indexer (DogNZB, NZB.su) remain opt-in — they need
+credentials, so they are never seeded automatically.
+
 ## Configuring a download client
 
 Each client is a provider row: implementation, JSON settings, enabled flag, priority,

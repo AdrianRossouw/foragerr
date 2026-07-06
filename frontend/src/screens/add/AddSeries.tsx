@@ -88,6 +88,35 @@ export function lookupOutcomeNote(
 }
 
 /**
+ * Render an error-tone outcome note's text (FRG-UI-020), upgrading the
+ * credential-failure case into a link to the Settings -> General ComicVine
+ * section so "check Settings" routes somewhere real. Classification reuses
+ * the SAME structural discriminator `lookupOutcomeNote` used to pick the
+ * message (`isComicVineAuthError`, never message prose) — this is layered on
+ * top of its precedence logic as a rendering-only concern, not a change to
+ * which outcome wins. Exported so `LibraryImport`'s inline `GroupLookup` —
+ * which already reuses `lookupOutcomeNote` wholesale — renders the identical
+ * credential-error link rather than a parallel copy.
+ */
+export function OutcomeErrorText({
+  error,
+  text,
+}: {
+  error: unknown;
+  text: string;
+}) {
+  if (isComicVineAuthError(error)) {
+    return (
+      <>
+        ComicVine API key missing or invalid —{' '}
+        <Link to="/settings/general">check Settings</Link>.
+      </>
+    );
+  }
+  return <>{text}</>;
+}
+
+/**
  * The minimal shape `AddOptionsPanel`/`add()` need, satisfied structurally by
  * BOTH a full-lookup `LookupCandidate` and a bounded `SuggestCandidate`
  * (FRG-UI-005): selecting a suggestion opens the exact same add panel and
@@ -481,7 +510,7 @@ export function AddSeries() {
           <div className={styles.suggestDropdown} data-testid="suggest-dropdown">
             {suggestNote?.tone === 'error' && (
               <p className={styles.errorNote} role="alert">
-                {suggestNote.text}
+                <OutcomeErrorText error={suggest.error} text={suggestNote.text} />
               </p>
             )}
             {!suggestNote &&
@@ -530,7 +559,7 @@ export function AddSeries() {
         {lookup.isLoading && <p className={styles.stateNote}>Searching ComicVine…</p>}
         {note?.tone === 'error' && (
           <p className={styles.errorNote} role="alert">
-            {note.text}
+            <OutcomeErrorText error={lookup.error} text={note.text} />
           </p>
         )}
         {note?.tone === 'status' && (

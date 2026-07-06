@@ -388,6 +388,45 @@ describe('FRG-UI-015: correcting a match before import', () => {
     );
     expect(screen.queryByText(/No volumes found/)).not.toBeInTheDocument();
   });
+
+  it('FRG-UI-020 — the credential-error guidance links to Settings -> General', async () => {
+    const { fetcher } = fakeFetcher(
+      makeResolver({
+        groups: () => [noMatchGroup],
+        lookup: () => {
+          throw new ApiRequestError(
+            503,
+            {
+              message: 'comicvine lookup failed: ComicVine rejected the API key',
+              errors: [
+                {
+                  field: 'comicvine_api_key',
+                  message: 'ComicVine rejected the API key (missing or invalid)',
+                },
+              ],
+            },
+            '/api/v1/series/lookup?term=saga',
+          );
+        },
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<LibraryImport />, { fetcher });
+
+    await screen.findByTestId('li-group-3');
+    await user.click(screen.getByRole('button', { name: 'Search ComicVine' }));
+    await user.type(
+      screen.getByRole('searchbox', { name: 'Search ComicVine for Unknown Mini' }),
+      'saga',
+    );
+    await user.click(screen.getByRole('button', { name: 'Search' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(within(alert).getByRole('link', { name: 'check Settings' })).toHaveAttribute(
+      'href',
+      '/settings/general',
+    );
+  });
 });
 
 describe('FRG-UI-015: bulk add with batch options and per-group outcomes', () => {
