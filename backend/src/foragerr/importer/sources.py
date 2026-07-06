@@ -37,6 +37,13 @@ from foragerr.importer.context import ImportContext
 # foragerr.importer) closes an import cycle that breaks
 # `import foragerr.importer` whenever the importer package is the entry point
 # (e.g. a scoped test run). The typing-only name stays under TYPE_CHECKING.
+#
+# GUARD: this is not a bare style preference — re-introducing a *top-level*
+# `foragerr.downloads` import here (or in the importer `__init__`) silently
+# re-opens the cycle. `tests/test_nfr_startup.py`'s isolated-importability
+# regression imports every importer/flows leaf as the sole entry point in a
+# fresh subprocess, so such a regression fails CI rather than only a scoped
+# test run (FRG-NFR-001).
 if TYPE_CHECKING:  # pragma: no cover — typing-only, never imported at runtime
     from foragerr.downloads.pathmap import RemotePathMapping
 

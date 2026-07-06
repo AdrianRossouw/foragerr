@@ -31,7 +31,11 @@ ORM model onto ``Base.metadata`` (same convention as the downloads area).
 
 from __future__ import annotations
 
-from foragerr.importer.context import ImportContext, media_management_fields
+from foragerr.importer.context import (
+    IMPORT_FILE_MUTATION_GROUP,
+    ImportContext,
+    media_management_fields,
+)
 from foragerr.importer.models import ImportHistoryRow
 from foragerr.importer.pipeline import (
     ImportOutcome,
@@ -52,8 +56,10 @@ from foragerr.importer.sources import (
 #: (the completed-download drain AND the per-series rescan). Both carry it so at
 #: most one library-mutating importer runs at a time regardless of the ``pp``
 #: pool size (``workers_pp`` may be up to 4) — double-import safety must not rest
-#: on the pool being size 1 (FRG-SER-010).
-IMPORT_FILE_MUTATION_GROUP = "import-file-mutation"
+#: on the pool being size 1 (FRG-SER-010). Canonically defined on the
+#: dependency-light :mod:`foragerr.importer.context` leaf and re-exported here
+#: unchanged (byte-identical public API) so flows modules needing only the group
+#: string can import the leaf without the full pipeline (FRG-NFR-001).
 
 __all__ = [
     "IMPORT_FILE_MUTATION_GROUP",

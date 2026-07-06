@@ -19,7 +19,16 @@ from foragerr.commands.registry import BaseCommand, register_command, register_h
 from foragerr.commands.service import HandlerContext
 from foragerr.config import Settings
 from foragerr.db import Database, utcnow
-from foragerr.importer import IMPORT_FILE_MUTATION_GROUP, ImportContext, media_management_fields
+# Import from the dependency-light importer leaf (not the package root): this
+# flow needs only the exclusivity-group string + ImportContext + the
+# media-management field mapper, none of which require the full pipeline / ORM
+# registration. Keeping this off the package root avoids re-opening the
+# flows→importer transitive weight (FRG-NFR-001 seam de-couple).
+from foragerr.importer.context import (
+    IMPORT_FILE_MUTATION_GROUP,
+    ImportContext,
+    media_management_fields,
+)
 from foragerr.importer.rename_ops import (
     RenamePlan,
     execute_renames,
