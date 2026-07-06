@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from foragerr.importer import fileops
+from foragerr.importer.decisions import DUPLICATE_CONSTRAINT_LARGER_SIZE
 from foragerr.naming import DEFAULT_FILE_TEMPLATE, DEFAULT_FOLDER_TEMPLATE
 from foragerr.parser.vocab import ARCHIVE_EXTENSIONS
 
@@ -55,6 +56,14 @@ class ImportContext:
     #: Days recycle-bin entries are retained before housekeeping prunes them
     #: (``0`` = keep forever). Carried for the housekeeping prune, not execute.
     recycle_bin_retention_days: int = 0
+    #: Same-rung duplicate arbitration constraint (FRG-PP-014):
+    #: ``larger-size`` (default) or ``preferred-format``.
+    duplicate_constraint: str = DUPLICATE_CONSTRAINT_LARGER_SIZE
+    #: Duplicate-dump root the losing file of a duplicate resolution moves to
+    #: (dated subfolders, FRG-PP-014). ``""`` = the normal replaced-file
+    #: disposal (recycle bin, or permanent delete) applies. Deliberately NOT a
+    #: recycle bin — it is never marked, so retention pruning never touches it.
+    duplicate_dump_path: str = ""
     #: Whether the import pipeline writes a ComicInfo.xml tag into cbz archives on
     #: import (FRG-PP-017). OFF by default; consumed by the ComicInfo write half
     #: (defined by the tagging area). The embedded-metadata READ (FRG-IMP-024) is
@@ -86,6 +95,8 @@ _SETTINGS_TO_CTX: dict[str, str] = {
     "recycle_bin_path": "recycle_bin_path",
     "recycle_bin_retention_days": "recycle_bin_retention_days",
     "comicinfo_tag_on_import": "comicinfo_tag_enabled",
+    "duplicate_constraint": "duplicate_constraint",
+    "duplicate_dump_path": "duplicate_dump_path",
 }
 
 

@@ -6,12 +6,14 @@ import { fakeFetcher } from '../../test/fakeFetcher';
 import { ApiRequestError, type FetcherInit } from '../../api/fetcher';
 import { makeCommand, makeSeriesResource, pageOf } from '../../test/mockData';
 import type {
-  MediaManagementConfig,
   NamingConfig,
   NamingTokens,
   RenamePreviewEntry,
 } from '../../api/types';
-import { MediaManagement } from './MediaManagement';
+import {
+  MediaManagement,
+  type MediaManagementConfigWithDuplicates,
+} from './MediaManagement';
 
 /*
  * FRG-UI-012 — the media-management / naming settings screen. Every delta-spec
@@ -30,11 +32,13 @@ const NAMING: NamingConfig = {
   replace_illegal_characters: true,
 };
 
-const MM: MediaManagementConfig = {
+const MM: MediaManagementConfigWithDuplicates = {
   import_transfer_mode: 'move',
   library_import_mode: 'in_place',
   recycle_bin_path: '',
   recycle_bin_retention_days: 0,
+  duplicate_constraint: 'larger-size',
+  duplicate_dump_path: '',
 };
 
 const TOKENS: NamingTokens = {
@@ -75,7 +79,7 @@ const RENAME_ROWS: RenamePreviewEntry[] = [
 
 interface Overrides {
   naming?: () => NamingConfig;
-  mm?: () => MediaManagementConfig;
+  mm?: () => MediaManagementConfigWithDuplicates;
   tokens?: () => NamingTokens;
   onTokens?: () => unknown;
   onPutNaming?: (init?: FetcherInit) => unknown;
@@ -101,7 +105,7 @@ function resolver(o: Overrides = {}) {
     }
     if (path === '/api/v1/config/mediamanagement') {
       if (init?.method === 'PUT') {
-        return o.onPutMm ? o.onPutMm(init) : (init.body as MediaManagementConfig);
+        return o.onPutMm ? o.onPutMm(init) : (init.body as MediaManagementConfigWithDuplicates);
       }
       return o.mm ? o.mm() : MM;
     }
@@ -185,6 +189,86 @@ describe('FRG-UI-012: standard fields via SchemaForm + save', () => {
     // The form is back to its saved state — the save bar disarms, not stuck dirty.
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'No Changes' })).toBeDisabled(),
+    );
+  });
+});
+
+describe('FRG-PP-014: duplicate handling settings', () => {
+  it('FRG-PP-014 — the duplicate constraint and dump folder fields render in the Duplicate Handling section', async () => {
+    const { fetcher } = fakeFetcher(resolver());
+    renderWithProviders(<MediaManagement />, { fetcher });
+
+    const constraint = await screen.findByTestId('schema-field-duplicate_constraint');
+    const select = within(constraint).getByLabelText('Duplicate Constraint');
+    expect(select.tagName).toBe('SELECT');
+    // Seeded from the GET (larger-size is the documented default).
+    expect(select).toHaveValue('larger-size');
+    expect(within(constraint).getByRole('option', { name: 'Preferred format' })).toBeInTheDocument();
+    expect(screen.getByTestId('schema-field-duplicate_dump_path')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Duplicate Handling' })).toBeInTheDocument();
+  });
+
+  it('FRG-PP-014 — changing the constraint and dump folder persists both through the media-management PUT', async () => {
+    const user = userEvent.setup();
+    const { spy, fetcher } = fakeFetcher(resolver());
+    renderWithProviders(<MediaManagement />, { fetcher });
+
+    const constraint = await screen.findByTestId('schema-field-duplicate_constraint');
+    await user.selectOptions(
+      within(constraint).getByLabelText('Duplicate Constraint'),
+      'preferred-format',
+    );
+    await user.type(
+      screen.getByLabelText('Duplicate Dump Folder'),
+      '/comics/.duplicates',
+    );
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith(
+        '/api/v1/config/mediamanagement',
+        expect.objectContaining({
+          method: 'PUT',
+          body: expect.objectContaining({
+            duplicate_constraint: 'preferred-format',
+            duplicate_dump_path: '/comics/.duplicates',
+          }),
+        }),
+      ),
+    );
+  });
+
+  it('FRG-PP-014 — a field-precise 4xx on the dump folder attaches to its field', async () => {
+    const user = userEvent.setup();
+    const { fetcher } = fakeFetcher(
+      resolver({
+        onPutMm: () => {
+          throw new ApiRequestError(
+            400,
+            {
+              message: 'config validation failed',
+              errors: [
+                {
+                  field: 'settings.duplicate_dump_path',
+                  message: 'path /nope does not exist and its parent is not a writable directory',
+                },
+              ],
+            },
+            '/api/v1/config/mediamanagement',
+          );
+        },
+      }),
+    );
+    renderWithProviders(<MediaManagement />, { fetcher });
+
+    await user.type(await screen.findByLabelText('Duplicate Dump Folder'), '/nope');
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    const field = screen.getByTestId('schema-field-duplicate_dump_path');
+    await waitFor(() =>
+      expect(within(field).getByRole('alert')).toHaveTextContent(
+        'not a writable directory',
+      ),
     );
   });
 });

@@ -73,6 +73,10 @@ __all__ = [
 
 _ISSUE_ID_RE = re.compile(r"\[__(.{1,64}?)__\]")
 
+#: `(fN)` fixed-release marker group inner text (FRG-PP-014), matched whole
+#: against the folded group content — `(f1)`, `(F2)`, `[f1]`.
+_FIX_MARKER_RE = re.compile(r"f(\d{1,2})")
+
 #: Trade formats whose trailing number reads as a volume (FRG-IMP-016).
 _TRADE_BOOKTYPES = (Booktype.TPB, Booktype.GN, Booktype.HC)
 
@@ -153,6 +157,7 @@ def _parse_impl(
     state.select_issue()
     state.apply_year_equals_issue_rule()
     state.apply_trade_volume_rule()
+    state.scan_fix_markers()
     state.attach_space_suffix()
     state.assemble_regions()
 
@@ -189,6 +194,7 @@ class _State:
         self.alt_series: str | None = None
         self.alt_issue_title: str | None = None
         self.scan_group: str | None = None
+        self.fix_revision: int | None = None
         self.series_name: str | None = None
 
     # -- helpers ------------------------------------------------------------
@@ -607,6 +613,41 @@ class _State:
                 # is NOT volume evidence and leaves volume_ordinal None.
                 self.volume_ordinal = 1
 
+    def scan_fix_markers(self) -> None:
+        """`(fN)` fixed-release markers (FRG-PP-014), with a title-plausibility
+        guard: only a standalone group sitting AFTER the selected issue (or,
+        with no issue, after the last word token — i.e. trailing, near the
+        extension, per common scene naming) reads as a fix marker, so an
+        `(f1)` embedded inside a series title never false-positives. A
+        recognized marker is re-kinded to FIX_MARKER, which also removes it
+        from the generic scan-group candidate pool. Runs after issue selection
+        (it needs the issue position) and before region assembly (which picks
+        the scan group)."""
+        last_word = max(
+            (t.index for t in self.tokens if t.kind is TokenKind.WORD), default=-1
+        )
+        anchor = self.issue_pos if self.issue_pos is not None else last_word
+        for t in self.tokens:
+            if not self._is_group(t) or t.index <= anchor:
+                continue
+            gi = self.ginfo.get(t.index)
+            if gi is None or gi.kind is not AnnotationKind.GENERIC:
+                continue
+            m = _FIX_MARKER_RE.fullmatch(fold(t.inner.strip()))
+            if m is None:
+                continue
+            revision = int(m.group(1))
+            gi.kind = AnnotationKind.FIX_MARKER
+            self.roles[t.index] = "fix-marker"
+            self.annotations = [
+                (i, Annotation(text=a.text, kind=AnnotationKind.FIX_MARKER))
+                if i == t.index and a.kind is AnnotationKind.GENERIC
+                else (i, a)
+                for i, a in self.annotations
+            ]
+            if self.fix_revision is None or revision > self.fix_revision:
+                self.fix_revision = revision
+
     # -- assembly -------------------------------------------------------------
 
     def _boundary(self) -> int:
@@ -830,6 +871,7 @@ class _State:
             booktype=self.booktype or Booktype.ISSUE,
             annotations=annotations,
             scan_group=self.scan_group,
+            fix_revision=self.fix_revision,
             issue_id=issue_id,
             type=ext,
             mode=mode,

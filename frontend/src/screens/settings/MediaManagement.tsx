@@ -37,6 +37,18 @@ import styles from './naming/MediaManagement.module.css';
  * launches from here.
  */
 
+/**
+ * FRG-PP-014 duplicate-handling fields (constraint + dump folder), served and
+ * accepted by GET/PUT /config/mediamanagement. A local extension of the shared
+ * `MediaManagementConfig` type so this change stays confined to the settings
+ * screen; fold these two fields into `api/types.ts` alongside the
+ * library-import types when that change lands.
+ */
+export type MediaManagementConfigWithDuplicates = MediaManagementConfig & {
+  duplicate_constraint: string;
+  duplicate_dump_path: string;
+};
+
 // Sample issue driving the live example line — display data (representative
 // values keyed by canonical field), NOT a token list; the token names come from
 // the backend vocabulary (GET /config/naming/tokens).
@@ -139,6 +151,34 @@ const RECYCLE_FIELDS: SchemaField[] = [
   },
 ];
 
+const DUPLICATE_FIELDS: SchemaField[] = [
+  {
+    order: 0,
+    name: 'duplicate_constraint',
+    type: 'textbox',
+    label: 'Duplicate Constraint',
+    help: 'How a duplicate at the same format-profile rung is resolved. Fixed releases ((f1)/(f2)) always win; profile upgrades are unaffected.',
+    required: true,
+    secret: false,
+    advanced: false,
+    selectOptions: [
+      { value: 'larger-size', name: 'Larger size' },
+      { value: 'preferred-format', name: 'Preferred format' },
+    ],
+  },
+  {
+    order: 1,
+    name: 'duplicate_dump_path',
+    type: 'textbox',
+    label: 'Duplicate Dump Folder',
+    help: 'Directory the losing duplicate is moved to (dated subfolders) instead of being deleted or recycled. Leave blank to use the normal replaced-file handling. Never pruned.',
+    required: false,
+    secret: false,
+    advanced: false,
+    selectOptions: [],
+  },
+];
+
 const NAMING_NAMES = [
   'rename_enabled',
   'file_naming_template',
@@ -151,6 +191,8 @@ const MM_NAMES = [
   'library_import_mode',
   'recycle_bin_path',
   'recycle_bin_retention_days',
+  'duplicate_constraint',
+  'duplicate_dump_path',
 ] as const;
 
 const KNOWN_FIELDS: ReadonlySet<string> = new Set([...NAMING_NAMES, ...MM_NAMES]);
@@ -169,7 +211,9 @@ function baselineValues(
  * server's `0` forever (the save round-trips 0 back, but the '' in the form
  * state keeps the save bar armed), a dirty-loop the operator cannot clear.
  */
-function normalize(values: FieldValues): NamingConfig & MediaManagementConfig {
+function normalize(
+  values: FieldValues,
+): NamingConfig & MediaManagementConfigWithDuplicates {
   return {
     rename_enabled: values.rename_enabled === true,
     file_naming_template: String(values.file_naming_template ?? ''),
@@ -179,6 +223,8 @@ function normalize(values: FieldValues): NamingConfig & MediaManagementConfig {
     library_import_mode: String(values.library_import_mode ?? ''),
     recycle_bin_path: String(values.recycle_bin_path ?? ''),
     recycle_bin_retention_days: Number(values.recycle_bin_retention_days) || 0,
+    duplicate_constraint: String(values.duplicate_constraint ?? 'larger-size'),
+    duplicate_dump_path: String(values.duplicate_dump_path ?? ''),
   };
 }
 
@@ -263,11 +309,13 @@ export function MediaManagement() {
       }
     }
     if (mmDirty) {
-      const body: MediaManagementConfig = {
+      const body: MediaManagementConfigWithDuplicates = {
         import_transfer_mode: norm.import_transfer_mode,
         library_import_mode: norm.library_import_mode,
         recycle_bin_path: norm.recycle_bin_path,
         recycle_bin_retention_days: norm.recycle_bin_retention_days,
+        duplicate_constraint: norm.duplicate_constraint,
+        duplicate_dump_path: norm.duplicate_dump_path,
       };
       try {
         await putMm.mutateAsync(body);
@@ -365,6 +413,16 @@ export function MediaManagement() {
               <h2 className={styles.sectionHeading}>Recycle Bin</h2>
               <SchemaForm
                 fields={RECYCLE_FIELDS}
+                values={values}
+                onChange={onChange}
+                errors={fieldErrors}
+              />
+            </section>
+
+            <section className={styles.section}>
+              <h2 className={styles.sectionHeading}>Duplicate Handling</h2>
+              <SchemaForm
+                fields={DUPLICATE_FIELDS}
                 values={values}
                 onChange={onChange}
                 errors={fieldErrors}
