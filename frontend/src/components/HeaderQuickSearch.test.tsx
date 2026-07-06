@@ -5,8 +5,7 @@ import { Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { renderWithProviders } from '../test/renderWithProviders';
 import { fakeFetcher } from '../test/fakeFetcher';
 import { makeSeriesResource, pageOf } from '../test/mockData';
-import type { SeriesResource } from '../api/types';
-import type { AddSeriesNavigationState } from '../screens/add/AddSeries';
+import type { SeriesResource, AddSeriesNavigationState } from '../api/types';
 import { HeaderQuickSearch } from './HeaderQuickSearch';
 
 function DetailStub() {
@@ -113,5 +112,23 @@ describe('FRG-UI-019: header quick search', () => {
       expect(screen.getByTestId('quick-result-fallthrough')).toBeInTheDocument(),
     );
     expect(screen.getAllByRole('option')).toHaveLength(1);
+  });
+
+  it('FRG-UI-019 — a click outside the widget closes the results list but keeps the typed term', async () => {
+    renderHeader();
+    const user = userEvent.setup();
+
+    await user.type(searchbox(), 'saga');
+    await waitFor(() =>
+      expect(screen.getByRole('listbox')).toBeInTheDocument(),
+    );
+
+    // A pointer-down elsewhere in the document dismisses the open listbox...
+    await user.click(document.body);
+    await waitFor(() =>
+      expect(screen.queryByRole('listbox')).not.toBeInTheDocument(),
+    );
+    // ...without clearing the term (dismissal, not a reset — Escape semantics).
+    expect(searchbox()).toHaveValue('saga');
   });
 });

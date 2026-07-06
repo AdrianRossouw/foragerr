@@ -1,9 +1,9 @@
-import { useMemo, useState, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSeriesIndex } from '../api/hooks';
 import { matchSeries } from '../lib/fuzzyMatch';
 import { SearchIcon } from './icons';
-import type { AddSeriesNavigationState } from '../screens/add/AddSeries';
+import type { AddSeriesNavigationState } from '../api/types';
 import styles from './HeaderQuickSearch.module.css';
 
 /**
@@ -34,12 +34,31 @@ type ResultRow = SeriesRow | FallThroughRow;
 export function HeaderQuickSearch() {
   const navigate = useNavigate();
   const seriesIndex = useSeriesIndex();
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const [term, setTerm] = useState('');
   const [dismissed, setDismissed] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
 
   const trimmed = term.trim();
   const open = trimmed.length > 0 && !dismissed;
+
+  // Close the results list on a click or focus move outside the widget, the
+  // same dismissal Escape performs (FRG-UI-019) — WITHOUT clearing the typed
+  // term, so the box can be reopened by typing again. Only listens while open.
+  useEffect(() => {
+    if (!open) return;
+    function onOutside(event: MouseEvent | FocusEvent) {
+      if (!wrapperRef.current?.contains(event.target as Node)) {
+        setDismissed(true);
+      }
+    }
+    document.addEventListener('mousedown', onOutside);
+    document.addEventListener('focusin', onOutside);
+    return () => {
+      document.removeEventListener('mousedown', onOutside);
+      document.removeEventListener('focusin', onOutside);
+    };
+  }, [open]);
 
   // Empty/loading cache degrades to just the fall-through row rather than
   // erroring or showing a spinner masquerading as results (FRG-UI-019).
@@ -95,7 +114,7 @@ export function HeaderQuickSearch() {
   }
 
   return (
-    <div className={styles.wrapper}>
+    <div className={styles.wrapper} ref={wrapperRef}>
       <span className={styles.icon} aria-hidden>
         <SearchIcon size={16} />
       </span>
