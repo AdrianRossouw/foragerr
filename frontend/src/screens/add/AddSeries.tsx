@@ -40,8 +40,10 @@ export function normalizeLookupTerm(raw: string): string {
  * degraded walk that returned nothing (error styling, retry guidance) →
  * capped result (narrow the term; candidates still render) → incomplete
  * result (candidates still render) → complete-and-empty → candidates only.
+ * Exported for reuse by every inline ComicVine lookup (FRG-UI-015 group
+ * correction) so degraded/capped/credential outcomes render identically.
  */
-function lookupOutcomeNote(
+export function lookupOutcomeNote(
   isError: boolean,
   error: unknown,
   data: LookupResponse | undefined,
@@ -80,7 +82,8 @@ function lookupOutcomeNote(
   return null;
 }
 
-const STRATEGY_LABELS: Record<string, string> = {
+/** Monitor-strategy display labels, shared with the library-import batch panel. */
+export const STRATEGY_LABELS: Record<string, string> = {
   all: 'All issues',
   none: 'None',
   future: 'Future issues',

@@ -13,7 +13,7 @@ import { createContext, useContext, type ReactNode } from 'react';
 
 /** Optional init for mutating requests; omitted entirely for plain GETs. */
 export interface FetcherInit {
-  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   /** JSON-serialized as the request body when present. */
   body?: unknown;
 }
