@@ -13,7 +13,7 @@ import type {
   CommandResource,
   FormatProfileResource,
   IssueResource,
-  LookupCandidate,
+  LookupResponse,
   QueueItem,
   QueuePageResponse,
   ReleaseDecision,
@@ -110,13 +110,19 @@ export function useIssues(seriesId: number): UseQueryResult<IssueResource[]> {
   });
 }
 
-/** Live ComicVine lookup (FRG-UI-005); only fires for a non-empty term. */
-export function useLookup(term: string): UseQueryResult<LookupCandidate[]> {
+/**
+ * Live ComicVine lookup (FRG-UI-005); only fires for a non-empty term. The
+ * backend returns a `LookupResponse` envelope (FRG-API-003) so the screen can
+ * distinguish a degraded walk (`complete=false`) from a clean empty result.
+ * An upstream/credential failure rejects with an `ApiRequestError` whose
+ * `message` (backend verbatim) and `status` are read off `query.error`.
+ */
+export function useLookup(term: string): UseQueryResult<LookupResponse> {
   const fetcher = useFetcher();
   return useQuery({
     queryKey: queryKeys.lookup.term(term),
     queryFn: () =>
-      fetcher<LookupCandidate[]>(
+      fetcher<LookupResponse>(
         `/api/v1/series/lookup?term=${encodeURIComponent(term)}`,
       ),
     enabled: term.length > 0,

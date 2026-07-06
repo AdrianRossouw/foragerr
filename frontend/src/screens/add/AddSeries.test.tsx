@@ -13,8 +13,18 @@ import {
   pageOf,
 } from '../../test/mockData';
 import { useUiStore } from '../../store/uiStore';
-import { AddSeries, normalizeLookupTerm } from './AddSeries';
+import { ApiRequestError } from '../../api/fetcher';
+import type { FetcherInit } from '../../api/fetcher';
+import {
+  AddSeries,
+  isComicVineAuthMessage,
+  normalizeLookupTerm,
+} from './AddSeries';
 import { SeriesDetail } from '../series/SeriesDetail';
+
+/** The backend's verbatim ComicVine auth-failure message (FRG-API-003). */
+const CV_AUTH_MESSAGE =
+  'comicvine lookup failed: ComicVine rejected the API key (missing or invalid) — set comicvine_api_key';
 
 /**
  * FRG-UI-005 — Add-series screen: ComicVine lookup with plausibility
@@ -30,10 +40,10 @@ function addFetcher() {
   return fakeFetcher((path, options) => {
     const method = options?.method ?? 'GET';
     if (method === 'GET' && path === '/api/v1/series/lookup?term=saga') {
-      return mockLookupCandidates;
+      return { records: mockLookupCandidates, complete: true };
     }
     if (method === 'GET' && path.startsWith('/api/v1/series/lookup?term=')) {
-      return [];
+      return { records: [], complete: true };
     }
     if (method === 'GET' && path === '/api/v1/rootfolder') return mockRootFolders;
     if (method === 'GET' && path === '/api/v1/formatprofile') {
@@ -209,5 +219,111 @@ describe('FRG-UI-005: add series', () => {
     await waitFor(() =>
       expect(spy).toHaveBeenCalledWith('/api/v1/series/lookup?term=4050-56789'),
     );
+  });
+});
+
+/**
+ * FRG-UI-005 — the three non-success search outcomes must render distinctly:
+ * a credential/lookup error, an incomplete (degraded) walk, and a genuinely
+ * empty result — a credential failure or degraded walk is NEVER shown as plain
+ * "no results".
+ */
+describe('FRG-UI-005: lookup outcome states', () => {
+  /** Render Add with a bespoke resolver for the `term=saga` lookup only. */
+  function renderAddWithLookup(lookup: (path: string) => unknown) {
+    const { fetcher } = fakeFetcher((path: string, options?: FetcherInit) => {
+      const method = options?.method ?? 'GET';
+      if (method === 'GET' && path.startsWith('/api/v1/series/lookup?term=')) {
+        return lookup(path);
+      }
+      if (method === 'GET' && path === '/api/v1/rootfolder') return mockRootFolders;
+      if (method === 'GET' && path === '/api/v1/formatprofile') {
+        return mockFormatProfiles;
+      }
+      throw new Error(`unexpected request: ${method} ${path}`);
+    });
+    return renderWithProviders(
+      <Routes>
+        <Route path="/add" element={<AddSeries />} />
+      </Routes>,
+      { fetcher, route: '/add' },
+    );
+  }
+
+  it('FRG-UI-005 — a ComicVine credential failure renders Settings guidance, not the empty state', async () => {
+    renderAddWithLookup(() => {
+      throw new ApiRequestError(
+        503,
+        { message: CV_AUTH_MESSAGE, errors: [] },
+        '/api/v1/series/lookup?term=saga',
+      );
+    });
+    await searchFor('saga');
+
+    await waitFor(() =>
+      expect(
+        screen.getByText('ComicVine API key missing or invalid — check Settings.'),
+      ).toBeInTheDocument(),
+    );
+    // The credential error must NOT be dressed up as "no results".
+    expect(screen.queryByText(/No volumes found/)).not.toBeInTheDocument();
+    // ...nor as the generic retry error.
+    expect(screen.queryByText(/Try again in a moment/)).not.toBeInTheDocument();
+  });
+
+  it('FRG-UI-005 — a non-credential lookup failure renders the generic error', async () => {
+    renderAddWithLookup(() => {
+      throw new ApiRequestError(
+        503,
+        { message: 'comicvine lookup failed: upstream unavailable', errors: [] },
+        '/api/v1/series/lookup?term=saga',
+      );
+    });
+    await searchFor('saga');
+
+    await waitFor(() =>
+      expect(
+        screen.getByText('ComicVine lookup failed. Try again in a moment.'),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/check Settings/)).not.toBeInTheDocument();
+  });
+
+  it('FRG-UI-005 — an incomplete result renders the candidates plus an incomplete notice', async () => {
+    renderAddWithLookup(() => ({ records: mockLookupCandidates, complete: false }));
+    await searchFor('saga');
+
+    await waitFor(() =>
+      expect(screen.getByTestId('candidate-40501234')).toBeInTheDocument(),
+    );
+    expect(screen.getByText(/Results may be incomplete/)).toBeInTheDocument();
+    // Incomplete is NOT "no results".
+    expect(screen.queryByText(/No volumes found/)).not.toBeInTheDocument();
+  });
+
+  it('FRG-UI-005 — a complete-and-empty result renders the plain "No volumes found" state', async () => {
+    renderAddWithLookup(() => ({ records: [], complete: true }));
+    await searchFor('saga');
+
+    await waitFor(() =>
+      expect(screen.getByText(/No volumes found/)).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/Results may be incomplete/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/check Settings/)).not.toBeInTheDocument();
+  });
+
+  it('FRG-UI-005 — isComicVineAuthMessage matches only the credential wording', () => {
+    expect(isComicVineAuthMessage(CV_AUTH_MESSAGE)).toBe(true);
+    expect(
+      isComicVineAuthMessage('ComicVine rejected the API key (missing or invalid)'),
+    ).toBe(true);
+    // Narrow: a generic upstream 503 or unrelated error must not match.
+    expect(
+      isComicVineAuthMessage('comicvine lookup failed: upstream unavailable'),
+    ).toBe(false);
+    expect(isComicVineAuthMessage('Request failed: 500')).toBe(false);
+    expect(isComicVineAuthMessage(null)).toBe(false);
+    expect(isComicVineAuthMessage(undefined)).toBe(false);
+    expect(isComicVineAuthMessage('')).toBe(false);
   });
 });
