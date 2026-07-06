@@ -162,6 +162,7 @@ function AddOptionsPanel({
       <button
         type="button"
         className={styles.addButton}
+        data-testid="ft-add-confirm"
         disabled={busy || selectedRootFolderId === null}
         onClick={() => {
           if (selectedRootFolderId === null) return;
