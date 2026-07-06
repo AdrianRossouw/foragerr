@@ -40,6 +40,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Settings',
     items: [
+      { to: '/settings/general', label: 'General' },
       { to: '/settings/media-management', label: 'Media Management' },
       { to: '/settings/indexers', label: 'Indexers' },
       { to: '/settings/download-clients', label: 'Download Clients' },

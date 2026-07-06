@@ -26,3 +26,21 @@ describe('FRG-UI-016: System nav group', () => {
     ).toHaveAttribute('href', '/system/tasks');
   });
 });
+
+/**
+ * FRG-UI-020 — nav reachability: Settings -> General (the ComicVine
+ * credential settings screen) is reachable from the sidebar, ahead of the
+ * existing Media Management/Indexers/Download Clients settings items.
+ */
+describe('FRG-UI-020: Settings nav group', () => {
+  it('FRG-UI-020 — the sidebar exposes a General settings item routing to /settings/general', () => {
+    renderWithProviders(<Sidebar />, { withRouter: true });
+
+    const group = screen.getByText('Settings').closest('nav');
+    expect(group).not.toBeNull();
+
+    expect(
+      within(group as HTMLElement).getByRole('link', { name: 'General' }),
+    ).toHaveAttribute('href', '/settings/general');
+  });
+});

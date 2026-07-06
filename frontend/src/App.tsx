@@ -11,6 +11,7 @@ import { WantedScreen } from './screens/wanted/WantedScreen';
 import { IndexerSettings } from './routes/settings/IndexerSettings';
 import { DownloadClientSettings } from './routes/settings/DownloadClientSettings';
 import { MediaManagement } from './screens/settings/MediaManagement';
+import { General } from './screens/settings/General';
 import { StatusScreen } from './screens/system/StatusScreen';
 import { HealthScreen } from './screens/system/HealthScreen';
 import { TasksScreen } from './screens/system/TasksScreen';
@@ -36,6 +37,7 @@ export function App() {
         <Route path="queue" element={<QueueScreen />} />
         <Route path="history" element={<HistoryScreen />} />
         <Route path="blocklist" element={<BlocklistScreen />} />
+        <Route path="settings/general" element={<General />} />
         <Route path="settings/indexers" element={<IndexerSettings />} />
         <Route
           path="settings/download-clients"
