@@ -6,7 +6,11 @@ import { PageControls } from '../../components/PageControls';
 import { ReasonsPopover } from '../../components/ReasonsPopover';
 import { useHistoryPage } from '../../api/hooks';
 import { queryKeys } from '../../api/queryKeys';
-import { HISTORY_EVENT_TYPES, type HistoryRecord } from '../../api/types';
+import {
+  HISTORY_EVENT_TYPES,
+  type HistoryEventType,
+  type HistoryRecord,
+} from '../../api/types';
 import { formatDate } from '../../lib/format';
 import styles from './HistoryScreen.module.css';
 
@@ -16,9 +20,11 @@ import styles from './HistoryScreen.module.css';
  * chips (no icon system), rows link to their series, and each row expands to
  * the event's canonical data payload with rejection reasons rendered VERBATIM
  * through the shared ReasonsPopover. Pagination is real server-side paging
- * (design decision 5); the WebSocketBridge invalidates ['history'] on queue
- * pushes (imports/failures write history rows), and the Refresh button covers
- * event writers that emit no push at all (e.g. manual file deletes).
+ * (design decision 5); the backend now emits a dedicated
+ * {name:'history',action:'updated'} push on EVERY history write, which the
+ * WebSocketBridge turns into a ['history'] invalidation — so the feed stays
+ * live on its own. The Refresh button remains only as a manual convenience, no
+ * longer the sole recovery path it once was.
  */
 
 const EVENT_LABEL: Record<string, string> = {
@@ -149,10 +155,11 @@ function HistoryRow({ record, expanded, onToggle }: {
 
 export function HistoryScreen() {
   const [page, setPage] = useState(1);
-  const [eventType, setEventType] = useState('');
+  // '' = the "All events" option; any other value is a valid HistoryEventType.
+  const [eventType, setEventType] = useState<HistoryEventType | ''>('');
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set());
   const queryClient = useQueryClient();
-  const { data, isLoading, isError } = useHistoryPage(page, { eventType });
+  const { data, isLoading, isError } = useHistoryPage(page, { eventType }, setPage);
 
   const records = data?.records ?? [];
 
@@ -163,7 +170,7 @@ export function HistoryScreen() {
     setExpanded(next);
   };
 
-  const changeFilter = (value: string) => {
+  const changeFilter = (value: HistoryEventType | '') => {
     setEventType(value);
     setPage(1);
     setExpanded(new Set());
@@ -179,7 +186,7 @@ export function HistoryScreen() {
               className={styles.filterSelect}
               aria-label="Filter by event type"
               value={eventType}
-              onChange={(e) => changeFilter(e.target.value)}
+              onChange={(e) => changeFilter(e.target.value as HistoryEventType | '')}
             >
               <option value="">All events</option>
               {HISTORY_EVENT_TYPES.map((type) => (

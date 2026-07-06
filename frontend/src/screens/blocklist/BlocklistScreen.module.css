@@ -1,51 +1,36 @@
+/* Shared table/link/button/state chrome (FRG-UI-010/011/017). */
 .table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--font-size-base);
-}
-
-.table th {
-  text-align: left;
-  padding: var(--spacing-sm) var(--spacing-md);
-  color: var(--text-muted);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  border-bottom: 1px solid var(--surface-border);
-  white-space: nowrap;
-}
-
-.table td {
-  padding: var(--spacing-sm) var(--spacing-md);
-  border-bottom: 1px solid var(--surface-border);
-  vertical-align: middle;
-}
-
-.table tbody tr:hover {
-  background: var(--surface-card-hover);
-}
-
-.selectCol {
-  width: 2rem;
+  composes: table from '../../components/dataTable.module.css';
 }
 
 .seriesLink {
-  color: var(--color-accent);
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.seriesLink:hover {
-  text-decoration: underline;
+  composes: seriesLink from '../../components/dataTable.module.css';
 }
 
 .muted {
-  color: var(--text-muted);
+  composes: muted from '../../components/dataTable.module.css';
 }
 
 .numeric {
-  white-space: nowrap;
+  composes: numeric from '../../components/dataTable.module.css';
+}
+
+.btn {
+  composes: btn from '../../components/dataTable.module.css';
+}
+
+.toolbarActions {
+  composes: toolbarActions from '../../components/dataTable.module.css';
+}
+
+.state {
+  composes: state from '../../components/dataTable.module.css';
+}
+
+/* --- Per-screen columns / controls --- */
+
+.selectCol {
+  width: 2rem;
 }
 
 .reasonCell {
@@ -58,38 +43,6 @@
   white-space: nowrap;
 }
 
-.btn {
-  appearance: none;
-  font: inherit;
-  font-size: var(--font-size-sm);
-  padding: var(--spacing-xs) var(--spacing-sm);
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--surface-border);
-  background: var(--surface-card);
-  color: var(--text-primary);
-  cursor: pointer;
-}
-
-.btn:hover:not(:disabled) {
-  background: var(--surface-card-hover);
-}
-
-.btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.btn:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 1px;
-}
-
-.toolbarActions {
-  display: flex;
-  gap: var(--spacing-sm);
-  align-items: center;
-}
-
 .notice {
   margin: var(--spacing-sm) var(--spacing-md);
   padding: var(--spacing-sm) var(--spacing-md);
@@ -97,10 +50,4 @@
   border-radius: var(--radius-sm);
   color: var(--color-warning);
   font-size: var(--font-size-sm);
-}
-
-.state {
-  padding: var(--spacing-xl) var(--spacing-md);
-  color: var(--text-secondary);
-  text-align: center;
 }

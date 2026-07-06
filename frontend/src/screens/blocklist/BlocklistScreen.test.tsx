@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
+import { screen, waitFor, within, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../../test/renderWithProviders';
 import { fakeFetcher } from '../../test/fakeFetcher';
+import { makeFakeSocketFactory } from '../../test/fakeSocket';
+import { WebSocketBridge } from '../../ws/WebSocketBridge';
 import { makeBlocklistRecord, pageOf } from '../../test/mockData';
 import type { BlocklistRecord } from '../../api/types';
 import { BlocklistScreen } from './BlocklistScreen';
@@ -125,6 +127,95 @@ describe('FRG-UI-017: blocklist screen', () => {
     });
     await screen.findByText('The blocklist is empty.');
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('FRG-UI-017 — removing the final page\'s last rows clamps back to the new last page (no false empty state)', async () => {
+    const page1 = Array.from({ length: 20 }, (_, i) =>
+      makeBlocklistRecord({ id: i + 1, sourceTitle: `P1 ${i + 1}` }),
+    );
+    let page2: BlocklistRecord[] = [
+      makeBlocklistRecord({ id: 21, sourceTitle: 'X 021' }),
+      makeBlocklistRecord({ id: 22, sourceTitle: 'X 022' }),
+    ];
+    const { fetcher } = fakeFetcher((path, init) => {
+      if (init?.method === 'POST' && path === '/api/v1/blocklist/delete') {
+        const ids = (init.body as { ids: number[] }).ids;
+        page2 = page2.filter((r) => !ids.includes(r.id));
+        return { deleted: ids, missing: [] };
+      }
+      const total = page1.length + page2.length;
+      return path.includes('page=2')
+        ? pageOf(page2, { page: 2, pageSize: 20, totalRecords: total })
+        : pageOf(page1, { page: 1, pageSize: 20, totalRecords: total });
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<BlocklistScreen />, { fetcher });
+
+    await screen.findByTestId('blocklist-row-1');
+    await user.click(screen.getByRole('button', { name: 'Next ›' }));
+    await screen.findByTestId('blocklist-row-21');
+    expect(screen.getByTestId('page-controls-label')).toHaveTextContent('Page 2 of 2');
+
+    // Remove EVERY row on the final page.
+    await user.click(
+      screen.getByRole('checkbox', { name: 'Select all blocklist entries' }),
+    );
+    await user.click(screen.getByRole('button', { name: 'Remove Selected' }));
+
+    // Instead of a false "Page 2 of 1" over an empty page, the clamp lands us on
+    // the real new last page (page 1) with its rows.
+    await screen.findByTestId('blocklist-row-1');
+    expect(screen.getByTestId('page-controls-label')).toHaveTextContent('Page 1 of 1');
+    expect(screen.queryByText('The blocklist is empty.')).not.toBeInTheDocument();
+  });
+
+  it('FRG-UI-017 — a genuinely empty blocklist keeps the empty state on page 1 (no clamp)', async () => {
+    const { fetcher } = fakeFetcher(() =>
+      pageOf([], { pageSize: 20, totalRecords: 0 }),
+    );
+    renderWithProviders(<BlocklistScreen />, { fetcher });
+
+    expect(await screen.findByText('The blocklist is empty.')).toBeInTheDocument();
+    // No page controls render for a zero-record list, and no clamp fires.
+    expect(screen.queryByTestId('page-controls-label')).not.toBeInTheDocument();
+  });
+
+  it('FRG-UI-017 — a blocklist WS push invalidates the list without manual action', async () => {
+    let calls = 0;
+    const { fetcher } = fakeFetcher(() => {
+      calls += 1;
+      return calls === 1
+        ? pageOf([makeBlocklistRecord({ id: 11, sourceTitle: 'first' })], {
+            pageSize: 20,
+          })
+        : pageOf(
+            [
+              makeBlocklistRecord({ id: 11, sourceTitle: 'first' }),
+              makeBlocklistRecord({ id: 12, sourceTitle: 'second' }),
+            ],
+            { pageSize: 20 },
+          );
+    });
+    const { factory, last } = makeFakeSocketFactory();
+    renderWithProviders(
+      <>
+        <BlocklistScreen />
+        <WebSocketBridge socketFactory={factory} />
+      </>,
+      { fetcher },
+    );
+
+    await screen.findByTestId('blocklist-row-11');
+    expect(screen.queryByTestId('blocklist-row-12')).not.toBeInTheDocument();
+
+    act(() => last().emitOpen());
+    // The backend's dedicated blocklist push (a blocklist write) invalidates the
+    // family; the refetched page shows the newly-banned release.
+    act(() =>
+      last().emitMessage({ name: 'blocklist', action: 'updated', resource: null }),
+    );
+
+    await screen.findByTestId('blocklist-row-12');
   });
 
   it('FRG-UI-017 — pagination navigates the server-side envelope', async () => {

@@ -29,7 +29,7 @@ function releaseDate(record: WantedIssueRecord): string | null {
 export function WantedScreen() {
   const [page, setPage] = useState(1);
   const queryClient = useQueryClient();
-  const { data, isLoading, isError } = useWantedPage(page);
+  const { data, isLoading, isError } = useWantedPage(page, setPage);
   const runCommand = useRunCommand();
 
   // One shared command watcher: Search All and the per-row automatic searches
@@ -127,7 +127,16 @@ export function WantedScreen() {
                       type="button"
                       className={styles.iconButton}
                       aria-label={`Automatic search for issue ${record.issue_number ?? record.id}`}
-                      title="Automatic search"
+                      // One shared watcher backs every automatic search: starting
+                      // a per-row search mid-run would hijack Search All's
+                      // completion (its invalidation + chip). Disable automatic
+                      // searches while one runs; interactive search stays open.
+                      title={
+                        command.running
+                          ? 'A search is already running'
+                          : 'Automatic search'
+                      }
+                      disabled={command.running}
                       onClick={() =>
                         dispatch(
                           `Search #${record.issue_number ?? record.id}`,
