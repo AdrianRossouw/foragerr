@@ -40,6 +40,15 @@ flow with zero callers).
   a valid OpenSearch description document; a templated search feed over series
   titles (id-only resolution, bound parameters, same unauthenticated-hostile
   posture and adversarial tests).
+- **Root-folder management (amending FRG-SER-008 / FRG-UI-012)**: a fresh
+  install cannot register a root folder at all — no create API and no UI
+  exists (even the e2e harness seeds the DB directly), so adding a series,
+  downloading, and library import are unreachable on first run (found by
+  Adrian's live testing, the second first-run gap after the API-key one).
+  `POST /api/v1/rootfolder` (validated: absolute, exists, writable, not
+  nested in/over an existing root) and `DELETE /api/v1/rootfolder/{id}`
+  (refused while series reference it), plus a Root Folders section on the
+  Media Management settings screen.
 - **Delete-files defects (amending FRG-API-003 / FRG-UI-004)**:
   `DELETE /api/v1/series/{id}?deleteFiles=true` is implemented (each file
   routed through the recycle bin before the rows go) instead of returning 501;
@@ -63,6 +72,8 @@ None.
   placeholders; FRG-UI-004 (series detail delete dialog + per-issue file
   delete).
 - `sched`: FRG-SCHED-010 (started transition included in the push).
+- `ser`: FRG-SER-008 (root-folder management endpoints — registration was
+  previously unreachable outside test seeding).
 - `opds`: FRG-OPDS-013 elaborated; FRG-OPDS-007 flips from option (b) to
   implemented option (a).
 

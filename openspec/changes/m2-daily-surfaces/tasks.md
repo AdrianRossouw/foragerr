@@ -48,6 +48,18 @@
       configured / not configured / mid-failure leaves rows intact.
       [FRG-API-003]
 
+## 5b. Root-folder management (FRG-SER-008, FRG-UI-012)
+
+- [ ] 5b.1 `POST /api/v1/rootfolder` (absolute/exists/writable/no-nesting/no-dup
+      validation, field-precise 400s) + `DELETE /api/v1/rootfolder/{id}`
+      (409-class refusal while series reference it, 404 unknown). Tagged tests.
+      [FRG-SER-008]
+- [ ] 5b.2 Media Management: Root Folders section (list + free space, add by
+      path with API errors verbatim, guarded remove); Add Series and Library
+      Import unconfigured states link to it. e2e run.sh drops the direct DB
+      seed in favor of the API (proves first-run registration end-to-end).
+      Vitest + e2e adjustments. [FRG-UI-012, FRG-SER-008]
+
 ## 6. Frontend (FRG-UI-010, FRG-UI-011, FRG-UI-017, FRG-UI-004)
 
 - [ ] 6.1 Shared usePagedQuery + page controls; History screen (Activity
