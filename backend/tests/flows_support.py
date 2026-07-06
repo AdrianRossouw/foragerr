@@ -113,11 +113,33 @@ class FakeCV:
                 if vol is None:
                     return httpx.Response(404, content=b"not found")
                 return _envelope(vol)
+            if path.endswith("/volumes/"):
+                return self._search_response(query)
             if path.endswith("/issues/"):
                 return self._issues_response(query)
             return httpx.Response(404, content=b"unknown endpoint")
 
         return _handle
+
+    def _search_response(self, query: dict[str, str]) -> httpx.Response:
+        """Answer the plural ``volumes/`` name-filtered search endpoint
+        (``search_series``) from the registered volumes: a case-insensitive
+        substring match in either direction, first page only."""
+        filter_value = query.get("filter", "")
+        term = filter_value.split("name:", 1)[1] if "name:" in filter_value else ""
+        term = term.strip().casefold()
+        offset = int(query.get("offset", "0"))
+        matches = [
+            vol
+            for vol in self._volumes.values()
+            if term
+            and (
+                term in str(vol.get("name", "")).casefold()
+                or str(vol.get("name", "")).casefold() in term
+            )
+        ]
+        window = matches if offset == 0 else []
+        return _envelope(window, number_of_total_results=len(matches))
 
     def _issues_response(self, query: dict[str, str]) -> httpx.Response:
         filter_value = query.get("filter", "")
