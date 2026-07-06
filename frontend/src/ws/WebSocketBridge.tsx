@@ -30,7 +30,12 @@ export interface WebSocketBridgeProps {
  *     with NO new request (no backend emitter in M1; byte-level ticks are M2);
  *   - any other `queue` message (the backend's `{name:'queue', action:'updated'}`
  *     invalidation signal — see backend/src/foragerr/ws/messages.py) invalidates
- *     the ['queue'] prefix so active queue pages refetch;
+ *     the ['queue'] prefix so active queue pages refetch, plus ['history'] and
+ *     ['wanted'] (the same transitions write history rows and change the
+ *     derived missing set — m2-daily-surfaces), and ['blocklist'] when the
+ *     push is a failure (the transition that writes a blocklist row);
+ *   - dedicated `history`/`wanted`/`blocklist` messages invalidate their
+ *     family (forward-compatible; the backend emits none today);
  *   - a `command` message invalidates the ['command'] prefix (status pushes).
  * It reconnects on an increasing backoff and reflects connection state in the
  * shared store (rendered by the sidebar footer). It holds no server data itself.
@@ -79,6 +84,40 @@ export function WebSocketBridge({
         // signal — the backend has no page/progress fields to patch with
         // (state transitions + failures only in M1); refetch the queue pages.
         void queryClient.invalidateQueries({ queryKey: queryKeys.queue.all() });
+        // m2-daily-surfaces: the backend emits NO history/wanted-specific
+        // event — imports, failures, and deletes all ride this same queue
+        // push (TrackedStateChanged / DownloadFailedEvent), and those exact
+        // transitions write history rows and change the derived missing set.
+        // Invalidation is per-family and refetch is one page for active
+        // observers only (design decision 5's storm note), so piggybacking
+        // here is cheap and keeps History/Wanted page 1 live.
+        void queryClient.invalidateQueries({ queryKey: queryKeys.history.all() });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.wanted.all() });
+        // A failure push is the one that carries a blocklist write
+        // (DownloadFailedEvent → blocklist row beside the failed state).
+        const status = (msg.resource as { status?: unknown } | null)?.status;
+        if (status === 'failed') {
+          void queryClient.invalidateQueries({
+            queryKey: queryKeys.blocklist.all(),
+          });
+        }
+        return;
+      }
+      // Forward-compatible dedicated branches: if the backend grows
+      // history/wanted/blocklist emitters in map_event, they invalidate the
+      // matching family directly with no bridge change.
+      if (msg.name === 'history') {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.history.all() });
+        return;
+      }
+      if (msg.name === 'wanted') {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.wanted.all() });
+        return;
+      }
+      if (msg.name === 'blocklist') {
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.blocklist.all(),
+        });
         return;
       }
       if (msg.name === 'series') {

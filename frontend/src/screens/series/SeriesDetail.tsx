@@ -18,8 +18,10 @@ import {
   WrenchIcon,
 } from '../../components/icons';
 import { RenamePreviewPanel } from '../settings/naming/RenamePreviewPanel';
+import { useMediaManagementConfig } from '../settings/naming/namingHooks';
 import {
   useBulkSetIssuesMonitored,
+  useDeleteIssueFile,
   useDeleteSeries,
   useIssues,
   useRunCommand,
@@ -78,6 +80,12 @@ function DeleteDialog({
             />
             Also delete files from disk
           </label>
+          {/* Truthful since m2-daily-surfaces: deleteFiles=true is implemented
+              (each file routed through the recycle bin before the rows go). */}
+          <p className={styles.dialogHint}>
+            Files are moved to the recycle bin when one is configured; otherwise
+            they are permanently deleted. Unchecked, files stay on disk.
+          </p>
           {error && <p className={styles.errorNote}>{error}</p>}
         </div>
         <footer className={styles.dialogFooter}>
@@ -91,6 +99,85 @@ function DeleteDialog({
             onClick={() => onConfirm(deleteFiles)}
           >
             Delete
+          </button>
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Per-issue delete-file confirmation (FRG-UI-004, m2-daily-surfaces). The
+ * dialog names the real consequence by reading the media-management config
+ * (mounted only while open, so the config is fetched on demand): a configured
+ * recycle bin means the file is moved there; none means permanent deletion.
+ * Confirm stays disabled until the consequence is known.
+ */
+function DeleteFileDialog({
+  issue,
+  seriesId,
+  onClose,
+}: {
+  issue: IssueResource;
+  seriesId: number;
+  onClose: () => void;
+}) {
+  const mmQuery = useMediaManagementConfig();
+  const deleteFile = useDeleteIssueFile(seriesId);
+  const issueLabel = issue.issue_number ?? String(issue.id);
+
+  const recycleConfigured = (mmQuery.data?.recycle_bin_path ?? '') !== '';
+  const consequence = mmQuery.isLoading
+    ? 'Checking the recycle-bin configuration…'
+    : mmQuery.isError
+      ? 'Could not read the recycle-bin configuration — the file may be permanently deleted.'
+      : recycleConfigured
+        ? 'This moves the file to the recycle bin.'
+        : 'This permanently deletes the file from disk — no recycle bin is configured.';
+
+  return (
+    <div className={styles.overlay}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Delete file for issue ${issueLabel}`}
+        className={styles.dialog}
+      >
+        <header className={styles.dialogHeader}>
+          <strong>Delete File — #{issueLabel}</strong>
+          <button
+            type="button"
+            className={styles.iconButton}
+            aria-label="Close"
+            onClick={onClose}
+          >
+            <CloseIcon size={14} />
+          </button>
+        </header>
+        <div className={styles.dialogBody}>
+          {issue.file && <p className={styles.dialogPath}>{issue.file.path}</p>}
+          <p>{consequence}</p>
+          {deleteFile.error && (
+            <p className={styles.errorNote}>{deleteFile.error.message}</p>
+          )}
+        </div>
+        <footer className={styles.dialogFooter}>
+          <button type="button" className={styles.button} onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className={`${styles.button} ${styles.danger}`}
+            disabled={
+              issue.file === null || deleteFile.isPending || mmQuery.isLoading
+            }
+            onClick={() => {
+              if (issue.file) {
+                deleteFile.mutate(issue.file.id, { onSuccess: onClose });
+              }
+            }}
+          >
+            Delete File
           </button>
         </footer>
       </div>
@@ -204,6 +291,7 @@ export function SeriesDetail() {
   const [showDelete, setShowDelete] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
   const [showRename, setShowRename] = useState(false);
+  const [deleteFileIssue, setDeleteFileIssue] = useState<IssueResource | null>(null);
 
   const interactiveIssueId = useUiStore((s) => s.interactiveSearchIssueId);
   const openInteractiveSearch = useUiStore((s) => s.openInteractiveSearch);
@@ -440,6 +528,17 @@ export function SeriesDetail() {
                     >
                       <PersonIcon size={14} />
                     </button>
+                    {issue.file && (
+                      <button
+                        type="button"
+                        className={styles.iconDanger}
+                        aria-label={`Delete file for issue ${issue.issue_number ?? issue.id}`}
+                        title="Delete file"
+                        onClick={() => setDeleteFileIssue(issue)}
+                      >
+                        <TrashIcon size={14} />
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -478,6 +577,14 @@ export function SeriesDetail() {
               { onSuccess: () => navigate('/') },
             )
           }
+        />
+      )}
+
+      {deleteFileIssue && (
+        <DeleteFileDialog
+          issue={deleteFileIssue}
+          seriesId={seriesId}
+          onClose={() => setDeleteFileIssue(null)}
         />
       )}
 
