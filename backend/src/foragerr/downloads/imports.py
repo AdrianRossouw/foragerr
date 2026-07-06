@@ -184,11 +184,19 @@ async def process_imports(
             .all()
         )
 
-    imported = blocked = failed = 0
+    imported = blocked = failed = errored = 0
     for row_id in row_ids:
-        state = await _process_one(
-            db, settings, ctx, row_id=row_id, commands=commands
-        )
+        # One row's unexpected failure (each _process_one owns its own
+        # write_session, so nothing leaks across iterations) must not abandon the
+        # rest of the batch — it is left in its prior state and retried next cycle.
+        try:
+            state = await _process_one(
+                db, settings, ctx, row_id=row_id, commands=commands
+            )
+        except Exception:
+            errored += 1
+            logger.exception("process-imports: row %s failed; retrying next cycle", row_id)
+            continue
         if state is TrackedDownloadState.IMPORTED:
             imported += 1
         elif state is TrackedDownloadState.IMPORT_BLOCKED:
@@ -197,7 +205,10 @@ async def process_imports(
             failed += 1
 
     summary = f"imported={imported} blocked={blocked} failed={failed}"
-    logger.info("process-imports: %s", summary)
+    if errored:
+        logger.warning("process-imports: %s errored=%d (retry next cycle)", summary, errored)
+    else:
+        logger.info("process-imports: %s", summary)
     return summary
 
 

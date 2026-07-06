@@ -256,6 +256,47 @@ async def test_stale_importing_row_recovers_orphaned_move(db, tmp_path):
     assert any(e.event_type == history.EVENT_IMPORTED for e in events)
 
 
+@pytest.mark.req("FRG-DL-009")
+async def test_one_rows_failure_does_not_abort_the_drain_batch(db, tmp_path, monkeypatch):
+    # Two pending rows; the first raises an unexpected error inside _process_one.
+    # The drain must isolate it (left for next cycle) and still import the second,
+    # rather than abandoning the whole batch.
+    import foragerr.downloads.imports as imports_mod
+
+    series_id, issue_id = await seed_library(db, tmp_path)
+    good_dir = tmp_path / "downloads" / "Spawn.002.2024"
+    make_large_cbz(good_dir / "Spawn 002 (2024).cbz")
+    for did in ("d-bad", "d-good"):
+        await insert_grab_history(db, download_id=did, series_id=series_id, issue_id=issue_id)
+        await insert_tracked(
+            db,
+            download_id=did,
+            state=TrackedDownloadState.IMPORT_PENDING,
+            client_id=None,
+            series_id=series_id,
+            issue_id=issue_id,
+        )
+    async with db.write_session() as session:
+        (await tracked_by_download_id_session(session, "d-good")).output_path = str(good_dir)
+
+    real = imports_mod._process_one
+    calls = {"n": 0}
+
+    async def flaky(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("boom on the first row")
+        return await real(*args, **kwargs)
+
+    monkeypatch.setattr(imports_mod, "_process_one", flaky)
+
+    summary = await process_imports(db, None, now=_NOW)
+
+    # The good row still imported; the bad row was isolated (not counted, not lost).
+    assert "imported=1" in summary
+    assert calls["n"] == 2  # both rows were attempted
+
+
 async def tracked_by_download_id_session(session, download_id):
     return (
         await session.execute(
