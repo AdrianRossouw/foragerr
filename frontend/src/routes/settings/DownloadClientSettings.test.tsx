@@ -152,6 +152,36 @@ describe('FRG-UI-009: download-client settings reuse the generic renderer', () =
     expect(body.settings.base_url).toBe('http://sab:8080');
   });
 
+  it('FRG-UI-009 — clearing a non-secret field sends it verbatim as "" so it can be cleared; the blank secret stays omitted', async () => {
+    const user = userEvent.setup();
+    const { spy, fetcher } = fakeFetcher(dlResolver());
+    renderWithProviders(<DownloadClientSettings />, { fetcher });
+
+    await user.click(await screen.findByTestId('provider-card-1'));
+    const dialog = screen.getByRole('dialog', {
+      name: 'Edit Download Client — SABnzbd',
+    });
+
+    // Blank a non-secret field that was seeded from the stored value.
+    await user.clear(within(dialog).getByLabelText('URL'));
+    await user.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith(
+        '/api/v1/downloadclient/1',
+        expect.objectContaining({ method: 'PUT' }),
+      ),
+    );
+    const putCall = spy.mock.calls.find(
+      ([p, i]) => p === '/api/v1/downloadclient/1' && i?.method === 'PUT',
+    );
+    const body = putCall?.[1]?.body as { settings: Record<string, unknown> };
+    // Non-secret: sent verbatim as '' so the backend actually clears it.
+    expect(body.settings.base_url).toBe('');
+    // Secret still omitted → "keep the stored value".
+    expect('api_key' in body.settings).toBe(false);
+  });
+
   it('FRG-UI-009 — the add picker lists every implementation from the schema (DDL appears with zero new UI code)', async () => {
     const user = userEvent.setup();
     const { fetcher } = fakeFetcher(dlResolver());

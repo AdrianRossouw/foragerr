@@ -34,10 +34,9 @@
   border-bottom: 1px solid var(--surface-border);
 }
 
+/* Context overrides for the shared Poster frame (structure lives in Poster.module.css). */
 .posterFrame {
-  position: relative;
   flex: 0 0 170px;
-  aspect-ratio: 2 / 3;
   border-radius: var(--radius-md);
   overflow: hidden;
   background: var(--surface-card);
@@ -45,22 +44,7 @@
 }
 
 .posterFallback {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   font-size: 48px;
-  font-weight: var(--font-weight-bold);
-  color: var(--text-muted);
-}
-
-.poster {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
 }
 
 .heroBody {

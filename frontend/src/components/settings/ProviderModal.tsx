@@ -55,15 +55,22 @@ function initialRowValues(
   return values;
 }
 
-/** Build the settings payload: blank/omitted values are dropped — for secret
- * fields that means "keep the stored value" (write-only round trip). */
+/**
+ * Build the settings payload. A never-set field (undefined) is always omitted.
+ * Blank values are dropped ONLY for secret fields — that is the write-only
+ * round trip where blank means "keep the stored value". A blank NON-secret
+ * field is sent verbatim (including '') so it can actually be CLEARED; dropping
+ * it would silently leave the backend's old value in place.
+ */
 function settingsPayload(fields: SchemaField[], values: FieldValues): FieldValues {
   const out: FieldValues = {} as FieldValues;
   for (const field of fields) {
     const value = values[field.name];
     if (value === undefined) continue;
-    if (value === '') continue;
-    if (Array.isArray(value) && value.length === 0) continue;
+    if (field.secret) {
+      if (value === '') continue;
+      if (Array.isArray(value) && value.length === 0) continue;
+    }
     out[field.name] = value;
   }
   return out;
@@ -109,9 +116,16 @@ export function ProviderModal({
   const [rowValues, setRowValues] = useState<FieldValues>(() =>
     initialRowValues(kind, provider),
   );
-  const [settingsValues, setSettingsValues] = useState<FieldValues>(() => ({
-    ...(provider?.settings ?? {}),
-  }));
+  const [settingsValues, setSettingsValues] = useState<FieldValues>(() => {
+    // Secrets are write-only and must never arrive from the API. Defense in
+    // depth: if the backend ever regressed and echoed one, drop it here so it
+    // can never flow into a password input's value.
+    const seed: FieldValues = { ...(provider?.settings ?? {}) };
+    for (const field of schema.fields) {
+      if (field.secret) delete seed[field.name];
+    }
+    return seed;
+  });
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<ProviderTestResult | null>(null);
@@ -247,6 +261,11 @@ export function ProviderModal({
           {testResult && (
             <div className={styles.testSuccess} data-testid="test-result">
               <div>{testResult.message}</div>
+              {testResult.degraded && (
+                <div className={styles.testWarning}>
+                  {kind.singular} responded but with degraded capabilities
+                </div>
+              )}
               {testResult.warnings?.map((w) => (
                 <div key={w} className={styles.testWarning}>
                   {w}

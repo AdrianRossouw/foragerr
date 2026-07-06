@@ -30,11 +30,27 @@ export interface ProviderResource {
   settings: FieldValues;
 }
 
-/** Structured pass result from POST /api/v1/{kind}/test. */
+/**
+ * Structured pass result from POST /api/v1/{kind}/test.
+ *
+ * The two kinds return different advisory shapes and the UI must surface both:
+ *   - download-client /test -> {success, message, version, warnings}
+ *   - indexer /test         -> {success, message, categories, degraded}
+ * `degraded` is an indexer signal that the probe connected but the indexer's
+ * capabilities are limited — a pass that must NOT read as clean, so the modal
+ * renders it as a warning line.
+ */
 export interface ProviderTestResult {
   success: boolean;
   message: string;
+  /** Download-client advisories (e.g. missing category). */
   warnings?: string[];
+  /** Download-client build string. */
+  version?: string;
+  /** Indexer newznab categories keyed by numeric id. */
+  categories?: Record<number, string>;
+  /** Indexer connected but with reduced capabilities. */
+  degraded?: boolean;
 }
 
 export type ChipTone = 'success' | 'danger' | 'warning' | 'muted';

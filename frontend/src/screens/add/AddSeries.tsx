@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Toolbar } from '../../components/Toolbar';
+import { Poster } from '../../components/Poster';
 import { SearchIcon, CloseIcon } from '../../components/icons';
 import {
   useAddSeries,
@@ -281,19 +282,14 @@ export function AddSeries() {
                   )
                 }
               >
-                <span className={styles.posterFrame}>
-                  <span className={styles.posterFallback} aria-hidden>
-                    {(candidate.name ?? '?').charAt(0)}
-                  </span>
-                  {candidate.image_url && (
-                    <img
-                      className={styles.poster}
-                      src={candidate.image_url}
-                      alt={`${candidate.name ?? 'volume'} cover`}
-                      loading="lazy"
-                    />
-                  )}
-                </span>
+                <Poster
+                  initial={(candidate.name ?? '?').charAt(0)}
+                  src={candidate.image_url}
+                  alt={`${candidate.name ?? 'volume'} cover`}
+                  frameClassName={styles.posterFrame}
+                  fallbackClassName={styles.posterFallback}
+                  lazy
+                />
                 <span className={styles.candidateInfo}>
                   <span className={styles.candidateTitle}>
                     {candidate.name ?? 'Unnamed volume'}

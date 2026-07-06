@@ -3,8 +3,10 @@ import { Link } from 'react-router-dom';
 import { Toolbar } from '../../components/Toolbar';
 import { ToolbarButton, ToolbarSeparator } from '../../components/ToolbarButton';
 import { ProgressPill } from '../../components/ProgressPill';
+import { Poster } from '../../components/Poster';
 import { BookmarkIcon, GridIcon, TableIcon } from '../../components/icons';
 import { useSeriesIndex } from '../../api/hooks';
+import { coverUrl } from '../../api/urls';
 import { useUiStore, type LibrarySortKey } from '../../store/uiStore';
 import { formatBytes } from '../../lib/format';
 import type { SeriesResource } from '../../api/types';
@@ -16,10 +18,6 @@ import styles from './LibraryIndex.module.css';
  * footer. Posters come exclusively from the LOCAL cover cache endpoint —
  * never an external ComicVine host.
  */
-
-function coverUrl(id: number): string {
-  return `/api/v1/series/${id}/cover`;
-}
 
 function sortSeries(
   records: readonly SeriesResource[],
@@ -49,17 +47,14 @@ function PosterCard({ series }: { series: SeriesResource }) {
       id={`series-card-${series.id}`}
       data-testid="series-card"
     >
-      <div className={styles.posterFrame}>
-        <span className={styles.posterFallback} aria-hidden>
-          {series.title.charAt(0)}
-        </span>
-        <img
-          className={styles.poster}
-          src={coverUrl(series.id)}
-          alt={`${series.title} cover`}
-          loading="lazy"
-        />
-      </div>
+      <Poster
+        initial={series.title.charAt(0)}
+        src={coverUrl(series.id)}
+        alt={`${series.title} cover`}
+        frameClassName={styles.posterFrame}
+        fallbackClassName={styles.posterFallback}
+        lazy
+      />
       <div className={styles.cardFooter}>
         <span className={styles.cardTitle} title={series.title}>
           {series.title}

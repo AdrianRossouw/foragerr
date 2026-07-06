@@ -4,7 +4,12 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { createQueryClient } from '../queryClient';
 import { FetcherProvider } from '../api/fetcher';
-import { useCommandStatus, useSeriesList, useQueuePage } from '../api/hooks';
+import {
+  useCommandStatus,
+  useSeriesDetail,
+  useSeriesList,
+  useQueuePage,
+} from '../api/hooks';
 import { queryKeys } from '../api/queryKeys';
 import type { QueueItem } from '../api/types';
 import { WebSocketBridge } from './WebSocketBridge';
@@ -88,6 +93,87 @@ describe('FRG-UI-001: WebSocketBridge maps messages to cache operations', () => 
     expect(patched?.find((i) => i.id === 901)?.progress).toBe(25);
     // No refetch was triggered by the patch.
     expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('FRG-UI-001 — a queue-progress tick without numeric progress/sizeLeft preserves the row values; a non-numeric tick is rejected and invalidates instead', async () => {
+    const client = createQueryClient();
+    const { spy, fetcher } = fakeFetcher(() => mockQueuePage1);
+    const { factory, last } = makeFakeSocketFactory();
+
+    function Harness() {
+      useQueuePage(1); // seeds ['queue', 1]
+      return <WebSocketBridge socketFactory={factory} />;
+    }
+
+    render(
+      <QueryClientProvider client={client}>
+        <FetcherProvider fetcher={fetcher}>
+          <Harness />
+        </FetcherProvider>
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+    act(() => last().emitOpen());
+
+    // A status-only tick (no progress/sizeLeft): patch in place, preserving the
+    // row's existing numbers — never blanking them into "undefined%".
+    act(() =>
+      last().emitMessage({
+        name: 'queue',
+        action: 'progress',
+        resource: { id: 900, page: 1 },
+      }),
+    );
+    const patched = client.getQueryData<QueueItem[]>(queryKeys.queue.page(1));
+    const row = patched?.find((i) => i.id === 900);
+    expect(row?.progress).toBe(10); // preserved, not undefined
+    expect(row?.sizeLeft).toBe(90); // preserved, not undefined
+    expect(spy).toHaveBeenCalledTimes(1); // still a patch, no refetch
+
+    // A malformed tick (non-numeric progress) fails the guard and is treated as
+    // a plain queue invalidation → the active page refetches.
+    act(() =>
+      last().emitMessage({
+        name: 'queue',
+        action: 'progress',
+        resource: { id: 900, page: 1, progress: 'oops' },
+      }),
+    );
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
+  });
+
+  it('FRG-UI-001 — a series message carrying an id invalidates that detail plus the list, not the whole prefix', async () => {
+    const client = createQueryClient();
+    const { spy, fetcher } = fakeFetcher(() => mockSeriesList);
+    const { factory, last } = makeFakeSocketFactory();
+
+    function Harness() {
+      useSeriesList(); // ['series']
+      useSeriesDetail(5); // ['series', 5]
+      return <WebSocketBridge socketFactory={factory} />;
+    }
+
+    render(
+      <QueryClientProvider client={client}>
+        <FetcherProvider fetcher={fetcher}>
+          <Harness />
+        </FetcherProvider>
+      </QueryClientProvider>,
+    );
+
+    // Both observers make their initial fetch.
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
+
+    act(() => last().emitOpen());
+    act(() =>
+      last().emitMessage({ name: 'series', action: 'updated', resource: { id: 5 } }),
+    );
+
+    // The list and the id-5 detail both refetch (id-scoped invalidation).
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(4));
+    expect(spy).toHaveBeenCalledWith('/api/v1/series');
+    expect(spy).toHaveBeenCalledWith('/api/v1/series/5');
   });
 
   it('FRG-UI-001 — a queue updated message invalidates ["queue"] and the queue query refetches', async () => {

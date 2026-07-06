@@ -57,11 +57,18 @@ export function WebSocketBridge({
     const applyMessage = (msg: WsMessage): void => {
       if (isQueueProgress(msg)) {
         const { id, page, progress, sizeLeft, status } = msg.resource;
-        // Patch in place — setQueryData never issues a network request.
+        // Patch in place — setQueryData never issues a network request. Absent
+        // fields fall back to the row's existing values (a status-only tick must
+        // not blank out progress/sizeLeft into "undefined%").
         queryClient.setQueryData<QueueItem[]>(queryKeys.queue.page(page), (prev) =>
           prev?.map((item) =>
             item.id === id
-              ? { ...item, progress, sizeLeft, status: status ?? item.status }
+              ? {
+                  ...item,
+                  progress: progress ?? item.progress,
+                  sizeLeft: sizeLeft ?? item.sizeLeft,
+                  status: status ?? item.status,
+                }
               : item,
           ),
         );
@@ -75,9 +82,20 @@ export function WebSocketBridge({
         return;
       }
       if (msg.name === 'series') {
-        // Invalidate — active ['series'] observers refetch; no manual refetch in
-        // any screen component.
-        void queryClient.invalidateQueries({ queryKey: queryKeys.series.all() });
+        // When the push carries a series id, invalidate that detail exactly plus
+        // the series list — not the whole ['series'] prefix — so unrelated detail
+        // queries are not refetched. An id-less push falls back to the broad
+        // invalidation. Active observers refetch; no manual refetch in any screen.
+        const id = (msg.resource as { id?: unknown } | null)?.id;
+        if (typeof id === 'number') {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.series.detail(id) });
+          void queryClient.invalidateQueries({
+            queryKey: queryKeys.series.all(),
+            exact: true,
+          });
+        } else {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.series.all() });
+        }
         return;
       }
       if (msg.name === 'command') {

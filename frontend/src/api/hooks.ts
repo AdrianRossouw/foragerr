@@ -6,7 +6,7 @@ import {
   type UseQueryResult,
 } from '@tanstack/react-query';
 import { queryKeys } from './queryKeys';
-import { useFetcher } from './fetcher';
+import { useFetcher, type Fetcher } from './fetcher';
 import { toQueueItem } from './queue';
 import type {
   ApiPage,
@@ -37,6 +37,26 @@ import type {
 /** Backend page-size cap (FRG-API-006: pageSize le=200). */
 const MAX_PAGE_SIZE = 200;
 
+/**
+ * Walk every page of a paged endpoint and return the flattened records. The
+ * backend returns an empty page past the end, so we stop once we have reached
+ * totalRecords OR a page comes back empty (defensive against a drifting total).
+ * `pageUrl` builds the request path for a 1-based page number.
+ */
+async function fetchAllPages<T>(
+  fetcher: Fetcher,
+  pageUrl: (page: number) => string,
+): Promise<T[]> {
+  const records: T[] = [];
+  for (let page = 1; ; page += 1) {
+    const res = await fetcher<ApiPage<T>>(pageUrl(page));
+    records.push(...res.records);
+    if (records.length >= res.totalRecords || res.records.length === 0) {
+      return records;
+    }
+  }
+}
+
 export function useSeriesList(): UseQueryResult<Series[]> {
   const fetcher = useFetcher();
   return useQuery({
@@ -55,18 +75,12 @@ export function useSeriesIndex(): UseQueryResult<SeriesResource[]> {
   const fetcher = useFetcher();
   return useQuery({
     queryKey: queryKeys.series.all(),
-    queryFn: async () => {
-      const records: SeriesResource[] = [];
-      for (let page = 1; ; page += 1) {
-        const res = await fetcher<ApiPage<SeriesResource>>(
+    queryFn: () =>
+      fetchAllPages<SeriesResource>(
+        fetcher,
+        (page) =>
           `/api/v1/series?page=${page}&pageSize=${MAX_PAGE_SIZE}&sortKey=sort_title&sortDirection=asc`,
-        );
-        records.push(...res.records);
-        if (records.length >= res.totalRecords || res.records.length === 0) {
-          return records;
-        }
-      }
-    },
+      ),
   });
 }
 
@@ -87,18 +101,12 @@ export function useIssues(seriesId: number): UseQueryResult<IssueResource[]> {
   const fetcher = useFetcher();
   return useQuery({
     queryKey: queryKeys.issues.forSeries(seriesId),
-    queryFn: async () => {
-      const records: IssueResource[] = [];
-      for (let page = 1; ; page += 1) {
-        const res = await fetcher<ApiPage<IssueResource>>(
+    queryFn: () =>
+      fetchAllPages<IssueResource>(
+        fetcher,
+        (page) =>
           `/api/v1/issues?seriesId=${seriesId}&page=${page}&pageSize=${MAX_PAGE_SIZE}`,
-        );
-        records.push(...res.records);
-        if (records.length >= res.totalRecords || res.records.length === 0) {
-          return records;
-        }
-      }
-    },
+      ),
   });
 }
 

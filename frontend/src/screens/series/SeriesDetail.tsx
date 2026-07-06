@@ -5,6 +5,7 @@ import { Toolbar } from '../../components/Toolbar';
 import { ToolbarButton, ToolbarSeparator } from '../../components/ToolbarButton';
 import { MonitorToggle } from '../../components/MonitorToggle';
 import { ProgressPill } from '../../components/ProgressPill';
+import { Poster } from '../../components/Poster';
 import {
   BookmarkIcon,
   CloseIcon,
@@ -26,6 +27,7 @@ import {
   useUpdateSeries,
 } from '../../api/hooks';
 import { queryKeys } from '../../api/queryKeys';
+import { coverUrl } from '../../api/urls';
 import { useUiStore } from '../../store/uiStore';
 import { InteractiveSearchOverlay } from '../search/InteractiveSearchOverlay';
 import { fileFormat, formatBytes, formatDate } from '../../lib/format';
@@ -297,16 +299,13 @@ export function SeriesDetail() {
       />
       <div className={styles.content}>
         <section className={styles.hero}>
-          <div className={styles.posterFrame}>
-            <span className={styles.posterFallback} aria-hidden>
-              {series.title.charAt(0)}
-            </span>
-            <img
-              className={styles.poster}
-              src={`/api/v1/series/${series.id}/cover`}
-              alt={`${series.title} cover`}
-            />
-          </div>
+          <Poster
+            initial={series.title.charAt(0)}
+            src={coverUrl(series.id)}
+            alt={`${series.title} cover`}
+            frameClassName={styles.posterFrame}
+            fallbackClassName={styles.posterFallback}
+          />
           <div className={styles.heroBody}>
             <div className={styles.titleRow}>
               <MonitorToggle

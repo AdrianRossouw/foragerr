@@ -184,6 +184,50 @@ describe('FRG-UI-008: schema-driven add/edit modal', () => {
     );
   });
 
+  it('FRG-UI-008 — a degraded indexer pass is surfaced as a warning, not a clean pass', async () => {
+    const user = userEvent.setup();
+    const { fetcher } = fakeFetcher(
+      indexerResolver({
+        onTest: () => ({
+          success: true,
+          message: 'indexer reachable',
+          categories: { 7030: 'Books/Comics' },
+          degraded: true,
+        }),
+      }),
+    );
+    renderWithProviders(<IndexerSettings />, { fetcher });
+
+    await user.click(await screen.findByTestId('provider-card-1'));
+    await user.click(screen.getByRole('button', { name: 'Test' }));
+
+    const result = await screen.findByTestId('test-result');
+    expect(result).toHaveTextContent('indexer reachable');
+    // degraded=true must read as a warning, never a clean pass.
+    expect(result).toHaveTextContent(
+      'Indexer responded but with degraded capabilities',
+    );
+  });
+
+  it('FRG-UI-008 — a secret echoed by a regressed backend never reaches the password input', async () => {
+    const user = userEvent.setup();
+    // Simulate a backend that WRONGLY echoes the secret in the row settings.
+    const leaked = [
+      {
+        ...mockIndexers[0],
+        settings: { ...mockIndexers[0].settings, api_key: 'leaked-secret' },
+      },
+    ];
+    const { fetcher } = fakeFetcher(indexerResolver({ rows: () => leaked }));
+    renderWithProviders(<IndexerSettings />, { fetcher });
+
+    await user.click(await screen.findByTestId('provider-card-1'));
+    const dialog = screen.getByRole('dialog', { name: 'Edit Indexer — Newznab' });
+    const apiKey = within(dialog).getByLabelText('API Key') as HTMLInputElement;
+    // Defense in depth: the secret is stripped when seeding, input stays empty.
+    expect(apiKey.value).toBe('');
+  });
+
   it('FRG-UI-008 — a valid configuration saves via POST and the new card renders enabled', async () => {
     const user = userEvent.setup();
     const rows: ProviderResource[] = [];

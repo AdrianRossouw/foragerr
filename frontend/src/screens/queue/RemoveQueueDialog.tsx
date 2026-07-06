@@ -20,7 +20,7 @@ export function RemoveQueueDialog({ item, onClose }: RemoveQueueDialogProps) {
   const remove = useRemoveQueueItem();
 
   const displayName = item.seriesTitle
-    ? `${item.seriesTitle}${item.issueNumber ? ` #${item.issueNumber}` : ''}`
+    ? `${item.seriesTitle}${item.issueNumber != null ? ` #${item.issueNumber}` : ''}`
     : item.title;
 
   return (

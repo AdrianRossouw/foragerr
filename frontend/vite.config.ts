@@ -8,7 +8,9 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '/api': { target: 'http://localhost:8789', changeOrigin: true },
+      // ws:true so the /api/v1/ws WebSocket upgrade is proxied to the backend
+      // under `npm run dev` (otherwise the bridge reconnect-loops forever).
+      '/api': { target: 'http://localhost:8789', changeOrigin: true, ws: true },
       '/opds': { target: 'http://localhost:8789', changeOrigin: true },
     },
   },

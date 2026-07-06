@@ -4,7 +4,7 @@ import { Toolbar } from '../../components/Toolbar';
 import { useQueuePage } from '../../api/hooks';
 import { queryKeys } from '../../api/queryKeys';
 import type { QueueItem } from '../../api/types';
-import { formatBytes, formatEta } from '../../utils/format';
+import { formatBytes, formatEta } from '../../lib/format';
 import { QueueStatusChip } from './QueueStatusChip';
 import { RemoveQueueDialog } from './RemoveQueueDialog';
 import styles from './QueueScreen.module.css';

@@ -6,7 +6,7 @@ import { useGrabRelease, useReleases } from '../../api/hooks';
 import { ApiRequestError } from '../../api/fetcher';
 import { queryKeys } from '../../api/queryKeys';
 import type { ReleaseDecision } from '../../api/types';
-import { formatAge, formatBytes } from '../../utils/format';
+import { formatAge, formatBytes } from '../../lib/format';
 import styles from './InteractiveSearchOverlay.module.css';
 
 export interface InteractiveSearchOverlayProps {

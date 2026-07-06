@@ -15,8 +15,21 @@ export interface SocketLike {
 
 export type SocketFactory = (url: string) => SocketLike;
 
+/**
+ * Resolve a possibly-relative WS path to an absolute ws(s):// URL derived from
+ * the page origin. Relying on the browser's relative-URL support for the raw
+ * WebSocket constructor is fragile; building the absolute URL explicitly picks
+ * `wss:` under HTTPS and `ws:` otherwise, against the current host.
+ */
+export function toAbsoluteWsUrl(url: string): string {
+  if (/^wss?:\/\//i.test(url)) return url;
+  const scheme = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+  const path = url.startsWith('/') ? url : `/${url}`;
+  return `${scheme}${window.location.host}${path}`;
+}
+
 export const defaultSocketFactory: SocketFactory = (url: string): SocketLike => {
-  const ws = new WebSocket(url);
+  const ws = new WebSocket(toAbsoluteWsUrl(url));
   const adapter: SocketLike = {
     close: () => ws.close(),
     onopen: null,
