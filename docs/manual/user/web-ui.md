@@ -8,7 +8,7 @@ naming, never as a different layout language.
 
 Open it at `http://<your-tailnet-address>:8789/`. Everything the UI shows comes
 from the same REST API documented throughout this manual, and updates arrive live:
-a WebSocket connection pushes resource-change notifications (series, issues, queue,
+a WebSocket connection pushes resource-change notifications (series, queue,
 commands), so grabs, imports, and refreshes appear without reloading the page. If
 the connection drops, the UI reconnects automatically with backoff.
 
@@ -58,9 +58,11 @@ any listed release can be grabbed manually.
 
 ## Settings
 
-Settings covers indexers, download clients, and Media Management. Both use the same schema-driven
+Settings covers indexers, download clients, and Media Management. Indexers and
+download clients use the same schema-driven
 form: the server describes each provider implementation's fields and the UI
-renders them, so a new provider type needs no UI change. Secret fields (API keys)
+renders them, so a new provider type needs no UI change; Media Management is its
+own dedicated screen (naming, transfer mode, recycle bin). Secret fields (API keys)
 are write-only — the form shows that a value is stored but never displays it back.
 Every provider has a Test button that performs a live connectivity check before
 you save.

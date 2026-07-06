@@ -72,9 +72,11 @@ them in `config.yaml` under `/config`, never bake them into the image.
 
 Everything persistent lives under `/config` (`FRG-DEP-002`): the SQLite database, the
 generated `config.yaml`, logs, backups, and caches. The container filesystem outside
-`/config` is disposable. **Upgrading** foragerr means building/pulling a new image and
+`/config` is disposable. **Upgrading** foragerr means building a new image and
 recreating the container against the same `/config` volume — there is no in-app
-self-update (`FRG-DEP-009`), and no other state to migrate. Destroying and recreating
+self-update (`FRG-DEP-009`), and no other state to migrate. Releases are annotated
+git tags on `main` (`v0.1.0`, `v0.2.x`, ...); to build a specific release, check the
+tag out and run `tools/build-image.sh --tag foragerr:<version>`. Destroying and recreating
 the container against the same volume restores identical state with no
 re-initialisation.
 
