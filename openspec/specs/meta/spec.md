@@ -6,9 +6,7 @@ Baseline requirements for metadata (comicvine), mined from the
 Phase 1 reference research (`docs/research/`). Baseline depth per the Phase 2 scope
 decision: SHALL + coarse acceptance; scenario-level elaboration happens in the
 milestone change that implements each requirement (FRG-PROC-003, FRG-PROC-009).
-
 ## Requirements
-
 ### Requirement: FRG-META-001 — ComicVine client fundamentals
 
 The system SHALL access ComicVine exclusively through a single client module that requests JSON responses with explicit field lists, applies connect and read timeouts to every request, verifies TLS by default, and sends an honest configurable User-Agent.
@@ -90,11 +88,11 @@ The system SHALL enforce a shared client-side ComicVine rate limit (token bucket
 
 ### Requirement: FRG-META-004 — Pagination with partial-failure tolerance
 
-The system SHALL page through ComicVine list responses (100 per page, offset-based) until `number_of_total_results` is satisfied, and on a mid-pagination failure SHALL persist the pages already retrieved, record the sync as incomplete, and schedule a retry rather than discarding partial results or reporting success.
+The system SHALL page through ComicVine list responses (100 per page, offset-based) until `number_of_total_results` is satisfied, and on a mid-pagination failure SHALL persist the pages already retrieved, record the sync as incomplete, and schedule a retry rather than discarding partial results or reporting success. Authentication failures (HTTP 401/403 or ComicVine error code 100) are exempt from this tolerance: they SHALL propagate to the caller as a typed auth error rather than degrade to a partial/empty result, because an invalid credential cannot succeed on any subsequent page.
 
 - **Milestone**: M1
 - **Source**: mylar-comicvine.md §1.4, §5.
-- **Notes**: Divergence: Mylar returns partial results silently; foragerr records incompleteness so refresh reconciliation does not delete issues it merely failed to fetch (interacts with the reconciliation requirement below).
+- **Notes**: Divergence: Mylar returns partial results silently; foragerr records incompleteness so refresh reconciliation does not delete issues it merely failed to fetch (interacts with the reconciliation requirement below). Auth carve-out added in m2-lookup-error-surfacing: swallowing `ComicVineAuthError` made a missing/invalid API key indistinguishable from an empty search result.
 
 #### Scenario: Offset walk cross-checked against total result count
 
@@ -103,8 +101,13 @@ The system SHALL page through ComicVine list responses (100 per page, offset-bas
 
 #### Scenario: Mid-walk page failure returns partial results with complete=False
 
-- **WHEN** page 3 of 5 fails after pages 1–2 were retrieved
+- **WHEN** page 3 of 5 fails after pages 1–2 were retrieved with a non-auth error (rate limit, server error, malformed page)
 - **THEN** the client returns the pages already retrieved with `complete=False` so the caller sees the incompleteness flag — it does not discard the partial results or report success.
+
+#### Scenario: Auth failure propagates instead of degrading
+
+- **WHEN** any page of the walk fails with a ComicVine authentication error (HTTP 401/403 or ComicVine error code 100)
+- **THEN** the walk raises the typed auth error to the caller — it does not return an empty or partial result with `complete=False`, and the error message never contains the API key.
 
 #### Scenario: Hard page cap from settings bounds the walk
 
@@ -305,3 +308,4 @@ The system SHALL treat all ComicVine-originated strings (names, aliases, descrip
 
 - **WHEN** ComicVine-derived text is used to construct an indexer/DDL query
 - **THEN** it is built through the central sanitizing query builder, so wiki-edited content cannot steer or inject into the outbound query.
+
