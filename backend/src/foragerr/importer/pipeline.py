@@ -65,7 +65,12 @@ from foragerr.importer.sources import (
 )
 from foragerr.library import matching, repo
 from foragerr.library.models import IssueFileRow, IssueRow, SeriesRow
-from foragerr.metadata.comicinfo import read_embedded_metadata
+from foragerr.metadata.comicinfo import (
+    ComicInfoTagError,
+    build_comicinfo_bytes,
+    read_embedded_metadata,
+    tag_cbz,
+)
 from foragerr.parser.result import Booktype, IssueClassification
 from foragerr.quality.models import FormatProfileRow, decode_formats
 from foragerr.security.archives import inspect_archive
@@ -647,6 +652,67 @@ def _source_provenance(candidate: ImportCandidate) -> str:
     return _PROVENANCE_BY_KIND.get(candidate.source_kind, history.SOURCE_DOWNLOAD)
 
 
+async def _tag_comicinfo(
+    session: AsyncSession,
+    candidate: ImportCandidate,
+    ev: ImportEvaluation,
+    ctx: ImportContext,
+    result: ExecuteResult,
+) -> None:
+    """Write a ComicInfo.xml tag into the just-placed cbz (FRG-PP-017).
+
+    Runs ONLY after the file is placed and the imported/upgrade history event is
+    recorded, so a tagging failure can never unwind a completed import. Gated
+    honestly on the tagging toggle AND the archive having passed inspection
+    (``safe_to_extract`` — a fully-listed, fully-vetted zip) AND the placed file
+    being a ``.cbz``; a magic-only cbr/cb7 or an unvetted archive is never
+    rewritten. The rewrite itself is filesystem work, run through ``ctx.offload``.
+
+    A tagging failure is swallowed here: the file lands untagged and a
+    ``comicinfo_tag_failed`` warning event is recorded — the import still
+    succeeded. This never raises.
+    """
+    archive = ev.archive
+    if not (
+        ctx.comicinfo_tag_enabled
+        and archive is not None
+        and archive.safe_to_extract
+        and result.imported_path.lower().endswith(".cbz")
+    ):
+        return
+    try:
+        series = await session.get(SeriesRow, ev.series_id)
+        issue = await session.get(IssueRow, ev.issue_id)
+        if series is None or issue is None:  # defensive; execute already asserted
+            return
+        xml_bytes = build_comicinfo_bytes(series, issue)
+        await _run_fs(ctx, tag_cbz, result.imported_path, xml_bytes)
+    except (ComicInfoTagError, OSError) as exc:
+        # Tagging is best-effort AFTER a completed import: the placed file is
+        # byte-identical (the rewrite unwound its own temp) and stays imported.
+        logger.warning(
+            "comicinfo: tagging %s failed after import; left untagged: %s",
+            result.imported_path,
+            exc,
+        )
+        history.record_event(
+            session,
+            event_type=history.EVENT_COMICINFO_TAG_FAILED,
+            series_id=ev.series_id,
+            issue_id=ev.issue_id,
+            download_id=candidate.download_id,
+            source_title=_source_title(candidate),
+            source=_source_provenance(candidate),
+            data={
+                "provenance": dict(ev.evidence.provenance),
+                "source_kind": candidate.source_kind,
+                "imported_path": result.imported_path,
+                "error": str(exc),
+            },
+            now=ctx.now,
+        )
+
+
 def _source_title(candidate: ImportCandidate) -> str:
     return candidate.grab_title or candidate.client_title or candidate.file_name
 
@@ -727,6 +793,10 @@ async def import_candidate(
                 quarantine_path=result.quarantine_path,
                 now=ctx.now,
             )
+            # ComicInfo tagging (FRG-PP-017) runs AFTER place_file + the
+            # issue_files row + the imported event: a tagging failure is caught
+            # inside and NEVER unwinds this completed import (records a warning).
+            await _tag_comicinfo(session, candidate, ev, ctx, result)
             return ImportOutcome(
                 status=ImportStatus.IMPORTED,
                 candidate=candidate,
