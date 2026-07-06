@@ -18,6 +18,7 @@ resource ``PUT /api/v1/issues/{id}``.
 from __future__ import annotations
 
 import datetime as dt
+import logging
 from dataclasses import asdict
 from pathlib import Path
 
@@ -45,6 +46,8 @@ from foragerr.library.flows import (
 from foragerr.library.models import SeriesRow
 from foragerr.library.repo import SeriesStatistics
 from foragerr.metadata import ComicVineAuthError, ComicVineClient, ComicVineError
+
+logger = logging.getLogger("foragerr.api.series")
 
 router = APIRouter(prefix="/series", tags=["series"])
 
@@ -213,11 +216,15 @@ class LookupResponse(BaseModel):
     """Lookup outcome envelope (FRG-API-003). ``complete`` carries the
     pagination walk's completeness so a degraded partial walk
     (``complete=False``) is distinguishable from a clean, complete empty
-    result (``complete=True, records=[]``); an auth failure never reaches
-    here — it maps to a 503 error response instead."""
+    result (``complete=True, records=[]``); ``truncated`` marks a walk
+    deliberately stopped at the configured result cap (retry cannot help —
+    narrow the term), distinct from a transient degrade (retry may help).
+    An auth failure never reaches here — it maps to a 503 error response
+    instead."""
 
     records: list[LookupCandidateResource]
     complete: bool
+    truncated: bool
 
 
 # --- routes -------------------------------------------------------------------
@@ -279,13 +286,17 @@ async def lookup_series(term: str, request: Request) -> LookupResponse:
         async with ComicVineClient(settings, factory) as cv:
             result = await cv.search_series(term)
     except ComicVineAuthError as exc:
-        # Static message — never interpolate the key or the exception's raw
-        # text (the client already scrubs api_key, but this branch keeps the
-        # credential value out of the response and logs unconditionally).
+        # Static message and static log line — never interpolate the key or
+        # the exception's raw text, so no credential value can reach the
+        # response body or the log.
+        logger.warning(
+            "series lookup rejected by ComicVine: API key missing or invalid"
+        )
         raise ApiError(
             _COMICVINE_LOOKUP_ERROR_STATUS,
             "comicvine lookup failed: ComicVine rejected the API key "
             "(missing or invalid) — set comicvine_api_key",
+            field="comicvine_api_key",
         ) from exc
     except ComicVineError as exc:
         raise ApiError(
@@ -319,6 +330,7 @@ async def lookup_series(term: str, request: Request) -> LookupResponse:
             for candidate in result.candidates
         ],
         complete=result.complete,
+        truncated=result.truncated,
     )
 
 

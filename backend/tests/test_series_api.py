@@ -335,7 +335,9 @@ def test_delete_nonexistent_series_with_delete_files_true_is_still_501(client):
 # reusing FakeCV.
 
 
-def _cv_search_envelope(volumes: list[dict]) -> "httpx.Response":
+def _cv_search_envelope(
+    volumes: list[dict], *, advertised: int | None = None
+) -> "httpx.Response":
     import json as _json
 
     import httpx
@@ -343,18 +345,34 @@ def _cv_search_envelope(volumes: list[dict]) -> "httpx.Response":
     payload = {
         "status_code": 1,
         "results": volumes,
-        "number_of_total_results": len(volumes),
+        "number_of_total_results": len(volumes) if advertised is None else advertised,
     }
     return httpx.Response(200, content=_json.dumps(payload).encode())
 
 
-def _search_handler(volumes: list[dict]):
+def _search_handler(
+    volumes: list[dict], *, status: int = 200, advertised: int | None = None
+):
+    """The one ``volumes/`` search scaffold for every lookup test.
+
+    ``status`` != 200 rejects the search outright with that HTTP status (401
+    drives the real client's ``ComicVineAuthError`` carve-out in
+    ``_paginate``); ``advertised`` overstates ``number_of_total_results`` so
+    the real pagination walk finishes with fewer items than advertised and
+    marks the result ``complete=False`` (a non-auth degrade, no page raises).
+    ``volumes`` is served on the first page only; later offsets are empty.
+    """
     import httpx
 
     def _handle(request: httpx.Request) -> httpx.Response:
-        if "/volumes/" in str(request.url):
-            return _cv_search_envelope(volumes)
-        return httpx.Response(404, content=b"unknown endpoint")
+        if "/volumes/" not in str(request.url):
+            return httpx.Response(404, content=b"unknown endpoint")
+        if status != 200:
+            return httpx.Response(status, content=b"rejected")
+        offset = int(request.url.params.get("offset", "0"))
+        return _cv_search_envelope(
+            volumes if offset == 0 else [], advertised=advertised
+        )
 
     return _handle
 
@@ -371,6 +389,7 @@ def test_lookup_returns_candidates_without_persisting(client, monkeypatch):
     assert response.status_code == 200
     body = response.json()
     assert body["complete"] is True  # complete walk over a matched result set
+    assert body["truncated"] is False  # nowhere near the result cap
     candidates = body["records"]
     assert len(candidates) == 1
     candidate = candidates[0]
@@ -418,11 +437,13 @@ async def _raise_comicvine_unavailable(self, term, **_kwargs):
 @pytest.mark.req("FRG-API-003")
 def test_lookup_upstream_failure_maps_to_503(client, monkeypatch):
     """Tests the router's OWN error-mapping in isolation from the real
-    client's partial-pagination-swallows-errors behavior (search_series
-    never raises on a mid-walk transport failure by design — it degrades to
-    a partial/empty result instead, per FRG-META-004): patch just the one
-    method on the REAL ComicVineClient class rather than reimplementing its
-    whole async-context-manager protocol in a stub."""
+    client's pagination behavior. Per FRG-META-004, ``search_series``
+    degrades a NON-auth mid-walk failure to a partial/empty ``complete=False``
+    result (so the generic 503 arm is a defensive backstop it can't normally
+    reach), while an auth failure DOES raise and is mapped by the dedicated
+    auth arm. Patch just the one method on the REAL ComicVineClient class
+    rather than reimplementing its whole async-context-manager protocol in a
+    stub."""
     from foragerr.metadata import ComicVineClient
 
     monkeypatch.setattr(ComicVineClient, "search_series", _raise_comicvine_unavailable)
@@ -440,74 +461,52 @@ _LOOKUP_AUTH_MESSAGE = (
 )
 
 
-def _auth_reject_handler():
-    """A ``volumes/`` search handler that rejects with HTTP 401 (the real
-    client turns this into a ``ComicVineAuthError`` inside ``_paginate``,
-    which now propagates instead of degrading to an empty result)."""
-    import httpx
-
-    def _handle(request: httpx.Request) -> httpx.Response:
-        if "/volumes/" in str(request.url):
-            return httpx.Response(401, content=b"unauthorized")
-        return httpx.Response(404, content=b"unknown endpoint")
-
-    return _handle
-
-
-def _degraded_search_handler(volumes: list[dict], *, advertised: int):
-    """Serve ``volumes`` on the first page but advertise a larger total, so the
-    real pagination walk finishes with fewer items than advertised and marks
-    the result ``complete=False`` (a non-auth degrade, no page raises)."""
-    import json as _json
-
-    import httpx
-
-    def _handle(request: httpx.Request) -> httpx.Response:
-        if "/volumes/" not in str(request.url):
-            return httpx.Response(404, content=b"unknown endpoint")
-        offset = int(request.url.params.get("offset", "0"))
-        results = volumes if offset == 0 else []
-        payload = {
-            "status_code": 1,
-            "results": results,
-            "number_of_total_results": advertised,
-        }
-        return httpx.Response(200, content=_json.dumps(payload).encode())
-
-    return _handle
-
-
 @pytest.mark.req("FRG-API-003")
 def test_lookup_auth_failure_is_503_naming_the_key_without_leaking_it(
-    client, monkeypatch
+    client, monkeypatch, caplog
 ):
-    """A missing/invalid ComicVine key now propagates out of the walk and maps
-    to a 503 whose message names the credential — never the key value."""
+    """A missing/invalid ComicVine key propagates out of the walk (as a real
+    401 -> ``ComicVineAuthError``) and maps to a 503 whose message names the
+    credential, whose ``errors[]`` entry carries the machine-readable field
+    discriminator, and which logs a static warning — never the key value."""
+    import logging
+
     factory = build_factory(
-        settings=client.app.state.settings, handler=_auth_reject_handler()
+        settings=client.app.state.settings, handler=_search_handler([], status=401)
     )
     monkeypatch.setattr(
         "foragerr.api.series.comicvine_factory", lambda _settings: factory
     )
 
-    response = client.get("/api/v1/series/lookup", params={"term": "Saga"})
+    with caplog.at_level(logging.WARNING, logger="foragerr.api.series"):
+        response = client.get("/api/v1/series/lookup", params={"term": "Saga"})
     assert response.status_code == 503
     body = response.json()
     assert body["message"] == _LOOKUP_AUTH_MESSAGE
-    # the actual key value (flows_settings default) never appears in the body
+    # machine-readable discriminator: clients classify by field, never prose
+    assert body["errors"][0]["field"] == "comicvine_api_key"
+    # a warning log line names the credential failure...
+    assert any(
+        "series lookup rejected by ComicVine: API key missing or invalid"
+        == record.getMessage()
+        for record in caplog.records
+    )
+    # ...and the key value (flows_settings default) appears in neither the
+    # body nor the log
     assert "CV-SECRET-KEY-abc123" not in response.text
+    assert "CV-SECRET-KEY-abc123" not in caplog.text
 
 
 @pytest.mark.req("FRG-API-003")
 def test_lookup_degraded_walk_is_200_incomplete_with_partial_records(
     client, monkeypatch
 ):
-    """A non-auth degraded walk returns a 200 envelope flagged incomplete,
-    alongside the partial candidates it did retrieve."""
+    """A non-auth degraded walk returns a 200 envelope flagged incomplete —
+    but NOT truncated — alongside the partial candidates it did retrieve."""
     volumes = [{"id": 101, "name": "Saga", "start_year": "2012"}]
     factory = build_factory(
         settings=client.app.state.settings,
-        handler=_degraded_search_handler(volumes, advertised=10),
+        handler=_search_handler(volumes, advertised=10),
     )
     monkeypatch.setattr(
         "foragerr.api.series.comicvine_factory", lambda _settings: factory
@@ -517,14 +516,43 @@ def test_lookup_degraded_walk_is_200_incomplete_with_partial_records(
     assert response.status_code == 200
     body = response.json()
     assert body["complete"] is False
+    assert body["truncated"] is False  # a degrade, not a deliberate cap
     assert len(body["records"]) == 1
     assert body["records"][0]["cv_volume_id"] == 101
 
 
 @pytest.mark.req("FRG-API-003")
+def test_lookup_capped_walk_is_200_truncated(tmp_path, monkeypatch):
+    """A walk deliberately stopped at the configured search-result cap marks
+    the envelope ``truncated=true`` (narrow the term; retry cannot help),
+    distinct from the transient ``complete=false`` degrade."""
+    cfg = tmp_path / "cfg"
+    cfg.mkdir()
+    capped_settings = flows_settings(cfg, comicvine_search_result_cap=1)
+    volumes = [
+        {"id": 101, "name": "Saga", "start_year": "2012"},
+        {"id": 102, "name": "Saga Deluxe", "start_year": "2014"},
+    ]
+    factory = build_factory(settings=capped_settings, handler=_search_handler(volumes))
+    monkeypatch.setattr(
+        "foragerr.api.series.comicvine_factory", lambda _settings: factory
+    )
+
+    app = create_app(capped_settings)
+    with TestClient(app) as capped_client:
+        response = capped_client.get("/api/v1/series/lookup", params={"term": "Saga"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["truncated"] is True
+    assert body["complete"] is False  # a capped result set is also incomplete
+    assert len(body["records"]) == 1  # cut to the cap
+
+
+@pytest.mark.req("FRG-API-003")
 def test_lookup_clean_empty_is_200_complete_with_no_records(client, monkeypatch):
     """A complete walk that genuinely matched nothing stays a 200 with
-    ``complete=true`` and an empty record list — distinct from a degrade."""
+    ``complete=true`` (and ``truncated=false``) and an empty record list —
+    distinct from a degrade and from a capped walk."""
     factory = build_factory(
         settings=client.app.state.settings, handler=_search_handler([])
     )
@@ -536,6 +564,7 @@ def test_lookup_clean_empty_is_200_complete_with_no_records(client, monkeypatch)
     assert response.status_code == 200
     body = response.json()
     assert body["complete"] is True
+    assert body["truncated"] is False
     assert body["records"] == []
 
 

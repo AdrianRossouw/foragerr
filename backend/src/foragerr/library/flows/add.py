@@ -25,7 +25,12 @@ from foragerr.library.paths import (
     build_series_path,
     validate_under_root,
 )
-from foragerr.metadata import ComicVineClient, ComicVineError, SeriesRecord
+from foragerr.metadata import (
+    ComicVineAuthError,
+    ComicVineClient,
+    ComicVineError,
+    SeriesRecord,
+)
 from foragerr.quality.models import DEFAULT_PROFILE_NAME, FormatProfileRow
 
 from foragerr.library.flows._common import (
@@ -89,8 +94,18 @@ async def add_series(
     try:
         async with ComicVineClient(settings, factory) as cv:
             record: SeriesRecord = await cv.get_volume(cv_volume_id)
+    except ComicVineAuthError as exc:
+        # Credential failure gets the same actionable wording the lookup
+        # endpoint surfaces (m2-lookup-error-surfacing design, Decision 5) —
+        # static text, never the exception's own message, so no key material
+        # can leak into the validation error.
+        raise SeriesValidationError(
+            f"comicvine volume {cv_volume_id} could not be fetched: "
+            "ComicVine rejected the API key (missing or invalid) — "
+            "set comicvine_api_key"
+        ) from exc
     except ComicVineError as exc:
-        # Auth / unavailable / malformed / rate-limited all reject cleanly —
+        # Unavailable / malformed / rate-limited all reject cleanly —
         # a volume we cannot fetch is not one we add (no partial writes).
         raise SeriesValidationError(
             f"comicvine volume {cv_volume_id} could not be fetched: {exc}"

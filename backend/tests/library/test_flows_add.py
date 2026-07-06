@@ -57,6 +57,37 @@ async def test_add_rejects_nonexistent_cv_volume(
 
 
 @pytest.mark.req("FRG-SER-005")
+async def test_add_auth_failure_surfaces_credential_message(
+    db, settings, commands, root_folder_id
+):
+    """A ComicVine auth rejection on the existence check surfaces the same
+    actionable credential wording as the lookup endpoint (add-flow parity,
+    m2-lookup-error-surfacing) — static text, never the key value."""
+    import httpx
+
+    factory = build_factory(
+        settings, lambda _request: httpx.Response(401, content=b"unauthorized")
+    )
+    with pytest.raises(SeriesValidationError) as excinfo:
+        await add_series(
+            db,
+            settings,
+            cv_volume_id=42,
+            root_folder_id=root_folder_id,
+            commands=commands,
+            factory=factory,
+        )
+    assert str(excinfo.value) == (
+        "comicvine volume 42 could not be fetched: ComicVine rejected the "
+        "API key (missing or invalid) — set comicvine_api_key"
+    )
+    # the key value (flows_settings default) never leaks into the message
+    assert "CV-SECRET-KEY-abc123" not in str(excinfo.value)
+    assert await _count(db, SeriesRow) == 0
+    assert await _count(db, CommandRow) == 0
+
+
+@pytest.mark.req("FRG-SER-005")
 async def test_add_rejects_unregistered_root_folder(db, settings, commands):
     factory = build_factory(settings, FakeCV().volume(42).handler())
     with pytest.raises(SeriesValidationError):
