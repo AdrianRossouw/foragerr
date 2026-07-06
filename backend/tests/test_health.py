@@ -18,13 +18,23 @@ def app(tmp_path):
 
 
 @pytest.mark.req("FRG-DEP-007")
-def test_health_is_root_level_not_under_api_v1(app):
+@pytest.mark.req("FRG-API-014")
+def test_health_is_root_level_and_distinct_from_api_v1_health(app):
+    """The root liveness probe stays at ``/health``; ``GET /api/v1/health``
+    is a DIFFERENT resource (m2-ops-health-backups, FRG-API-014: the
+    actionable health-warnings list) — not the same endpoint duplicated, and
+    not a 404. The two shapes prove they are genuinely distinct: the root
+    probe is an object with ``status``/``components``, while
+    ``/api/v1/health`` is a warnings array."""
     with TestClient(app) as client:
-        response = client.get("/health")
-    assert response.status_code == 200
-    # A second request under /api/v1 must NOT exist for the same resource.
-    with TestClient(app) as client:
-        assert client.get("/api/v1/health").status_code == 404
+        root_response = client.get("/health")
+        api_response = client.get("/api/v1/health")
+    assert root_response.status_code == 200
+    assert isinstance(root_response.json(), dict)
+    assert "components" in root_response.json()
+
+    assert api_response.status_code == 200
+    assert isinstance(api_response.json(), list)
 
 
 @pytest.mark.req("FRG-DEP-007")

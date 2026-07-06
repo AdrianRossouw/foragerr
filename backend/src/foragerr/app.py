@@ -26,6 +26,7 @@ import logging
 import signal
 import sys
 import threading
+import time
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -112,16 +113,42 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         swagger_ui_oauth2_redirect_url=None,
     )
     app.state.settings = settings
+    app.state.process_started_at = time.monotonic()  # FRG-API-014 uptime_seconds
     app.state.startup_hooks = []  # async (app) -> None, run in order at startup
     app.state.shutdown_hooks = []  # async (app) -> None, run reversed at shutdown
+
+    # --- ops/health-backups area (m2-ops-health-backups): importing the module
+    #     registers the backup-database command + handler (mirrors the
+    #     ddl.commands / downloads.tracking bare-import pattern). The
+    #     restore-marker startup hook (FRG-DB-010) MUST run FIRST — before
+    #     register_database opens the engine below — so it is appended here,
+    #     ahead of the db area. ---
+    from foragerr.db.backup_command import (
+        quick_check_startup_hook,
+        register_backup_task,
+        restore_marker_startup_hook,
+    )
+
+    app.state.startup_hooks.append(restore_marker_startup_hook)
 
     # --- db area (tasks 2.x): engine/migration startup + WAL-checkpoint
     #     shutdown (registered BEFORE sched so shutdown runs after drain) ---
     register_database(app)
 
+    # Startup integrity quick_check (FRG-DB-012) runs AFTER the db area above
+    # has prepared/opened the database, so it checks the live file.
+    app.state.startup_hooks.append(quick_check_startup_hook)
+
     # --- sched area (tasks 3.x): worker pools + scheduler startup, graceful
     #     drain shutdown (FRG-SCHED-011) ---
     register_scheduler(app)
+
+    async def _register_backup_database_task(app: FastAPI) -> None:
+        await register_backup_task(app.state.scheduler, app.state.settings)
+
+    # Registers the "backup-database" scheduled task (FRG-DB-009); runs after
+    # the scheduler above has created app.state.scheduler.
+    app.state.startup_hooks.append(_register_backup_database_task)
 
     # --- library flows (change 3): importing registers the chained
     #     refresh-series/scan-series/series-search commands + handlers
