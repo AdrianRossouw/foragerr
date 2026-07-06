@@ -32,6 +32,19 @@ export function normalizeLookupTerm(raw: string): string {
   return idMatch ? idMatch[1] : trimmed;
 }
 
+/**
+ * Does a lookup error message name the ComicVine API key as the cause? The
+ * backend maps a ComicVine auth failure to a 503 whose message names both
+ * ComicVine and its API key (FRG-API-003); other 503s (upstream down) do not.
+ * Kept deliberately narrow to that credential wording so the actionable
+ * "check Settings" guidance only fires for a missing/invalid key.
+ */
+export function isComicVineAuthMessage(message: string | null | undefined): boolean {
+  if (!message) return false;
+  const m = message.toLowerCase();
+  return m.includes('comicvine') && m.includes('api key');
+}
+
 const STRATEGY_LABELS: Record<string, string> = {
   all: 'All issues',
   none: 'None',
@@ -189,6 +202,12 @@ export function AddSeries() {
   const lookup = useLookup(term);
   const addSeries = useAddSeries();
 
+  // A missing/invalid ComicVine key is an actionable credential error, not the
+  // plain "no results" state (FRG-UI-005); every other lookup failure stays a
+  // generic retry message.
+  const isCredentialError =
+    lookup.isError && isComicVineAuthMessage(lookup.error?.message);
+
   const submit = (e: FormEvent) => {
     e.preventDefault();
     setSelectedId(null);
@@ -254,17 +273,27 @@ export function AddSeries() {
         </form>
 
         {lookup.isLoading && <p className={styles.stateNote}>Searching ComicVine…</p>}
-        {lookup.isError && (
-          <p className={styles.stateNote}>
+        {isCredentialError && (
+          <p className={styles.errorNote} role="alert">
+            ComicVine API key missing or invalid — check Settings.
+          </p>
+        )}
+        {lookup.isError && !isCredentialError && (
+          <p className={styles.errorNote} role="alert">
             ComicVine lookup failed. Try again in a moment.
           </p>
         )}
-        {lookup.data && lookup.data.length === 0 && (
+        {lookup.data && !lookup.data.complete && (
+          <p className={styles.stateNote} role="status">
+            Results may be incomplete — ComicVine did not return everything.
+          </p>
+        )}
+        {lookup.data && lookup.data.complete && lookup.data.records.length === 0 && (
           <p className={styles.stateNote}>No volumes found for “{term}”.</p>
         )}
 
         <div className={styles.results}>
-          {lookup.data?.map((candidate) => (
+          {lookup.data?.records.map((candidate) => (
             <div
               key={candidate.cv_volume_id}
               className={styles.candidateCard}
