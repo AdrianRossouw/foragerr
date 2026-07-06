@@ -101,7 +101,9 @@ a metadata refresh and is also available on demand.
 `PUT /api/v1/series/{id}` updates a series' monitored flag, monitor-new-items policy,
 format profile, and root folder/path (subject to the same root-folder validation as
 add). `DELETE /api/v1/series/{id}` removes a series and its issue/issue-file rows;
-by default the files stay on disk. With `deleteFiles=true` every file is first
+by default the files stay on disk. With `deleteFiles=true` the delete runs as a
+background command (it serializes with imports/rescans and never blocks the
+app): every file is first
 moved to the recycle bin (permanently deleted only when no bin is configured —
 see `import.md` §recycle bin), each recorded as a manual `file_deleted` history
 event, and only then are the rows removed — a failure mid-way never leaves rows
