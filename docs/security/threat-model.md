@@ -993,6 +993,81 @@ primitive. Disposition:
   (`isComicVineAuthError`, the structural `errors[].field` discriminator) and
   the 503 it reacts to are unchanged.
 
+### 2026-07-06 — m2-hardening-performance (M2 change 6)
+
+The final M2 change: closes the two gaps this model deliberately left open one
+milestone early (G-1's listener limits, and COMP 2's WS documented latent).
+Disposition:
+
+**COMP 1 — Web API / UI (`T-API-5`, Gap G-1)**
+
+- **G-1 CLOSED for the HTTP listener** (`T-API-5`, RISK-021): `api/limits.py`
+  (FRG-NFR-014) is a pure-ASGI middleware installed in `register_api`, running
+  on the **HTTP scope only** (`websocket`/`lifespan` pass through untouched, so
+  it can never reach the long-lived WS — that surface is COMP 2, below). Four
+  controls, all configurable with generous documented defaults
+  (`docs/manual/admin/configuration.md` → "Listener resource limits"):
+  header-size cap (`listener_max_header_bytes`, default 16 KiB → 431);
+  body-size cap (`listener_max_body_bytes`, default 8 MiB) enforced by a
+  streaming byte-counter that aborts at the cap with 413 — a chunked, absent,
+  or lying `Content-Length` can never accrue an unbounded buffer; a
+  time-to-first-response-byte request timeout (`listener_request_timeout_seconds`,
+  default 30s, bounded 503 on expiry, worker released) that is dropped once a
+  response starts streaming, so a deliberately-streaming response (an OPDS
+  file, an SPA asset) is never truncated by this control; and a per-client
+  (peer-address) sliding-window rate cap (`listener_rate_max_requests` per
+  `listener_rate_window_seconds`, default 240/1s, `0` disables) backed by an
+  LRU-bounded (1024-entry) client table, so the limiter's own memory cannot be
+  grown unboundedly by a spoofed-source flood → 429 + `Retry-After`.
+- **RISK-014 request arm CLOSED**: any request-sourced value the middleware
+  writes toward its own over-limit warnings (method/path/query) passes through
+  `sanitize_log_field()`, which reuses the existing `sanitize_cv_text()`
+  (FRG-NFR-012) control-character/ANSI stripper, before reaching a structured
+  log line — a CR/LF-bearing request path or header can never forge a second
+  log line. The DDL scraped-text arm of RISK-014 (GetComics titles/sizes/years)
+  is UNCHANGED and stays open, tracked since `m1-downloads`.
+
+**COMP 2 — WebSocket resource-change channel (`T-WS-3`, RISK-021 — the M1
+documented latent)**
+
+- **The M1-documented latent is CLOSED**: `WsBroadcaster` (`ws/broadcast.py`)
+  gains a configurable `max_connections` cap (`ws_max_connections`, default 32)
+  and `try_connect()`, which returns `None` — refusing the connection **without
+  mutating the registry or disturbing any live socket** — once
+  `connection_count` reaches the cap. `ws_endpoint` (`ws/router.py`) calls
+  `try_connect()` and, on refusal, closes the handshake with code `1013`
+  **before** `accept()`; below the cap the accepted-connection path (the
+  load-bearing register-before-accept ordering, and the `0e0456a` client-gone
+  teardown fix) is byte-identical to M1 — no lifecycle regression.
+- `_drain_incoming` now bounds the inbound channel (the WS is server-push;
+  inbound frames are only a disconnect detector): a frame over
+  `ws_max_inbound_bytes` (default 4 KiB) or a burst over
+  `ws_max_inbound_messages_per_second` (default 10, sliding 1s window) is
+  anomalous and ends the loop, returning with the **client-still-connected**
+  disposition, so the endpoint's *existing* `if not client_gone: await
+  websocket.close()` teardown performs the single close — no second close path
+  was added, and the genuine-`WebSocketDisconnect` → `True` computation is
+  unchanged. A tailnet-reachable client can no longer grow listener memory by
+  opening unbounded sockets or sending unbounded inbound frames. See
+  `docs/security/risk-register.md` RISK-021 for the flipped decision
+  (**Mitigate (implemented)**).
+
+**Not new attack surface (test authoring over already-shipped mechanisms)**:
+the other four NFR rows this change elaborates — FRG-NFR-001 (startup budget +
+a no-outbound-HTTP-during-startup guard + an isolated-importability regression
+test pinning the `foragerr.importer` package's existing deferred-import cycle
+fix), FRG-NFR-002 (scan-throughput budget), FRG-NFR-003 (UI-latency budget),
+FRG-NFR-007 (crash-safety fault-injection) — are budget/regression tests over
+mechanisms this model already covers elsewhere (COMP 1 pagination, COMP 12
+scheduler/queue persistence). No new listener, no new parser of untrusted
+input, and no new credential or outbound-integration path is introduced by any
+of the four. The startup change's no-outbound-HTTP-during-startup guard is a
+robustness property (a startup hook cannot wedge on an unreachable
+ComicVine/indexer host) rather than a new trust boundary, and the
+`IMPORT_FILE_MUTATION_GROUP` relocation into a neutral importer leaf is
+byte-identical-behavior housekeeping guarding a structural import-cycle
+fragility, not a threat closure.
+
 ## Coverage summary
 
 - **Well covered by the five drafts** (mitigation named, no new requirement needed): OPDS

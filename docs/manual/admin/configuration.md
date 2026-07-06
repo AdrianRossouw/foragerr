@@ -80,6 +80,14 @@ under the top level of `config.yaml`.
 | `recycle_bin_retention_days` | `FORAGERR_RECYCLE_BIN_RETENTION_DAYS` | `0` | Days before housekeeping permanently prunes bin entries. `0` = keep forever. |
 | `config_backup_retention` | `FORAGERR_CONFIG_BACKUP_RETENTION` | `3` | Pre-migration `config.yaml` backups kept under `backups/`. |
 | `comicinfo_tag_on_import` | `FORAGERR_COMICINFO_TAG_ON_IMPORT` | `false` | Write ComicInfo.xml into imported cbz archives from the matched ComicVine record (atomic rewrite; a tagging failure never fails the import). |
+| `listener_max_body_bytes` | `FORAGERR_LISTENER_MAX_BODY_BYTES` | `8388608` (8 MiB) | Max inbound HTTP request body size; floor 64 KiB. See "Listener resource limits" below. |
+| `listener_max_header_bytes` | `FORAGERR_LISTENER_MAX_HEADER_BYTES` | `16384` (16 KiB) | Max total inbound HTTP header size; floor 1 KiB. |
+| `listener_request_timeout_seconds` | `FORAGERR_LISTENER_REQUEST_TIMEOUT_SECONDS` | `30` | Max seconds a request may run before the listener aborts it. Clamped to 1-300. |
+| `listener_rate_max_requests` | `FORAGERR_LISTENER_RATE_MAX_REQUESTS` | `240` | Per-client request cap per `listener_rate_window_seconds`. `0` disables the rate cap entirely. |
+| `listener_rate_window_seconds` | `FORAGERR_LISTENER_RATE_WINDOW_SECONDS` | `1` | Sliding-window length (seconds) for the per-client rate cap. Clamped to 1-60. |
+| `ws_max_connections` | `FORAGERR_WS_MAX_CONNECTIONS` | `32` | Max concurrent WebSocket connections; floor 1. |
+| `ws_max_inbound_bytes` | `FORAGERR_WS_MAX_INBOUND_BYTES` | `4096` (4 KiB) | Max size of a single inbound WebSocket frame; floor 64 bytes. |
+| `ws_max_inbound_messages_per_second` | `FORAGERR_WS_MAX_INBOUND_MESSAGES_PER_SECOND` | `10` | Max sustained inbound WebSocket frames per second per socket; floor 1. |
 
 Unknown keys found in `config.yaml` are ignored with a logged warning rather than
 failing startup, so a config file from a slightly different version doesn't brick
@@ -113,6 +121,45 @@ tuning lives. Earlier versions of this manual listed
 they were never consumed by anything and have been removed from the `Settings`
 model (`m2-first-run-defaults`) — a stale `config.yaml` that still carries them
 keeps loading fine (see the unknown-key note above), the keys are just ignored.
+
+## Listener resource limits
+
+The `listener_*` and `ws_*` settings above are availability safety valves on the
+inbound HTTP/WebSocket listener, not access control (foragerr has no
+authentication in M1/M2 — see `network.md`). Their defaults are deliberately
+generous so nothing in normal single-admin use is ever refused; they exist to
+bound memory/CPU if something on the tailnet misbehaves or a client floods the
+listener. If you ever see one of these responses, it means a limit was hit —
+here's what each one means and where to look:
+
+- **413 (Payload Too Large)** — a request body exceeded `listener_max_body_bytes`
+  (default 8 MiB). foragerr's API only ever accepts small JSON bodies, so this
+  should never happen in normal use; if it does, something sent an unusually
+  large request.
+- **431 (Request Header Fields Too Large)** — combined request headers exceeded
+  `listener_max_header_bytes` (default 16 KiB).
+- **503 (Service Unavailable)** — the request did not produce a response within
+  `listener_request_timeout_seconds` (default 30s). This bounds only
+  **time-to-first-response-byte**: once a handler starts streaming a response
+  (an OPDS comic download, a large SPA asset) the timeout no longer applies, so
+  a slow-but-working download is never truncated by this setting — only a
+  handler that never responds at all is aborted.
+- **429 (Too Many Requests)** — a single peer address exceeded
+  `listener_rate_max_requests` requests within `listener_rate_window_seconds`
+  (default 240 per 1s). The response carries a `Retry-After` header. Set
+  `listener_rate_max_requests` to `0` to disable this cap entirely if it ever
+  interferes with legitimate UI traffic (e.g. a busy React-Query fan-out on a
+  slow link).
+- **WebSocket close code 1013 (Try Again Later)** — the live-updates socket
+  (`/api/v1/ws`) refused a new connection because `ws_max_connections`
+  (default 32) concurrent sockets were already open. Existing connections are
+  completely unaffected; refresh or retry once another tab/client disconnects.
+- **A WebSocket connection closing unexpectedly** — if a client sends an
+  inbound frame larger than `ws_max_inbound_bytes` (default 4 KiB) or more than
+  `ws_max_inbound_messages_per_second` (default 10) frames per second, that
+  socket is closed. The channel is server-push only (foragerr never expects
+  meaningful inbound WebSocket traffic), so this should not occur from the
+  normal web UI.
 
 ## Config-file precedence in practice
 
