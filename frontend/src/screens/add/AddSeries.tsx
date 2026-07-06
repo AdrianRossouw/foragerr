@@ -9,7 +9,8 @@ import {
   useLookup,
   useRootFolders,
 } from '../../api/hooks';
-import type { LookupCandidate } from '../../api/types';
+import { isComicVineAuthError } from '../../api/fetcher';
+import type { LookupCandidate, LookupResponse } from '../../api/types';
 import { MONITOR_STRATEGIES } from '../../api/types';
 import { formatBytes } from '../../lib/format';
 import styles from './AddSeries.module.css';
@@ -30,6 +31,53 @@ export function normalizeLookupTerm(raw: string): string {
   const trimmed = raw.trim();
   const idMatch = trimmed.match(/(?:^cv:)?.*?(4050-\d+)/i);
   return idMatch ? idMatch[1] : trimmed;
+}
+
+/**
+ * Classify the lookup outcome into the single note that renders (FRG-UI-005):
+ * exactly one outcome state at a time, in precedence order — credential error
+ * (structural, via the errors[] field discriminator) → generic error →
+ * degraded walk that returned nothing (error styling, retry guidance) →
+ * capped result (narrow the term; candidates still render) → incomplete
+ * result (candidates still render) → complete-and-empty → candidates only.
+ */
+function lookupOutcomeNote(
+  isError: boolean,
+  error: unknown,
+  data: LookupResponse | undefined,
+  term: string,
+): { tone: 'error' | 'status' | 'plain'; text: string } | null {
+  if (isError) {
+    return {
+      tone: 'error',
+      text: isComicVineAuthError(error)
+        ? 'ComicVine API key missing or invalid — check Settings.'
+        : 'ComicVine lookup failed. Try again in a moment.',
+    };
+  }
+  if (!data) return null;
+  if (!data.complete && data.records.length === 0) {
+    return {
+      tone: 'error',
+      text: 'ComicVine lookup failed part-way and returned nothing — try again in a moment.',
+    };
+  }
+  if (data.truncated) {
+    return {
+      tone: 'status',
+      text: 'Too many results — ComicVine capped this search. Narrow the term.',
+    };
+  }
+  if (!data.complete) {
+    return {
+      tone: 'status',
+      text: 'Results may be incomplete — ComicVine did not return everything.',
+    };
+  }
+  if (data.records.length === 0) {
+    return { tone: 'plain', text: `No volumes found for “${term}”.` };
+  }
+  return null;
 }
 
 const STRATEGY_LABELS: Record<string, string> = {
@@ -189,10 +237,28 @@ export function AddSeries() {
   const lookup = useLookup(term);
   const addSeries = useAddSeries();
 
+  // A lookup error must never leak stale candidates from a previous outcome:
+  // the results list and the outcome note both derive from this one value.
+  const results = lookup.isError ? undefined : lookup.data;
+  const note = lookupOutcomeNote(lookup.isError, lookup.error, results, term);
+
   const submit = (e: FormEvent) => {
     e.preventDefault();
     setSelectedId(null);
-    setTerm(normalizeLookupTerm(input));
+    const next = normalizeLookupTerm(input);
+    // A same-term re-submit after an error or a degraded/capped outcome must
+    // retry for real (FRG-UI-005): setting an identical term re-renders
+    // nothing and never refetches, so refire explicitly. Complete, uncapped
+    // lookups stay cached (staleTime Infinity in useLookup) — re-submitting
+    // those is deliberately a no-op against the rate-limited upstream.
+    const retryable =
+      lookup.isError ||
+      (lookup.data !== undefined &&
+        (!lookup.data.complete || lookup.data.truncated));
+    if (next === term && retryable) {
+      void lookup.refetch();
+    }
+    setTerm(next);
   };
 
   const add = (
@@ -254,17 +320,20 @@ export function AddSeries() {
         </form>
 
         {lookup.isLoading && <p className={styles.stateNote}>Searching ComicVine…</p>}
-        {lookup.isError && (
-          <p className={styles.stateNote}>
-            ComicVine lookup failed. Try again in a moment.
+        {note?.tone === 'error' && (
+          <p className={styles.errorNote} role="alert">
+            {note.text}
           </p>
         )}
-        {lookup.data && lookup.data.length === 0 && (
-          <p className={styles.stateNote}>No volumes found for “{term}”.</p>
+        {note?.tone === 'status' && (
+          <p className={styles.stateNote} role="status">
+            {note.text}
+          </p>
         )}
+        {note?.tone === 'plain' && <p className={styles.stateNote}>{note.text}</p>}
 
         <div className={styles.results}>
-          {lookup.data?.map((candidate) => (
+          {results?.records.map((candidate) => (
             <div
               key={candidate.cv_volume_id}
               className={styles.candidateCard}

@@ -17,6 +17,25 @@ outright; other plausibility signals only annotate, they don't filter. Results a
 capped (around 1000 candidates) with a visible truncation warning if a search would
 exceed that.
 
+### Troubleshooting: search returns nothing
+
+A genuinely empty result only appears when ComicVine completed the search and
+matched nothing. Other outcomes are reported distinctly:
+
+- **"ComicVine API key missing or invalid"** — the lookup was rejected outright
+  (HTTP 401/403 upstream). Set `comicvine_api_key` (or the
+  `FORAGERR_COMICVINE_API_KEY` environment variable — see the admin manual,
+  `secrets.md`) and search again. An invalid key fails every request, so foragerr
+  reports it as an error instead of pretending the search found nothing.
+- **"Results may be incomplete"** — the search degraded part-way (rate limiting,
+  a ComicVine outage, a malformed page). Whatever candidates were retrieved are
+  shown; re-run the same search in a moment for the full list. If the degrade
+  happened on the very first page, the screen reports it as a lookup failure
+  instead of showing an empty list with a footnote.
+- **"Too many results"** — the search hit the configured result cap (around
+  1000 candidates). Retrying will not change this; use a narrower term (add a
+  year, a fuller title) instead.
+
 ## What a refresh does
 
 A metadata refresh re-fetches a series' volume and issue list from ComicVine and

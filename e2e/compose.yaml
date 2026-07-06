@@ -35,10 +35,13 @@ services:
       # Point the metadata client at the fixture ComicVine (the one sanctioned
       # e2e-only override; defaults to the real API in production).
       # Fixture-network plaintext is explicitly opted into (test affordance;
-      # the 'key' below is a dummy fixture value, not a secret).
+      # the default 'key' below is a dummy fixture value, not a secret).
       FORAGERR_COMICVINE_BASE_URL: http://mockhub:8080/api
       FORAGERR_COMICVINE_INSECURE_BASE: "true"
-      FORAGERR_COMICVINE_API_KEY: e2e-example-key
+      # ${VAR-default} (dash, not colon-dash) on purpose: unset -> fixture key;
+      # EXPLICITLY EMPTY passes through as empty so the unconfigured-key
+      # scenario (zz-unconfigured.spec.ts) can recreate the app with no key.
+      FORAGERR_COMICVINE_API_KEY: ${E2E_CV_API_KEY-e2e-example-key}
       FORAGERR_COMICVINE_IMAGE_HOSTS: mockhub
       FORAGERR_COMICVINE_MIN_INTERVAL_SECONDS: "0.1"
       # A retention window so the deliberately-old Newznab release is rejected

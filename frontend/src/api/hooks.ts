@@ -13,7 +13,7 @@ import type {
   CommandResource,
   FormatProfileResource,
   IssueResource,
-  LookupCandidate,
+  LookupResponse,
   QueueItem,
   QueuePageResponse,
   ReleaseDecision,
@@ -110,19 +110,31 @@ export function useIssues(seriesId: number): UseQueryResult<IssueResource[]> {
   });
 }
 
-/** Live ComicVine lookup (FRG-UI-005); only fires for a non-empty term. */
-export function useLookup(term: string): UseQueryResult<LookupCandidate[]> {
+/**
+ * Live ComicVine lookup (FRG-UI-005); only fires for a non-empty term. The
+ * backend returns a `LookupResponse` envelope (FRG-API-003) so the screen can
+ * distinguish a degraded walk (`complete=false`) and a capped result set
+ * (`truncated=true`) from a clean empty result. An upstream/credential failure
+ * rejects with an `ApiRequestError`; screens classify credential failures
+ * structurally via `isComicVineAuthError`.
+ */
+export function useLookup(term: string): UseQueryResult<LookupResponse> {
   const fetcher = useFetcher();
   return useQuery({
     queryKey: queryKeys.lookup.term(term),
     queryFn: () =>
-      fetcher<LookupCandidate[]>(
+      fetcher<LookupResponse>(
         `/api/v1/series/lookup?term=${encodeURIComponent(term)}`,
       ),
     enabled: term.length > 0,
-    // A term's candidate list is stable within a session; never refetch a
-    // ComicVine search behind the user's back (live, rate-limited upstream).
-    staleTime: Infinity,
+    // A complete, uncapped candidate list is stable within a session; never
+    // refetch such a ComicVine search behind the user's back (live,
+    // rate-limited upstream). Degraded or capped outcomes stay immediately
+    // stale so a re-submitted term retries for real instead of serving the
+    // bad envelope from cache (errors carry no data, so the error case is
+    // handled by the screen's explicit same-term refetch).
+    staleTime: (query) =>
+      query.state.data?.complete && !query.state.data.truncated ? Infinity : 0,
     retry: false,
   });
 }

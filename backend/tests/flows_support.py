@@ -56,7 +56,8 @@ class FakeCV:
     def __init__(self) -> None:
         self._volumes: dict[int, dict] = {}
         self._issues: dict[int, list[dict]] = {}
-        self._issue_fail_after_offset: dict[int, int] = {}
+        #: volume id -> (offset threshold, HTTP status) for a mid-walk failure.
+        self._issue_fail_after_offset: dict[int, tuple[int, int]] = {}
         self._images: set[str] = set()
 
     def volume(
@@ -81,11 +82,20 @@ class FakeCV:
         return self
 
     def issues(
-        self, volume_id: int, issues: list[dict], *, fail_after_offset: int | None = None
+        self,
+        volume_id: int,
+        issues: list[dict],
+        *,
+        fail_after_offset: int | None = None,
+        fail_status: int = 500,
     ) -> "FakeCV":
+        """Register a volume's issues; ``fail_after_offset`` makes every page
+        at or past that offset fail with ``fail_status`` (500 = a transient
+        mid-walk failure the walk degrades on; 401 = an auth rejection the
+        walk propagates)."""
         self._issues[volume_id] = issues
         if fail_after_offset is not None:
-            self._issue_fail_after_offset[volume_id] = fail_after_offset
+            self._issue_fail_after_offset[volume_id] = (fail_after_offset, fail_status)
         return self
 
     # -- handler -----------------------------------------------------------
@@ -115,9 +125,9 @@ class FakeCV:
         all_issues = self._issues.get(vid, [])
         offset = int(query.get("offset", "0"))
         limit = int(query.get("limit", "100"))
-        fail_at = self._issue_fail_after_offset.get(vid)
-        if fail_at is not None and offset >= fail_at:
-            return httpx.Response(500, content=b"boom")
+        fail = self._issue_fail_after_offset.get(vid)
+        if fail is not None and offset >= fail[0]:
+            return httpx.Response(fail[1], content=b"boom")
         window = all_issues[offset : offset + limit]
         return _envelope(window, number_of_total_results=len(all_issues))
 

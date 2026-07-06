@@ -39,6 +39,11 @@ The spine (`tests/spine.spec.ts`, serial — the library grows across steps):
    news-server credentials are present (the hermetic tier is the deliverable).
 8. **restart resilience** — `docker restart` mid-flight; library + persisted
    command queue survive (`FRG-SCHED-002`).
+9. **unconfigured key** (`tests/zz-unconfigured.spec.ts`, runs last) — the app
+   container is recreated with an explicitly **empty** ComicVine key
+   (`E2E_CV_API_KEY=` against compose's `${E2E_CV_API_KEY-e2e-example-key}`);
+   an Add Series search renders the actionable credential error pointing at
+   Settings, never the plain "no results" state (`FRG-UI-005`).
 
 Each test title names the FRG ids it exercises;
 `scripts/acceptance-report.mjs` converts the Playwright JSON reporter output

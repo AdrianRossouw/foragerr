@@ -143,6 +143,34 @@ async def test_partial_fetch_skips_delete_arm(
     assert {r.cv_issue_id for r in rows} == {100, 101, 102}  # nothing deleted
 
 
+@pytest.mark.req("FRG-META-004")
+async def test_auth_failure_mid_walk_fails_refresh_not_incomplete(
+    db, settings, commands, root_folder_id, root_folder_path, format_profile_id
+):
+    # An auth error on the issues walk now propagates out of _paginate (rather
+    # than degrading to complete=False), so the refresh fails loudly instead of
+    # recording an incomplete sync that would retry forever on a dead key.
+    from foragerr.metadata import ComicVineAuthError
+
+    series_id = await _make_series(db, root_folder_path, format_profile_id)
+    async with db.write_session() as session:
+        for cv, num in [(100, "1"), (101, "2")]:
+            await repo.create_issue(session, series_id=series_id, cv_issue_id=cv, issue_number=num)
+
+    # get_volume succeeds; the issues walk is rejected as unauthorized on page 2
+    small = flows_settings(settings.config_dir, comicvine_page_size=1)
+    fake = FakeCV().volume(1).issues(
+        1, [issue(100, "1"), issue(101, "2")], fail_after_offset=1, fail_status=401
+    )
+    factory = build_factory(small, fake.handler())
+    with pytest.raises(ComicVineAuthError):
+        await refresh_series(db, small, series_id, commands=commands, factory=factory)
+
+    # the pre-existing issues are untouched — no incomplete-sync reconciliation ran
+    rows = await _issues(db, series_id)
+    assert {r.cv_issue_id for r in rows} == {100, 101}
+
+
 @pytest.mark.req("FRG-META-008")
 async def test_issue_with_file_is_never_hard_deleted(
     db, settings, commands, root_folder_id, root_folder_path, format_profile_id

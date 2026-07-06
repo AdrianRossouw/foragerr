@@ -28,6 +28,15 @@ signals (issue counts, years) so the right volume is easy to pick. The add panel
 lets you choose the root folder, format profile, and monitoring options before the
 add flow kicks off its chained refresh → scan → optional search.
 
+A search that can't be completed is never presented as "no results": if ComicVine
+rejects the API key (unset or invalid) the screen says so and points you at
+Settings; if the search degraded mid-way (rate limiting, a ComicVine outage)
+any candidates found so far render with a "results may be incomplete" notice —
+or, when nothing at all was retrieved, an explicit failure message; and a search
+that hit the result cap says so and advises a narrower term. Re-searching the
+same term always retries for real. Only a fully completed search with zero
+matches shows the plain no-results state.
+
 ## Queue
 
 The Queue screen shows every tracked download live: state (queued, downloading,

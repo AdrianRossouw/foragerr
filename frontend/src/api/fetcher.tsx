@@ -43,6 +43,21 @@ export class ApiRequestError extends Error {
   }
 }
 
+/**
+ * Structural ComicVine credential-failure discriminator (FRG-UI-005): the
+ * backend marks an auth failure by naming `comicvine_api_key` in the uniform
+ * error body's `errors[]` (the same field channel settings screens consume),
+ * so screens classify on the field — never by sniffing message prose.
+ */
+export function isComicVineAuthError(error: unknown): boolean {
+  return (
+    error instanceof ApiRequestError &&
+    (error.body?.errors ?? []).some(
+      (entry) => entry.field === 'comicvine_api_key',
+    )
+  );
+}
+
 export type Fetcher = <T>(path: string, init?: FetcherInit) => Promise<T>;
 
 export const defaultFetcher: Fetcher = async <T,>(

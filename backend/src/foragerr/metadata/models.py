@@ -110,6 +110,12 @@ class SearchResult:
     #: True when the result set was cut to the configured cap; a truncation
     #: warning was logged.
     truncated: bool
+    #: Mirrors the underlying pagination walk's completeness (FRG-META-004):
+    #: ``False`` when a non-auth mid-walk failure or the hard page cap left
+    #: the result partial, so callers can tell a degraded walk apart from a
+    #: clean, complete empty result. (Auth failures no longer reach here —
+    #: they propagate as ``ComicVineAuthError``.)
+    complete: bool
 
 
 @dataclass(frozen=True, slots=True)
