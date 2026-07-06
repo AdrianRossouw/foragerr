@@ -179,6 +179,14 @@ presented for owner review.
 - **THEN** the most recent e2e run against that milestone's image is green and its
   run log is referenced in the review material
 
+#### Scenario: Acceptance report is generated, not authored
+
+- **WHEN** the e2e suite completes a milestone-acceptance run
+- **THEN** an acceptance report is generated mechanically from the FRG-tagged
+  scenario results (scenario → tagged requirement ids → pass/fail/skipped) with no
+  hand-authored criteria matrix, and the owner's sign-off is recorded against that
+  generated report in the change proposal's `## Acceptance` section
+
 ### Requirement: FRG-PROC-011 — Manual kept in sync with the application
 
 The project SHALL maintain a user and administrator manual in `docs/manual/`, covering

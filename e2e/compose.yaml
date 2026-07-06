@@ -34,7 +34,10 @@ services:
       TZ: Etc/UTC
       # Point the metadata client at the fixture ComicVine (the one sanctioned
       # e2e-only override; defaults to the real API in production).
+      # Fixture-network plaintext is explicitly opted into (test affordance;
+      # the 'key' below is a dummy fixture value, not a secret).
       FORAGERR_COMICVINE_BASE_URL: http://mockhub:8080/api
+      FORAGERR_COMICVINE_INSECURE_BASE: "true"
       FORAGERR_COMICVINE_API_KEY: e2e-example-key
       FORAGERR_COMICVINE_IMAGE_HOSTS: mockhub
       FORAGERR_COMICVINE_MIN_INTERVAL_SECONDS: "0.1"

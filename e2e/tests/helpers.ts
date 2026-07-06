@@ -14,7 +14,7 @@ export async function createProviders(api: APIRequestContext): Promise<void> {
           implementation: 'newznab',
           settings: {
             base_url: 'http://mockhub:8080/newznab',
-            api_key: 'e2e-example',
+            api_key: 'e2e-example' /* dummy fixture value, not a secret */,
             categories: [7030],
           },
           enabled: true,

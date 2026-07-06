@@ -54,12 +54,31 @@ secret_scan() {
     unset 'prune_expr[${#prune_expr[@]}-1]'
 
     # 1) Environment files carrying real values. Templates/examples are allowed.
+    #    A `.env` in the working tree is NORMAL on a dev machine; what matters is
+    #    whether docker would upload it. When the context's .dockerignore carries
+    #    the recursive env excludes (.env / .env.* / **/.env / **/.env.*), docker
+    #    cannot COPY these files into any layer, so their presence is reported
+    #    but not fatal. If those patterns are ever removed, this reverts to a
+    #    hard failure — the scan stays the enforcing check, .dockerignore the
+    #    mechanism it verifies.
+    local env_excluded=0
+    if [ -f "$ctx/.dockerignore" ] \
+        && grep -qxF '.env' "$ctx/.dockerignore" \
+        && grep -qxF '.env.*' "$ctx/.dockerignore" \
+        && grep -qxF '**/.env' "$ctx/.dockerignore" \
+        && grep -qxF '**/.env.*' "$ctx/.dockerignore"; then
+        env_excluded=1
+    fi
     while IFS= read -r -d '' f; do
         case "$(basename "$f")" in
             .env.example|.env.sample|.env.template) continue ;;
         esac
-        echo "SECRET-SCAN: env file present in build context: ${f#"$ctx"/}" >&2
-        findings=$((findings + 1))
+        if [ "$env_excluded" = 1 ]; then
+            echo "SECRET-SCAN: env file ${f#"$ctx"/} present but excluded by .dockerignore (ok)" >&2
+        else
+            echo "SECRET-SCAN: env file present in build context: ${f#"$ctx"/}" >&2
+            findings=$((findings + 1))
+        fi
     done < <(find "$ctx" \( "${prune_expr[@]}" \) -type d -prune -o \
                  -type f \( -name '.env' -o -name '.env.*' \) -print0)
 

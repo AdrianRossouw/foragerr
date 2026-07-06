@@ -73,10 +73,15 @@ None (the requirement extends the existing `dev-process` capability).
 
 ## Manual impact
 
-None (declared per FRG-PROC-011, which post-dates this proposal's original
-approval): the e2e harness is development/verification tooling with no user- or
-administrator-facing application behavior. The manual's deployment chapter already
-documents the image the suite builds and drives; nothing it documents changes.
+`docs/manual/admin/configuration.md` — one new admin-facing setting,
+`comicvine_base_url` / `FORAGERR_COMICVINE_BASE_URL` (defaults to the real
+ComicVine API; exists so the e2e harness can point the client at a fixture),
+documented in the same change. `docs/manual/admin/deployment.md` — the build
+script's secret-scan wording updated: an env file that `.dockerignore`
+excludes from the context is reported but non-fatal (a `.env` in a dev
+working tree is normal; key-shaped material in shipping files stays fatal).
+Everything else in the change is development/verification tooling with no
+user- or administrator-facing behavior.
 
 ## Approval
 

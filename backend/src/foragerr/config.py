@@ -241,8 +241,20 @@ class Settings(BaseSettings):
         description=(
             "Base URL of the ComicVine API. Defaults to the real service and is "
             "only overridden to point the metadata client at a fixture server "
-            "(the end-to-end harness, FRG-PROC-010). The outbound egress policy "
-            "(FRG-SEC-001) still applies to whatever host this resolves to."
+            "(the end-to-end harness, FRG-PROC-010). Every request carries the "
+            "ComicVine API key, so the scheme MUST be https unless "
+            "comicvine_insecure_base explicitly opts in (test fixtures only) — "
+            "a plaintext override would exfiltrate the key to whatever host "
+            "this names. The outbound egress policy (FRG-SEC-001) additionally "
+            "applies to whatever host this resolves to."
+        ),
+    )
+    comicvine_insecure_base: bool = Field(
+        default=False,
+        description=(
+            "Permit a plain-http comicvine_base_url. A TEST AFFORDANCE for the "
+            "e2e fixture network only — never set in production; the API key "
+            "rides every request."
         ),
     )
     comicvine_min_interval_seconds: float = Field(
@@ -379,6 +391,28 @@ class Settings(BaseSettings):
                     f"must not collide with the reserved mount {reserved!r}"
                 )
         return path
+
+    @field_validator("comicvine_base_url")
+    @classmethod
+    def _comicvine_base_shape(cls, value: str) -> str:
+        from urllib.parse import urlsplit
+
+        parts = urlsplit(value)
+        if parts.scheme not in ("http", "https") or not parts.netloc:
+            raise ValueError(
+                "comicvine_base_url must be an absolute http(s) URL"
+            )
+        return value.rstrip("/")
+
+    @model_validator(mode="after")
+    def _comicvine_base_requires_tls(self):
+        if self.comicvine_base_url.startswith("http://") and not self.comicvine_insecure_base:
+            raise ValueError(
+                "comicvine_base_url uses plain http, which would send the "
+                "ComicVine API key unencrypted; use https, or set "
+                "comicvine_insecure_base=true if this is a test fixture"
+            )
+        return self
 
     @field_validator("log_level")
     @classmethod

@@ -127,6 +127,49 @@ def test_dockerignore_excludes_nested_env_files():
     assert "!.env.example" in text  # the template is still allowed through
 
 
+def _scan(context) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["bash", str(REPO_ROOT / "tools" / "build-image.sh"),
+         "--scan-only", "--context", str(context)],
+        capture_output=True, text=True, timeout=60,
+    )
+
+
+_ENV_EXCLUDES = ".env\n.env.*\n**/.env\n**/.env.*\n!.env.example\n"
+
+
+@pytest.mark.req("FRG-DEP-001")
+def test_scan_tolerates_env_file_that_dockerignore_excludes(tmp_path):
+    """A ``.env`` in the working tree is normal on a dev machine; the scan
+    fails only when docker could actually upload it — i.e. when .dockerignore
+    lacks the recursive env excludes. (Ungated: scan is pure shell.)"""
+    (tmp_path / ".dockerignore").write_text(_ENV_EXCLUDES)
+    (tmp_path / ".env").write_text("FORAGERR_TEST_VALUE=not-a-real-secret\n")
+    result = _scan(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert "excluded by .dockerignore" in result.stderr
+
+
+@pytest.mark.req("FRG-DEP-001")
+def test_scan_fails_on_env_file_without_dockerignore_excludes(tmp_path):
+    (tmp_path / ".env").write_text("FORAGERR_TEST_VALUE=not-a-real-secret\n")
+    result = _scan(tmp_path)
+    assert result.returncode != 0
+    assert "env file present in build context" in result.stderr
+
+
+@pytest.mark.req("FRG-DEP-001")
+def test_scan_still_fails_on_key_shaped_content_despite_dockerignore(tmp_path):
+    """The .dockerignore allowance covers env FILES only — key-shaped material
+    in a file that ships stays fatal regardless."""
+    (tmp_path / ".dockerignore").write_text(_ENV_EXCLUDES)
+    (tmp_path / "settings.py").write_text(
+        'AWS_SECRET_ACCESS_KEY = "AKIAIOSFODNN7EXAMPLEKEY99"\n'
+    )
+    result = _scan(tmp_path)
+    assert result.returncode != 0
+
+
 @docker_gate
 @pytest.mark.docker
 @pytest.mark.req("FRG-DEP-001")

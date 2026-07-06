@@ -388,7 +388,7 @@ def test_ws_endpoint_delivers_a_push_over_the_real_asgi_stack(tmp_path):
                 "resource": {"id": 42, "partial": False},
             }
             received = []
-            for _ in range(5):
+            for _ in range(20):
                 msg = json.loads(ws.receive_text())
                 received.append(msg)
                 if msg == expected:

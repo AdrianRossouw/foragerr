@@ -46,10 +46,10 @@ def pyproject_deps(root: Path = ROOT):
     return runtime, tooling
 
 
-def package_json_deps(root: Path = ROOT):
-    """(runtime, tooling) dicts of name -> version constraint from package.json,
-    or (None, None) if frontend/package.json does not exist yet."""
-    path = root / 'frontend/package.json'
+def package_json_deps(root: Path = ROOT, rel: str = 'frontend/package.json'):
+    """(runtime, tooling) dicts of name -> version constraint from a
+    package.json, or (None, None) if it does not exist yet."""
+    path = root / rel
     if not path.is_file():
         return None, None
     data = json.loads(path.read_text())
@@ -84,7 +84,12 @@ def register_tables(root: Path = ROOT):
             category = 'tools'
         else:
             continue
-        ecosystem = 'frontend' if '(frontend)' in header else 'backend'
+        if '(frontend)' in header:
+            ecosystem = 'frontend'
+        elif '(e2e)' in header:
+            ecosystem = 'e2e'
+        else:
+            ecosystem = 'backend'
         constraint = cells[1].strip('` ').strip()
         tables.setdefault((ecosystem, category), {})[name_cell] = constraint
     return tables
@@ -133,6 +138,17 @@ def check(root: Path = ROOT) -> tuple[list[str], dict[str, int], bool]:
         problems += diff('frontend tooling', frontend_tools, reg_frontend_tools)
         counts['frontend runtime'] = len(frontend_runtime)
         counts['frontend tooling'] = len(frontend_tools)
+
+    e2e_runtime, e2e_tools = package_json_deps(root, 'e2e/package.json')
+    if e2e_runtime is not None:
+        # The harness is dev tooling by definition: runtime deps are a smell.
+        for name in sorted(e2e_runtime):
+            problems.append(
+                f"e2e: {name!r} is a runtime dependency -- the harness must "
+                f"declare devDependencies only"
+            )
+        problems += diff('e2e tooling', e2e_tools, tables.get(('e2e', 'tools'), {}))
+        counts['e2e tooling'] = len(e2e_tools)
 
     return problems, counts, has_frontend
 
