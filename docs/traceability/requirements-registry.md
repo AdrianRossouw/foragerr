@@ -186,8 +186,8 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-PP-009 | Token-based renaming engine | pp | implemented | M1 |
 | FRG-PP-010 | Folder templates and folder lifecycle | pp | implemented | M1 |
 | FRG-PP-011 | Import history events | pp | implemented | M1 |
-| FRG-PP-012 | Rename preview before execution | pp | approved | M2 |
-| FRG-PP-013 | Upgrades and deletions via recycle bin | pp | approved | M2 |
+| FRG-PP-012 | Rename preview before execution | pp | implemented | M2 |
+| FRG-PP-013 | Upgrades and deletions via recycle bin | pp | implemented | M2 |
 | FRG-PP-014 | Duplicate constraint handling | pp | approved | M2 |
 | FRG-PP-015 | Failed-download blocklist and auto re-search | pp | withdrawn | — |
 | FRG-PP-016 | Manual import resolution | pp | approved | M2 |
@@ -206,7 +206,7 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-API-010 | WebSocket resource-change push | api | implemented | M1 |
 | FRG-API-011 | History endpoint | api | approved | M2 |
 | FRG-API-012 | Wanted/missing endpoint | api | approved | M2 |
-| FRG-API-013 | Config resource endpoints | api | approved | M2 |
+| FRG-API-013 | Config resource endpoints | api | implemented | M2 |
 | FRG-API-014 | System status, health, and task endpoints | api | approved | M2 |
 | FRG-API-015 | Manual import endpoint | api | approved | M2 |
 | FRG-API-016 | Parse debug endpoint | api | approved | B |
@@ -221,7 +221,7 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-UI-009 | Settings: download clients | ui | implemented | M1 |
 | FRG-UI-010 | Activity: history screen | ui | approved | M2 |
 | FRG-UI-011 | Wanted screen | ui | approved | M2 |
-| FRG-UI-012 | Settings: media management and naming with rename preview | ui | approved | M2 |
+| FRG-UI-012 | Settings: media management and naming with rename preview | ui | implemented | M2 |
 | FRG-UI-013 | Settings: notifications | ui | approved | B |
 | FRG-UI-014 | Manual import overlay | ui | approved | M2 |
 | FRG-UI-015 | Library import (existing files) flow | ui | approved | M2 |
@@ -277,7 +277,7 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-DEP-001 | Docker image per linuxserver.io conventions | dep | implemented | M1 |
 | FRG-DEP-002 | all persistent state under /config | dep | implemented | M1 |
 | FRG-DEP-003 | configuration via environment variables and config file | dep | implemented | M1 |
-| FRG-DEP-004 | versioned config-file migration | dep | approved | M2 |
+| FRG-DEP-004 | versioned config-file migration | dep | implemented | M2 |
 | FRG-DEP-005 | secrets never in image or repository | dep | implemented | M1 |
 | FRG-DEP-006 | structured logging | dep | implemented | M1 |
 | FRG-DEP-007 | health endpoint | dep | implemented | M1 |

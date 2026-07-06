@@ -232,6 +232,8 @@ export interface CommandResource {
   id: number;
   name: string;
   status: string;
+  /** The enqueue payload (e.g. rename-series carries `{ series_id }`). */
+  payload?: Record<string, unknown>;
   queued_at: string;
   started_at: string | null;
   finished_at: string | null;
@@ -276,3 +278,43 @@ export const MONITOR_STRATEGIES = [
 
 /** Valid monitor-new-items policies (backend MONITOR_NEW_ITEMS_POLICIES). */
 export const MONITOR_NEW_ITEMS_POLICIES = ['all', 'none'] as const;
+
+/*
+ * Config resource shapes (FRG-API-013) + naming tokens (FRG-UI-012). These
+ * mirror the typed GET/PUT singletons the naming / media-management settings
+ * page reads and writes; field NAMES are the backend settings names verbatim.
+ */
+
+/** GET/PUT /api/v1/config/naming. */
+export interface NamingConfig {
+  rename_enabled: boolean;
+  file_naming_template: string;
+  folder_naming_template: string;
+  replace_illegal_characters: boolean;
+}
+
+/** GET/PUT /api/v1/config/mediamanagement. */
+export interface MediaManagementConfig {
+  import_transfer_mode: string;
+  library_import_mode: string;
+  recycle_bin_path: string;
+  recycle_bin_retention_days: number;
+}
+
+/**
+ * GET /api/v1/config/naming/tokens — the ONE shared token vocabulary the
+ * renderer accepts (design decision 11). `aliases` maps every casefolded token
+ * name to its canonical field key; `defaults` carries the default templates.
+ */
+export interface NamingTokens {
+  aliases: Record<string, string>;
+  defaults: Record<string, string>;
+}
+
+/** One row of GET /api/v1/rename?seriesId= — a file whose name WOULD change. */
+export interface RenamePreviewEntry {
+  issueFileId: number;
+  issueId: number;
+  existingPath: string;
+  newPath: string;
+}

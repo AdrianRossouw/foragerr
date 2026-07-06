@@ -14,6 +14,13 @@ thread via the command handler's ``offload`` and are unit-testable in isolation.
   guard with a configurable margin, checked *before* any bytes are copied.
 - :func:`quarantine_file` — move a superseded file under ``<config>/quarantine/
   <date>/`` (the M1 recycle-bin stand-in, FRG-PP-010 / design decision 8).
+- :func:`recycle_file` — the M2 first-class recycle bin (FRG-PP-013): move a
+  superseded or user-deleted file under ``<recycle_root>/<date>/`` with the same
+  collision-safe naming and cross-device fallback, its destination constructed
+  through :func:`foragerr.security.paths.safe_join` so an adversarial source name
+  can never escape the bin root (design decisions 4-5).
+- :func:`prune_recycle_bin` — housekeeping retention prune of aged recycle-bin
+  entries (design decision 7).
 - :func:`cleanup_empty_dirs` — after a move, remove emptied source directories
   up to (but not including) a stop root (FRG-PP-010).
 """
@@ -29,10 +36,19 @@ import tempfile
 from enum import Enum
 from pathlib import Path
 
+from foragerr.security.paths import safe_join
+
 logger = logging.getLogger("foragerr.importer.fileops")
 
 #: Default free-space safety margin required beyond the file size (FRG-PP-007).
 DEFAULT_FREE_SPACE_MARGIN_BYTES = 100 * 1024 * 1024
+
+#: Marker file :func:`recycle_file` drops at the bin root on first use. Its
+#: presence is the sole licence :func:`prune_recycle_bin` needs before it will
+#: delete anything — so a housekeeping prune pointed at (say) a library root that
+#: was never a recycle bin refuses to touch it, and can never eat series folders
+#: (FRG-PP-013, design decision 5).
+RECYCLE_BIN_MARKER = ".foragerr-recycle-bin"
 
 
 class TransferMode(Enum):
@@ -205,6 +221,104 @@ def quarantine_file(
     return dest
 
 
+def recycle_file(
+    src: str | os.PathLike[str],
+    recycle_root: str | os.PathLike[str],
+    *,
+    now: dt.datetime | None = None,
+) -> Path:
+    """Move a superseded/deleted file into the recycle bin (FRG-PP-013).
+
+    The M2 first-class replacement for :func:`quarantine_file`: the file is moved
+    (never deleted) under ``<recycle_root>/<date>/`` with the same collision-safe
+    numeric-suffix naming and cross-device copy-verify-delete fallback. The
+    destination is built via :func:`safe_join` under the resolved bin root, so a
+    source basename engineered to traverse (``..``, absolute) is reduced to a
+    single safe segment and can never land outside the bin (FRG-SEC-004, design
+    decision 5). Returns the destination path (recorded on the history event).
+    """
+    date = (now or dt.datetime.now(dt.timezone.utc)).date().isoformat()
+    src_path = Path(src)
+    dest = safe_join(recycle_root, date, src_path.name)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    # Stamp the bin so a later housekeeping prune can positively identify this
+    # directory as a foragerr recycle bin before it deletes anything (FRG-PP-013).
+    _mark_recycle_bin(recycle_root)
+    counter = 1
+    while dest.exists():
+        dest = safe_join(recycle_root, date, f"{src_path.stem}.{counter}{src_path.suffix}")
+        counter += 1
+    # Best-effort same-volume rename; fall back across devices, verifying the copy
+    # before the source is removed so a bin on another mount never loses bytes.
+    try:
+        os.replace(src_path, dest)
+    except OSError as exc:
+        if exc.errno != errno.EXDEV:
+            raise
+        _copy_verify_delete(src_path, dest, delete_source=True)
+    return dest
+
+
+def _mark_recycle_bin(recycle_root: str | os.PathLike[str]) -> None:
+    """Drop the :data:`RECYCLE_BIN_MARKER` at the bin root (idempotent)."""
+    root = Path(recycle_root)
+    root.mkdir(parents=True, exist_ok=True)
+    marker = root / RECYCLE_BIN_MARKER
+    if not marker.exists():
+        marker.touch()
+
+
+def prune_recycle_bin(
+    recycle_root: str | os.PathLike[str],
+    retention_days: int,
+    *,
+    now: dt.datetime | None = None,
+) -> int:
+    """Permanently remove aged recycle-bin entries older than ``retention_days`` (FRG-PP-013).
+
+    Structurally confined so a misconfigured retention prune can never eat an
+    arbitrary directory (design decision 5):
+
+    - it refuses to touch anything unless the bin root carries the
+      :data:`RECYCLE_BIN_MARKER` :func:`recycle_file` drops there — a directory
+      that was never a foragerr recycle bin (e.g. a library root accidentally
+      pointed at) is left completely untouched, with a warning; and
+    - it only ever removes **ISO-date-named subdirectories** (``recycle_file``
+      always writes under ``<root>/<YYYY-MM-DD>/``), so a loose file or any
+      non-date folder in the bin is never a prune target.
+
+    ``retention_days <= 0`` keeps everything (``0`` = keep forever). Returns the
+    number of dated folders removed. Never raises on a missing bin.
+    """
+    if retention_days <= 0:
+        return 0
+    root = Path(recycle_root)
+    if not root.is_dir():
+        return 0
+    if not (root / RECYCLE_BIN_MARKER).exists():
+        logger.warning(
+            "recycle prune refused: %s carries no %s marker, so it is not a "
+            "foragerr recycle bin — nothing pruned",
+            root,
+            RECYCLE_BIN_MARKER,
+        )
+        return 0
+    now = now or dt.datetime.now(dt.timezone.utc)
+    cutoff_date = (now - dt.timedelta(days=retention_days)).date()
+    removed = 0
+    for entry in sorted(root.iterdir()):
+        if not entry.is_dir():
+            continue  # loose files (incl. the marker) are never prune targets
+        try:
+            folder_date = dt.date.fromisoformat(entry.name)
+        except ValueError:
+            continue  # only ISO-date folders recycle_file writes are prunable
+        if folder_date < cutoff_date:
+            shutil.rmtree(entry)
+            removed += 1
+    return removed
+
+
 def cleanup_empty_dirs(
     start_dir: str | os.PathLike[str],
     stop_root: str | os.PathLike[str],
@@ -254,6 +368,7 @@ _DEFAULT_JUNK_NAMES: frozenset[str] = frozenset(
 
 __all__ = [
     "DEFAULT_FREE_SPACE_MARGIN_BYTES",
+    "RECYCLE_BIN_MARKER",
     "NotEnoughSpaceError",
     "TransferError",
     "TransferMode",
@@ -262,5 +377,7 @@ __all__ = [
     "free_bytes",
     "free_space_ok",
     "place_file",
+    "prune_recycle_bin",
     "quarantine_file",
+    "recycle_file",
 ]

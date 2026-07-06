@@ -6,6 +6,7 @@ import { AddSeries } from './screens/add/AddSeries';
 import { QueueScreen } from './screens/queue/QueueScreen';
 import { IndexerSettings } from './routes/settings/IndexerSettings';
 import { DownloadClientSettings } from './routes/settings/DownloadClientSettings';
+import { MediaManagement } from './screens/settings/MediaManagement';
 
 /**
  * Routing (FRG-UI-001). All change-7 screens are real: library cluster
@@ -25,6 +26,10 @@ export function App() {
         <Route
           path="settings/download-clients"
           element={<DownloadClientSettings />}
+        />
+        <Route
+          path="settings/media-management"
+          element={<MediaManagement />}
         />
       </Route>
     </Routes>

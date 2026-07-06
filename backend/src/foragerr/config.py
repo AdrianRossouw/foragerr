@@ -29,7 +29,14 @@ import yaml
 from pydantic import Field, SecretStr, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from foragerr.config_migrations import (
+    CURRENT_CONFIG_VERSION,
+    ConfigSchemaVersionError,
+    atomic_write_text,
+    migrate_config,
+)
 from foragerr.logging import register_secret
+from foragerr.naming import DEFAULT_FILE_TEMPLATE, DEFAULT_FOLDER_TEMPLATE
 
 logger = _stdlog.getLogger("foragerr.config")
 
@@ -44,6 +51,10 @@ _LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 #: OPDS on one of these (or on "/", the SPA root) would silently shadow a core
 #: route, so ``opds_base_path`` validation rejects them (FRG-NFR-009).
 _OPDS_RESERVED_PATHS = ("/api", "/health")
+
+#: Allowed values for the two media-management transfer/import mode settings.
+_TRANSFER_MODES = ("move", "copy", "hardlink")
+_LIBRARY_IMPORT_MODES = ("in_place", "move")
 
 #: Documented safe ranges for interval settings: name -> (floor, ceiling).
 #: Out-of-range supplied values are clamped with a warning (FRG-NFR-009).
@@ -66,6 +77,60 @@ class ConfigError(Exception):
 def resolve_config_dir() -> Path:
     """The directory holding all persistent state (FRG-DEP-002)."""
     return Path(os.environ.get(CONFIG_DIR_ENV, str(DEFAULT_CONFIG_DIR))).expanduser()
+
+
+def _file_template_round_trips(template: str) -> bool:
+    """True if ``template`` both round-trips a probe identity AND is injective over
+    distinct issues (the FRG-PP-009 contract + its data-loss corollary).
+
+    Two properties are checked, because a single-identity probe misses the worst
+    failure: a template that renders the SAME name for DISTINCT issues silently
+    overwrites one library file with another on rename.
+
+    1. **Round-trip.** A rendered probe re-parses back to the same series matching
+       key and issue ordering key — so a renamed file stays reconcilable.
+    2. **Injectivity.** Two probes differing only in issue number, and two probes
+       differing only in the ``[__{IssueId}__]`` identity, must each render
+       DIFFERENT names. This rejects a template that drops the issue number (issues
+       7 and 8 would collide) or the id tag (two issues sharing a display number
+       would collide) — the tokens that guarantee one file per issue.
+
+    Imports are deferred to avoid an import cycle (``config`` is imported early).
+    """
+    from fractions import Fraction
+
+    from foragerr.library.ordering import encode_sort_key
+    from foragerr.naming import RenameFields, render_filename
+    from foragerr.parser import parse
+    from foragerr.parser.normalize import matching_key
+    from foragerr.parser.ordering import sort_key
+    from foragerr.parser.result import Issue
+
+    def _render(issue: str, issue_id: str) -> str:
+        fields = RenameFields(
+            series_title="Foragerr Probe Series",
+            issue=issue,
+            year="2015",
+            issue_id=issue_id,
+        )
+        return render_filename(fields, template=template, ext=".cbz")
+
+    try:
+        rendered = _render("7", "424242")
+        # Injectivity: distinct issue numbers and distinct ids must not collide.
+        differs_by_number = _render("8", "424242") != rendered
+        differs_by_id = _render("7", "424243") != rendered
+        reparsed = parse(rendered, reference_year=2016)
+    except Exception:
+        return False
+    if not (differs_by_number and differs_by_id):
+        return False
+    if not reparsed.success or reparsed.issue is None:
+        return False
+    if reparsed.matching_key != matching_key("Foragerr Probe Series"):
+        return False
+    expected = encode_sort_key(sort_key(Issue(value=Fraction(7), display="7")))
+    return encode_sort_key(sort_key(reparsed.issue)) == expected
 
 
 class Settings(BaseSettings):
@@ -361,6 +426,86 @@ class Settings(BaseSettings):
         ),
     )
 
+    rename_enabled: bool = Field(
+        default=True,
+        description=(
+            "Rename imported files to the file naming template. When off, an "
+            "imported file keeps its original name (FRG-PP-012)."
+        ),
+    )
+    file_naming_template: str = Field(
+        default=DEFAULT_FILE_TEMPLATE,
+        description=(
+            "Token template for imported/renamed file names (FRG-PP-009). Tokens "
+            "like {Series Title} {Issue Number:000} ({Year}) are substituted; the "
+            "template must round-trip a probe identity back through the parser so a "
+            "renamed file stays reconcilable to its issue."
+        ),
+    )
+    folder_naming_template: str = Field(
+        default=DEFAULT_FOLDER_TEMPLATE,
+        description=(
+            "Token template for the series folder name (FRG-PP-010), e.g. "
+            "{Series Title} ({Year})."
+        ),
+    )
+    replace_illegal_characters: bool = Field(
+        default=True,
+        description=(
+            "Replace filesystem-illegal characters in rendered file names with a "
+            "space instead of leaving them (FRG-PP-009)."
+        ),
+    )
+    import_transfer_mode: str = Field(
+        default="move",
+        description=(
+            "How a completed download is placed into the library: move, copy, or "
+            "hardlink (FRG-PP-007). 'move' is the correct default for a file "
+            "arriving in a download directory."
+        ),
+    )
+    library_import_mode: str = Field(
+        default="in_place",
+        description=(
+            "How an existing-library import treats files already under the library "
+            "root: in_place (safe default — never re-move) or move. Honored by the "
+            "existing-library import path (defined here, wired in a later change)."
+        ),
+    )
+    recycle_bin_path: str = Field(
+        default="",
+        description=(
+            "Directory that upgrade-replaced and user-deleted library files are "
+            "moved to instead of being permanently deleted (FRG-PP-013). Empty "
+            "means permanently delete. Must be a writable directory when set."
+        ),
+    )
+    recycle_bin_retention_days: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Days recycle-bin entries are kept before housekeeping permanently "
+            "removes them (FRG-PP-013). 0 keeps them forever."
+        ),
+    )
+    config_backup_retention: int = Field(
+        default=3,
+        ge=1,
+        description=(
+            "Number of pre-config-migration backups retained under backups/; the "
+            "oldest beyond this count are pruned (FRG-DEP-004)."
+        ),
+    )
+    config_schema_version: int = Field(
+        default=CURRENT_CONFIG_VERSION,
+        ge=0,
+        description=(
+            "Schema version stamped into this config file. Managed automatically: "
+            "an older file is migrated forward at startup, a newer one refuses to "
+            "start (FRG-DEP-004). Do not edit by hand."
+        ),
+    )
+
     @classmethod
     def settings_customise_sources(  # env vars override init kwargs (= file values)
         cls,
@@ -433,6 +578,63 @@ class Settings(BaseSettings):
                 raise ValueError(f"directory is not writable: {value}")
         return value
 
+    @field_validator("file_naming_template", "folder_naming_template")
+    @classmethod
+    def _template_non_empty(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("naming template must not be empty")
+        return value
+
+    @field_validator("file_naming_template")
+    @classmethod
+    def _file_template_round_trips_check(cls, value: str) -> str:
+        if not _file_template_round_trips(value):
+            raise ValueError(
+                "file naming template must render a name that round-trips back to "
+                "the same series and issue — keep {Series Title}, {Issue Number} "
+                "and the [__{IssueId}__] identity tag"
+            )
+        return value
+
+    @field_validator("import_transfer_mode")
+    @classmethod
+    def _valid_transfer_mode(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in _TRANSFER_MODES:
+            raise ValueError(f"must be one of {', '.join(_TRANSFER_MODES)}")
+        return normalized
+
+    @field_validator("library_import_mode")
+    @classmethod
+    def _valid_library_import_mode(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in _LIBRARY_IMPORT_MODES:
+            raise ValueError(f"must be one of {', '.join(_LIBRARY_IMPORT_MODES)}")
+        return normalized
+
+    @field_validator("recycle_bin_path")
+    @classmethod
+    def _recycle_bin_usable(cls, value: str) -> str:
+        """Empty is allowed (permanent delete); a set path must be a writable,
+        confinement-safe directory — same fail-fast posture as ``config_dir``."""
+        text = value.strip()
+        if not text:
+            return ""
+        path = Path(text).expanduser()
+        if path.exists():
+            if not path.is_dir():
+                raise ValueError(f"path exists but is not a directory: {path}")
+            if not os.access(path, os.W_OK):
+                raise ValueError(f"directory is not writable: {path}")
+        else:
+            parent = path.parent
+            if not parent.exists() or not os.access(parent, os.W_OK):
+                raise ValueError(
+                    f"path {path} does not exist and its parent is not a "
+                    "writable directory"
+                )
+        return str(path)
+
     @model_validator(mode="after")
     def _clamp_intervals(self) -> "Settings":
         for name, (floor, ceiling) in INTERVAL_RANGES.items():
@@ -459,9 +661,19 @@ class Settings(BaseSettings):
         }
 
 
-def generate_default_config(path: Path) -> None:
-    """Write a first-run ``config.yaml``: every setting, its default, and an
-    explanatory comment; secrets only as commented placeholders (FRG-DEP-003)."""
+def render_documented_config(values: dict[str, Any] | None = None) -> str:
+    """Render a fully documented ``config.yaml`` body (FRG-DEP-003).
+
+    Every setting is emitted with its explanatory comment (from the ``Field``
+    description) and its built-in default; secrets and the environment-only
+    ``config_dir`` are commented placeholders. This is the ONE renderer used for
+    both the first-run write (``values=None`` ⇒ pure defaults) AND every rewrite
+    (migration, config-resource ``PUT``): passing the CURRENT ``values`` emits the
+    same documented shape carrying live values, so no rewrite ever strips the
+    documentation the first-run file promised. Any key not in the model (an
+    operator/unknown key) is preserved verbatim at the end rather than dropped.
+    """
+    provided = values or {}
     lines = [
         "# foragerr configuration",
         "#",
@@ -482,13 +694,33 @@ def generate_default_config(path: Path) -> None:
             continue
         default = field.default
         if isinstance(default, SecretStr):
+            supplied = provided.get(name)
             lines.append("# default: (empty)")
-            lines.append(f'#{name}: ""')
+            if supplied:  # operator set the secret in the file — preserve it
+                lines.append(yaml.safe_dump({name: supplied}, sort_keys=False).strip())
+            else:
+                lines.append(f'#{name}: ""')
         else:
+            current = provided.get(name, default)
             lines.append(f"# default: {default}")
-            lines.append(yaml.safe_dump({name: default}, sort_keys=False).strip())
+            lines.append(yaml.safe_dump({name: current}, sort_keys=False).strip())
         lines.append("")
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    extras = {
+        key: val
+        for key, val in provided.items()
+        if key not in Settings.model_fields and key != "config_dir"
+    }
+    if extras:
+        lines.append("# keys not recognized by this build (preserved verbatim):")
+        lines.append(yaml.safe_dump(extras, sort_keys=False).strip())
+        lines.append("")
+    return "\n".join(lines) + "\n"
+
+
+def generate_default_config(path: Path) -> None:
+    """Write a first-run ``config.yaml`` (FRG-DEP-003): the documented defaults,
+    written atomically."""
+    atomic_write_text(path, render_documented_config())
 
 
 def _format_validation_error(exc: ValidationError) -> str:
@@ -522,7 +754,31 @@ def load_settings() -> Settings:
             raise ConfigError(f"{config_file}: invalid YAML: {exc}") from exc
         if not isinstance(loaded, dict):
             raise ConfigError(f"{config_file}: top level must be a key/value mapping")
-        file_values = loaded
+        # Forward-migrate the stamped config before validating (FRG-DEP-004). A
+        # newer-than-supported stamp refuses startup with the file untouched.
+        retention = loaded.get("config_backup_retention", 3)
+        try:
+            retention = int(retention)
+        except (TypeError, ValueError):
+            retention = 3
+        try:
+            file_values = migrate_config(
+                config_file,
+                loaded,
+                config_dir,
+                retention=retention,
+                render=render_documented_config,
+            )
+        except ConfigSchemaVersionError as exc:
+            raise ConfigError(str(exc)) from exc
+        except OSError as exc:
+            # The forward migration backs up + rewrites the file; an unwritable
+            # config directory surfaces here as an OSError. Report it in the same
+            # field-precise shape the config_dir writability check uses.
+            raise ConfigError(
+                f"config_dir: config directory is not writable, cannot migrate "
+                f"{config_file}: {exc}"
+            ) from exc
     else:
         try:
             generate_default_config(config_file)
