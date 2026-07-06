@@ -7,8 +7,10 @@ dependency declared in the backend and frontend manifests, so that a dependency
 change is a visible, reviewed event rather than a silent transitive drift.
 
 **Scope.** Direct dependencies only — the entries a manifest (`backend/pyproject.toml`
-`[project.dependencies]` / `[dependency-groups].dev`, and, once it exists,
-`frontend/package.json` `dependencies` / `devDependencies`) declares explicitly.
+`[project.dependencies]` / `[dependency-groups].dev`, `frontend/package.json`
+`dependencies` / `devDependencies`, and `e2e/package.json` `devDependencies` —
+the Playwright harness is dev tooling by definition and may declare no runtime
+dependencies) declares explicitly.
 Transitive dependencies are not tracked here; the lockfiles (`uv.lock`,
 `package-lock.json` once present) remain the authoritative pin of the full
 resolved tree, per FRG-PROC-012's non-goals.
@@ -82,3 +84,11 @@ When live tooling becomes available, anomaly review is introduced in its own cha
 | typescript | `^5.6.2` | TypeScript compiler/type-checker (`tsc -b`, `npm run typecheck`) |
 | vite | `^5.4.8` | Dev server and production build tool for the SPA |
 | vitest | `^2.1.2` | Test runner for the frontend test suite (`frontend/src/**/*.test.tsx`) |
+
+## Development/test tooling (e2e)
+
+| Name | Version constraint | Purpose |
+|---|---|---|
+| @playwright/test | `1.49.1` | Browser-driven end-to-end test runner for the FRG-PROC-010 slice-verification harness (`e2e/tests`) |
+| @types/node | `^26.1.0` | TypeScript type definitions for the harness's node-side helpers and report generator |
+| typescript | `^6.0.3` | Type-checks the e2e harness sources |

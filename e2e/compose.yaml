@@ -1,0 +1,78 @@
+# docker-compose topology for the foragerr hermetic e2e run (FRG-PROC-010).
+#
+# One user-defined network on a NON-RFC-1918 subnet (TEST-NET-3, 203.0.113.0/24)
+# so fixture container IPs are accepted by the app's egress policy (FRG-SEC-001,
+# which refuses loopback/link-local/RFC-1918) exactly as the unit suite's
+# PUBLIC_V4 does — no product egress change, a compose-only network choice.
+#
+# Everything the app reaches externally resolves to mockhub: ComicVine + Newznab
+# over http, GetComics DDL over https (host getcomics.org, a network alias). The
+# live-SAB tier is a profile-gated extra, skipped when creds are absent.
+
+networks:
+  e2e:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 203.0.113.0/24
+
+services:
+  foragerr:
+    image: ${FORAGERR_IMAGE:-foragerr:e2e}
+    # Trust mockhub's TLS CA (the DDL client refuses non-https and TLS verify is
+    # always on), then hand off to the image's real linuxserver entrypoint which
+    # remaps PUID/PGID and drops privileges. This runs as root before the drop.
+    # NB: bash -c, NOT -lc — a login shell re-sources /etc/profile and drops
+    # /app/.venv/bin from PATH, which would hide the `foragerr` console script.
+    entrypoint:
+      - /bin/bash
+      - -c
+      - 'cat /certs/ca.pem >> "$(/app/.venv/bin/python -c "import certifi;print(certifi.where())")" && exec /usr/local/bin/entrypoint.sh foragerr'
+    environment:
+      PUID: ${FORAGERR_PUID:-911}
+      PGID: ${FORAGERR_PGID:-911}
+      TZ: Etc/UTC
+      # Point the metadata client at the fixture ComicVine (the one sanctioned
+      # e2e-only override; defaults to the real API in production).
+      # Fixture-network plaintext is explicitly opted into (test affordance;
+      # the 'key' below is a dummy fixture value, not a secret).
+      FORAGERR_COMICVINE_BASE_URL: http://mockhub:8080/api
+      FORAGERR_COMICVINE_INSECURE_BASE: "true"
+      FORAGERR_COMICVINE_API_KEY: e2e-example-key
+      FORAGERR_COMICVINE_IMAGE_HOSTS: mockhub
+      FORAGERR_COMICVINE_MIN_INTERVAL_SECONDS: "0.1"
+      # A retention window so the deliberately-old Newznab release is rejected
+      # with a verbatim reason for the interactive-search scenario.
+      FORAGERR_USENET_RETENTION_DAYS: "30"
+      # Poll completed downloads quickly so S4 does not wait a full minute.
+      FORAGERR_TRACK_DOWNLOADS_INTERVAL_SECONDS: "60"
+      FORAGERR_LOG_LEVEL: INFO
+    volumes:
+      - ${FORAGERR_E2E_RUN}/config:/config
+      - ${FORAGERR_E2E_RUN}/library:/library
+      - ${FORAGERR_E2E_RUN}/certs/ca.pem:/certs/ca.pem:ro
+    networks:
+      - e2e
+    ports:
+      - "8789" # ephemeral host port; run.sh discovers it via `compose port`
+    depends_on:
+      mockhub:
+        condition: service_started
+
+  mockhub:
+    build:
+      context: ./fixtures
+      args:
+        BASE_IMAGE: ${FORAGERR_IMAGE:-foragerr:e2e}
+    environment:
+      MOCKHUB_TLS_CERT: /certs/getcomics.crt
+      MOCKHUB_TLS_KEY: /certs/getcomics.key
+      MOCKHUB_CBZ: /data/saga-001.cbz
+    volumes:
+      - ${FORAGERR_E2E_RUN}/certs:/certs:ro
+      - ${FORAGERR_E2E_RUN}/data:/data:ro
+    networks:
+      e2e:
+        aliases:
+          - mockhub
+          - getcomics.org

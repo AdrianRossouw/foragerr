@@ -170,7 +170,7 @@ function DecisionRow({
             label={`${label} — show reasons`}
           >
             {/* Verbatim reasons, one per line — never paraphrased (FRG-UI-007). */}
-            <ul className={styles.rejectionList}>
+            <ul className={styles.rejectionList} data-testid={`ft-rejections-${decision.guid}`}>
               {decision.rejections.map((reason) => (
                 <li key={reason}>{reason}</li>
               ))}

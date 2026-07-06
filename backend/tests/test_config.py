@@ -220,6 +220,25 @@ def test_opds_base_path_rejects_reserved_mount_paths(config_dir, reserved):
 
 @pytest.mark.req("FRG-NFR-009")
 @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
+@pytest.mark.req("FRG-META-001")
+def test_comicvine_base_url_requires_https(config_dir):
+    """The API key rides every CV request; a plaintext base would exfiltrate
+    it (change-8 gate finding). https passes, http is refused at startup,
+    and the e2e fixture opts in explicitly."""
+    from foragerr.config import Settings
+
+    Settings(config_dir=config_dir, comicvine_base_url="https://cv.example/api")
+    with pytest.raises(Exception, match="plain http"):
+        Settings(config_dir=config_dir, comicvine_base_url="http://cv.example/api")
+    Settings(
+        config_dir=config_dir,
+        comicvine_base_url="http://mockhub:8080/api",
+        comicvine_insecure_base=True,
+    )
+    with pytest.raises(Exception, match="absolute http"):
+        Settings(config_dir=config_dir, comicvine_base_url="not-a-url")
+
+
 def test_unwritable_config_dir_is_named_in_the_failure(config_dir):
     (config_dir / CONFIG_FILENAME).write_text("log_level: INFO\n", encoding="utf-8")
     config_dir.chmod(0o555)

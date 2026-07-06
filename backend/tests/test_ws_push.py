@@ -378,9 +378,19 @@ def test_ws_endpoint_delivers_a_push_over_the_real_asgi_stack(tmp_path):
                 client.app.state.events.publish,
                 SeriesRefreshed(series_id=42, partial=False),
             )
-            msg = json.loads(ws.receive_text())
-            assert msg == {
+            # The app's own startup activity (scheduler/command events) may
+            # legitimately broadcast in the same window under load — the
+            # claim under test is that OUR envelope arrives, not that it
+            # arrives first. Read a bounded handful of messages.
+            expected = {
                 "name": "series",
                 "action": "updated",
                 "resource": {"id": 42, "partial": False},
             }
+            received = []
+            for _ in range(20):
+                msg = json.loads(ws.receive_text())
+                received.append(msg)
+                if msg == expected:
+                    break
+            assert expected in received, f"push never arrived; saw {received!r}"

@@ -92,11 +92,15 @@ class ComicVineClient:
         settings,
         factory: HttpClientFactory,
         *,
-        base: str = DEFAULT_BASE,
+        base: str | None = None,
     ) -> None:
         self._api_key = settings.comicvine_api_key.get_secret_value()
         self._client = factory.external()
-        self._base = base.rstrip("/")
+        # Precedence: an explicit ``base=`` (tests) > the ``comicvine_base_url``
+        # setting (defaults to the real API, only overridden by the e2e compose
+        # harness to point at the fixture ComicVine) > the module default.
+        resolved_base = base or getattr(settings, "comicvine_base_url", "") or DEFAULT_BASE
+        self._base = resolved_base.rstrip("/")
         self._interval = effective_interval(settings)
         self._page_size = settings.comicvine_page_size
         self._max_pages = settings.comicvine_max_pages

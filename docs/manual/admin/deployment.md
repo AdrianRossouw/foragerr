@@ -22,7 +22,10 @@ tools/build-image.sh --tag foragerr:latest
 ```
 
 The build script secret-scans the build context before invoking `docker build` and
-**refuses to build** if it finds a `.env` file or key-shaped material in the context
+**refuses to build** on key-shaped material in any file that would ship, or on an
+env file that `.dockerignore` does not exclude from the context (a `.env` in the
+working tree is normal on a dev machine and is reported but non-fatal, because the
+recursive `.dockerignore` patterns keep it out of every image layer)
 (`FRG-DEP-001`). Run just the scan with `tools/build-image.sh --scan-only`. Under the
 hood it is an ordinary multi-stage `docker build` (a node stage builds the frontend, a
 `python:3.12-slim` stage installs the backend with `uv` and copies in the built SPA),
