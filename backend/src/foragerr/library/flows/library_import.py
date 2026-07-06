@@ -900,8 +900,28 @@ async def _import_group(
 
     imported = 0
     blocked_reasons: list[str] = []
+    all_already_registered = False
     async with db.write_session() as session:
         candidates = await gather(source, session, ctx)
+        if not candidates:
+            # Distinguish "everything vanished" from "everything already
+            # imported" (the source filters registered paths): a re-run of a
+            # fully-imported group is a success, not a scan problem.
+            staged = [path for path, _size in decode_group_files(group.files)]
+            registered = set(
+                (
+                    await session.execute(
+                        select(IssueFileRow.path).where(
+                            IssueFileRow.path.in_(staged)
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            all_already_registered = bool(staged) and all(
+                path in registered for path in staged
+            )
         for candidate in candidates:
             outcome = await import_candidate(session, candidate, ctx)
             if outcome.status is ImportStatus.IMPORTED:
@@ -913,6 +933,15 @@ async def _import_group(
                 )
 
     if not candidates:
+        if all_already_registered:
+            await _set_group_outcome(
+                db,
+                group.id,
+                state="imported",
+                message="all staged files are already imported",
+                rejections=[],
+            )
+            return "imported"
         await _set_group_outcome(
             db,
             group.id,
