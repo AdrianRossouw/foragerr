@@ -24,6 +24,25 @@ export const queryKeys = {
     all: () => ['queue'] as const,
     page: (page: number) => ['queue', page] as const,
   },
+  // Paged daily surfaces (FRG-UI-010/011/017), family-page convention like
+  // ['queue', page] plus a filters hash so two filterings of the same page are
+  // distinct cache entries: ['history', 2, 'eventType=imported']. Invalidating
+  // the bare family key sweeps every page/filter combination.
+  history: {
+    all: () => ['history'] as const,
+    page: (page: number, filtersHash = '') =>
+      ['history', page, filtersHash] as const,
+  },
+  wanted: {
+    all: () => ['wanted'] as const,
+    page: (page: number, filtersHash = '') =>
+      ['wanted', page, filtersHash] as const,
+  },
+  blocklist: {
+    all: () => ['blocklist'] as const,
+    page: (page: number, filtersHash = '') =>
+      ['blocklist', page, filtersHash] as const,
+  },
   release: {
     forIssue: (issueId: number) => ['release', issueId] as const,
   },

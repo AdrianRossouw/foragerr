@@ -4,7 +4,13 @@ import userEvent from '@testing-library/user-event';
 import { Routes, Route } from 'react-router-dom';
 import { renderWithProviders } from '../../test/renderWithProviders';
 import { fakeFetcher } from '../../test/fakeFetcher';
-import { makeCommand, mockIssues, mockSeriesResource, pageOf } from '../../test/mockData';
+import {
+  makeCommand,
+  makeMediaManagementConfig,
+  mockIssues,
+  mockSeriesResource,
+  pageOf,
+} from '../../test/mockData';
 import { queryKeys } from '../../api/queryKeys';
 import { useUiStore } from '../../store/uiStore';
 import type { SeriesResource } from '../../api/types';
@@ -21,9 +27,15 @@ beforeEach(() => {
 });
 
 /** A stateful fake backend for series 7 covering all detail-screen routes. */
-function detailFetcher() {
+function detailFetcher(mmConfig = makeMediaManagementConfig()) {
   return fakeFetcher((path, options) => {
     const method = options?.method ?? 'GET';
+    if (method === 'GET' && path === '/api/v1/config/mediamanagement') {
+      return mmConfig;
+    }
+    if (method === 'DELETE' && path === '/api/v1/issuefile/501') {
+      return { recycled: mmConfig.recycle_bin_path || null };
+    }
     if (method === 'GET' && path === '/api/v1/series/7') return mockSeriesResource;
     if (method === 'GET' && path.startsWith('/api/v1/issues?seriesId=7')) {
       return pageOf(mockIssues);
@@ -51,8 +63,8 @@ function detailFetcher() {
   });
 }
 
-function renderDetail() {
-  const { spy, fetcher } = detailFetcher();
+function renderDetail(mmConfig = makeMediaManagementConfig()) {
+  const { spy, fetcher } = detailFetcher(mmConfig);
   const utils = renderWithProviders(
     <Routes>
       <Route path="/" element={<div data-testid="library-stub" />} />
@@ -207,6 +219,13 @@ describe('FRG-UI-004: series detail', () => {
     );
     await user.click(screen.getByRole('button', { name: 'Delete' }));
     const dialog = screen.getByRole('dialog', { name: 'Delete Invincible' });
+    // Truthful since m2-daily-surfaces: deleteFiles=true is implemented — the
+    // dialog states the real consequence instead of a 501-era caveat.
+    expect(
+      within(dialog).getByText(
+        /Files are moved to the recycle bin when one is configured; otherwise they are permanently deleted\./,
+      ),
+    ).toBeInTheDocument();
     await user.click(
       within(dialog).getByRole('checkbox', { name: 'Also delete files from disk' }),
     );
@@ -219,5 +238,67 @@ describe('FRG-UI-004: series detail', () => {
     );
     // Successful delete navigates back to the library index.
     await waitFor(() => expect(screen.getByTestId('library-stub')).toBeInTheDocument());
+  });
+
+  it('FRG-UI-004 — delete-file confirmation names the recycle bin when one is configured and deletes via /api/v1/issuefile', async () => {
+    const { spy } = renderDetail(
+      makeMediaManagementConfig({ recycle_bin_path: '/recycle' }),
+    );
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('issue-row-71')).toBeInTheDocument(),
+    );
+    // Only rows WITH a file offer the delete-file action.
+    expect(
+      screen.getByRole('button', { name: 'Delete file for issue 1' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Delete file for issue 1.5' }),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Delete file for issue 1' }));
+    const dialog = await screen.findByRole('dialog', {
+      name: 'Delete file for issue 1',
+    });
+    expect(
+      within(dialog).getByText('/comics/Invincible (2003)/Invincible 001.cbz'),
+    ).toBeInTheDocument();
+    // The confirmation names the consequence: recycle bin, not permanent.
+    expect(
+      await within(dialog).findByText('This moves the file to the recycle bin.'),
+    ).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole('button', { name: 'Delete File' }));
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith('/api/v1/issuefile/501', {
+        method: 'DELETE',
+      }),
+    );
+    // Success closes the confirmation.
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('dialog', { name: 'Delete file for issue 1' }),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
+  it('FRG-UI-004 — delete-file confirmation warns of permanent deletion when no recycle bin is configured', async () => {
+    renderDetail(makeMediaManagementConfig({ recycle_bin_path: '' }));
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('issue-row-71')).toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole('button', { name: 'Delete file for issue 1' }));
+    const dialog = await screen.findByRole('dialog', {
+      name: 'Delete file for issue 1',
+    });
+
+    expect(
+      await within(dialog).findByText(
+        'This permanently deletes the file from disk — no recycle bin is configured.',
+      ),
+    ).toBeInTheDocument();
   });
 });

@@ -391,6 +391,85 @@ export const ARCHIVE_FORMATS = ['cbz', 'cbr', 'cb7', 'cbt', 'pdf'] as const;
  * so `LibraryImportGroup` types the wire shape directly.
  */
 
+/*
+ * Daily-surfaces resource shapes (m2-daily-surfaces: FRG-API-011/012 +
+ * blocklist read API). All three ride the shared ApiPage envelope and use the
+ * queue resource's camelCase field convention with nested series/issue
+ * display objects.
+ */
+
+/** The backend's import_history event vocabulary (importer/history.py). */
+export const HISTORY_EVENT_TYPES = [
+  'grabbed',
+  'imported',
+  'upgrade_replaced',
+  'import_blocked',
+  'import_failed',
+  'download_failed',
+  'file_deleted',
+  'file_renamed',
+  'comicinfo_tag_failed',
+] as const;
+
+export type HistoryEventType = (typeof HISTORY_EVENT_TYPES)[number];
+
+/** One GET /api/v1/history record (FRG-API-011, queue-pattern camelCase). */
+export interface HistoryRecord {
+  id: number;
+  /** Event vocabulary value; typed open so unknown future events still render. */
+  eventType: string;
+  sourceTitle: string | null;
+  downloadId: string | null;
+  date: string;
+  /** The canonical per-event payload; `reasons` (when present) is the verbatim
+   * rejection-reasons array — never re-sorted. */
+  data: Record<string, unknown>;
+  series: { id: number; title: string } | null;
+  issue: { id: number; issueNumber: string | null; title: string | null } | null;
+}
+
+/**
+ * One GET /api/v1/wanted/missing record (FRG-API-012): issue-shaped with a
+ * nested series. The release-date field is tolerated in any of the shapes the
+ * backend may serve (`releaseDate`, or the issue's own `storeDate`/`coverDate`).
+ */
+export interface WantedIssueRecord {
+  id: number;
+  /** Verbatim string — NEVER numeric ("1.5"/"1.MU" render unchanged). */
+  issueNumber: string | null;
+  title: string | null;
+  releaseDate?: string | null;
+  coverDate?: string | null;
+  storeDate?: string | null;
+  series: { id: number; title: string };
+}
+
+/** One GET /api/v1/blocklist record. `message` is the verbatim ban reason. */
+export interface BlocklistRecord {
+  id: number;
+  sourceTitle: string;
+  indexerName: string | null;
+  /** The backend serves the ban timestamp as `date` (or `createdAt`). */
+  date?: string | null;
+  createdAt?: string | null;
+  message: string | null;
+  protocol: string | null;
+  series: { id: number; title: string } | null;
+  issue: { id: number; issueNumber: string | null; title: string | null } | null;
+}
+
+/** POST /api/v1/blocklist/delete response — partial failure is reportable. */
+export interface BlocklistBulkDeleteResult {
+  deleted: number[];
+  missing: number[];
+}
+
+/** DELETE /api/v1/issuefile/{id} response (FRG-API-003 / FRG-UI-004). */
+export interface IssueFileDeleteResult {
+  /** Recycle-bin destination path, or null when permanently deleted. */
+  recycled: string | null;
+}
+
 /** Staging lifecycle of one scanned folder group (design decision 2). */
 export type LibraryImportGroupState =
   | 'proposed'
