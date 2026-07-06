@@ -65,7 +65,7 @@ def test_lookup_candidate_exposes_count_of_issues(client, monkeypatch):
 
     resp = client.get("/api/v1/series/lookup", params={"term": "Saga"})
     assert resp.status_code == 200
-    candidate = resp.json()[0]
+    candidate = resp.json()["records"][0]
     assert candidate["count_of_issues"] == 66
 
 
@@ -80,4 +80,4 @@ def test_lookup_count_of_issues_is_null_when_comicvine_omits_it(client, monkeypa
     )
 
     resp = client.get("/api/v1/series/lookup", params={"term": "Paper Girls"})
-    assert resp.json()[0]["count_of_issues"] is None
+    assert resp.json()["records"][0]["count_of_issues"] is None
