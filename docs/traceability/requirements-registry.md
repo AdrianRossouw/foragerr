@@ -35,6 +35,7 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-PROC-007 | Branch-based integration, green main | dev-process | active | — |
 | FRG-PROC-008 | Worktree isolation for concurrent agents | dev-process | active | — |
 | FRG-PROC-009 | Spec approval gate | dev-process | active | — |
+| FRG-PROC-010 | End-to-end slice verification harness | dev-process | proposed | M1 |
 | FRG-PROC-011 | Manual kept in sync with the application | dev-process | active | — |
 | FRG-PROC-012 | SOUP register | dev-process | active | — |
 | FRG-SER-001 | Series entity from ComicVine volume | ser | implemented | M1 |
