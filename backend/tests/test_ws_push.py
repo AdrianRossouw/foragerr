@@ -326,6 +326,7 @@ class _FakeWebSocket:
         self.sent: list[str] = []
         self.accepted = False
         self.closed = False
+        self.close_code: int | None = None
         self._incoming: asyncio.Queue[object] = asyncio.Queue()
 
     async def accept(self) -> None:
@@ -340,13 +341,41 @@ class _FakeWebSocket:
             raise item
         return str(item)
 
+    async def receive(self) -> dict:
+        """Model the raw ASGI ``receive`` the endpoint now uses: a disconnect
+        surfaces as a ``websocket.disconnect`` message (not a raised exception),
+        a ``bytes`` item as a binary frame, anything else as a text frame."""
+        item = await self._incoming.get()
+        if isinstance(item, WebSocketDisconnect):
+            return {"type": "websocket.disconnect", "code": item.code}
+        if isinstance(item, (bytes, bytearray)):
+            return {"type": "websocket.receive", "bytes": bytes(item)}
+        return {"type": "websocket.receive", "text": str(item)}
+
     async def close(self, code: int = 1000) -> None:
         self.closed = True
+        self.close_code = code
 
 
-def _fake_app(broadcaster: WsBroadcaster) -> object:
+def _fake_app(
+    broadcaster: WsBroadcaster,
+    *,
+    ws_max_inbound_bytes: int = 4096,
+    ws_max_inbound_messages_per_second: int = 10,
+) -> object:
+    """A stand-in app carrying the two state attributes the endpoint reads:
+    ``ws_broadcaster`` and ``settings`` (only the inbound-limit fields the
+    endpoint touches — the cap lives on the broadcaster)."""
     return types.SimpleNamespace(
-        state=types.SimpleNamespace(ws_broadcaster=broadcaster)
+        state=types.SimpleNamespace(
+            ws_broadcaster=broadcaster,
+            settings=types.SimpleNamespace(
+                ws_max_inbound_bytes=ws_max_inbound_bytes,
+                ws_max_inbound_messages_per_second=(
+                    ws_max_inbound_messages_per_second
+                ),
+            ),
+        )
     )
 
 
@@ -480,3 +509,280 @@ def test_ws_endpoint_delivers_a_push_over_the_real_asgi_stack(tmp_path):
             # disconnect and skips its own close() — keeping the portal teardown
             # (this `with` block's __exit__) from racing a double close.
             ws.close()
+
+
+# -- FRG-NFR-014: connection cap + inbound frame limits -----------------------
+
+
+@pytest.mark.req("FRG-NFR-014")
+def test_try_connect_admits_below_cap_and_refuses_at_cap():
+    """The broadcaster cap: ``try_connect`` registers up to the cap, then
+    returns ``None`` WITHOUT mutating the registry or dropping a live socket."""
+    broadcaster = WsBroadcaster(max_connections=2)
+
+    a = broadcaster.try_connect()
+    b = broadcaster.try_connect()
+    assert a is not None and b is not None
+    assert broadcaster.connection_count == 2
+
+    refused = broadcaster.try_connect()  # at the cap
+    assert refused is None
+    # Registry untouched by the refusal; both live connections still present.
+    assert broadcaster.connection_count == 2
+    assert a in broadcaster._connections and b in broadcaster._connections
+    assert not a.dropped.is_set() and not b.dropped.is_set()
+
+
+@pytest.mark.req("FRG-NFR-014")
+def test_cap_release_frees_a_slot():
+    """A disconnect frees a slot so the next ``try_connect`` admits again."""
+    broadcaster = WsBroadcaster(max_connections=1)
+    first = broadcaster.try_connect()
+    assert first is not None
+    assert broadcaster.try_connect() is None  # full
+
+    broadcaster.disconnect(first)  # slot freed
+    second = broadcaster.try_connect()
+    assert second is not None
+    assert broadcaster.connection_count == 1
+
+
+@pytest.mark.req("FRG-NFR-014")
+async def test_over_cap_connection_is_refused_1013_without_disturbing_the_rest():
+    """The (cap+1)-th socket is refused with a pre-accept close(1013), never
+    registered, while the sockets already accepted keep receiving broadcasts."""
+    bus = EventBus()
+    broadcaster = WsBroadcaster(debounce_seconds=0.02, max_connections=2)
+    broadcaster.subscribe(bus)
+
+    live = [_FakeWebSocket(_fake_app(broadcaster)) for _ in range(2)]
+    endpoints = [asyncio.ensure_future(ws_endpoint(ws)) for ws in live]
+    await asyncio.sleep(0.02)
+    assert all(ws.accepted for ws in live)
+    assert broadcaster.connection_count == 2
+
+    # A third client arrives at the cap: refused cleanly, not accepted, absent
+    # from the registry.
+    over = _FakeWebSocket(_fake_app(broadcaster))
+    await asyncio.wait_for(ws_endpoint(over), 1.0)
+    assert not over.accepted
+    assert over.closed and over.close_code == 1013
+    assert broadcaster.connection_count == 2  # refusal did not register it
+
+    # The two accepted sockets are undisturbed — a broadcast still reaches them.
+    bus.publish(SeriesRefreshed(series_id=55, partial=False))
+    await asyncio.sleep(0.06)
+    for ws in live:
+        assert any(json.loads(t)["resource"]["id"] == 55 for t in ws.sent)
+
+    for ws in live:
+        ws._incoming.put_nowait(WebSocketDisconnect(1000))
+    for ep in endpoints:
+        await asyncio.wait_for(ep, 1.0)
+    assert broadcaster.connection_count == 0
+
+
+@pytest.mark.req("FRG-NFR-014")
+async def test_first_thirty_two_admitted_thirty_third_refused():
+    """The documented default shape: 32 sockets admitted, the 33rd refused."""
+    broadcaster = WsBroadcaster(max_connections=32)
+    admitted = [broadcaster.try_connect() for _ in range(32)]
+    assert all(c is not None for c in admitted)
+    assert broadcaster.connection_count == 32
+    assert broadcaster.try_connect() is None  # the 33rd
+    assert broadcaster.connection_count == 32
+
+
+@pytest.mark.req("FRG-NFR-014")
+async def test_oversize_inbound_frame_closes_only_that_socket():
+    """An inbound frame over the byte cap closes that socket once (through the
+    existing teardown), leaving other clients and the bus unaffected."""
+    bus = EventBus()
+    broadcaster = WsBroadcaster(debounce_seconds=0.02)
+    broadcaster.subscribe(bus)
+
+    victim = _FakeWebSocket(_fake_app(broadcaster, ws_max_inbound_bytes=64))
+    other = _FakeWebSocket(_fake_app(broadcaster, ws_max_inbound_bytes=64))
+    ep_victim = asyncio.ensure_future(ws_endpoint(victim))
+    ep_other = asyncio.ensure_future(ws_endpoint(other))
+    await asyncio.sleep(0.02)
+    assert broadcaster.connection_count == 2
+
+    # Victim sends an over-cap frame -> server closes ONLY that socket once.
+    victim._incoming.put_nowait("x" * 65)
+    await asyncio.wait_for(ep_victim, 1.0)
+    assert victim.closed  # single server-initiated close via existing path
+    assert broadcaster.connection_count == 1
+
+    # The other socket is untouched and still receives broadcasts.
+    assert not other.closed
+    bus.publish(SeriesRefreshed(series_id=88, partial=False))
+    await asyncio.sleep(0.06)
+    assert any(json.loads(t)["resource"]["id"] == 88 for t in other.sent)
+
+    other._incoming.put_nowait(WebSocketDisconnect(1000))
+    await asyncio.wait_for(ep_other, 1.0)
+    assert broadcaster.connection_count == 0
+
+
+@pytest.mark.req("FRG-NFR-014")
+async def test_inbound_message_flood_closes_the_socket():
+    """A burst beyond the per-second inbound rate closes that socket once."""
+    broadcaster = WsBroadcaster(debounce_seconds=0.02)
+    ws = _FakeWebSocket(
+        _fake_app(broadcaster, ws_max_inbound_messages_per_second=5)
+    )
+    endpoint = asyncio.ensure_future(ws_endpoint(ws))
+    await asyncio.sleep(0.02)
+    assert broadcaster.connection_count == 1
+
+    # 6 frames land in the same 1-second window -> over the rate of 5.
+    for i in range(6):
+        ws._incoming.put_nowait(f"m{i}")
+    await asyncio.wait_for(endpoint, 1.0)
+    assert ws.closed  # single close through the existing teardown
+    assert broadcaster.connection_count == 0
+
+
+@pytest.mark.req("FRG-NFR-014")
+async def test_normal_inbound_traffic_under_limits_is_not_closed():
+    """Small, in-budget inbound frames (a keepalive/ping shape) are consumed
+    without ever tripping a limit — the socket only ends on real disconnect."""
+    bus = EventBus()
+    broadcaster = WsBroadcaster(debounce_seconds=0.02)
+    broadcaster.subscribe(bus)
+    ws = _FakeWebSocket(
+        _fake_app(
+            broadcaster,
+            ws_max_inbound_bytes=4096,
+            ws_max_inbound_messages_per_second=10,
+        )
+    )
+    endpoint = asyncio.ensure_future(ws_endpoint(ws))
+    await asyncio.sleep(0.02)
+
+    # A handful of small frames well under both caps — no close.
+    for _ in range(5):
+        ws._incoming.put_nowait("ping")
+    await asyncio.sleep(0.05)
+    assert not ws.closed
+    assert broadcaster.connection_count == 1
+
+    # A server push still flows to this client normally.
+    bus.publish(SeriesRefreshed(series_id=13, partial=False))
+    await asyncio.sleep(0.06)
+    assert any(json.loads(t)["resource"]["id"] == 13 for t in ws.sent)
+
+    # Only a genuine client disconnect ends it — and the server does NOT
+    # re-close a gone socket (the 0e0456a client-gone guard, unchanged).
+    ws._incoming.put_nowait(WebSocketDisconnect(1000))
+    await asyncio.wait_for(endpoint, 1.0)
+    assert not ws.closed
+    assert broadcaster.connection_count == 0
+
+
+@pytest.mark.req("FRG-NFR-014")
+async def test_oversize_inbound_binary_frame_closes_only_that_socket():
+    """A BINARY frame over the byte cap is capped on the same path as text —
+    it closes only that socket once (via the existing teardown), leaving the
+    other client and the bus unaffected. Before the receive()-based drain a
+    binary frame raised KeyError('text') and dirtied teardown."""
+    bus = EventBus()
+    broadcaster = WsBroadcaster(debounce_seconds=0.02)
+    broadcaster.subscribe(bus)
+
+    victim = _FakeWebSocket(_fake_app(broadcaster, ws_max_inbound_bytes=64))
+    other = _FakeWebSocket(_fake_app(broadcaster, ws_max_inbound_bytes=64))
+    ep_victim = asyncio.ensure_future(ws_endpoint(victim))
+    ep_other = asyncio.ensure_future(ws_endpoint(other))
+    await asyncio.sleep(0.02)
+    assert broadcaster.connection_count == 2
+
+    # Victim sends an over-cap BINARY frame -> server closes ONLY that socket.
+    victim._incoming.put_nowait(b"\x00" * 65)
+    await asyncio.wait_for(ep_victim, 1.0)
+    assert victim.closed  # single server-initiated close via existing path
+    assert broadcaster.connection_count == 1
+
+    # The other socket is untouched and still receives broadcasts.
+    assert not other.closed
+    bus.publish(SeriesRefreshed(series_id=91, partial=False))
+    await asyncio.sleep(0.06)
+    assert any(json.loads(t)["resource"]["id"] == 91 for t in other.sent)
+
+    other._incoming.put_nowait(WebSocketDisconnect(1000))
+    await asyncio.wait_for(ep_other, 1.0)
+    assert broadcaster.connection_count == 0
+
+
+@pytest.mark.req("FRG-NFR-014")
+async def test_small_binary_frame_under_limits_is_not_closed():
+    """A small binary frame within both caps is consumed like a small text
+    frame — no close, and server pushes keep flowing."""
+    bus = EventBus()
+    broadcaster = WsBroadcaster(debounce_seconds=0.02)
+    broadcaster.subscribe(bus)
+    ws = _FakeWebSocket(
+        _fake_app(
+            broadcaster,
+            ws_max_inbound_bytes=4096,
+            ws_max_inbound_messages_per_second=10,
+        )
+    )
+    endpoint = asyncio.ensure_future(ws_endpoint(ws))
+    await asyncio.sleep(0.02)
+
+    for _ in range(3):
+        ws._incoming.put_nowait(b"\x01\x02\x03")  # small binary frames
+    await asyncio.sleep(0.05)
+    assert not ws.closed
+    assert broadcaster.connection_count == 1
+
+    bus.publish(SeriesRefreshed(series_id=17, partial=False))
+    await asyncio.sleep(0.06)
+    assert any(json.loads(t)["resource"]["id"] == 17 for t in ws.sent)
+
+    ws._incoming.put_nowait(WebSocketDisconnect(1000))
+    await asyncio.wait_for(endpoint, 1.0)
+    assert broadcaster.connection_count == 0
+
+
+@pytest.mark.req("FRG-NFR-014")
+async def test_inbound_rate_window_is_half_open_at_the_boundary(monkeypatch):
+    """Exactly-at-rate traffic is NOT closed: the sliding window uses a
+    half-open ``<=`` expiry (consistent with the HTTP limiter), so a frame
+    exactly 1.0s old has left the window. With a scripted clock, 6 frames at
+    0.0,0.2,…,1.0s against a cap of 5 keep the socket open — the oldest (now
+    exactly 1.0s old) expires, leaving 5 in the window. A closed-interval
+    ``<`` expiry would keep 6 and wrongly close."""
+    import foragerr.ws.router as router
+
+    ticks = iter([0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
+    last = [0.0]
+
+    def _scripted() -> float:
+        try:
+            last[0] = next(ticks)
+        except StopIteration:
+            pass
+        return last[0]
+
+    monkeypatch.setattr(router, "time", types.SimpleNamespace(monotonic=_scripted))
+
+    broadcaster = WsBroadcaster(debounce_seconds=0.02)
+    ws = _FakeWebSocket(
+        _fake_app(broadcaster, ws_max_inbound_messages_per_second=5)
+    )
+    endpoint = asyncio.ensure_future(ws_endpoint(ws))
+    await asyncio.sleep(0.02)
+    assert broadcaster.connection_count == 1
+
+    for i in range(6):  # 6 frames, but one expires exactly at the boundary
+        ws._incoming.put_nowait(f"b{i}")
+    await asyncio.sleep(0.05)
+    assert not ws.closed  # half-open window: exactly-at-rate is allowed
+    assert broadcaster.connection_count == 1
+
+    ws._incoming.put_nowait(WebSocketDisconnect(1000))
+    await asyncio.wait_for(endpoint, 1.0)
+    assert broadcaster.connection_count == 0

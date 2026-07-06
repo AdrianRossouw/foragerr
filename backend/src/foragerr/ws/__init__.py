@@ -27,7 +27,12 @@ def register_ws(app: FastAPI) -> None:
     app.add_api_websocket_route("/api/v1/ws", ws_endpoint)
 
     async def _startup(app: FastAPI) -> None:
-        broadcaster = WsBroadcaster()
+        # The connection cap lives on the broadcaster; the inbound-frame
+        # size/rate limits are read per-socket by the endpoint off
+        # app.state.settings (FRG-NFR-014).
+        broadcaster = WsBroadcaster(
+            max_connections=app.state.settings.ws_max_connections
+        )
         broadcaster.subscribe(app.state.events)
         app.state.ws_broadcaster = broadcaster
 

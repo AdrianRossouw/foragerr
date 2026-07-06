@@ -301,13 +301,13 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-AUTH-008 | at-rest secret encryption | auth | approved | M5 |
 | FRG-AUTH-009 | login rate limiting and audit | auth | approved | M5 |
 | FRG-AUTH-010 | uniform coverage of all surfaces | auth | approved | M5 |
-| FRG-NFR-001 | startup time | nfr | approved | M2 |
-| FRG-NFR-002 | library scan throughput | nfr | approved | M2 |
-| FRG-NFR-003 | UI responsiveness at library scale | nfr | approved | M2 |
+| FRG-NFR-001 | startup time | nfr | implemented | M2 |
+| FRG-NFR-002 | library scan throughput | nfr | implemented | M2 |
+| FRG-NFR-003 | UI responsiveness at library scale | nfr | implemented | M2 |
 | FRG-NFR-004 | ComicVine rate limiting | nfr | implemented | M1 |
 | FRG-NFR-005 | indexer and DDL politeness with failure backoff | nfr | implemented | M1 |
 | FRG-NFR-006 | bounded, verified outbound requests | nfr | implemented | M1 |
-| FRG-NFR-007 | crash-safe queues and idempotent work | nfr | approved | M2 |
+| FRG-NFR-007 | crash-safe queues and idempotent work | nfr | implemented | M2 |
 | FRG-NFR-008 | secret redaction in logs and errors | nfr | implemented | M1 |
 | FRG-NFR-009 | configuration validation at startup | nfr | implemented | M1 |
 | FRG-NFR-010 | resilience to external-service failure | nfr | implemented | M1 |
@@ -319,7 +319,7 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-SEC-003 | Archive-processing safety (bomb / zip-slip limits) | sec | implemented | M1 |
 | FRG-SEC-004 | Filesystem path confinement (safe-join) | sec | implemented | M1 |
 | FRG-SEC-005 | CSRF stance and WebSocket Origin validation | sec | approved | M5 |
-| FRG-NFR-014 | Listener request resource limits | nfr | approved | M2 |
+| FRG-NFR-014 | Listener request resource limits | nfr | implemented | M2 |
 | FRG-QUAL-001 | Format profile entity | qual | implemented | M1 |
 | FRG-QUAL-002 | Default profile seeded on first run | qual | implemented | M1 |
 | FRG-QUAL-003 | Release preferred-term scoring | qual | approved | B |

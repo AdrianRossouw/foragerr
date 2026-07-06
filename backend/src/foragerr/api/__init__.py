@@ -21,6 +21,7 @@ from fastapi import APIRouter, FastAPI
 from foragerr.api.command import router as command_router
 from foragerr.api.errors import ApiError, register_error_handlers
 from foragerr.api.health import cache_migration_head
+from foragerr.api.limits import install_request_limits
 from foragerr.api.health import router as health_router
 from foragerr.api.issues import router as issues_router
 from foragerr.api.series import router as series_router
@@ -32,6 +33,12 @@ __all__ = ["ApiError", "register_api"]
 
 def register_api(app: FastAPI) -> None:
     register_error_handlers(app)
+
+    # Listener inbound resource limits (FRG-NFR-014): a single ASGI middleware
+    # on the HTTP scope — body/header/timeout/per-client-rate caps — installed
+    # here so it wraps every mounted route (API, OPDS, health, SPA) while never
+    # touching the long-lived WebSocket (websocket scope passes through).
+    install_request_limits(app)
 
     api_router = APIRouter()
     api_router.include_router(system_router)

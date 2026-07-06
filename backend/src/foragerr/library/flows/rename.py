@@ -19,7 +19,19 @@ from foragerr.commands.registry import BaseCommand, register_command, register_h
 from foragerr.commands.service import HandlerContext
 from foragerr.config import Settings
 from foragerr.db import Database, utcnow
-from foragerr.importer import IMPORT_FILE_MUTATION_GROUP, ImportContext, media_management_fields
+# Import from the importer.context leaf (not the package root) for
+# definition-site clarity: this flow needs only the exclusivity-group string +
+# ImportContext + the media-management field mapper, so it names their leaf.
+# This does NOT avoid loading the pipeline — importing importer.context still
+# executes the foragerr.importer package __init__ (parent-package semantics),
+# which pulls in the full pipeline + ORM registration regardless. The actual
+# flows→importer cycle protection is the isolated-importability subprocess guard
+# in tests/test_nfr_startup.py (FRG-NFR-001).
+from foragerr.importer.context import (
+    IMPORT_FILE_MUTATION_GROUP,
+    ImportContext,
+    media_management_fields,
+)
 from foragerr.importer.rename_ops import (
     RenamePlan,
     execute_renames,

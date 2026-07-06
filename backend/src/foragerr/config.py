@@ -64,6 +64,8 @@ _DUPLICATE_CONSTRAINTS = ("larger-size", "preferred-format")
 INTERVAL_RANGES: dict[str, tuple[int, int]] = {
     "scheduler_tick_seconds": (5, 60),
     "shutdown_grace_seconds": (1, 29),
+    "listener_request_timeout_seconds": (1, 300),
+    "listener_rate_window_seconds": (1, 60),
 }
 
 #: Range fragments derived from INTERVAL_RANGES so the generated config.yaml
@@ -71,6 +73,8 @@ INTERVAL_RANGES: dict[str, tuple[int, int]] = {
 #: actually enforced by ``_clamp_intervals``.
 _TICK_LO, _TICK_HI = INTERVAL_RANGES["scheduler_tick_seconds"]
 _GRACE_LO, _GRACE_HI = INTERVAL_RANGES["shutdown_grace_seconds"]
+_REQ_TIMEOUT_LO, _REQ_TIMEOUT_HI = INTERVAL_RANGES["listener_request_timeout_seconds"]
+_RATE_WIN_LO, _RATE_WIN_HI = INTERVAL_RANGES["listener_rate_window_seconds"]
 
 
 class ConfigError(Exception):
@@ -575,6 +579,99 @@ class Settings(BaseSettings):
             "Schema version stamped into this config file. Managed automatically: "
             "an older file is migrated forward at startup, a newer one refuses to "
             "start (FRG-DEP-004). Do not edit by hand."
+        ),
+    )
+
+    # --- Listener inbound resource limits (FRG-NFR-014) ---
+    # Availability controls on the inbound HTTP/WebSocket listener: generous,
+    # documented defaults so nothing in the single-admin happy path is ever
+    # refused; the limits bite only under the abusive request shapes RISK-021
+    # describes. The HTTP limits are enforced by the api/limits.py middleware
+    # (HTTP scope only — never the long-lived WebSocket); the ws_* limits are
+    # consumed by the WebSocket router/broadcaster.
+    listener_max_body_bytes: int = Field(
+        default=8 * 1024 * 1024,
+        ge=64 * 1024,
+        description=(
+            "Maximum inbound HTTP request body size in bytes (default 8 MiB, "
+            "floor 64 KiB). foragerr has no inbound file-upload endpoint, so "
+            "this is generous headroom over the small JSON bodies the API "
+            "accepts. A request whose body exceeds the cap — including one with "
+            "an omitted or lying Content-Length that drips unboundedly — is "
+            "rejected with 413 at the cap, streamed and aborted rather than "
+            "buffered whole (FRG-NFR-014)."
+        ),
+    )
+    listener_max_header_bytes: int = Field(
+        default=16 * 1024,
+        ge=1024,
+        description=(
+            "Maximum total inbound HTTP header size in bytes (default 16 KiB, "
+            "floor 1 KiB). A request whose combined headers exceed the cap is "
+            "rejected with a bounded 431 before a handler runs (FRG-NFR-014)."
+        ),
+    )
+    listener_request_timeout_seconds: int = Field(
+        default=30,
+        description=(
+            "Maximum seconds an inbound HTTP request may run before the "
+            "listener aborts it with a 503 and releases the worker (FRG-NFR-014). "
+            "Endpoints return quickly (heavy work is queued as scheduler "
+            "commands), so 30 s is comfortable headroom. Enforced on the HTTP "
+            "scope only — the long-lived WebSocket is never subject to it. "
+            f"Clamped to the safe range {_REQ_TIMEOUT_LO}..{_REQ_TIMEOUT_HI} "
+            "with a warning if set outside it."
+        ),
+    )
+    listener_rate_max_requests: int = Field(
+        default=240,
+        ge=0,
+        description=(
+            "Per-client inbound request cap per listener_rate_window_seconds "
+            "(default 240). A single peer address exceeding it in the window is "
+            "rejected with 429 + Retry-After (FRG-NFR-014). This is a "
+            "single-user-tailnet DoS safety valve, not throttling or access "
+            "control; the generous default keeps it clear of the normal admin. "
+            "Set to 0 to disable per-client rate limiting entirely."
+        ),
+    )
+    listener_rate_window_seconds: int = Field(
+        default=1,
+        description=(
+            "Sliding-window length in seconds for the per-client request rate "
+            "cap (default 1). "
+            f"Clamped to the safe range {_RATE_WIN_LO}..{_RATE_WIN_HI} with a "
+            "warning if set outside it (FRG-NFR-014)."
+        ),
+    )
+    ws_max_connections: int = Field(
+        default=32,
+        ge=1,
+        description=(
+            "Maximum number of concurrent WebSocket connections (default 32, "
+            "floor 1). A connection attempted at or above the cap is refused "
+            "cleanly at the handshake without disturbing existing connections "
+            "(FRG-NFR-014)."
+        ),
+    )
+    ws_max_inbound_bytes: int = Field(
+        default=4096,
+        ge=64,
+        description=(
+            "Maximum size in bytes of a single inbound WebSocket frame (default "
+            "4 KiB, floor 64). The WebSocket is server-push; inbound frames are "
+            "only a disconnect detector, so an over-size inbound frame closes "
+            "that socket cleanly rather than buffering unbounded memory "
+            "(FRG-NFR-014)."
+        ),
+    )
+    ws_max_inbound_messages_per_second: int = Field(
+        default=10,
+        ge=1,
+        description=(
+            "Maximum sustained inbound WebSocket frames per second per socket "
+            "(default 10). A client flooding inbound frames beyond this rate has "
+            "that socket closed cleanly (FRG-NFR-014)."
         ),
     )
 

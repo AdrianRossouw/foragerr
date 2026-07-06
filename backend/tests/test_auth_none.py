@@ -41,11 +41,18 @@ def make_app(tmp_path, name: str):
 
 
 @pytest.mark.req("FRG-AUTH-001")
-def test_no_middleware_is_registered_on_the_app(tmp_path):
+@pytest.mark.req("FRG-NFR-014")
+def test_only_the_resource_limit_middleware_is_registered(tmp_path):
+    """The one registered middleware is the FRG-NFR-014 listener resource-limit
+    middleware (an availability control), and nothing auth-shaped: no CORS, no
+    session, no authentication middleware. Auth stays enforced-by-absence
+    (FRG-AUTH-001) — the resource limits are keyed by peer address as a DoS
+    safety valve, not access control."""
+    from foragerr.api.limits import RequestLimitsMiddleware
+
     app = make_app(tmp_path, "cfg")
-    # No add_middleware() call exists anywhere in this codebase (no CORS, no
-    # auth, nothing) — the user-added middleware stack is empty.
-    assert list(app.user_middleware) == []
+    installed = [mw.cls for mw in app.user_middleware]
+    assert installed == [RequestLimitsMiddleware]
 
 
 @pytest.mark.req("FRG-AUTH-001")

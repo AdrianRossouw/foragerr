@@ -17,40 +17,115 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
+import time
+from collections import deque
 
 from fastapi import WebSocket, WebSocketDisconnect
 
 from foragerr.ws.broadcast import pump
 
+logger = logging.getLogger("foragerr.ws")
 
-async def _drain_incoming(websocket: WebSocket) -> bool:
-    """Consume inbound frames until the client closes the socket.
 
-    Returns ``True`` when the client has disconnected (so the caller must not
-    try to close an already-gone socket), ``False`` only if cancelled before
-    that (the caller is tearing us down for another reason)."""
+async def _drain_incoming(
+    websocket: WebSocket,
+    *,
+    max_bytes: int,
+    max_messages_per_second: int,
+) -> bool:
+    """Consume inbound frames until the client closes or violates a limit.
+
+    The WebSocket is server-push; this inbound channel exists only as a
+    disconnect detector, so any real inbound payload is anomalous. Two limits
+    bound it (FRG-NFR-014): an inbound frame larger than ``max_bytes``, or a
+    sustained burst exceeding ``max_messages_per_second`` (sliding 1-second
+    window), is logged once and ends the loop. The drain reads raw frames via
+    ``websocket.receive()`` (not ``receive_text``) so a **binary** frame is
+    capped and disconnect-handled on the same path as text — ``receive_text``
+    would raise ``KeyError('text')`` on a binary frame, escaping this loop and
+    dirtying teardown, yet design.md promises binary frames are capped too.
+
+    Returns ``True`` when the CLIENT disconnected (the socket is gone, so the
+    caller must not close it again — the ``0e0456a`` client-gone guard), and
+    ``False`` otherwise: either cancelled by the caller's teardown, or a limit
+    violation where the socket is still connected so the endpoint's existing
+    ``if not client_gone: await websocket.close()`` performs the single close.
+    """
+    arrivals: deque[float] = deque()
     try:
         while True:
-            await websocket.receive_text()
+            message = await websocket.receive()
+            # A disconnect surfaces as a message (receive() does not raise the
+            # typed WebSocketDisconnect that receive_text would); treat it as the
+            # client-gone signal so the caller must not re-close the socket.
+            if message["type"] == "websocket.disconnect":
+                return True
+            # Uniform text/binary handling: measure whichever payload is present
+            # by its byte length, so a binary frame is capped exactly like text.
+            payload = message.get("text")
+            if payload is None:
+                payload = message.get("bytes") or b""
+            frame_bytes = (
+                len(payload.encode("utf-8"))
+                if isinstance(payload, str)
+                else len(payload)
+            )
+            if frame_bytes > max_bytes:
+                logger.warning(
+                    "ws: closing client — inbound frame over the %d-byte cap",
+                    max_bytes,
+                )
+                return False  # client still connected: endpoint closes once
+            now = time.monotonic()
+            arrivals.append(now)
+            cutoff = now - 1.0
+            # Half-open window (``<=`` expiry), consistent with the HTTP limiter:
+            # a frame exactly 1.0s old has left the window, so exactly-at-rate
+            # traffic is not closed.
+            while arrivals and arrivals[0] <= cutoff:
+                arrivals.popleft()
+            if len(arrivals) > max_messages_per_second:
+                logger.warning(
+                    "ws: closing client — inbound rate over %d msgs/s",
+                    max_messages_per_second,
+                )
+                return False  # client still connected: endpoint closes once
     except WebSocketDisconnect:
         return True
 
 
 async def ws_endpoint(websocket: WebSocket) -> None:
     broadcaster = websocket.app.state.ws_broadcaster
+    settings = websocket.app.state.settings
+    # Concurrent-connection cap (FRG-NFR-014): refuse over-cap sockets BEFORE
+    # accept() and WITHOUT registering, so the registry and every live socket
+    # are untouched. 1013 = Try Again Later — a clean handshake refusal. Below
+    # the cap try_connect registers exactly as connect() did, so the
+    # register-before-accept ordering for accepted sockets is preserved.
+    conn = broadcaster.try_connect()
+    if conn is None:
+        with contextlib.suppress(BaseException):
+            await websocket.close(code=1013)
+        return
     # Register BEFORE accepting: the client considers itself connected the
     # moment the accept frame arrives, so registering afterwards leaves a
     # window where an event published by another task is broadcast to a
     # registry this socket isn't in yet and silently lost. Anything published
     # while we're still inside accept() just queues on the bounded connection
     # queue and is delivered once the pump starts.
-    conn = broadcaster.connect()
     pump_task: asyncio.Future[None] | None = None
     recv_task: asyncio.Future[bool] | None = None
     try:
         await websocket.accept()
         pump_task = asyncio.ensure_future(pump(conn, websocket.send_text))
-        recv_task = asyncio.ensure_future(_drain_incoming(websocket))
+        recv_task = asyncio.ensure_future(
+            _drain_incoming(
+                websocket,
+                max_bytes=settings.ws_max_inbound_bytes,
+                max_messages_per_second=settings.ws_max_inbound_messages_per_second,
+            )
+        )
         # First to finish wins: pump returns on a slow-client drop; recv returns
         # on client disconnect. Either way we fall through to teardown.
         await asyncio.wait(
