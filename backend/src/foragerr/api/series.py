@@ -44,7 +44,7 @@ from foragerr.library.flows import (
 )
 from foragerr.library.models import SeriesRow
 from foragerr.library.repo import SeriesStatistics
-from foragerr.metadata import ComicVineClient, ComicVineError
+from foragerr.metadata import ComicVineAuthError, ComicVineClient, ComicVineError
 
 router = APIRouter(prefix="/series", tags=["series"])
 
@@ -209,6 +209,17 @@ class LookupCandidateResource(BaseModel):
     have_it: bool
 
 
+class LookupResponse(BaseModel):
+    """Lookup outcome envelope (FRG-API-003). ``complete`` carries the
+    pagination walk's completeness so a degraded partial walk
+    (``complete=False``) is distinguishable from a clean, complete empty
+    result (``complete=True, records=[]``); an auth failure never reaches
+    here — it maps to a 503 error response instead."""
+
+    records: list[LookupCandidateResource]
+    complete: bool
+
+
 # --- routes -------------------------------------------------------------------
 
 
@@ -248,27 +259,34 @@ async def list_series(
 
 # NOTE: registered BEFORE "/{series_id}" so "lookup" is never swallowed by
 # the int-typed path parameter.
-@router.get("/lookup", response_model=list[LookupCandidateResource])
-async def lookup_series(
-    term: str, request: Request
-) -> list[LookupCandidateResource]:
+@router.get("/lookup", response_model=LookupResponse)
+async def lookup_series(term: str, request: Request) -> LookupResponse:
     """Live ComicVine volume search; no library side effect (FRG-API-003).
 
-    NOTE on the ``except ComicVineError`` below: ``ComicVineClient._paginate``
-    (which ``search_series`` rides) already catches every per-page
-    ``ComicVineError`` internally and degrades to a partial/empty
-    ``SearchResult`` with ``complete=False`` rather than raising — a
-    deliberate FRG-META-004 pagination-robustness choice. In practice a mid-
-    walk ComicVine outage today surfaces here as a 200 with an empty/partial
-    candidate list, not a 503. The catch below is a defensive backstop (and
-    is what actually fires in this module's own error-mapping test, which
-    stubs the client directly) against any future client change that raises
-    directly — not a currently-reachable path for real network failures."""
+    NOTE on the two ``except`` arms below: ``ComicVineClient._paginate`` (which
+    ``search_series`` rides) carves out ``ComicVineAuthError`` — a missing or
+    invalid API key propagates out of the pagination walk rather than degrading
+    to a partial/empty ``SearchResult`` (FRG-META-004) — so the auth arm below
+    IS a reachable path and maps a credential failure to a 503 naming the key.
+    Every OTHER per-page ``ComicVineError`` is still swallowed internally and
+    degrades to ``complete=False``, so a mid-walk outage surfaces here as a 200
+    envelope with ``complete=false``, not a 503; the general ``ComicVineError``
+    arm is a defensive backstop against any future client change that raises
+    directly."""
     settings = request.app.state.settings
     factory = comicvine_factory(settings)
     try:
         async with ComicVineClient(settings, factory) as cv:
             result = await cv.search_series(term)
+    except ComicVineAuthError as exc:
+        # Static message — never interpolate the key or the exception's raw
+        # text (the client already scrubs api_key, but this branch keeps the
+        # credential value out of the response and logs unconditionally).
+        raise ApiError(
+            _COMICVINE_LOOKUP_ERROR_STATUS,
+            "comicvine lookup failed: ComicVine rejected the API key "
+            "(missing or invalid) — set comicvine_api_key",
+        ) from exc
     except ComicVineError as exc:
         raise ApiError(
             _COMICVINE_LOOKUP_ERROR_STATUS, f"comicvine lookup failed: {exc}"
@@ -284,21 +302,24 @@ async def lookup_series(
             )
             have = set(rows.scalars().all())
 
-    return [
-        LookupCandidateResource(
-            cv_volume_id=candidate.series.cv_volume_id,
-            name=candidate.series.name,
-            publisher=candidate.series.publisher,
-            start_year=candidate.series.start_year,
-            count_of_issues=candidate.series.count_of_issues,
-            image_url=candidate.series.image_url,
-            name_similarity=candidate.plausibility.name_similarity,
-            year_proximity=candidate.plausibility.year_proximity,
-            target_issue_plausible=candidate.plausibility.target_issue_plausible,
-            have_it=candidate.series.cv_volume_id in have,
-        )
-        for candidate in result.candidates
-    ]
+    return LookupResponse(
+        records=[
+            LookupCandidateResource(
+                cv_volume_id=candidate.series.cv_volume_id,
+                name=candidate.series.name,
+                publisher=candidate.series.publisher,
+                start_year=candidate.series.start_year,
+                count_of_issues=candidate.series.count_of_issues,
+                image_url=candidate.series.image_url,
+                name_similarity=candidate.plausibility.name_similarity,
+                year_proximity=candidate.plausibility.year_proximity,
+                target_issue_plausible=candidate.plausibility.target_issue_plausible,
+                have_it=candidate.series.cv_volume_id in have,
+            )
+            for candidate in result.candidates
+        ],
+        complete=result.complete,
+    )
 
 
 @router.get("/{series_id}", response_model=SeriesResource)

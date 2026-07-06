@@ -369,7 +369,9 @@ def test_lookup_returns_candidates_without_persisting(client, monkeypatch):
 
     response = client.get("/api/v1/series/lookup", params={"term": "Saga"})
     assert response.status_code == 200
-    candidates = response.json()
+    body = response.json()
+    assert body["complete"] is True  # complete walk over a matched result set
+    candidates = body["records"]
     assert len(candidates) == 1
     candidate = candidates[0]
     assert candidate["cv_volume_id"] == 101
@@ -404,7 +406,7 @@ def test_lookup_marks_have_it_true_for_an_existing_series(
     )
 
     response = client.get("/api/v1/series/lookup", params={"term": "Saga"})
-    assert response.json()[0]["have_it"] is True
+    assert response.json()["records"][0]["have_it"] is True
 
 
 async def _raise_comicvine_unavailable(self, term, **_kwargs):
@@ -428,6 +430,113 @@ def test_lookup_upstream_failure_maps_to_503(client, monkeypatch):
     response = client.get("/api/v1/series/lookup", params={"term": "Saga"})
     assert response.status_code == 503
     assert set(response.json()) == {"message", "errors"}
+
+
+#: The exact static 503 message a lookup auth failure surfaces (asserted here
+#: so the frontend's credential-error sniff has a stable contract to key off).
+_LOOKUP_AUTH_MESSAGE = (
+    "comicvine lookup failed: ComicVine rejected the API key "
+    "(missing or invalid) — set comicvine_api_key"
+)
+
+
+def _auth_reject_handler():
+    """A ``volumes/`` search handler that rejects with HTTP 401 (the real
+    client turns this into a ``ComicVineAuthError`` inside ``_paginate``,
+    which now propagates instead of degrading to an empty result)."""
+    import httpx
+
+    def _handle(request: httpx.Request) -> httpx.Response:
+        if "/volumes/" in str(request.url):
+            return httpx.Response(401, content=b"unauthorized")
+        return httpx.Response(404, content=b"unknown endpoint")
+
+    return _handle
+
+
+def _degraded_search_handler(volumes: list[dict], *, advertised: int):
+    """Serve ``volumes`` on the first page but advertise a larger total, so the
+    real pagination walk finishes with fewer items than advertised and marks
+    the result ``complete=False`` (a non-auth degrade, no page raises)."""
+    import json as _json
+
+    import httpx
+
+    def _handle(request: httpx.Request) -> httpx.Response:
+        if "/volumes/" not in str(request.url):
+            return httpx.Response(404, content=b"unknown endpoint")
+        offset = int(request.url.params.get("offset", "0"))
+        results = volumes if offset == 0 else []
+        payload = {
+            "status_code": 1,
+            "results": results,
+            "number_of_total_results": advertised,
+        }
+        return httpx.Response(200, content=_json.dumps(payload).encode())
+
+    return _handle
+
+
+@pytest.mark.req("FRG-API-003")
+def test_lookup_auth_failure_is_503_naming_the_key_without_leaking_it(
+    client, monkeypatch
+):
+    """A missing/invalid ComicVine key now propagates out of the walk and maps
+    to a 503 whose message names the credential — never the key value."""
+    factory = build_factory(
+        settings=client.app.state.settings, handler=_auth_reject_handler()
+    )
+    monkeypatch.setattr(
+        "foragerr.api.series.comicvine_factory", lambda _settings: factory
+    )
+
+    response = client.get("/api/v1/series/lookup", params={"term": "Saga"})
+    assert response.status_code == 503
+    body = response.json()
+    assert body["message"] == _LOOKUP_AUTH_MESSAGE
+    # the actual key value (flows_settings default) never appears in the body
+    assert "CV-SECRET-KEY-abc123" not in response.text
+
+
+@pytest.mark.req("FRG-API-003")
+def test_lookup_degraded_walk_is_200_incomplete_with_partial_records(
+    client, monkeypatch
+):
+    """A non-auth degraded walk returns a 200 envelope flagged incomplete,
+    alongside the partial candidates it did retrieve."""
+    volumes = [{"id": 101, "name": "Saga", "start_year": "2012"}]
+    factory = build_factory(
+        settings=client.app.state.settings,
+        handler=_degraded_search_handler(volumes, advertised=10),
+    )
+    monkeypatch.setattr(
+        "foragerr.api.series.comicvine_factory", lambda _settings: factory
+    )
+
+    response = client.get("/api/v1/series/lookup", params={"term": "Saga"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["complete"] is False
+    assert len(body["records"]) == 1
+    assert body["records"][0]["cv_volume_id"] == 101
+
+
+@pytest.mark.req("FRG-API-003")
+def test_lookup_clean_empty_is_200_complete_with_no_records(client, monkeypatch):
+    """A complete walk that genuinely matched nothing stays a 200 with
+    ``complete=true`` and an empty record list — distinct from a degrade."""
+    factory = build_factory(
+        settings=client.app.state.settings, handler=_search_handler([])
+    )
+    monkeypatch.setattr(
+        "foragerr.api.series.comicvine_factory", lambda _settings: factory
+    )
+
+    response = client.get("/api/v1/series/lookup", params={"term": "Saga"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["complete"] is True
+    assert body["records"] == []
 
 
 # --- cover -------------------------------------------------------------------

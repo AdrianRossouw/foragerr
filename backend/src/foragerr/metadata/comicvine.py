@@ -171,6 +171,7 @@ class ComicVineClient:
             candidates=tuple(candidates),
             total_results=page.total_results,
             truncated=page.truncated,
+            complete=page.complete,
         )
 
     async def aclose(self) -> None:
@@ -205,6 +206,13 @@ class ComicVineClient:
             params = {**base_params, "offset": offset, "limit": self._page_size}
             try:
                 data = await self._request(path, params)
+            except ComicVineAuthError:
+                # Auth carve-out (FRG-META-004): an invalid/missing key cannot
+                # succeed on a later page, so degrading it to a partial result
+                # would make a credential failure indistinguishable from an
+                # empty search. Re-raise the typed error to the caller instead.
+                # The message is a static string (no api_key interpolated).
+                raise
             except ComicVineError:
                 complete = False  # mid-walk failure: keep what we have
                 break

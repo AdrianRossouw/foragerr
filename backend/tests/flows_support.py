@@ -57,6 +57,7 @@ class FakeCV:
         self._volumes: dict[int, dict] = {}
         self._issues: dict[int, list[dict]] = {}
         self._issue_fail_after_offset: dict[int, int] = {}
+        self._issue_auth_fail_after_offset: dict[int, int] = {}
         self._images: set[str] = set()
 
     def volume(
@@ -81,11 +82,18 @@ class FakeCV:
         return self
 
     def issues(
-        self, volume_id: int, issues: list[dict], *, fail_after_offset: int | None = None
+        self,
+        volume_id: int,
+        issues: list[dict],
+        *,
+        fail_after_offset: int | None = None,
+        auth_fail_after_offset: int | None = None,
     ) -> "FakeCV":
         self._issues[volume_id] = issues
         if fail_after_offset is not None:
             self._issue_fail_after_offset[volume_id] = fail_after_offset
+        if auth_fail_after_offset is not None:
+            self._issue_auth_fail_after_offset[volume_id] = auth_fail_after_offset
         return self
 
     # -- handler -----------------------------------------------------------
@@ -115,6 +123,9 @@ class FakeCV:
         all_issues = self._issues.get(vid, [])
         offset = int(query.get("offset", "0"))
         limit = int(query.get("limit", "100"))
+        auth_fail_at = self._issue_auth_fail_after_offset.get(vid)
+        if auth_fail_at is not None and offset >= auth_fail_at:
+            return httpx.Response(401, content=b"unauthorized")
         fail_at = self._issue_fail_after_offset.get(vid)
         if fail_at is not None and offset >= fail_at:
             return httpx.Response(500, content=b"boom")
