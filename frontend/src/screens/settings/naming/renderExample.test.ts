@@ -37,6 +37,9 @@ const FOLDER_TEMPLATE = '{Series Title} ({Year})';
 const file = (tpl: string, fields: Record<string, string | null>, replaceIllegal = true) =>
   renderExample(tpl, fields, ALIASES, { isFile: true, replaceIllegal, ext: '.cbz' });
 
+const folder = (tpl: string, fields: Record<string, string | null>) =>
+  renderExample(tpl, fields, ALIASES, { isFile: false });
+
 describe('FRG-UI-012: live-example render mirror matches backend naming semantics', () => {
   it('FRG-UI-012 — full default file template renders identically to the backend', () => {
     const fields = {
@@ -86,5 +89,53 @@ describe('FRG-UI-012: live-example render mirror matches backend naming semantic
     // backend render(...) => 'Saga (2012)'
     expect(renderTemplate(FOLDER_TEMPLATE, { series_title: 'Saga', year: '2012' }, ALIASES))
       .toBe('Saga (2012)');
+  });
+});
+
+describe('FRG-UI-012: folder example mirrors render_folder_segments + safe_path_component', () => {
+  // Every EXPECT is copied verbatim from the real engine:
+  //   '/'.join(safe_path_component(s)
+  //            for s in render_folder_segments(RenameFields(**kw), template=tpl))
+  it('FRG-UI-012 — the default folder template matches the backend', () => {
+    // backend => 'Saga (2012)'
+    expect(folder(FOLDER_TEMPLATE, { series_title: 'Saga', year: '2012' })).toBe('Saga (2012)');
+  });
+
+  it('FRG-UI-012 — a multi-segment folder template splits on "/" like the backend', () => {
+    // backend => 'Image/Saga (2012)'
+    expect(
+      folder('{Publisher}/{Series Title} ({Year})', {
+        series_title: 'Saga',
+        year: '2012',
+        publisher: 'Image',
+      }),
+    ).toBe('Image/Saga (2012)');
+  });
+
+  it('FRG-UI-012 — folder sanitization keeps ":" and only splits real separators (NOT the file policy)', () => {
+    // backend => 'Foo/Bar: Baz' — the "/" in the title becomes a new segment
+    // boundary, but ":" survives (safe_path_component, not the file illegal set).
+    expect(folder('{Series Title}', { series_title: 'Foo/Bar: Baz' })).toBe('Foo/Bar: Baz');
+  });
+
+  it('FRG-UI-012 — an empty leading segment is dropped, like the backend', () => {
+    // backend, publisher absent => 'Batman' (the empty '' segment drops out)
+    expect(folder('{Publisher}/{Series Title}', { series_title: 'Batman', publisher: null }))
+      .toBe('Batman');
+  });
+
+  it('FRG-UI-012 — an empty {Year} in literal parens is kept, like the backend', () => {
+    // backend, year absent => 'Saga ()' (parens are literal, not an [optional] group)
+    expect(folder(FOLDER_TEMPLATE, { series_title: 'Saga', year: null })).toBe('Saga ()');
+  });
+
+  it('FRG-UI-012 — a reserved device-name segment is de-reserved, like the backend', () => {
+    // backend => '_CON'
+    expect(folder('{Series Title}', { series_title: 'CON' })).toBe('_CON');
+  });
+
+  it('FRG-UI-012 — a trailing dot is stripped PER SEGMENT, not by the file policy', () => {
+    // backend, template '{Series Title}.' => 'Trailing'
+    expect(folder('{Series Title}.', { series_title: 'Trailing' })).toBe('Trailing');
   });
 });

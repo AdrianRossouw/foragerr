@@ -125,6 +125,66 @@ function stripSpaceDot(text: string): string {
   return text.replace(/^[ .]+/, '').replace(/[ .]+$/, '');
 }
 
+// Windows/DOS reserved device names, mirroring paths._RESERVED_NAMES — reserved
+// with or without an extension, so the check is against the segment before the
+// first dot.
+const RESERVED_NAMES = new Set<string>([
+  'CON',
+  'PRN',
+  'AUX',
+  'NUL',
+  ...Array.from({ length: 9 }, (_, i) => `COM${i + 1}`),
+  ...Array.from({ length: 9 }, (_, i) => `LPT${i + 1}`),
+]);
+
+/**
+ * Reduce one string to a single filesystem-safe path segment, mirroring the
+ * backend's authoritative `foragerr.security.paths.safe_path_component`
+ * (FRG-SEC-004): path separators and control characters become spaces,
+ * whitespace runs collapse, leading/trailing spaces-and-dots are stripped, an
+ * empty result falls back to "untitled", and a Windows reserved device name is
+ * de-reserved with a leading underscore. Folder rendering delegates per-segment
+ * safety to this (via `safe_join` server-side), so the live example must too.
+ */
+function safePathComponent(raw: string, fallback = 'untitled'): string {
+  let text = raw.replace(/[/\\]/g, ' ');
+  let controlStripped = '';
+  for (const ch of text) {
+    const code = ch.codePointAt(0) ?? 0;
+    controlStripped += code <= 0x1f || code === 0x7f ? ' ' : ch;
+  }
+  text = controlStripped.trim().split(/\s+/).join(' ');
+  text = stripSpaceDot(text);
+  if (!text) text = fallback;
+  const stem = text.split('.')[0].toUpperCase();
+  if (RESERVED_NAMES.has(stem)) text = `_${text}`;
+  return text;
+}
+
+/**
+ * Render a FOLDER template's live example, mirroring the backend pipeline
+ * `render_folder_segments` + `safe_join`'s per-segment `safe_path_component`
+ * (never the file-name policy): render the template, collapse [ \t] runs, split
+ * on "/", drop whitespace-empty segments, sanitize each surviving segment, and
+ * rejoin with "/". Crucially there is NO file-style whole-string trailing-dot
+ * strip — the backend strips per segment inside `safe_path_component`, so a
+ * template like "{Series Title}." yields the sanitized segment, not the file
+ * body's stripped form.
+ */
+function renderFolderExample(
+  template: string,
+  fields: ExampleFields,
+  aliases: TokenAliases,
+): string {
+  const rendered = renderTemplate(template, fields, aliases).replace(WS_RE, ' ');
+  return rendered
+    .split('/')
+    .map((seg) => seg.trim())
+    .filter((seg) => seg.length > 0)
+    .map((seg) => safePathComponent(seg))
+    .join('/');
+}
+
 export interface RenderExampleOptions {
   /** File-name rendering applies the illegal-char policy + appends the ext. */
   isFile: boolean;
@@ -147,11 +207,16 @@ export function renderExample(
   aliases: TokenAliases,
   opts: RenderExampleOptions,
 ): string {
+  // Folder rendering has different backend semantics (per-segment
+  // safe_path_component, NOT the file illegal-char + trailing-dot policy).
+  if (!opts.isFile) {
+    return renderFolderExample(template, fields, aliases);
+  }
   let body = renderTemplate(template, fields, aliases);
-  if (opts.isFile && (opts.replaceIllegal ?? true)) {
+  if (opts.replaceIllegal ?? true) {
     body = replaceIllegal(body);
   }
   body = stripSpaceDot(body.replace(WS_RE, ' ').trim());
-  if (opts.isFile && opts.ext) body += opts.ext;
+  if (opts.ext) body += opts.ext;
   return body;
 }

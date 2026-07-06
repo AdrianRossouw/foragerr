@@ -162,6 +162,26 @@ function baselineValues(
   return { ...naming, ...mm };
 }
 
+/**
+ * Coerce the raw form values into their PUT-payload form. This ONE function
+ * feeds both the dirty check and the request bodies, so the two can never
+ * disagree: without it a number field cleared to '' compares unequal to the
+ * server's `0` forever (the save round-trips 0 back, but the '' in the form
+ * state keeps the save bar armed), a dirty-loop the operator cannot clear.
+ */
+function normalize(values: FieldValues): NamingConfig & MediaManagementConfig {
+  return {
+    rename_enabled: values.rename_enabled === true,
+    file_naming_template: String(values.file_naming_template ?? ''),
+    folder_naming_template: String(values.folder_naming_template ?? ''),
+    replace_illegal_characters: values.replace_illegal_characters === true,
+    import_transfer_mode: String(values.import_transfer_mode ?? ''),
+    library_import_mode: String(values.library_import_mode ?? ''),
+    recycle_bin_path: String(values.recycle_bin_path ?? ''),
+    recycle_bin_retention_days: Number(values.recycle_bin_retention_days) || 0,
+  };
+}
+
 interface SelectedSeries {
   id: number;
   title: string;
@@ -194,14 +214,18 @@ export function MediaManagement() {
     [naming, mm],
   );
 
+  // Diff in PUT-payload form (via `normalize`), never on the raw form values —
+  // otherwise '' vs 0 on a cleared number field reads dirty forever after save.
+  const normValues = values !== null ? normalize(values) : null;
+  const normBaseline = baseline !== null ? normalize(baseline) : null;
   const namingDirty =
-    values !== null &&
-    baseline !== null &&
-    NAMING_NAMES.some((n) => values[n] !== baseline[n]);
+    normValues !== null &&
+    normBaseline !== null &&
+    NAMING_NAMES.some((n) => normValues[n] !== normBaseline[n]);
   const mmDirty =
-    values !== null &&
-    baseline !== null &&
-    MM_NAMES.some((n) => values[n] !== baseline[n]);
+    normValues !== null &&
+    normBaseline !== null &&
+    MM_NAMES.some((n) => normValues[n] !== normBaseline[n]);
   const dirty = namingDirty || mmDirty;
   const saving = putNaming.isPending || putMm.isPending;
 
@@ -224,12 +248,13 @@ export function MediaManagement() {
       if (mapped.formError) collectedFormErrors.push(mapped.formError);
     };
 
+    const norm = normalize(values);
     if (namingDirty) {
       const body: NamingConfig = {
-        rename_enabled: values.rename_enabled === true,
-        file_naming_template: String(values.file_naming_template ?? ''),
-        folder_naming_template: String(values.folder_naming_template ?? ''),
-        replace_illegal_characters: values.replace_illegal_characters === true,
+        rename_enabled: norm.rename_enabled,
+        file_naming_template: norm.file_naming_template,
+        folder_naming_template: norm.folder_naming_template,
+        replace_illegal_characters: norm.replace_illegal_characters,
       };
       try {
         await putNaming.mutateAsync(body);
@@ -239,10 +264,10 @@ export function MediaManagement() {
     }
     if (mmDirty) {
       const body: MediaManagementConfig = {
-        import_transfer_mode: String(values.import_transfer_mode ?? ''),
-        library_import_mode: String(values.library_import_mode ?? ''),
-        recycle_bin_path: String(values.recycle_bin_path ?? ''),
-        recycle_bin_retention_days: Number(values.recycle_bin_retention_days) || 0,
+        import_transfer_mode: norm.import_transfer_mode,
+        library_import_mode: norm.library_import_mode,
+        recycle_bin_path: norm.recycle_bin_path,
+        recycle_bin_retention_days: norm.recycle_bin_retention_days,
       };
       try {
         await putMm.mutateAsync(body);
@@ -298,6 +323,8 @@ export function MediaManagement() {
                 error={fieldErrors.file_naming_template}
                 exampleFields={EXAMPLE_FIELDS}
                 tokens={tokensQuery.data}
+                tokensPending={tokensQuery.isPending}
+                tokensError={tokensQuery.isError}
                 isFile
                 replaceIllegal={replaceIllegal}
                 renameEnabled={renameEnabled}
@@ -310,6 +337,8 @@ export function MediaManagement() {
                 error={fieldErrors.folder_naming_template}
                 exampleFields={EXAMPLE_FIELDS}
                 tokens={tokensQuery.data}
+                tokensPending={tokensQuery.isPending}
+                tokensError={tokensQuery.isError}
                 isFile={false}
                 replaceIllegal={replaceIllegal}
                 renameEnabled={renameEnabled}

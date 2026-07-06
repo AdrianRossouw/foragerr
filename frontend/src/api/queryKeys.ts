@@ -43,10 +43,17 @@ export const queryKeys = {
   },
   // Config singletons (FRG-API-013) + the shared token vocabulary (FRG-UI-012),
   // mirroring GET /api/v1/config/{naming,mediamanagement,naming/tokens}.
+  //
+  // The token vocabulary is deliberately keyed OUTSIDE the ['config','naming']
+  // prefix (as ['config','namingTokens']) even though its URL nests under it:
+  // the tokens query carries staleTime Infinity (it is a property of the build's
+  // renderer, never refetched), so a future broad invalidation of the naming
+  // config — invalidateQueries(['config','naming']) after a PUT — must NOT sweep
+  // it up by prefix and force a refetch of the static vocabulary.
   config: {
     naming: () => ['config', 'naming'] as const,
     mediaManagement: () => ['config', 'mediamanagement'] as const,
-    namingTokens: () => ['config', 'naming', 'tokens'] as const,
+    namingTokens: () => ['config', 'namingTokens'] as const,
   },
   // Per-series rename preview (FRG-PP-012), mirroring GET /api/v1/rename.
   rename: {

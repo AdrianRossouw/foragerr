@@ -2,7 +2,11 @@ import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCommandStatus } from '../../../api/hooks';
 import { queryKeys } from '../../../api/queryKeys';
-import { useExecuteRename, useRenamePreview } from './namingHooks';
+import {
+  useActiveRenameSeriesCommand,
+  useExecuteRename,
+  useRenamePreview,
+} from './namingHooks';
 import styles from './MediaManagement.module.css';
 
 /*
@@ -38,8 +42,19 @@ export function RenamePreviewPanel({
   const queryClient = useQueryClient();
   const [commandId, setCommandId] = useState<number | null>(null);
 
-  const commandQuery = useCommandStatus(commandId);
-  const status = commandQuery.data?.status ?? (commandId !== null ? 'queued' : null);
+  // A rename-series command for THIS series can already be running from a
+  // previous open of this (transient) panel — consult the server so Confirm
+  // stays disabled across a close+reopen instead of re-arming a duplicate.
+  const activeCommand = useActiveRenameSeriesCommand(seriesId);
+  const watchedId = commandId ?? activeCommand.data?.id ?? null;
+
+  const commandQuery = useCommandStatus(watchedId);
+  const status = commandQuery.data?.status ?? (watchedId !== null ? 'queued' : null);
+  // The Confirm button follows the LIVE command status, not a one-way "we
+  // clicked" flag: once the watched command reaches a terminal status it is no
+  // longer in progress, so the button reflects completion instead of sticking
+  // on "Renaming…" (the old `confirmed` flag was never reset).
+  const inProgress = status !== null && LIVE_STATUSES.has(status);
   const finished = status !== null && !LIVE_STATUSES.has(status) ? status : null;
 
   useEffect(() => {
@@ -51,7 +66,6 @@ export function RenamePreviewPanel({
   }, [finished, queryClient, seriesId]);
 
   const rows = preview.data ?? [];
-  const confirmed = commandId !== null;
 
   const onConfirm = () => {
     execute.mutate(seriesId, { onSuccess: (cmd) => setCommandId(cmd.id) });
@@ -126,11 +140,13 @@ export function RenamePreviewPanel({
           <button
             type="button"
             className={`${styles.button} ${styles.buttonPrimary}`}
-            disabled={rows.length === 0 || confirmed || execute.isPending}
+            disabled={rows.length === 0 || inProgress || execute.isPending}
             onClick={onConfirm}
             data-testid="rename-confirm"
           >
-            {confirmed ? 'Renaming…' : `Rename ${rows.length} file${rows.length === 1 ? '' : 's'}`}
+            {inProgress || execute.isPending
+              ? 'Renaming…'
+              : `Rename ${rows.length} file${rows.length === 1 ? '' : 's'}`}
           </button>
         </div>
       </div>

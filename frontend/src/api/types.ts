@@ -232,6 +232,8 @@ export interface CommandResource {
   id: number;
   name: string;
   status: string;
+  /** The enqueue payload (e.g. rename-series carries `{ series_id }`). */
+  payload?: Record<string, unknown>;
   queued_at: string;
   started_at: string | null;
   finished_at: string | null;

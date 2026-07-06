@@ -76,16 +76,23 @@ const RENAME_ROWS: RenamePreviewEntry[] = [
 interface Overrides {
   naming?: () => NamingConfig;
   mm?: () => MediaManagementConfig;
+  tokens?: () => NamingTokens;
+  onTokens?: () => unknown;
   onPutNaming?: (init?: FetcherInit) => unknown;
   onPutMm?: (init?: FetcherInit) => unknown;
   renameRows?: () => RenamePreviewEntry[];
   onPostRename?: (init?: FetcherInit) => unknown;
   command?: () => ReturnType<typeof makeCommand>;
+  /** The paged command-list the active-rename probe reads (default: empty). */
+  commandList?: () => ReturnType<typeof makeCommand>[];
 }
 
 function resolver(o: Overrides = {}) {
   return (path: string, init?: FetcherInit): unknown => {
-    if (path === '/api/v1/config/naming/tokens') return TOKENS;
+    if (path === '/api/v1/config/naming/tokens') {
+      if (o.onTokens) return o.onTokens();
+      return o.tokens ? o.tokens() : TOKENS;
+    }
     if (path === '/api/v1/config/naming') {
       if (init?.method === 'PUT') {
         return o.onPutNaming ? o.onPutNaming(init) : (init.body as NamingConfig);
@@ -104,6 +111,10 @@ function resolver(o: Overrides = {}) {
     }
     if (path === '/api/v1/rename' && init?.method === 'POST') {
       return o.onPostRename ? o.onPostRename(init) : makeCommand({ id: 55, name: 'rename-series', status: 'queued' });
+    }
+    // The active-rename probe (paged list) — distinct from the by-id lookup.
+    if (path.startsWith('/api/v1/command?')) {
+      return pageOf(o.commandList ? o.commandList() : []);
     }
     if (path.startsWith('/api/v1/command/')) {
       return o.command ? o.command() : makeCommand({ id: 55, name: 'rename-series', status: 'completed' });
@@ -158,6 +169,23 @@ describe('FRG-UI-012: standard fields via SchemaForm + save', () => {
     renderWithProviders(<MediaManagement />, { fetcher });
     const button = await screen.findByRole('button', { name: 'No Changes' });
     expect(button).toBeDisabled();
+  });
+
+  it('FRG-UI-012 — clearing a number field back to its saved 0 does not arm the save bar (no dirty-loop)', async () => {
+    const user = userEvent.setup();
+    // MM.recycle_bin_retention_days is 0; the schema number widget emits '' when
+    // cleared. Diffing raw ('' !== 0) would read dirty forever; normalize (to the
+    // PUT-payload form, 0) makes the cleared field equal its saved value.
+    const { fetcher } = fakeFetcher(resolver());
+    renderWithProviders(<MediaManagement />, { fetcher });
+
+    const days = await screen.findByLabelText('Recycle Bin Cleanup (days)');
+    await user.clear(days);
+
+    // The form is back to its saved state — the save bar disarms, not stuck dirty.
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'No Changes' })).toBeDisabled(),
+    );
   });
 });
 
@@ -293,5 +321,116 @@ describe('FRG-UI-012: per-series rename preview', () => {
     expect(await screen.findByTestId('rename-no-changes')).toBeInTheDocument();
     // Nothing to confirm.
     expect(screen.getByTestId('rename-confirm')).toBeDisabled();
+  });
+
+  it('FRG-UI-012 — reopening the panel while a rename-series is still running keeps Confirm disabled', async () => {
+    const user = userEvent.setup();
+    // The panel is transient, so its own commandId is lost on close+reopen; the
+    // server's command list still reports the in-flight rename for this series.
+    const running = makeCommand({
+      id: 77,
+      name: 'rename-series',
+      status: 'started',
+      payload: { series_id: 7 },
+    });
+    const { spy, fetcher } = fakeFetcher(
+      resolver({ commandList: () => [running], command: () => running }),
+    );
+    renderWithProviders(<MediaManagement />, { fetcher });
+
+    await user.selectOptions(
+      await screen.findByLabelText('Series to preview renames for'),
+      '7',
+    );
+    await user.click(screen.getByRole('button', { name: 'Preview Rename' }));
+    await screen.findByTestId('rename-preview-table');
+
+    const confirm = screen.getByTestId('rename-confirm');
+    await waitFor(() => expect(confirm).toBeDisabled());
+    expect(confirm).toHaveTextContent('Renaming…');
+    // The running command is reused, NOT duplicated — no fresh POST /rename.
+    expect(
+      spy.mock.calls.filter(([p, i]) => p === '/api/v1/rename' && i?.method === 'POST'),
+    ).toHaveLength(0);
+  });
+
+  it('FRG-UI-012 — when the rename command completes the Confirm button stops saying "Renaming…"', async () => {
+    const user = userEvent.setup();
+    const { fetcher } = fakeFetcher(
+      resolver({
+        onPostRename: () =>
+          makeCommand({ id: 55, name: 'rename-series', status: 'queued', payload: { series_id: 7 } }),
+        command: () =>
+          makeCommand({ id: 55, name: 'rename-series', status: 'completed', payload: { series_id: 7 } }),
+      }),
+    );
+    renderWithProviders(<MediaManagement />, { fetcher });
+
+    await user.selectOptions(
+      await screen.findByLabelText('Series to preview renames for'),
+      '7',
+    );
+    await user.click(screen.getByRole('button', { name: 'Preview Rename' }));
+    await screen.findByTestId('rename-preview-table');
+    await user.click(screen.getByTestId('rename-confirm'));
+
+    // The watched command reaches a terminal status → the button reflects
+    // completion instead of sticking on "Renaming…".
+    await waitFor(() =>
+      expect(screen.getByTestId('rename-command-status')).toHaveTextContent('completed'),
+    );
+    expect(screen.getByTestId('rename-confirm')).not.toHaveTextContent('Renaming…');
+  });
+});
+
+describe('FRG-UI-012: the example is honest while the token vocabulary is unresolved', () => {
+  it('FRG-UI-012 — a tokens fetch error shows "example unavailable", never empty-token garbage', async () => {
+    const { fetcher } = fakeFetcher(
+      resolver({
+        onTokens: () => {
+          throw new Error('tokens endpoint down');
+        },
+      }),
+    );
+    renderWithProviders(<MediaManagement />, { fetcher });
+
+    const example = await screen.findByTestId('example-file_naming_template');
+    await waitFor(() => expect(example).toHaveTextContent('example unavailable'));
+    // The old bug rendered every unresolved token empty → "Example: ().cbz".
+    expect(example).not.toHaveTextContent('().cbz');
+  });
+
+  it('FRG-UI-012 — while the token vocabulary is still loading the example shows a loading state', async () => {
+    const { fetcher } = fakeFetcher(
+      resolver({ onTokens: () => new Promise(() => {}) }),
+    );
+    renderWithProviders(<MediaManagement />, { fetcher });
+
+    const example = await screen.findByTestId('example-file_naming_template');
+    expect(example).toHaveTextContent('loading example…');
+    expect(example).not.toHaveTextContent('().cbz');
+  });
+});
+
+describe('FRG-UI-012: reset a template to its shipped default', () => {
+  it('FRG-UI-012 — editing reveals "Reset to default"; clicking restores tokens.defaults', async () => {
+    const user = userEvent.setup();
+    const { fetcher } = fakeFetcher(resolver());
+    renderWithProviders(<MediaManagement />, { fetcher });
+
+    const field = await screen.findByTestId('template-field-file_naming_template');
+    const input = within(field).getByRole('textbox');
+    // Seeded exactly at the default → no reset affordance is offered.
+    expect(
+      within(field).queryByTestId('reset-default-file_naming_template'),
+    ).toBeNull();
+
+    await user.clear(input);
+    await user.type(input, '{{Series Title}');
+    const reset = within(field).getByTestId('reset-default-file_naming_template');
+    await user.click(reset);
+
+    // Restored from the endpoint's defaults contract, not a hardcoded string.
+    expect(input).toHaveValue(TOKENS.defaults.file_naming_template);
   });
 });

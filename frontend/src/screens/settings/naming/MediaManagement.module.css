@@ -91,6 +91,22 @@
   color: var(--color-accent);
 }
 
+/* Sits at the right edge of the label row (help trigger stays last). */
+.resetDefault {
+  margin-left: auto;
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.resetDefault:hover {
+  color: var(--color-accent);
+}
+
 .templateInput {
   width: 100%;
   padding: var(--spacing-sm);
