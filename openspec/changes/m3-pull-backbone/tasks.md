@@ -17,14 +17,14 @@ is called out per area so the orchestrator can assign model tiers accordingly.
 `entry_key` derivation are the correctness core; the schema itself is mechanical.*
 Owns: `pull/models.py`, `pull/repo.py`, one alembic migration under `db/alembic`.
 
-- [ ] A.1 `pull_entries` table + typed model (FRG-DB-008): `(week, entry_key)`
+- [x] A.1 `pull_entries` table + typed model (FRG-DB-008): `(week, entry_key)`
       unique, publisher/series_name/issue_number/cv_series_id/cv_issue_id/
       release_date/matched_issue_id (nullable FK to issues)/match_type/fetched_at.
       Forward migration under FRG-DB-002 (pre-migration backup is automatic,
       FRG-DB-003). Deterministic `entry_key` (prefer `cv_issue_id`, else normalized
       `(series_name, issue_number, publisher)`). Tagged tests: schema round-trips
       typed values; `entry_key` is stable for the same logical source row. [FRG-PULL-003]
-- [ ] A.2 `repo.replace_week(week, entries)` — single-transaction delete-then-insert
+- [x] A.2 `repo.replace_week(week, entries)` — single-transaction delete-then-insert
       (FRG-DB-007) so a re-fetch is idempotent and a mid-run failure leaves the prior
       week intact. Tagged tests: re-fetch yields identical row counts/content; entries
       carry source CV IDs; a simulated failure mid-replace does not half-replace the
@@ -36,15 +36,15 @@ Owns: `pull/models.py`, `pull/repo.py`, one alembic migration under `db/alembic`
 untrusted-JSON handling are security-load-bearing.* Owns: `pull/source.py` and its
 health-item contribution. Depends on A's typed entry model.
 
-- [ ] B.1 Fetch client over the `security` **external** egress profile (FRG-SEC-001):
+- [x] B.1 Fetch client over the `security` **external** egress profile (FRG-SEC-001):
       configurable `pull_source_url`, current + previous week per run, mandatory
       timeouts (FRG-NFR-006), auto-redirect disabled. Tagged tests: a loopback/private
       source URL is refused per-hop (not fetched); timeouts enforced. [FRG-PULL-002]
-- [ ] B.2 Untrusted-JSON parse (FRG-NFR-012): byte-capped stdlib parse into A's typed
+- [x] B.2 Untrusted-JSON parse (FRG-NFR-012): byte-capped stdlib parse into A's typed
       entry model; source-supplied CV IDs recorded as candidates only. Tagged tests: a
       malformed/oversized/hostile body degrades without raising and writes no partial
       week. [FRG-PULL-002]
-- [ ] B.3 Documented error-code + outage handling: 619 skips the affected week
+- [x] B.3 Documented error-code + outage handling: 619 skips the affected week
       (logged, other week still fetched); 522/666/transport failure → source-outage
       outcome that leaves the stored week intact and marks the pull source **degraded**
       in health (FRG-NFR-011 / FRG-API-014) with a remediation hint. Tagged tests: a
@@ -57,14 +57,14 @@ health-item contribution. Depends on A's typed entry model.
 hard-won correctness core; this is where wrong matches are prevented.* Owns:
 `pull/matching.py` (a thin adapter over `library/matching.py`). Depends on A's model.
 
-- [ ] C.1 Id match first (CV series+issue) with a **book-type guard**; else guarded
+- [x] C.1 Id match first (CV series+issue) with a **book-type guard**; else guarded
       name match (normalized name/alias equal AND `0 ≤ seq delta < 3` AND release date
       within pull week ±2 days), reusing `library/matching.py` normalization. Resolve
       `match_type` (`id`/`name_seq`/`unmatched`/`new_series`) and persist link +
       type on the entry. Tagged tests: the mixed fixture (id match + valid name match +
       wrong-volume collision + unknown → exactly two links, two unmatched); book-type
       guard rejects a mismatched id; source IDs treated as candidates not authority. [FRG-PULL-004]
-- [ ] C.2 New-series tagging: an unmatched `#1`/`#0` for a series not in the library is
+- [x] C.2 New-series tagging: an unmatched `#1`/`#0` for a series not in the library is
       tagged `new_series` (a tag only — no series is created). Tagged test: new #1
       tagged, no series record created. [FRG-PULL-004]
 
@@ -74,13 +74,13 @@ hard-won correctness core; this is where wrong matches are prevented.* Owns:
 Owns: `pull/commands.py`, new config keys on `config.py`, the built-in task entry in
 `commands/__init__.py` (shared file — orchestrator merges). Depends on A, B, C.
 
-- [ ] D.1 Refresh trigger (FRG-PULL-005): a matched-but-missing issue enqueues the
+- [x] D.1 Refresh trigger (FRG-PULL-005): a matched-but-missing issue enqueues the
       existing `refresh-series` (`triggered_by="pull-refresh"`), deduplicated on the
       command queue (FRG-SCHED-003); the pull side writes no issue status. Tagged
       tests: missing matched issue → one deduplicated `refresh-series`, no status
       write; an already-present matched issue triggers none; post-refresh with policy
       "all" the issue is monitored/wanted via the normal path. [FRG-PULL-005]
-- [ ] D.2 `pull-refresh` command (fetch → store → match → trigger) wiring A+B+C;
+- [x] D.2 `pull-refresh` command (fetch → store → match → trigger) wiring A+B+C;
       register as a built-in recurring task (default 14400 s, min clamp ~3600 s) in
       `BUILTIN_SCHEDULED_TASKS`; internal re-poll throttle suppresses scheduled fetches
       but NOT a manual force-run; job runs recorded in history (FRG-SCHED-008) and
@@ -96,13 +96,13 @@ Owns: `pull/commands.py`, new config keys on `config.py`, the built-in task entr
 endpoint itself is conventional.* Owns: `pull/projection.py`, `api/pull.py`, its
 router registration (shared wiring — orchestrator merges). Depends on A's store.
 
-- [ ] E.1 Weekly projection (FRG-PULL-001): for a target store-date week, the watched-
+- [x] E.1 Weekly projection (FRG-PULL-001): for a target store-date week, the watched-
       series issues dated in that week with derived state (missing/wanted, downloading,
       downloaded, unmonitored) from issue+queue records (FRG-SER-004/FRG-DL-008);
       parameterised week (prev/current/next); functions with no/degraded source.
       Tagged tests: current-week content + derived state with no source; adjacent weeks
       by parameter; survives a degraded source. [FRG-PULL-001]
-- [ ] E.2 `GET /api/v1/pull?week=` (FRG-API-019): standard paging envelope
+- [x] E.2 `GET /api/v1/pull?week=` (FRG-API-019): standard paging envelope
       (FRG-API-006) + conventions (FRG-API-002); rows carry entry fields, `match_type`,
       linked issue id, derived state (or pending-refresh); omitted `week` → current
       week; no secret exposed; read-only (refresh is FRG-API-014 task force-run). Tagged
