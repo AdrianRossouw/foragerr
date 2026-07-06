@@ -43,10 +43,22 @@ the first tag is created at change 7's merge:
   pending network-connected CI (`pip-audit` / `npm audit` / Dependabot). Existing
   training-data-derived anomaly cells are replaced with "Deferred — see
   methodology"; the methodology note states why and what replaces it.
-- **Registry milestone moves (no spec-content change):** FRG-QUAL-003/004/005
-  `M2 → B`. Their requirement text stays in the `qual` baseline spec unchanged;
-  only scheduling moves. `docs/process/decisions.md` records the rationale and the
-  re-homing knock-ons (PP-013, PP-014, API-012) so M2 proposals cite it.
+- **Registry milestone moves + milestone-metadata reconciliation (no
+  requirement-content change):** FRG-QUAL-003/004/005 `M2 → B`. Their requirement
+  text (SHALL statements, scenarios) stays unchanged; only scheduling moves.
+  `docs/process/decisions.md` records the rationale and the re-homing knock-ons
+  (PP-013, PP-014, API-012) so M2 proposals cite it. The review of this change
+  found the baseline specs' per-requirement `**Milestone**:` fields had never been
+  reconciled with the 2026-07-05 milestone reshape (43 stale fields across
+  ui/notif/qual/pp/idx/opds/auth/sec/pull/tor/srch specs, including the three QUAL
+  rows this change parks) — all 43 are reconciled to the registry (the allocation
+  authority) in this change, stale prose cross-references naming the old milestones
+  (qual Purpose/Notes, srch FRG-SRCH-004 Notes, registry M2 legend, README SOUP
+  wording) are corrected, and `tools/trace.py` now fails on any future
+  spec-vs-registry milestone drift. `trace.py` also gains the correct `proposed`
+  semantics: a proposed registry row is satisfied by its requirement heading in an
+  OPEN change delta (baseline sync happens at merge), instead of failing the gate
+  for the lifetime of every open change.
 - **Merge-gate checklist** in `docs/process/commit-standard.md` gains the tagging
   step (from change 7 onward).
 
@@ -67,8 +79,11 @@ the first tag is created at change 7's merge:
   FRG-PROC-012)
 - Affected docs: `docs/security/soup-register.md` (methodology + anomaly cells),
   `docs/process/commit-standard.md` (gate checklist), `docs/process/decisions.md`
-  (two decision records), `docs/traceability/requirements-registry.md`
-  (FRG-PROC-013 row; QUAL-003/004/005 milestone cells)
+  (three decision records), `docs/traceability/requirements-registry.md`
+  (FRG-PROC-013 row; QUAL-003/004/005 milestone cells; M2 legend), `README.md`
+  (SOUP wording), `tools/trace.py` (milestone-drift check + proposed-row
+  semantics), baseline spec milestone metadata + stale scheduling prose
+  (43 `**Milestone**:` fields; qual/srch notes)
 - No production code. No dependency changes.
 
 ## Manual impact

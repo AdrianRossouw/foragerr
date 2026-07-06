@@ -13,7 +13,7 @@ Also: `deferred` (approved, explicitly parked), `withdrawn` (kept for history).
 
 Milestones: `M1` vertical slice · `M2` own your library (existing-collection
 import, manual import, naming preview, daily-use screens, backups, NFR
-hardening, quality trio) · `M3` comics-native (weekly pull list + discovery,
+hardening; quality trio parked to B 2026-07-06) · `M3` comics-native (weekly pull list + discovery,
 volume grouping, trade typing, OPDS page streaming — grouping/trade ids
 allocated at proposal time) · `M4` sources (Humble Bundle importer — ids
 allocated at proposal time) · `M5` authentication · `B` backlog · `—` process

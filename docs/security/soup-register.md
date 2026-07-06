@@ -27,10 +27,11 @@ owner judged those audit-misleading (they fabricate review rigor that never
 happened) and had them removed. Until the project has network-connected CI able to
 run live advisory tooling (`pip-audit`, `npm audit`, GitHub Dependabot), the
 anomaly column reads "Deferred — see methodology" and no knowledge-based verdict
-may be recorded (FRG-PROC-012). What this register **does** guarantee, mechanically
-(`tools/soup_check.py` at every merge gate): a complete, current inventory of every
-direct dependency — name, version constraint, source, purpose, supporting
-requirements, license — so a dependency change is always a visible, reviewed event.
+may be recorded (FRG-PROC-012). What this register **does** keep: a complete,
+current inventory of every direct dependency (name, version constraint, source,
+purpose, supporting requirements, license), with presence and version constraints
+verified mechanically against the manifests by `tools/soup_check.py` at every merge
+gate; the descriptive columns are maintained by the same-change update rule.
 When live tooling becomes available, anomaly review is introduced in its own change
 (tooling, cadence, recording format) and this note is updated.
 

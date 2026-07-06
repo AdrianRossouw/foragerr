@@ -249,7 +249,7 @@ RSS fetches SHALL record a last-seen-release bookmark per indexer and page backw
 
 The system SHALL support Torznab indexers as a Newznab-protocol implementation over the torrent protocol, reusing the caps probe, request generator, parser, and back-off machinery, with torrent-specific attributes (seeders, leechers, info-hash) captured from `torznab:attr`.
 
-- **Milestone**: M2
+- **Milestone**: B
 - **Source**: sonarr-arch §2.3 (Torznab = same protocol over torrents); mylar-fs IDX (torznab tuples)
 - **Notes**: This is the only torrent *search* surface in baseline — see TOR exclusions for tracker scrapers.
 

@@ -121,7 +121,7 @@ Every filesystem path the system constructs from external or derived input — s
 
 Once authentication is enabled, all state-changing HTTP endpoints SHALL be protected against cross-site request forgery (via API-key-header-only auth for programmatic clients and an explicit SameSite/anti-CSRF stance for the cookie-session UI), and the WebSocket handshake SHALL validate the request Origin against an allowlist, refusing cross-origin socket connections.
 
-- **Milestone**: M3
+- **Milestone**: M5
 - **Source**: STRIDE analysis (WebSocket auth required by FRG-AUTH uniform surface coverage, but Origin/CSWSH and API CSRF stance unaddressed). Gap G-5; RISK-022.
 - **Notes**: Rides with the AUTH milestone. Before M3 the tailnet is the boundary (RISK-020, owned by FRG-AUTH); this prevents a browser-resident attacker abusing the operator's session once auth exists.
 

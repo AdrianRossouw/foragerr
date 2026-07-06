@@ -92,7 +92,8 @@ The decision engine SHALL include at minimum these specifications: format allowe
 
 - **Milestone**: M1
 - **Source**: sonarr-arch §3.2 (specification inventory with comic keep/drop calls); mylar-fs SRCH (size limits, ignore-words)
-- **Notes**: Mylar's `IGNORE_SEARCH_WORDS` maps onto must-not-contain. TV-shape specs (season pack, sample, anime, scene) deliberately dropped per sonarr-arch §3.2. "Format allowed by profile" and "genuine upgrade (profile order/revision/cutoff)" are evaluated against the format profile defined by FRG-QUAL-001; at M1 the seeded default (FRG-QUAL-002) supplies the ordering, so size/term scoring specs that depend on FRG-QUAL-003/004 are inert until M2.
+- **Notes**: Mylar's `IGNORE_SEARCH_WORDS` maps onto must-not-contain. TV-shape specs (season pack, sample, anime, scene) deliberately dropped per sonarr-arch §3.2. "Format allowed by profile" and "genuine upgrade (profile order/revision/cutoff)" are evaluated against the format profile defined by FRG-QUAL-001; at M1 the seeded default (FRG-QUAL-002) supplies the ordering, so size/term scoring specs that depend on FRG-QUAL-003/004 remain inert unless those
+requirements are picked up from backlog B (parked 2026-07-06).
 
 #### Scenario: Format not allowed by profile is rejected
 
