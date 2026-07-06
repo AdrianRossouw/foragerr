@@ -59,7 +59,7 @@ With a library of a few thousand issues (reference: 5,000), interactive read API
 #### Scenario: Listed endpoints are always paged with a server-side cap and query-computed stats
 
 - **WHEN** the series-list, queue, history, and wanted endpoints are requested with a page size above the server cap, and the series-detail/list stats are inspected
-- **THEN** each returns a paged envelope (never an unbounded array) with the page size clamped to the server-side cap, and aggregate have/total stats come from a SQL aggregate query rather than a per-row Python loop
+- **THEN** each returns a paged envelope (never an unbounded array) with the page size refused with a validation error when above the server-side cap (an oversize page is never served), and aggregate have/total stats come from a SQL aggregate query rather than a per-row Python loop
 
 ### Requirement: FRG-NFR-007 — crash-safe queues and idempotent work
 
