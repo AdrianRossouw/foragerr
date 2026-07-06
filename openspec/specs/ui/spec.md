@@ -169,7 +169,7 @@ The UI SHALL provide media-management/naming settings (rename on/off, folder and
 
 The UI SHALL provide a notification settings screen using the schema-driven form renderer, with per-connection event-opt-in checkboxes (on grab, on import, on upgrade, on failure, on health issue) and a Test button per connection.
 
-- **Milestone**: M2
+- **Milestone**: B
 - **Source**: sonarr-architecture.md §7.2 schema pattern; mylar-feature-surface.md §6 / §NOTIF (per-agent opt-in gates, test endpoints).
 - **Notes**: Pure consumer of the NOTIF area's provider schema — ships in the same milestone as the NOTIF core.
 
@@ -234,7 +234,7 @@ The UI SHALL provide a paged blocklist screen showing blocklisted releases (sour
 
 The UI SHALL provide a release-calendar or weekly-pull view of upcoming/recent issues for watched series with want/skip actions per entry.
 
-- **Milestone**: B
+- **Milestone**: M3
 - **Source**: mylar-feature-surface.md §1 weekly pull + §PULL capability map; sonarr-architecture.md §7.1 Calendar (+iCal).
 - **Notes**: Backend is PULL area (not in this baseline) — this UI requirement is deliberately B and blocked on PULL; recorded here so the screen inventory is complete. Choose Mylar pull-list shape vs Sonarr calendar shape at PULL design time.
 

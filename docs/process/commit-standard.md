@@ -30,6 +30,10 @@ Governed by **FRG-PROC-001** and **FRG-PROC-002** (message format) and
 6. Code review + simplify pass on the branch diff.
 7. Registry rows flipped, matrix regenerated, change archived, branch deleted
    after merge.
+8. Release tag (immediately AFTER the merge commit exists — the one post-merge
+   step): create and push the annotated SemVer tag per FRG-PROC-013
+   (`openspec/specs/dev-process/spec.md` owns the scheme), from change 7 /
+   v0.1.0 onward.
 
 ## Format
 

@@ -13,7 +13,7 @@ Also: `deferred` (approved, explicitly parked), `withdrawn` (kept for history).
 
 Milestones: `M1` vertical slice · `M2` own your library (existing-collection
 import, manual import, naming preview, daily-use screens, backups, NFR
-hardening, quality trio) · `M3` comics-native (weekly pull list + discovery,
+hardening; quality trio parked to B 2026-07-06) · `M3` comics-native (weekly pull list + discovery,
 volume grouping, trade typing, OPDS page streaming — grouping/trade ids
 allocated at proposal time) · `M4` sources (Humble Bundle importer — ids
 allocated at proposal time) · `M5` authentication · `B` backlog · `—` process
@@ -37,6 +37,7 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-PROC-009 | Spec approval gate | dev-process | active | — |
 | FRG-PROC-011 | Manual kept in sync with the application | dev-process | active | — |
 | FRG-PROC-012 | SOUP register | dev-process | active | — |
+| FRG-PROC-013 | Release tagging | dev-process | active | — |
 | FRG-SER-001 | Series entity from ComicVine volume | ser | implemented | M1 |
 | FRG-SER-002 | Issue entity | ser | implemented | M1 |
 | FRG-SER-003 | Two-level monitored flags | ser | implemented | M1 |
@@ -315,6 +316,6 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-NFR-014 | Listener request resource limits | nfr | approved | M2 |
 | FRG-QUAL-001 | Format profile entity | qual | implemented | M1 |
 | FRG-QUAL-002 | Default profile seeded on first run | qual | implemented | M1 |
-| FRG-QUAL-003 | Release preferred-term scoring | qual | approved | M2 |
-| FRG-QUAL-004 | Per-profile size bounds | qual | approved | M2 |
-| FRG-QUAL-005 | Profile management UI and API | qual | approved | M2 |
+| FRG-QUAL-003 | Release preferred-term scoring | qual | approved | B |
+| FRG-QUAL-004 | Per-profile size bounds | qual | approved | B |
+| FRG-QUAL-005 | Profile management UI and API | qual | approved | B |

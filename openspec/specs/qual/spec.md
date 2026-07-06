@@ -7,7 +7,8 @@ areas depend on (referenced by FRG-SER-001/005/006, FRG-SRCH-004/007, FRG-API-00
 FRG-PP-005/013/014). This is the comic-domain contraction of Sonarr's quality-profile
 machinery (sonarr-architecture.md §4, §608): comics have far fewer meaningful "qualities"
 than video, so the profile reduces to an ordered list of container formats plus a cutoff,
-extended at M2 by release-scoring and size bounds. Depth is baseline per the Phase 2 scope
+extendable by release-scoring and size bounds (FRG-QUAL-003/004, parked to backlog B
+2026-07-06 — comic files are size-stable). Depth is baseline per the Phase 2 scope
 decision; scenario elaboration happens in the implementing milestone change.
 
 ## Requirements
@@ -18,7 +19,7 @@ The system SHALL define a format profile as a named, ordered list of allowed com
 
 - **Milestone**: M1
 - **Source**: sonarr-architecture.md §4 (QualityProfile: ordered qualities + cutoff), §608 (comic contraction to a short format ladder).
-- **Notes**: The M1 default (see FRG-QUAL-002) makes this concrete without user configuration; profile *editing* UI is FRG-QUAL-005 (M2). This is the entity FRG-SER-001 references and FRG-SRCH-007 uses as its first comparator rung.
+- **Notes**: The M1 default (see FRG-QUAL-002) makes this concrete without user configuration; profile *editing* UI is FRG-QUAL-005 (parked to backlog B 2026-07-06). This is the entity FRG-SER-001 references and FRG-SRCH-007 uses as its first comparator rung.
 
 #### Scenario: Profile persists a named ordered format ladder with a cutoff
 
@@ -72,7 +73,7 @@ The system SHALL seed a usable default format profile (ordered `pdf < cbr < cbz`
 
 The system SHALL support per-profile preferred and rejected terms (release-group, edition, and title tokens) that contribute a numeric score to a candidate release, feeding the release-decision comparator after the format rung, as the comic-domain analogue of Sonarr custom formats.
 
-- **Milestone**: M2
+- **Milestone**: B
 - **Source**: sonarr-architecture.md §3.2/§4 (custom-format scoring); mylar-feature-surface.md IDX/SRCH (ignore-words, scan-group scoring).
 - **Notes**: Consumes the scan-group/annotation signals FRG-IMP flags at parse time. Second comparator key after FRG-QUAL-001's format rung in FRG-SRCH-007.
 
@@ -85,7 +86,7 @@ The system SHALL support per-profile preferred and rejected terms (release-group
 
 The system SHALL allow optional minimum and maximum file-size bounds per profile, rejecting candidate releases outside the bounds during the decision stage.
 
-- **Milestone**: M2
+- **Milestone**: B
 - **Source**: sonarr-architecture.md §3.2 (size specifications); mylar-feature-surface.md SRCH (min/max size).
 - **Notes**: Decision-engine specification, not a comparator; pairs with FRG-SRCH-004 accept/reject specs.
 
@@ -98,7 +99,7 @@ The system SHALL allow optional minimum and maximum file-size bounds per profile
 
 The system SHALL expose create/read/update/delete of format profiles through the API and a settings UI, including reordering formats, setting the cutoff, and editing preferred/rejected terms and size bounds, with profiles in use by series protected from deletion.
 
-- **Milestone**: M2
+- **Milestone**: B
 - **Source**: sonarr-architecture.md §7.1 (profile resources); mylar-feature-surface.md UI (config forms).
 - **Notes**: Reuses the generic schema-form renderer FRG-UI/FRG-API promote to M1; the entity and default (QUAL-001/002) are M1, only management is M2.
 

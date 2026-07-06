@@ -18,32 +18,37 @@ backfill (M1 vertical slice is backend-only pre-change-7). Frontend SOUP rows ar
 added to this register in the change that creates `frontend/package.json`, per the
 "dependency added or upgraded" scenario.
 
-**Anomaly-review methodology.** This project has no network access from its
-development sandbox and no automated CVE-scanning service (see the change-8
-non-goals). The "known-anomaly review" column below is an **initial,
-knowledge-based review** performed from the reviewing agent's training knowledge of
-each project's maintainer changelogs, published security advisories, and CVE
-history as of the review date — not a live database query. Each entry states the
-date of that review and its outcome. Anomaly reviews should be refreshed (and the
-date/outcome updated) whenever the pinned version constraint changes, and
-periodically re-examined with live tooling (e.g. `pip-audit`, `npm audit`,
-GitHub Dependabot) once the project has network-connected CI, at which point this
-methodology note should be updated to reflect that.
+**Anomaly-review methodology (deferred — 2026-07-06 housekeeping).** Systematic
+known-anomaly/vulnerability review of register items is a **documented future
+improvement**, not a per-item mandate of this register. The original backfill
+carried per-item "no relevant known anomalies as of <date>" verdicts written from
+the reviewing agent's training knowledge rather than a live advisory query; the
+owner judged those audit-misleading (they fabricate review rigor that never
+happened) and had them removed. Until the project has network-connected CI able to
+run live advisory tooling (`pip-audit`, `npm audit`, GitHub Dependabot), the
+anomaly column reads "Deferred — see methodology" and no knowledge-based verdict
+may be recorded (FRG-PROC-012). What this register **does** keep: a complete,
+current inventory of every direct dependency (name, version constraint, source,
+purpose, supporting requirements, license), with presence and version constraints
+verified mechanically against the manifests by `tools/soup_check.py` at every merge
+gate; the descriptive columns are maintained by the same-change update rule.
+When live tooling becomes available, anomaly review is introduced in its own change
+(tooling, cadence, recording format) and this note is updated.
 
 ## Runtime SOUP items (backend)
 
 | Name | Version constraint | Source | Intended purpose | Requirements/subsystems supported | License | Known-anomaly review |
 |---|---|---|---|---|---|---|
-| fastapi | `>=0.115` | PyPI | ASGI web framework; defines and serves the REST API (routing, request/response models, OpenAPI schema generation) | FRG-API-* (REST API layer) | MIT | 2026-07-05: no relevant known anomalies at review date. Pinned floor (0.115) postdates the Starlette/python-multipart content-type ReDoS advisories (GHSA-qj7f-devc-hxxx / CVE-2024-24762 family, fixed upstream by FastAPI 0.109.1); no CVE known against FastAPI itself at this constraint. |
-| pydantic | `>=2.7` | PyPI | Data validation and settings/model layer underlying API request/response schemas and internal domain models | FRG-API-*, FRG-DEP-003 (config validation), most typed domain models | MIT | 2026-07-05: no relevant known anomalies at review date. Pydantic v2's Rust-based `pydantic-core` has no outstanding CVEs known to the reviewer for the 2.7+ line. |
-| pydantic-settings | `>=2.3` | PyPI | Environment-variable/config-file settings loading and precedence (`FORAGERR_*` env vars, `/config/config.yaml`) on top of pydantic models | FRG-DEP-003 (configuration via environment variables and config file), FRG-DEP-005 (secrets never in image/repo) | MIT | 2026-07-05: no relevant known anomalies at review date. |
-| sqlalchemy | `>=2.0` | PyPI | ORM and SQL toolkit; all persistent-state access (series, issues, downloads, queue) goes through it | FRG-DB-* (single SQLite database, transactional multi-step operations, typed schema) | MIT | 2026-07-05: no relevant known anomalies at review date. SQLAlchemy 2.0's `text()`/parameter-binding API is the safe default the project relies on to avoid SQL injection; no known CVE against the 2.x line at this floor. |
-| alembic | `>=1.13` | PyPI | Versioned schema migrations for the SQLite database | FRG-DB-002 (versioned schema migrations), FRG-DB-003 (pre-migration automatic backup), FRG-DB-004 (schema-version guard) | MIT | 2026-07-05: no relevant known anomalies at review date. |
-| aiosqlite | `>=0.20` | PyPI | Async SQLite driver used by SQLAlchemy's async engine | FRG-DB-005 (WAL journal mode with busy timeout), FRG-DB-006 (single-writer discipline) | MIT | 2026-07-05: no relevant known anomalies at review date. |
-| httpx | `>=0.27` | PyPI | Async HTTP client for all outbound integrations (ComicVine, Newznab indexers, SABnzbd API, built-in DDL fetches) | FRG-META-001..004 (ComicVine client), FRG-IDX-* (Newznab queries), FRG-DL-*, FRG-DDL-* (download clients) | BSD-3-Clause | 2026-07-05: no relevant known anomalies at review date. Pinned floor (0.27) postdates the historical httpx `Proxy-Authorization`/`Authorization` header leak on cross-origin redirect advisory (fixed well before the 0.23 line); project does not proxy credentials across hosts in its own httpx usage. |
-| uvicorn | `>=0.30` | PyPI | ASGI server that runs the FastAPI application | FRG-DEP-007 (health endpoint), FRG-DEP-008 (graceful shutdown), all FRG-API-* endpoints at runtime | BSD-3-Clause | 2026-07-05: no relevant known anomalies at review date. |
-| pyyaml | `>=6.0` | PyPI | YAML parsing/serialization of `/config/config.yaml` | FRG-DEP-003 (configuration via environment variables and config file) | MIT | 2026-07-05: no relevant known anomalies in the pinned 6.x line itself (the historical arbitrary-code-execution issues, e.g. CVE-2017-18342/CVE-2020-14343, were about unsafe `yaml.load()` usage with `Loader=None`/`FullLoader`, fixed upstream by making `SafeLoader` the effective default in 5.1+/6.0). Foragerr must continue to load `config.yaml` only via `yaml.safe_load` (or an explicit `SafeLoader`) — this is a usage discipline, not something the version pin alone guarantees, and is worth a periodic code-review check. |
-| defusedxml | `>=0.7` | PyPI | Hardened XML parsing (guards against XXE, billion-laughs/entity-expansion, external-entity SSRF) for untrusted Newznab/RSS indexer responses | FRG-IDX-006 (Newznab response parsing and error mapping), FRG-SEC-* (untrusted-input handling), the STRIDE disposition in `docs/security/threat-model.md` for indexer response parsing | PSF-2.0 | 2026-07-05: no relevant known anomalies at review date. This dependency exists specifically because stdlib `xml.etree`/`xml.dom.minidom` are unsafe against XXE/entity-expansion on untrusted input; no CVE known against defusedxml itself at this floor. |
+| fastapi | `>=0.115` | PyPI | ASGI web framework; defines and serves the REST API (routing, request/response models, OpenAPI schema generation) | FRG-API-* (REST API layer) | MIT | Deferred — see methodology |
+| pydantic | `>=2.7` | PyPI | Data validation and settings/model layer underlying API request/response schemas and internal domain models | FRG-API-*, FRG-DEP-003 (config validation), most typed domain models | MIT | Deferred — see methodology |
+| pydantic-settings | `>=2.3` | PyPI | Environment-variable/config-file settings loading and precedence (`FORAGERR_*` env vars, `/config/config.yaml`) on top of pydantic models | FRG-DEP-003 (configuration via environment variables and config file), FRG-DEP-005 (secrets never in image/repo) | MIT | Deferred — see methodology |
+| sqlalchemy | `>=2.0` | PyPI | ORM and SQL toolkit; all persistent-state access (series, issues, downloads, queue) goes through it | FRG-DB-* (single SQLite database, transactional multi-step operations, typed schema) | MIT | Deferred — see methodology |
+| alembic | `>=1.13` | PyPI | Versioned schema migrations for the SQLite database | FRG-DB-002 (versioned schema migrations), FRG-DB-003 (pre-migration automatic backup), FRG-DB-004 (schema-version guard) | MIT | Deferred — see methodology |
+| aiosqlite | `>=0.20` | PyPI | Async SQLite driver used by SQLAlchemy's async engine | FRG-DB-005 (WAL journal mode with busy timeout), FRG-DB-006 (single-writer discipline) | MIT | Deferred — see methodology |
+| httpx | `>=0.27` | PyPI | Async HTTP client for all outbound integrations (ComicVine, Newznab indexers, SABnzbd API, built-in DDL fetches) | FRG-META-001..004 (ComicVine client), FRG-IDX-* (Newznab queries), FRG-DL-*, FRG-DDL-* (download clients) | BSD-3-Clause | Deferred — see methodology |
+| uvicorn | `>=0.30` | PyPI | ASGI server that runs the FastAPI application | FRG-DEP-007 (health endpoint), FRG-DEP-008 (graceful shutdown), all FRG-API-* endpoints at runtime | BSD-3-Clause | Deferred — see methodology |
+| pyyaml | `>=6.0` | PyPI | YAML parsing/serialization of `/config/config.yaml` | FRG-DEP-003 (configuration via environment variables and config file) | MIT | Deferred — see methodology |
+| defusedxml | `>=0.7` | PyPI | Hardened XML parsing (guards against XXE, billion-laughs/entity-expansion, external-entity SSRF) for untrusted Newznab/RSS indexer responses | FRG-IDX-006 (Newznab response parsing and error mapping), FRG-SEC-* (untrusted-input handling), the STRIDE disposition in `docs/security/threat-model.md` for indexer response parsing | PSF-2.0 | Deferred — see methodology |
 
 ## Development/test tooling (backend)
 
