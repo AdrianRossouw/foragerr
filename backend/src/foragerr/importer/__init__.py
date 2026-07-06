@@ -45,7 +45,15 @@ from foragerr.importer.sources import (
     RescanSource,
 )
 
+#: Shared command exclusivity group for every file-mutating importer command
+#: (the completed-download drain AND the per-series rescan). Both carry it so at
+#: most one library-mutating importer runs at a time regardless of the ``pp``
+#: pool size (``workers_pp`` may be up to 4) — double-import safety must not rest
+#: on the pool being size 1 (FRG-SER-010).
+IMPORT_FILE_MUTATION_GROUP = "import-file-mutation"
+
 __all__ = [
+    "IMPORT_FILE_MUTATION_GROUP",
     "CompletedDownloadSource",
     "ImportCandidate",
     "ImportContext",

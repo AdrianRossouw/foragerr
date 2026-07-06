@@ -14,12 +14,17 @@ full volume; it defaults to the real :func:`shutil.disk_usage`-backed probe.
 from __future__ import annotations
 
 import datetime as dt
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 from foragerr.importer import fileops
 from foragerr.importer.renamer import DEFAULT_FILE_TEMPLATE, DEFAULT_FOLDER_TEMPLATE
 from foragerr.parser.vocab import ARCHIVE_EXTENSIONS
+
+#: ``HandlerContext.offload``-compatible callable (``daemon_offload`` in
+#: production): runs a blocking function on a thread off the shared event loop.
+OffloadFn = Callable[..., Awaitable[Any]]
 
 #: Minimum plausible archive size; anything smaller is treated as junk/sample
 #: (a real comic page scan set is far larger than this floor).
@@ -47,10 +52,22 @@ class ImportContext:
     now: dt.datetime | None = None
     #: Free-space probe seam (path → free bytes); default is the real probe.
     free_space_probe: Callable[[str], int] = field(default=fileops.free_bytes)
+    #: Optional offload seam for the FS-heavy work (the multi-GB ``place_file``
+    #: copy/fsync and archive inspection). The flows commands pass
+    #: ``ctx.offload`` so that work runs on a daemon thread instead of stalling
+    #: the shared event loop; ``None`` (tests/direct callers) runs it inline.
+    offload: OffloadFn | None = None
+    #: Per-run cache of a series' parsed-issue index (``series_id`` → index), so
+    #: reconciliation parses each series' issues once per run rather than once
+    #: per candidate (built lazily; keyed off the run-scoped context instance).
+    issue_index_cache: dict[int, list] = field(
+        default_factory=dict, compare=False, repr=False
+    )
 
 
 __all__ = [
     "DEFAULT_JUNK_SIZE_FLOOR_BYTES",
     "DEFAULT_MAX_WALK_DEPTH",
     "ImportContext",
+    "OffloadFn",
 ]

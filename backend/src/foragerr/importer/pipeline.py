@@ -32,6 +32,7 @@ leave the source file in place.
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from enum import Enum
@@ -45,25 +46,21 @@ from foragerr.importer.context import ImportContext
 from foragerr.importer.decisions import ImportDecision, ImportEvaluation, decide
 from foragerr.importer.evidence import Evidence, aggregate
 from foragerr.importer.models import ImportHistoryRow
-from foragerr.importer.renamer import (
-    RenameFields,
-    render_filename,
-    render_series_folder,
-)
+from foragerr.importer.renamer import RenameFields, render_filename
 from foragerr.importer.sources import (
     SOURCE_DOWNLOAD,
-    SOURCE_RESCAN,
     CompletedDownloadSource,
     ImportCandidate,
     RescanSource,
 )
-from foragerr.library import repo
+from foragerr.library import matching, repo
 from foragerr.library.models import IssueFileRow, IssueRow, SeriesRow
-from foragerr.library.ordering import parse_issue_number
-from foragerr.parser.result import Booktype, Issue, IssueClassification
+from foragerr.parser.result import Booktype, IssueClassification
 from foragerr.quality.models import FormatProfileRow, decode_formats
 from foragerr.security.archives import inspect_archive
 from foragerr.security.paths import safe_join
+
+logger = logging.getLogger("foragerr.importer.pipeline")
 
 # --- outcome types -----------------------------------------------------------
 
@@ -100,6 +97,20 @@ class ExecuteResult:
     upgraded: bool
 
 
+async def _run_fs(ctx: ImportContext, func, *args, **kwargs):
+    """Run a blocking filesystem op through the context's offload seam.
+
+    The heavy import file operations (``place_file``'s multi-GB copy + fsync,
+    archive inspection) are synchronous and filesystem-only. When the flows
+    command wired ``ctx.offload`` they run on a daemon thread so the shared event
+    loop keeps serving; direct callers (tests) leave it ``None`` and run inline.
+    The database work stays on the loop/session — only the FS portion offloads.
+    """
+    if ctx.offload is not None:
+        return await ctx.offload(func, *args, **kwargs)
+    return func(*args, **kwargs)
+
+
 # --- stage 1: gather ---------------------------------------------------------
 
 
@@ -130,36 +141,34 @@ def aggregate_candidate(candidate: ImportCandidate, ctx: ImportContext) -> Evide
 # --- reconciliation (FRG-PP-003) --------------------------------------------
 
 
-def _issue_equal(a: Issue, b: Issue) -> bool:
-    return (
-        a.value == b.value
-        and a.suffix == b.suffix
-        and a.is_infinity == b.is_infinity
-        and (a.name or None) == (b.name or None)
-    )
+async def _issue_index_for_series(
+    session: AsyncSession, series_id: int, ctx: ImportContext
+) -> list:
+    """The series' parsed-issue index, built once per run (FRG-PP-003).
 
-
-def _series_title_matches(parsed_key: str | None, series_key: str) -> bool:
-    """Exact key, or the parsed key's tokens are a subset of the series key's
-    (same asymmetric rule as the change-1 scanner)."""
-    if not parsed_key or not series_key:
-        return False
-    if parsed_key == series_key:
-        return True
-    return set(parsed_key.split()) <= set(series_key.split())
+    Cached on the run-scoped :class:`ImportContext` so a multi-candidate drain /
+    rescan parses each series' issue numbers once, not once per candidate."""
+    index = ctx.issue_index_cache.get(series_id)
+    if index is None:
+        issues = await repo.list_issues_for_series(session, series_id)
+        index = matching.build_issue_index(issues)
+        ctx.issue_index_cache[series_id] = index
+    return index
 
 
 async def _match_issue_in_series(
-    session: AsyncSession, series_id: int, issue: Issue
+    session: AsyncSession, series_id: int, issue, ctx: ImportContext
 ) -> int | None:
-    for row in await repo.list_issues_for_series(session, series_id):
-        if _issue_equal(issue, parse_issue_number(row.issue_number)):
-            return row.id
-    return None
+    return matching.match_issue_id(
+        issue, await _issue_index_for_series(session, series_id, ctx)
+    )
 
 
 async def reconcile(
-    session: AsyncSession, candidate: ImportCandidate, evidence: Evidence
+    session: AsyncSession,
+    candidate: ImportCandidate,
+    evidence: Evidence,
+    ctx: ImportContext,
 ) -> tuple[int | None, int | None]:
     """Resolve (series_id, issue_id) for a candidate (FRG-PP-003).
 
@@ -176,7 +185,15 @@ async def reconcile(
         if iid is not None:
             issue_row = await session.get(IssueRow, iid)
             if issue_row is not None:
-                return issue_row.series_id, issue_row.id
+                # On a scoped rescan the tag is only trustworthy for THIS series:
+                # a file carrying another series' id tag (misfiled, or a stale
+                # tag) must not be dragged into the scoped series' folder
+                # (FRG-SER-010). Fall through to the heuristic when it disagrees.
+                if (
+                    candidate.series_scope_id is None
+                    or issue_row.series_id == candidate.series_scope_id
+                ):
+                    return issue_row.series_id, issue_row.id
 
     # 2. grab-history reconciliation by download id (survives an unparseable name).
     if candidate.grab_series_id is not None and candidate.grab_issue_id is not None:
@@ -187,11 +204,11 @@ async def reconcile(
         return None, None
     if candidate.series_scope_id is not None:
         series = await session.get(SeriesRow, candidate.series_scope_id)
-        if series is None or not _series_title_matches(
+        if series is None or not matching.series_title_matches(
             evidence.matching_key, series.matching_key
         ):
             return None, None
-        issue_id = await _match_issue_in_series(session, series.id, evidence.issue)
+        issue_id = await _match_issue_in_series(session, series.id, evidence.issue, ctx)
         return (series.id, issue_id) if issue_id is not None else (None, None)
 
     if evidence.matching_key is None:
@@ -203,7 +220,7 @@ async def reconcile(
     ).scalars().first()
     if series is None:
         return None, None
-    issue_id = await _match_issue_in_series(session, series.id, evidence.issue)
+    issue_id = await _match_issue_in_series(session, series.id, evidence.issue, ctx)
     return (series.id, issue_id) if issue_id is not None else (None, None)
 
 
@@ -249,11 +266,13 @@ async def build_evaluation(
             junk_size_floor=ctx.junk_size_floor_bytes,
         )
 
-    series_id, issue_id = await reconcile(session, candidate, evidence)
+    series_id, issue_id = await reconcile(session, candidate, evidence, ctx)
 
     archive = None
     if os.path.exists(candidate.local_path):
-        archive = inspect_archive(candidate.local_path)
+        # Archive inspection reads the whole central directory off disk; run it
+        # off the event loop when an offload seam is wired (FRG-PP-006).
+        archive = await _run_fs(ctx, inspect_archive, candidate.local_path)
 
     existing_path: str | None = None
     existing_format: str | None = None
@@ -333,12 +352,6 @@ def build_fields(series: SeriesRow, issue: IssueRow, evidence: Evidence) -> Rena
     )
 
 
-def series_dir_under_root(library_root: str, series: SeriesRow) -> Path:
-    """Build the series folder path under ``library_root`` via safe_join
-    (FRG-PP-010) — the templated folder name from :func:`render_series_folder`."""
-    return safe_join(library_root, render_series_folder(series.title, series.start_year))
-
-
 # --- stage 4: execute --------------------------------------------------------
 
 
@@ -350,10 +363,21 @@ async def execute(
 ) -> ExecuteResult:
     """Rename into the library, place the file safely, swap the issue_files row.
 
-    On an upgrade the superseded file is quarantined (never deleted) and its old
-    ``issue_files`` row removed in this same transaction (FRG-PP-010). Runs inside
-    the caller's ``write_session``: a file-op failure raises and rolls the row
-    changes back.
+    **FS↔DB ordering (FRG-PP-010).** The irreversible on-disk move happens FIRST
+    (``place_file``); only after it succeeds is any DB row mutated and, on an
+    upgrade, the superseded file quarantined (never deleted). This makes every
+    interruption point recoverable:
+
+    - a ``place_file`` failure raises before any DB write or quarantine, so the
+      row still points at the (untouched) old file — nothing to reconcile;
+    - once the new file is placed, a later failure rolls the row changes back but
+      leaves the placed file carrying its ``[__issueid__]`` identity tag on disk,
+      which re-claim / rescan reconciles back to this issue rather than orphaning.
+
+    The reverse (old order) quarantined + dropped the old row *before* placing,
+    so a ``place_file`` failure rolled back the restored old row while the file
+    was already gone — a vanished path that the next rescan removed, silently
+    reverting the issue to Wanted. The FS-heavy copy runs through ``ctx.offload``.
     """
     assert ev.series_id is not None and ev.issue_id is not None
     series = await session.get(SeriesRow, ev.series_id)
@@ -371,16 +395,39 @@ async def execute(
     )
     # Destination directory: the series' own (template-derived) folder; created
     # via safe_join so the constructed path can never escape the series root.
-    dest_dir = series.path
-    dest_path = safe_join(dest_dir, new_name)
+    dest_path = safe_join(series.path, new_name)
 
-    # Upgrade: quarantine the superseded file and drop its row first, so the
-    # unique path constraint cannot collide and the swap is atomic in this txn.
+    # 1. IRREVERSIBLE MOVE FIRST — before any DB mutation or quarantine, off the
+    #    event loop. os.replace overwrites an existing destination, so placing
+    #    ahead of the row swap never collides.
+    placed = await _run_fs(
+        ctx,
+        fileops.place_file,
+        candidate.local_path,
+        dest_path,
+        mode=ctx.transfer_mode,
+        margin_bytes=ctx.free_space_margin_bytes,
+    )
+    size = placed.stat().st_size
+
+    # 2. Only now that the new file is durable: quarantine the superseded file
+    #    (never deleted) and drop its stale row, then add the new row. If any of
+    #    this rolls back, the placed file's id tag keeps it recoverable.
     quarantine_path: str | None = None
     upgraded = False
-    if ev.existing_file_path is not None and os.path.exists(ev.existing_file_path):
+    if (
+        ev.existing_file_path is not None
+        and ev.existing_file_path != str(placed)
+        and os.path.exists(ev.existing_file_path)
+    ):
         quarantine_path = str(
-            fileops.quarantine_file(ev.existing_file_path, ctx.config_dir, now=ctx.now)
+            await _run_fs(
+                ctx,
+                fileops.quarantine_file,
+                ev.existing_file_path,
+                ctx.config_dir,
+                now=ctx.now,
+            )
         )
         upgraded = True
         old_row = (
@@ -392,14 +439,7 @@ async def execute(
             await session.delete(old_row)
             await session.flush()
 
-    placed = fileops.place_file(
-        candidate.local_path,
-        dest_path,
-        mode=ctx.transfer_mode,
-        margin_bytes=ctx.free_space_margin_bytes,
-    )
-
-    # Move-mode: clean up emptied source directories up to the staging root.
+    # 3. Move-mode: clean up emptied source directories up to the staging root.
     if (
         ctx.transfer_mode is fileops.TransferMode.MOVE
         and candidate.container_root
@@ -407,9 +447,13 @@ async def execute(
     ):
         source_parent = Path(candidate.local_path).parent
         if str(source_parent) != candidate.container_root:
-            fileops.cleanup_empty_dirs(source_parent, candidate.container_root)
+            await _run_fs(
+                ctx,
+                fileops.cleanup_empty_dirs,
+                source_parent,
+                candidate.container_root,
+            )
 
-    size = placed.stat().st_size
     file_row = await repo.add_issue_file(
         session, issue_id=issue.id, path=str(placed), size=size, added_at=ctx.now
     )
@@ -446,67 +490,114 @@ async def import_candidate(
     row) inside the caller's ``write_session`` (FRG-PP-011). Returns the outcome;
     does not touch ``tracked_downloads`` — the flows command applies the state
     transition from the returned :class:`ImportStatus`.
+
+    **Candidate isolation (FRG-DL-009 / FRG-PP-002).** The decide+execute+row
+    write for one candidate runs inside a per-candidate SAVEPOINT
+    (``begin_nested``), and any exception escaping ``execute`` (a filesystem IO
+    failure) is caught and turned into a BLOCKED outcome. Together these ensure a
+    failure in one candidate can neither escape to unwind the shared
+    ``write_session`` (which would roll back an already-moved sibling's
+    ``issue_files`` row, orphaning its file) nor leave the session poisoned for
+    the candidates that follow it. The moved-but-failed file keeps its identity
+    tag on disk and is reconciled on the next run.
     """
     evidence = aggregate_candidate(candidate, ctx)
-    ev = await build_evaluation(session, candidate, evidence, ctx)
-    decision: ImportDecision = decide(ev)
+    try:
+        async with session.begin_nested():  # SAVEPOINT isolating this candidate
+            ev = await build_evaluation(session, candidate, evidence, ctx)
+            decision: ImportDecision = decide(ev)
 
-    data = {
-        "provenance": dict(evidence.provenance),
-        "source_kind": candidate.source_kind,
-    }
+            data = {
+                "provenance": dict(evidence.provenance),
+                "source_kind": candidate.source_kind,
+            }
 
-    if not decision.approved:
-        data["reasons"] = list(decision.reasons)
-        failed = decision.failed
+            if not decision.approved:
+                data["reasons"] = list(decision.reasons)
+                failed = decision.failed
+                history.record_event(
+                    session,
+                    event_type=(
+                        history.EVENT_IMPORT_FAILED
+                        if failed
+                        else history.EVENT_IMPORT_BLOCKED
+                    ),
+                    series_id=decision.series_id,
+                    issue_id=decision.issue_id,
+                    download_id=candidate.download_id,
+                    source_title=_source_title(candidate),
+                    source=_source_provenance(candidate),
+                    data=data,
+                    now=ctx.now,
+                )
+                return ImportOutcome(
+                    status=ImportStatus.FAILED if failed else ImportStatus.BLOCKED,
+                    candidate=candidate,
+                    reasons=decision.reasons,
+                    series_id=decision.series_id,
+                    issue_id=decision.issue_id,
+                )
+
+            result = await execute(session, candidate, ev, ctx)
+            data["imported_path"] = result.imported_path
+            data["size"] = result.size
+            history.record_event(
+                session,
+                event_type=(
+                    history.EVENT_UPGRADE_REPLACED
+                    if result.upgraded
+                    else history.EVENT_IMPORTED
+                ),
+                series_id=ev.series_id,
+                issue_id=ev.issue_id,
+                download_id=candidate.download_id,
+                source_title=_source_title(candidate),
+                source=_source_provenance(candidate),
+                data=data,
+                quarantine_path=result.quarantine_path,
+                now=ctx.now,
+            )
+            return ImportOutcome(
+                status=ImportStatus.IMPORTED,
+                candidate=candidate,
+                series_id=ev.series_id,
+                issue_id=ev.issue_id,
+                issue_file_id=result.issue_file_id,
+                imported_path=result.imported_path,
+                quarantine_path=result.quarantine_path,
+                upgraded=result.upgraded,
+            )
+    except Exception as exc:  # noqa: BLE001 — an IO failure must not escape/roll siblings
+        # The SAVEPOINT already rolled back this candidate's DB writes; siblings
+        # committed earlier in the shared session are untouched. Park it as
+        # BLOCKED (not FAILED: an environmental IO error is not a bad release, so
+        # it must not blocklist + re-search) with a visible reason, and re-record
+        # the block in the now-clean outer transaction so it persists.
+        logger.warning(
+            "import: candidate %s failed during execute; blocked (not lost): %s",
+            candidate.file_name,
+            exc,
+        )
+        reason = f"import failed placing the file on disk: {exc}"
         history.record_event(
             session,
-            event_type=(
-                history.EVENT_IMPORT_FAILED if failed else history.EVENT_IMPORT_BLOCKED
-            ),
-            series_id=decision.series_id,
-            issue_id=decision.issue_id,
+            event_type=history.EVENT_IMPORT_BLOCKED,
             download_id=candidate.download_id,
             source_title=_source_title(candidate),
             source=_source_provenance(candidate),
-            data=data,
+            data={
+                "provenance": dict(evidence.provenance),
+                "source_kind": candidate.source_kind,
+                "reasons": [reason],
+                "error": str(exc),
+            },
             now=ctx.now,
         )
         return ImportOutcome(
-            status=ImportStatus.FAILED if failed else ImportStatus.BLOCKED,
+            status=ImportStatus.BLOCKED,
             candidate=candidate,
-            reasons=decision.reasons,
-            series_id=decision.series_id,
-            issue_id=decision.issue_id,
+            reasons=(reason,),
         )
-
-    result = await execute(session, candidate, ev, ctx)
-    data["imported_path"] = result.imported_path
-    data["size"] = result.size
-    history.record_event(
-        session,
-        event_type=(
-            history.EVENT_UPGRADE_REPLACED if result.upgraded else history.EVENT_IMPORTED
-        ),
-        series_id=ev.series_id,
-        issue_id=ev.issue_id,
-        download_id=candidate.download_id,
-        source_title=_source_title(candidate),
-        source=_source_provenance(candidate),
-        data=data,
-        quarantine_path=result.quarantine_path,
-        now=ctx.now,
-    )
-    return ImportOutcome(
-        status=ImportStatus.IMPORTED,
-        candidate=candidate,
-        series_id=ev.series_id,
-        issue_id=ev.issue_id,
-        issue_file_id=result.issue_file_id,
-        imported_path=result.imported_path,
-        quarantine_path=result.quarantine_path,
-        upgraded=result.upgraded,
-    )
 
 
 __all__ = [
@@ -520,5 +611,4 @@ __all__ = [
     "gather",
     "import_candidate",
     "reconcile",
-    "series_dir_under_root",
 ]
