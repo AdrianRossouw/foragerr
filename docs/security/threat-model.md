@@ -806,6 +806,48 @@ routed through the existing `safe_join`-confined recycle bin with
 files-before-rows compensation (FRG-PP-013 mechanics, no new confinement
 surface); destructive scope is bounded to rows the id resolves to.
 
+### 2026-07-06 — m2-search-autosuggest (M2 change 4.5)
+
+**`GET /api/v1/series/lookup/suggest?term=`** (FRG-API-017, COMP 8 — ComicVine
+client) is a new query-string endpoint whose whole point is to be called
+frequently as the operator types, which raises a request-amplification /
+outbound-DoS consideration on the CV integration (an instance of `T-CV-4`,
+RISK-024/036 territory) distinct from the existing full-lookup walk. It reuses
+the same outbound egress choke point, the same filter-metacharacter
+neutralisation, and the same auth/error mapping as `GET /lookup` — no new
+listener, no new parser of untrusted input, no new credential handling.
+Disposition:
+
+- **Amplification bounded on three sides**: (1) the frontend gates the request
+  on a trimmed term of ≥3 characters AND a ~250 ms debounce
+  (`useSuggest`/`useDebouncedValue`), so idle keystrokes never reach the
+  network; (2) the server fetch is a single bounded page (offset 0, `limit=10`)
+  via one direct `_request` call — `suggest_series` never enters
+  `_paginate`'s walk to `_max_pages`, so one suggestion can cost at most one
+  upstream page request, tagged-tested; (3) the existing process-global
+  ComicVine rate limiter (FRG-META-003/FRG-NFR-004) still serializes this
+  traffic alongside every other CV call, unchanged. No new rate-limiting
+  mechanism was added or is needed.
+- **Error contract reused verbatim, not parallel-copied**: the suggest route
+  shares `_comicvine_error_to_api_error` with `GET /lookup` — a
+  `ComicVineAuthError` maps to the same static 503 body and
+  `field="comicvine_api_key"` discriminator (never the key value, in body or
+  log), so the frontend's existing `isComicVineAuthError` classifier drives
+  the identical actionable state for both routes. A mid-fetch non-auth failure
+  degrades the single page to `complete=false` with no candidates rather than
+  raising — there is only one page to lose, so this cannot become a partial
+  cascade the way a mid-walk failure could.
+- **No new residual risk expected**: this is a bounded, cheap accelerator over
+  an already-modeled integration (COMP 8), not a new trust boundary. No new
+  `RISK-` row is added, consistent with prior changes that compose existing
+  hardened surfaces without introducing new attack surface (e.g.
+  m2-existing-library-import).
+
+**Header quick-search** (FRG-UI-019): client-local only — it fuzzy-matches the
+already-cached `['series']` React Query data (titles/aliases already delivered
+to the browser) with **no network request per keystroke** and no new endpoint.
+It adds no attack surface.
+
 ## Coverage summary
 
 - **Well covered by the five drafts** (mitigation named, no new requirement needed): OPDS
