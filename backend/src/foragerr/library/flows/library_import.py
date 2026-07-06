@@ -7,26 +7,47 @@ Two commands around one persisted staging table
   the shared junk-aware walk (FRG-IMP-022), reconcile vanished ``issue_files``
   rows (shared :mod:`~foragerr.library.flows.reconcile` helpers), parse every
   still-unmapped file through the shared evidence layers, group by the parser's
-  ``matching_key`` normalization, propose ONE ComicVine match per group (capped
-  per run, plausibility-floored, never auto-picked), and atomically replace the
-  root's staging rows. Read-only w.r.t. files, so it takes NO file-mutation
-  exclusivity group (design decision 3); it runs on the ``pp`` pool.
+  ``matching_key``, and stage PROGRESSIVELY: the staging rows are replaced
+  immediately after the walk (carry-forward and already-imported filtering
+  happen inside that one write transaction, so review decisions and imports
+  made while a scan runs are never reverted), then the per-group ComicVine
+  proposal phase (capped per run, plausibility-floored, never auto-picked)
+  lands each proposal on its row in its own short write transaction — the UI
+  sees groups within seconds and a mid-proposal restart loses only the
+  un-proposed matches. Read-only w.r.t. files, so it takes NO file-mutation
+  exclusivity group (design decision 3); it runs on the ``pp`` pool. The scan
+  fails fast (visible command error) when a ``library-import`` execute holding
+  this root's staged group ids is queued or running — replacing the rows would
+  invalidate that selection.
 
-- ``library-import`` (:func:`execute_library_import`) — for each user-CONFIRMED
-  group: create the series through the existing :func:`add_series` flow
+- ``library-import`` (:func:`execute_library_import`) — for each SELECTED
+  group (selection IS confirmation: a ``proposed`` group with an attached
+  proposal auto-confirms, adopting the proposal as its confirmed volume):
+  create the series through the existing :func:`add_series` flow
   (``path_override`` = the group's folder when ``library_import_mode`` is
-  ``in_place``; the normal root-relative path in ``move`` mode), refresh its
-  issues, then run the group's files through the SAME
+  ``in_place``; the normal root-relative path in ``move`` mode;
+  ``enqueue_refresh=False`` because THIS flow awaits the refresh directly —
+  exactly one refresh per imported group, never a doubled fetch/scan), then
+  run the group's files through the SAME
   :func:`~foragerr.importer.pipeline.import_candidate` pipeline via
   :class:`~foragerr.importer.sources.LibraryImportSource` — same specs, same
   history events. File-mutating, so it shares ``IMPORT_FILE_MUTATION_GROUP``
   with the drain/rescan/rename commands. Outcomes land back on the staging row
-  (state + visible message), never silently (FRG-IMP-023 scenario 4).
+  (state + visible message + structured per-file ``rejections``), never
+  silently (FRG-IMP-023 scenario 4). Safety rails: a group whose folder IS the
+  root folder never becomes a root-swallowing series; a volume whose series
+  already exists elsewhere never has files moved at it — the group blocks
+  visibly with the files left untouched.
 
 Re-check semantics: re-running the scan for the root. Already-imported files
-are skipped at walk time (they are in ``issue_files``), so a re-scan after an
-import never re-stages what landed; confirmed/skipped decisions carry forward
-for groups whose ``matching_key`` persists.
+are dropped at replace time (re-read of ``issue_files`` inside the txn), so a
+re-scan after an import never re-stages what landed. Carry-forward by
+``matching_key``: confirmed/skipped decisions, attached proposals + display
+fields, and no-match answers all persist across re-scans; only groups with NO
+prior proposal/no-match answer are (re-)searched, so deferred groups advance
+on the next run instead of starving behind the cap, and a ComicVine outage
+never wipes existing proposals (a proposal is only overwritten by a successful
+new search).
 
 Import-cycle discipline (design decision 8): this module lives in
 ``library.flows`` and imports ``foragerr.importer``; nothing under
@@ -42,12 +63,12 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, ClassVar, Literal
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 
 from foragerr.commands.registry import BaseCommand, register_command, register_handler
 from foragerr.commands.service import CommandService, HandlerContext
 from foragerr.config import Settings
-from foragerr.db import Database, utcnow
+from foragerr.db import CommandRow, Database, utcnow
 from foragerr.http import HttpClientFactory
 from foragerr.importer import (
     IMPORT_FILE_MUTATION_GROUP,
@@ -67,11 +88,17 @@ from foragerr.library.flows.add import add_series
 from foragerr.library.flows.refresh import refresh_series
 from foragerr.library.models import (
     IssueFileRow,
+    IssueRow,
     LibraryImportGroupRow,
     RootFolderRow,
     SeriesRow,
 )
-from foragerr.metadata import ComicVineAuthError, ComicVineClient, ComicVineError
+from foragerr.metadata import (
+    COMICVINE_CREDENTIAL_MESSAGE,
+    ComicVineAuthError,
+    ComicVineClient,
+    ComicVineError,
+)
 from foragerr.parser.normalize import matching_key as fold_matching_key
 from foragerr.parser.vocab import ARCHIVE_EXTENSIONS
 
@@ -79,25 +106,32 @@ logger = logging.getLogger("foragerr.library.flows.library_import")
 
 OffloadFn = Callable[..., Awaitable[Any]]
 
-#: Maximum ComicVine match proposals ONE scan run performs (design decision 3
-#: risk note): each proposal is a live, politeness-gated ``search_series`` call,
-#: so a 500-series first scan must not fan out unboundedly. Groups beyond the
-#: cap stage as ``proposed`` with no attached match and a visible message —
-#: logged, never silent — and pick up a proposal on a later re-scan (once
-#: earlier groups are confirmed/imported they stop consuming the cap).
+#: Fallback default for ``Settings.library_import_proposal_cap`` when no
+#: settings are wired (bare test contexts): each proposal is a live,
+#: politeness-gated ``search_series`` call, so one scan run must not fan out
+#: unboundedly. Groups beyond the cap stage as ``proposed`` with no attached
+#: match and a visible message — logged, never silent — and pick up a proposal
+#: on a later re-scan (carry-forward keeps already-answered groups out of the
+#: budget, so deferred groups advance instead of starving).
 LIBRARY_IMPORT_PROPOSAL_CAP = 50
 
-#: Plausibility floor for attaching a proposed match (FRG-IMP-023 scenario 4):
-#: the best search candidate's shared-matching-key ``name_similarity`` must
-#: reach this or the group stages as ``no_match`` — reviewable, never guessed.
+#: Fallback default for ``Settings.library_import_similarity_floor`` (FRG-
+#: IMP-023 scenario 4): the best search candidate's shared-matching-key
+#: ``name_similarity`` must reach the floor or the group stages as
+#: ``no_match`` — reviewable, never guessed.
 LIBRARY_IMPORT_SIMILARITY_FLOOR = 0.5
 
-#: The static credential-failure wording (m2-lookup-error-surfacing decision 5):
-#: never the exception's own message, so no key material can leak into staging.
-_AUTH_FAILED_MESSAGE = (
-    "comicvine search failed: ComicVine rejected the API key "
-    "(missing or invalid) — set comicvine_api_key"
-)
+#: The static credential-failure wording (m2-lookup-error-surfacing decision
+#: 5): the ONE shared sentence, never the exception's own message, so no key
+#: material can leak into staging.
+_AUTH_FAILED_MESSAGE = f"comicvine search failed: {COMICVINE_CREDENTIAL_MESSAGE}"
+
+
+class LibraryImportScanBlockedError(RuntimeError):
+    """A queued/running ``library-import`` execute still holds staged group ids
+    for this root: the scan's delete+reinsert would invalidate its selection
+    mid-flight, so the scan fails fast with this clear, user-visible error
+    instead (the command row records it verbatim)."""
 
 
 # --- commands -----------------------------------------------------------------
@@ -109,7 +143,7 @@ class LibraryImportScanCommand(BaseCommand):
 
     Runs on the ``pp`` pool but takes NO exclusivity group: it is read-only
     with respect to files (its only writes are the vanished-row reconciliation
-    and the staging replacement), so it may overlap a drain/rescan safely
+    and the staging rows), so it may overlap a drain/rescan safely
     (design decision 3)."""
 
     name: Literal["library-import-scan"] = "library-import-scan"
@@ -119,7 +153,7 @@ class LibraryImportScanCommand(BaseCommand):
 
 @register_command
 class LibraryImportCommand(BaseCommand):
-    """Bulk-import confirmed staging groups (FRG-IMP-023).
+    """Bulk-import selected staging groups (FRG-IMP-023).
 
     File-mutating — it places/registers library files — so it shares the
     importer's exclusivity group with the completed-download drain, rescan,
@@ -135,7 +169,7 @@ class LibraryImportCommand(BaseCommand):
     search_on_add: bool = False
 
 
-# --- staged-files codec ---------------------------------------------------------
+# --- staged-files / rejections codecs -------------------------------------------
 
 
 def encode_group_files(files: list[tuple[str, int]]) -> str:
@@ -163,6 +197,25 @@ def decode_group_files(raw: str | None) -> list[tuple[str, int]]:
         if isinstance(item, dict) and isinstance(item.get("path"), str):
             out.append((item["path"], int(item.get("size", 0) or 0)))
     return out
+
+
+def encode_rejections(reasons: list[str]) -> str:
+    """Canonical-JSON encoding of a group's per-file blocked-reason list."""
+    return json.dumps(list(reasons), separators=(",", ":"))
+
+
+def decode_rejections(raw: str | None) -> list[str]:
+    """Decode the rejections list; a corrupt value degrades to ``[]`` (logged)."""
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        logger.warning("library-import: malformed rejections list; treating as empty")
+        return []
+    if not isinstance(data, list):
+        return []
+    return [item for item in data if isinstance(item, str)]
 
 
 # --- scan ----------------------------------------------------------------------
@@ -201,6 +254,14 @@ class _GroupDraft:
             return 0.0
         return round(sum(self.confidences) / len(self.confidences), 4)
 
+    @property
+    def needs_proposal(self) -> bool:
+        """True when no prior/current answer exists: still ``proposed`` with no
+        attached match (new group, deferred-over-cap group, or a group whose
+        last search errored). Confirmed/skipped/no-match answers and carried
+        proposals are never re-searched (proposal-budget starvation guard)."""
+        return self.state == "proposed" and self.proposed_cv_volume_id is None
+
 
 def _draft_for_file(
     groups: dict[str, _GroupDraft], path: str, size: int, reference_year: int
@@ -234,30 +295,86 @@ def _draft_for_file(
         draft.confidences.append(0.0)
 
 
+def _carry_forward(draft: _GroupDraft, prior: LibraryImportGroupRow | None) -> None:
+    """Fold the persisting group's prior answer into the fresh draft.
+
+    Carried by ``matching_key``: the attached proposal + display fields (for
+    EVERY persisting group, so unskip/back-to-review always shows what it
+    showed before), the confirmed/skipped decision, and the no-match answer +
+    message. A group with a carried answer is never re-searched — only a
+    successful NEW search may overwrite a proposal — so re-scans spend the
+    proposal budget exclusively on unanswered groups and a ComicVine outage
+    can never wipe existing proposals.
+    """
+    if prior is not None:
+        draft.proposed_cv_volume_id = prior.proposed_cv_volume_id
+        draft.proposal_name = prior.proposal_name
+        draft.proposal_start_year = prior.proposal_start_year
+        draft.proposal_publisher = prior.proposal_publisher
+        draft.proposal_image_url = prior.proposal_image_url
+        if prior.state == "confirmed" and prior.confirmed_cv_volume_id is not None:
+            draft.state = "confirmed"
+            draft.confirmed_cv_volume_id = prior.confirmed_cv_volume_id
+            return
+        if prior.state == "skipped":
+            draft.state = "skipped"
+            return
+        if prior.state == "no_match":
+            draft.state = "no_match"
+            draft.message = prior.message
+            return
+        if prior.state == "imported":
+            # New unmapped files appeared for an already-imported key: propose
+            # the same volume again rather than burning a fresh search on it.
+            draft.state = "proposed"
+            if draft.proposed_cv_volume_id is None:
+                draft.proposed_cv_volume_id = prior.confirmed_cv_volume_id
+            return
+        # prior 'proposed': the carried proposal (if any) stands; a proposal-
+        # less prior (deferred / errored search) stays unanswered and falls
+        # through to needs_proposal on this run.
+        draft.state = "proposed"
+        return
+    # Brand-new group with no prior answer.
+    if draft.parsed_count == 0:
+        draft.state = "no_match"
+        draft.message = (
+            "files could not be parsed into a series; "
+            "set the comicvine match manually"
+        )
+
+
 async def _propose_matches(
     settings: Settings | None,
     drafts: list[_GroupDraft],
     factory: HttpClientFactory | None,
+    *,
+    persist: Callable[[_GroupDraft], Awaitable[None]],
 ) -> None:
-    """Attach at most one plausible ComicVine proposal per draft (in order).
+    """Attach at most one plausible ComicVine proposal per draft (in order),
+    landing each outcome via ``persist`` as it resolves (progressive staging).
 
     Never auto-picks for the user — it annotates. Failures are recorded on the
     draft's visible message, never silently dropped; an auth rejection is
     reported with the static wording (no key material) and aborts the remaining
-    searches, leaving those groups reviewable/overridable.
+    searches, leaving those groups reviewable/overridable. A failed search
+    never clears an existing proposal (only a successful search writes one).
     """
     if not drafts:
         return
     if settings is None:
         for draft in drafts:
             draft.message = "comicvine is not configured; set the match manually"
+            await persist(draft)
         return
+    floor = settings.library_import_similarity_floor
     factory = factory or comicvine_factory(settings)
     auth_failed = False
     async with ComicVineClient(settings, factory) as cv:
         for draft in drafts:
             if auth_failed:
                 draft.message = _AUTH_FAILED_MESSAGE
+                await persist(draft)
                 continue
             term = draft.term or draft.matching_key
             try:
@@ -269,12 +386,14 @@ async def _propose_matches(
                     "library-import scan: comicvine auth rejected; "
                     "remaining match proposals skipped"
                 )
+                await persist(draft)
                 continue
             except ComicVineError as exc:
                 draft.message = f"comicvine search failed: {exc}"
                 logger.warning(
                     "library-import scan: search for %r failed: %s", term, exc
                 )
+                await persist(draft)
                 continue
             best = max(
                 result.candidates,
@@ -283,8 +402,7 @@ async def _propose_matches(
             )
             if (
                 best is not None
-                and best.plausibility.name_similarity
-                >= LIBRARY_IMPORT_SIMILARITY_FLOOR
+                and best.plausibility.name_similarity >= floor
             ):
                 draft.proposed_cv_volume_id = best.series.cv_volume_id
                 draft.proposal_name = best.series.name
@@ -292,6 +410,15 @@ async def _propose_matches(
                 draft.proposal_publisher = best.series.publisher
                 draft.proposal_image_url = best.series.image_url
                 draft.message = None
+            elif not result.complete:
+                # A degraded/partial walk (mid-search outage) with no plausible
+                # hit is NOT an answer: the group stays unanswered ``proposed``
+                # so the next scan retries it, rather than pinning a no_match
+                # verdict a healthy ComicVine might contradict.
+                draft.message = (
+                    f"comicvine search for {term!r} was incomplete; "
+                    "re-run the scan or set the match manually"
+                )
             else:
                 draft.state = "no_match"
                 if best is None:
@@ -301,8 +428,89 @@ async def _propose_matches(
                         f"no plausible comicvine match for {term!r} "
                         f"(best similarity "
                         f"{best.plausibility.name_similarity:.2f} below "
-                        f"{LIBRARY_IMPORT_SIMILARITY_FLOOR})"
+                        f"{floor})"
                     )
+            await persist(draft)
+
+
+async def _persist_proposal(
+    db: Database, root_folder_id: int, draft: _GroupDraft
+) -> None:
+    """Land one draft's proposal outcome on its staged row (short write txn).
+
+    Guarded so a user decision or an execute made DURING the proposal phase
+    always wins: the update only applies while the row still exists as an
+    undecided ``proposed`` group with no confirmed volume — a mid-scan PATCH
+    (confirm/override/skip) or import is never reverted by the scan.
+    """
+    async with db.write_session() as session:
+        row = (
+            (
+                await session.execute(
+                    select(LibraryImportGroupRow).where(
+                        LibraryImportGroupRow.root_folder_id == root_folder_id,
+                        LibraryImportGroupRow.matching_key == draft.matching_key,
+                    )
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if row is None:
+            return  # raced a re-scan; that scan owns the row now
+        if row.state != "proposed" or row.confirmed_cv_volume_id is not None:
+            return  # the user (or an execute) decided meanwhile — they win
+        row.proposed_cv_volume_id = draft.proposed_cv_volume_id
+        row.proposal_name = draft.proposal_name
+        row.proposal_start_year = draft.proposal_start_year
+        row.proposal_publisher = draft.proposal_publisher
+        row.proposal_image_url = draft.proposal_image_url
+        row.state = draft.state
+        row.message = draft.message
+
+
+async def _fail_if_execute_pending(session, root_folder_id: int) -> None:
+    """Fail the scan fast when a ``library-import`` execute for this root is
+    queued or running: the scan's delete+reinsert would invalidate the group
+    ids that execute holds (scan-vs-execute race). The reverse direction needs
+    no guard here — an execute enqueued after the scan's replace only ever
+    sees the new rows, and the scan's later per-group proposal updates are
+    guarded to never touch a decided/imported row."""
+    rows = (
+        (
+            await session.execute(
+                select(CommandRow).where(
+                    CommandRow.name == "library-import",
+                    CommandRow.status.in_(("queued", "started")),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for row in rows:
+        try:
+            payload = json.loads(row.payload)
+            group_ids = list(payload.get("group_ids") or [])
+        except (json.JSONDecodeError, AttributeError):
+            continue
+        if not group_ids:
+            continue
+        hit = await session.scalar(
+            select(LibraryImportGroupRow.id)
+            .where(
+                LibraryImportGroupRow.id.in_(group_ids),
+                LibraryImportGroupRow.root_folder_id == root_folder_id,
+            )
+            .limit(1)
+        )
+        if hit is not None:
+            raise LibraryImportScanBlockedError(
+                f"a library-import execute (command {row.id}, {row.status}) "
+                f"still holds staged groups of root folder {root_folder_id}; "
+                "a re-scan now would invalidate its selection — wait for it "
+                "to finish, then scan again"
+            )
 
 
 async def scan_library_root(
@@ -317,10 +525,15 @@ async def scan_library_root(
     """Scan one root folder into staging groups (FRG-IMP-022, FRG-IMP-023).
 
     Walk (junk-aware, bounded) → reconcile vanished rows → parse + group
-    unmapped files by ``matching_key`` → propose capped ComicVine matches →
-    atomically replace the root's staging rows. A missing root folder (deleted
-    between enqueue and run) yields a skip summary rather than an error.
-    ``offload`` runs the FS-heavy walk and existence sweep off the event loop.
+    unmapped files by ``matching_key`` → REPLACE the root's staging rows in one
+    write transaction (re-reading prior decisions and tracked files inside it:
+    carry-forward + already-imported filtering happen at replace time) → then
+    propose capped ComicVine matches, landing each on its row as it resolves
+    (progressive staging — the review renders long before proposals finish).
+    A missing root folder (deleted between enqueue and run) yields a skip
+    summary rather than an error; a queued/running execute for this root fails
+    the scan fast (:class:`LibraryImportScanBlockedError`). ``offload`` runs
+    the FS-heavy walk and existence sweep off the event loop.
     """
     now = now or utcnow()
     async with db.read_session() as session:
@@ -331,31 +544,14 @@ async def scan_library_root(
             )
             return f"root folder {root_folder_id} no longer exists; scan skipped"
         root_path = root.path
-        # Rows to reconcile against disk (this root's series' files), plus the
-        # global tracked-path set so already-imported files never re-stage.
+        await _fail_if_execute_pending(session, root_folder_id)
+        # Rows to reconcile against disk (this root's series' files), plus a
+        # tracked-path snapshot for the parse loop (re-read authoritatively
+        # inside the replace transaction below).
         existing = await reconcile.issue_file_paths_for_root(session, root_folder_id)
         tracked = set(
             (await session.execute(select(IssueFileRow.path))).scalars().all()
         )
-        prior = {
-            row.matching_key: (
-                row.state,
-                row.confirmed_cv_volume_id,
-                (
-                    row.proposal_name,
-                    row.proposal_start_year,
-                    row.proposal_publisher,
-                    row.proposal_image_url,
-                ),
-            )
-            for row in (
-                await session.execute(
-                    select(LibraryImportGroupRow).where(
-                        LibraryImportGroupRow.root_folder_id == root_folder_id
-                    )
-                )
-            ).scalars()
-        }
 
     # 1. Vanished-file reconciliation BEFORE staging (FRG-IMP-022): a stale DB
     #    record never blocks re-import of a replacement file.
@@ -386,63 +582,73 @@ async def scan_library_root(
         unmapped += 1
         _draft_for_file(groups, path, size, now.year)
 
-    # 4. States: carry user decisions forward; split the rest into parseable
-    #    (proposal candidates) and unparseable (visible no_match) groups.
-    to_propose: list[_GroupDraft] = []
-    for key, draft in sorted(
-        groups.items(), key=lambda kv: (-len(kv[1].files), kv[0])
-    ):
-        prior_state, prior_confirmed, prior_display = prior.get(
-            key, (None, None, (None, None, None, None))
-        )
-        if prior_state == "confirmed" and prior_confirmed is not None:
-            draft.state = "confirmed"
-            draft.confirmed_cv_volume_id = prior_confirmed
-            (
-                draft.proposal_name,
-                draft.proposal_start_year,
-                draft.proposal_publisher,
-                draft.proposal_image_url,
-            ) = prior_display
-            continue
-        if prior_state == "skipped":
-            draft.state = "skipped"
-            continue
-        if draft.parsed_count == 0:
-            draft.state = "no_match"
-            draft.message = (
-                "files could not be parsed into a series; "
-                "set the comicvine match manually"
-            )
-            continue
-        to_propose.append(draft)
-
-    over_cap = to_propose[LIBRARY_IMPORT_PROPOSAL_CAP:]
-    if over_cap:
-        logger.warning(
-            "library-import scan: %d group(s) beyond the %d-proposal cap; "
-            "staged without a proposed match (re-scan later or match manually)",
-            len(over_cap),
-            LIBRARY_IMPORT_PROPOSAL_CAP,
-        )
-        for draft in over_cap:
-            draft.message = (
-                f"match proposal deferred (scan proposes at most "
-                f"{LIBRARY_IMPORT_PROPOSAL_CAP} groups per run); "
-                "re-run the scan or set the match manually"
-            )
-    await _propose_matches(
-        settings, to_propose[:LIBRARY_IMPORT_PROPOSAL_CAP], factory
+    cap = (
+        settings.library_import_proposal_cap
+        if settings is not None
+        else LIBRARY_IMPORT_PROPOSAL_CAP
     )
 
-    # 5. Atomically replace this root's staging rows.
+    # 4. Atomically replace this root's staging rows — BEFORE the (potentially
+    #    minutes-long) proposal phase. Prior decisions and the tracked-file set
+    #    are re-read INSIDE this transaction, so a PATCH made or a file
+    #    imported since the scan started is honored, never reverted/re-staged.
     async with db.write_session() as session:
+        tracked_now = set(
+            (await session.execute(select(IssueFileRow.path))).scalars().all()
+        )
+        prior_rows = {
+            row.matching_key: row
+            for row in (
+                await session.execute(
+                    select(LibraryImportGroupRow).where(
+                        LibraryImportGroupRow.root_folder_id == root_folder_id
+                    )
+                )
+            ).scalars()
+        }
+        kept: dict[str, _GroupDraft] = {}
+        for key, draft in groups.items():
+            draft.files = [
+                (path, size) for path, size in draft.files if path not in tracked_now
+            ]
+            if not draft.files:
+                continue  # every file got imported mid-scan — nothing to stage
+            _carry_forward(draft, prior_rows.get(key))
+            kept[key] = draft
+
+        # Proposal budget: biggest groups first, only unanswered ones.
+        to_propose = [
+            draft
+            for _key, draft in sorted(
+                kept.items(), key=lambda kv: (-len(kv[1].files), kv[0])
+            )
+            if draft.needs_proposal
+        ]
+        over_cap = to_propose[cap:]
+        if over_cap:
+            logger.warning(
+                "library-import scan: %d group(s) beyond the %d-proposal cap; "
+                "staged without a proposed match (re-scan later or match "
+                "manually)",
+                len(over_cap),
+                cap,
+            )
+            for draft in over_cap:
+                draft.message = (
+                    f"match proposal deferred (scan proposes at most "
+                    f"{cap} groups per run); "
+                    "re-run the scan or set the match manually"
+                )
+        to_propose = to_propose[:cap]
+        for draft in to_propose:
+            draft.message = "comicvine match proposal pending"
+
         await session.execute(
             delete(LibraryImportGroupRow).where(
                 LibraryImportGroupRow.root_folder_id == root_folder_id
             )
         )
-        for draft in groups.values():
+        for draft in kept.values():
             session.add(
                 LibraryImportGroupRow(
                     matching_key=draft.matching_key,
@@ -462,9 +668,15 @@ async def scan_library_root(
                 )
             )
 
-    states = [d.state for d in groups.values()]
+    # 5. Proposal phase: each outcome lands on its row as it resolves.
+    async def _persist(draft: _GroupDraft) -> None:
+        await _persist_proposal(db, root_folder_id, draft)
+
+    await _propose_matches(settings, to_propose, factory, persist=_persist)
+
+    states = [d.state for d in kept.values()]
     summary = (
-        f"groups={len(groups)} "
+        f"groups={len(kept)} "
         f"proposed={sum(1 for s in states if s == 'proposed')} "
         f"confirmed={sum(1 for s in states if s == 'confirmed')} "
         f"no_match={sum(1 for s in states if s == 'no_match')} "
@@ -478,6 +690,20 @@ async def scan_library_root(
 # --- execute -------------------------------------------------------------------
 
 
+def importable_volume(group: LibraryImportGroupRow) -> int | None:
+    """The ComicVine volume this group would import, or ``None`` when it is not
+    importable. Selection IS confirmation: a ``confirmed`` group imports its
+    confirmed volume; a ``proposed`` group WITH an attached proposal imports
+    the proposal (auto-confirming at execute). ``no_match``/``skipped``/
+    ``imported`` groups and proposal-less ``proposed`` groups are never
+    importable. Shared by the API's up-front validation and the flow."""
+    if group.state == "confirmed" and group.confirmed_cv_volume_id is not None:
+        return group.confirmed_cv_volume_id
+    if group.state == "proposed" and group.proposed_cv_volume_id is not None:
+        return group.proposed_cv_volume_id
+    return None
+
+
 def _shorten(reasons: list[str], *, limit: int = 3, width: int = 400) -> str:
     """A bounded, human-visible tail of blocked reasons for the group message."""
     shown = "; ".join(reasons[:limit])
@@ -487,8 +713,17 @@ def _shorten(reasons: list[str], *, limit: int = 3, width: int = 400) -> str:
 
 
 async def _set_group_outcome(
-    db: Database, group_id: int, *, state: str | None, message: str | None
+    db: Database,
+    group_id: int,
+    *,
+    state: str | None,
+    message: str | None,
+    rejections: list[str] | None = None,
 ) -> None:
+    """Annotate the staging row with an execute outcome. ``rejections`` (when
+    given) replaces the structured per-file blocked-reason list; ``None``
+    leaves the stored list untouched (pre-import failures keep the last
+    attempt's reasons)."""
     async with db.write_session() as session:
         group = await session.get(LibraryImportGroupRow, group_id)
         if group is None:  # raced a re-scan; nothing to annotate
@@ -496,6 +731,8 @@ async def _set_group_outcome(
         if state is not None:
             group.state = state
         group.message = message
+        if rejections is not None:
+            group.rejections = encode_rejections(rejections)
 
 
 async def _series_for_volume(db: Database, cv_volume_id: int) -> SeriesRow | None:
@@ -509,6 +746,40 @@ async def _series_for_volume(db: Database, cv_volume_id: int) -> SeriesRow | Non
             .scalars()
             .first()
         )
+
+
+async def _issue_count(db: Database, series_id: int) -> int:
+    async with db.read_session() as session:
+        count = await session.scalar(
+            select(func.count())
+            .select_from(IssueRow)
+            .where(IssueRow.series_id == series_id)
+        )
+    return int(count or 0)
+
+
+async def _refresh_before_import(
+    db: Database,
+    settings: Settings | None,
+    commands: CommandService,
+    group_id: int,
+    series_id: int,
+    factory: HttpClientFactory | None,
+) -> bool:
+    """Populate the series' issue list deterministically before importing
+    (files can only match issues that exist). Returns False — with the failure
+    visible on the staging row — when the refresh could not run."""
+    try:
+        await refresh_series(db, settings, series_id, commands=commands, factory=factory)
+    except ComicVineError as exc:
+        message = (
+            f"metadata refresh failed before import: {COMICVINE_CREDENTIAL_MESSAGE}"
+            if isinstance(exc, ComicVineAuthError)
+            else f"metadata refresh failed before import: {exc}"
+        )
+        await _set_group_outcome(db, group_id, state=None, message=message)
+        return False
+    return True
 
 
 async def _import_group(
@@ -526,20 +797,61 @@ async def _import_group(
 ) -> str:
     """Import one confirmed group; returns its one-word outcome for the summary.
 
-    The staging row is annotated (state + message) with whatever happened —
-    imported, partially blocked (reasons visible), or add/refresh failure —
-    so no outcome is ever silent (FRG-IMP-023).
+    The staging row is annotated (state + message + structured rejections)
+    with whatever happened — imported, partially blocked (reasons visible), a
+    safety-rail block, or add/refresh failure — so no outcome is ever silent
+    (FRG-IMP-023).
     """
     assert group.confirmed_cv_volume_id is not None
     in_place = (
         getattr(settings, "library_import_mode", "in_place") if settings else "in_place"
     ) != "move"
 
-    # Series: reuse an existing row for the volume (a re-run after a partial
-    # import), else create it through the ONE add flow — CV fetch, path build,
-    # refresh chain (design decision 4).
+    # Safety rail: a group whose folder IS the root folder (loose files at the
+    # root, groups spanning sibling folders) must never become a series whose
+    # path is the root — a later per-series rescan would swallow the whole
+    # library. In move mode the normal per-series path is built instead.
+    if in_place and group.folder:
+        async with db.read_session() as session:
+            root = await session.get(RootFolderRow, group.root_folder_id)
+        if root is not None and os.path.realpath(group.folder) == os.path.realpath(
+            root.path
+        ):
+            await _set_group_outcome(
+                db,
+                group.id,
+                state=None,
+                message=(
+                    "group has no dedicated folder; move the files into one "
+                    "or import with move mode"
+                ),
+            )
+            return "no-folder"
+
+    # Series: reuse an existing row for the volume ONLY when that is provably
+    # the in-place re-run case (same on-disk folder — e.g. finishing a partial
+    # import); otherwise the volume already lives elsewhere in the library and
+    # importing would move/register this group's files at a foreign series —
+    # block visibly, files left untouched. No existing series: create it
+    # through the ONE add flow (CV fetch, path build; refresh handled below —
+    # enqueue_refresh=False so the group gets EXACTLY one refresh).
     series = await _series_for_volume(db, group.confirmed_cv_volume_id)
-    if series is None:
+    if series is not None:
+        same_folder = bool(group.folder) and os.path.realpath(
+            series.path
+        ) == os.path.realpath(group.folder)
+        if not (in_place and same_folder):
+            await _set_group_outcome(
+                db,
+                group.id,
+                state=None,
+                message=(
+                    f"volume already in library at {series.path}; "
+                    "files left untouched"
+                ),
+            )
+            return "duplicate"
+    else:
         try:
             result = await add_series(
                 db,
@@ -551,6 +863,7 @@ async def _import_group(
                 monitor_strategy=monitor_strategy,
                 search_on_add=search_on_add,
                 path_override=group.folder if in_place else None,
+                enqueue_refresh=False,
                 factory=factory,
             )
         except SeriesValidationError as exc:
@@ -559,22 +872,16 @@ async def _import_group(
             )
             return "add-failed"
         series = result.series
-        # Populate the issue list DETERMINISTICALLY before importing: the
-        # add-enqueued refresh-series command runs asynchronously on another
-        # pool, and files can only match issues that exist. The queued refresh
-        # re-runs idempotently later (reconciliation is upsert-shaped).
-        try:
-            await refresh_series(
-                db, settings, series.id, commands=commands, factory=factory
-            )
-        except ComicVineError as exc:
-            message = (
-                "metadata refresh failed before import: ComicVine rejected the "
-                "API key (missing or invalid) — set comicvine_api_key"
-                if isinstance(exc, ComicVineAuthError)
-                else f"metadata refresh failed before import: {exc}"
-            )
-            await _set_group_outcome(db, group.id, state=None, message=message)
+
+    # Populate the issue list DETERMINISTICALLY before importing: files can
+    # only match issues that exist. Runs for a just-created series (always
+    # issueless) and for a reused series whose add-enqueued refresh is still
+    # pending — never for a series that already has its issues (no double
+    # fetch/scan).
+    if await _issue_count(db, series.id) == 0:
+        if not await _refresh_before_import(
+            db, settings, commands, group.id, series.id, factory
+        ):
             return "refresh-failed"
 
     ctx = ImportContext(
@@ -611,6 +918,7 @@ async def _import_group(
             group.id,
             state=None,
             message="no staged files remain on disk; re-run the scan",
+            rejections=[],
         )
         return "empty"
     if blocked_reasons:
@@ -622,10 +930,15 @@ async def _import_group(
                 f"imported={imported} blocked={len(blocked_reasons)}: "
                 + _shorten(blocked_reasons)
             ),
+            rejections=blocked_reasons,
         )
         return "partial" if imported else "blocked"
     await _set_group_outcome(
-        db, group.id, state="imported", message=f"imported={imported}"
+        db,
+        group.id,
+        state="imported",
+        message=f"imported={imported}",
+        rejections=[],
     )
     return "imported"
 
@@ -643,20 +956,32 @@ async def execute_library_import(
     factory: HttpClientFactory | None = None,
     now: dt.datetime | None = None,
 ) -> str:
-    """Bulk-import the selected confirmed groups (FRG-IMP-023).
+    """Bulk-import the selected groups (FRG-IMP-023).
 
-    Groups are processed independently: one group's failure (a ComicVine error,
-    a validation rejection, blocked files) is recorded on ITS staging row and
-    never abandons the rest of the batch. Unconfirmed/unknown ids are counted
-    and skipped — the API validates up front, but the queue payload may be
-    stale by run time (a re-scan replaced the rows).
+    Selection IS confirmation: a ``proposed`` group with an attached proposal
+    is promoted to ``confirmed`` (adopting the proposal as its confirmed
+    volume) before importing. Groups are processed independently: one group's
+    failure (a ComicVine error, a validation rejection, blocked files) is
+    recorded on ITS staging row and never abandons the rest of the batch.
+    Non-importable/unknown ids are counted and skipped — the API validates up
+    front, but the queue payload may be stale by run time (a re-scan replaced
+    the rows).
     """
     now = now or utcnow()
     tallies: dict[str, int] = {}
     for group_id in group_ids:
-        async with db.read_session() as session:
+        # Read + (when applicable) auto-confirm promotion in ONE write txn so
+        # the check-and-promote can't race a concurrent PATCH.
+        async with db.write_session() as session:
             group = await session.get(LibraryImportGroupRow, group_id)
             if group is not None:
+                if (
+                    group.state == "proposed"
+                    and group.proposed_cv_volume_id is not None
+                ):
+                    group.state = "confirmed"
+                    group.confirmed_cv_volume_id = group.proposed_cv_volume_id
+                await session.flush()
                 session.expunge(group)
         if group is None:
             outcome = "missing"
@@ -722,9 +1047,13 @@ __all__ = [
     "LIBRARY_IMPORT_PROPOSAL_CAP",
     "LIBRARY_IMPORT_SIMILARITY_FLOOR",
     "LibraryImportCommand",
+    "LibraryImportScanBlockedError",
     "LibraryImportScanCommand",
     "decode_group_files",
+    "decode_rejections",
     "encode_group_files",
+    "encode_rejections",
     "execute_library_import",
+    "importable_volume",
     "scan_library_root",
 ]

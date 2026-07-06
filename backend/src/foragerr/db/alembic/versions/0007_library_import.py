@@ -60,8 +60,12 @@ def upgrade() -> None:
         sa.Column("proposal_image_url", sa.Text(), nullable=True),
         # state ∈ proposed | confirmed | no_match | imported | skipped.
         sa.Column("state", sa.Text(), nullable=False, server_default="proposed"),
-        # Human-visible outcome/annotation (no-match reason, blocked reasons).
+        # Human-visible outcome/annotation (no-match reason, outcome summary).
         sa.Column("message", sa.Text(), nullable=True),
+        # Structured per-file blocked reasons from the last execute attempt:
+        # canonical-JSON list of strings (empty list when nothing blocked), so
+        # the review UI renders a real list instead of re-parsing the summary.
+        sa.Column("rejections", sa.Text(), nullable=False, server_default="[]"),
         sa.Column("scanned_at", sa.DateTime(), nullable=False),
         sa.UniqueConstraint(
             "root_folder_id", "matching_key", name="uq_library_import_root_key"

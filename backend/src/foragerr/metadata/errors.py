@@ -14,6 +14,18 @@ deliver a usable response), keeping ``httpx`` types from leaking to callers.
 
 from __future__ import annotations
 
+#: The ONE static credential-failure sentence (m2-lookup-error-surfacing
+#: decision 5). Every surface that reports a :class:`ComicVineAuthError`
+#: composes its own prefix around this constant — the lookup endpoint, the
+#: add flow, the library-import scan/execute, the override validation — so
+#: the wording can never drift between call sites. Static text, never the
+#: exception's own message, so no key material can leak; API surfaces pair it
+#: with the machine-readable ``field="comicvine_api_key"`` discriminator the
+#: frontend classifies credential failures on.
+COMICVINE_CREDENTIAL_MESSAGE = (
+    "ComicVine rejected the API key (missing or invalid) — set comicvine_api_key"
+)
+
 
 class ComicVineError(Exception):
     """Base class for every ComicVine client failure."""

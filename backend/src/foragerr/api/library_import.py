@@ -35,13 +35,18 @@ from foragerr.api.command import CommandResource
 from foragerr.api.errors import ApiError
 from foragerr.api.paging import envelope, paginate
 from foragerr.commands import CommandValidationError
-from foragerr.library.flows import decode_group_files
+from foragerr.library.flows import (
+    decode_group_files,
+    decode_rejections,
+    importable_volume,
+)
 from foragerr.library.flows._common import (
     MONITOR_STRATEGIES,
     comicvine_factory,
 )
 from foragerr.library.models import LibraryImportGroupRow, RootFolderRow
 from foragerr.metadata import (
+    COMICVINE_CREDENTIAL_MESSAGE,
     ComicVineAuthError,
     ComicVineClient,
     ComicVineError,
@@ -91,6 +96,9 @@ class LibraryImportGroupResource(BaseModel):
     imageUrl: str | None
     state: str
     message: str | None
+    #: Structured per-file blocked reasons from the last execute attempt
+    #: (empty when nothing blocked); ``message`` stays the human summary.
+    rejections: list[str]
     scannedAt: dt.datetime
 
     @classmethod
@@ -113,6 +121,7 @@ class LibraryImportGroupResource(BaseModel):
             imageUrl=row.proposal_image_url,
             state=row.state,
             message=row.message,
+            rejections=decode_rejections(row.rejections),
             scannedAt=row.scanned_at,
         )
 
@@ -127,8 +136,12 @@ class GroupPatch(BaseModel):
     """Request body for ``PATCH /api/v1/library-import/groups/{id}``.
 
     ``cvVolumeId`` overrides the match (validated live against ComicVine, like
-    add) and implies confirmation; ``state`` alone confirms the existing
-    proposal, skips, or returns the group to review.
+    add) and implies confirmation — the override becomes BOTH the proposal and
+    the confirmed volume, so the card always displays exactly what would
+    import; combining it with ``state`` ``skipped``/``proposed`` is a 400
+    (nonsensical). ``state`` alone confirms the existing proposal, skips, or
+    returns the group to review (clearing only the confirmed volume — the
+    displayed proposal stays what confirm would re-adopt).
     """
 
     state: str | None = None
@@ -226,10 +239,13 @@ async def _validate_cv_volume(request: Request, cv_volume_id: int) -> SeriesReco
         async with ComicVineClient(settings, factory) as cv:
             return await cv.get_volume(cv_volume_id)
     except ComicVineAuthError as exc:
+        # The shared static wording + the machine-readable field discriminator
+        # (the frontend classifies credential failures structurally on
+        # ``field == "comicvine_api_key"``, the v0.2.2 lookup contract).
         raise ApiError(
             503,
-            "ComicVine rejected the API key (missing or invalid) — "
-            "set comicvine_api_key",
+            COMICVINE_CREDENTIAL_MESSAGE,
+            field="comicvine_api_key",
         ) from exc
     except ComicVineError as exc:
         raise ApiError(
@@ -253,6 +269,13 @@ async def patch_group_endpoint(
             f"state must be one of {list(_PATCHABLE_STATES)} (got {body.state!r})",
             field="state",
         )
+    if body.cvVolumeId is not None and body.state in ("skipped", "proposed"):
+        raise ApiError(
+            400,
+            f"cvVolumeId cannot be combined with state {body.state!r}; "
+            "an override always confirms the group",
+            field="state",
+        )
 
     # Live ComicVine validation happens OUTSIDE the write lock (network I/O).
     override_record: SeriesRecord | None = None
@@ -264,13 +287,18 @@ async def patch_group_endpoint(
         if group is None:
             raise ApiError(404, f"no library-import group with id {group_id}")
         if body.cvVolumeId is not None:
+            # The override becomes THE proposal as well as the confirmed
+            # volume: display always matches the id that would import, and a
+            # later back-to-review -> confirm re-adopts the override, never
+            # silently reverts to the original scan proposal.
+            group.proposed_cv_volume_id = body.cvVolumeId
             group.confirmed_cv_volume_id = body.cvVolumeId
             assert override_record is not None
             group.proposal_name = override_record.name
             group.proposal_start_year = override_record.start_year
             group.proposal_publisher = override_record.publisher
             group.proposal_image_url = override_record.image_url
-            group.state = body.state or "confirmed"
+            group.state = "confirmed"
             group.message = None
         elif body.state == "confirmed":
             volume_id = group.confirmed_cv_volume_id or group.proposed_cv_volume_id
@@ -286,7 +314,9 @@ async def patch_group_endpoint(
             group.message = None
         elif body.state == "skipped":
             group.state = "skipped"
-        else:  # "proposed": back to review
+        else:  # "proposed": back to review — clears ONLY the confirmed volume;
+            # the displayed proposal/details stay exactly what a re-confirm
+            # (or an execute auto-confirm) would import.
             group.state = "proposed"
             group.confirmed_cv_volume_id = None
         await session.flush()
@@ -332,19 +362,39 @@ async def execute_endpoint(body: ExecuteRequest, request: Request) -> CommandRes
             .all()
         )
         by_id = {row.id: row for row in rows}
+        volume_owner: dict[int, int] = {}
         for group_id in body.groupIds:
             group = by_id.get(group_id)
             if group is None:
                 raise ApiError(
                     404, f"no library-import group with id {group_id}"
                 )
-            if group.state != "confirmed" or group.confirmed_cv_volume_id is None:
+            # Selection IS confirmation: a proposed group with an attached
+            # proposal is importable (the flow auto-confirms it); anything
+            # else (no_match/skipped/imported, or proposal-less proposed)
+            # still needs an explicit confirm/override.
+            volume = importable_volume(group)
+            if volume is None:
                 raise ApiError(
                     400,
-                    f"group {group_id} is not confirmed "
-                    f"(state {group.state!r}); confirm or override it first",
+                    f"group {group_id} is not importable "
+                    f"(state {group.state!r} with no confirmed or proposed "
+                    "match); confirm or override it first",
                     field="groupIds",
                 )
+            # Two selected groups resolving to the SAME volume would race one
+            # series (one group's files would land at the other's folder) —
+            # reject the selection naming both groups.
+            other = volume_owner.get(volume)
+            if other is not None:
+                raise ApiError(
+                    400,
+                    f"groups {other} and {group_id} both resolve to comicvine "
+                    f"volume {volume}; a volume can only be imported by one "
+                    "group — deselect one of them",
+                    field="groupIds",
+                )
+            volume_owner[volume] = group_id
 
     try:
         record = await service.enqueue(
