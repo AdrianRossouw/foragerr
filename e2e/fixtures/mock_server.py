@@ -61,6 +61,24 @@ def _cbz_bytes() -> bytes:
         return buffer.getvalue()
 
 
+def _cbz_size_bytes() -> int:
+    """The TRUE size of the served cbz — the single source of truth for every
+    advertised size (GetComics search page, Newznab length/size). Advertising a
+    fictitious 45 MB while serving a ~200 KB file is dishonest and lets the
+    download-size sanity checks pass on a lie; the fixture advertises the real
+    byte count instead."""
+    return len(_cbz_bytes())
+
+
+def _cbz_size_label() -> str:
+    """Human "Size : N KB/MB" string for the GetComics search page, derived from
+    the true byte count (parseable by the DDL adapter's size regex)."""
+    size = _cbz_size_bytes()
+    if size >= 1024 * 1024:
+        return f"{size / (1024 * 1024):.1f} MB"
+    return f"{max(1, round(size / 1024))} KB"
+
+
 # A 1x1 JPEG-ish blob for covers (content is irrelevant; the fetch just needs
 # bytes with an image content-type from an allowlisted host).
 _COVER = b"\xff\xd8\xff\xe0" + b"\x00" * 1024
@@ -137,6 +155,9 @@ def search_html() -> str:
     recent = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=1)).strftime(
         "%Y-%m-%dT%H:%M:%S+00:00"
     )
+    # Advertise the TRUE served file size (not a fictitious 45 MB) so the
+    # download-size sanity checks are exercised against an honest expectation.
+    size = _cbz_size_label()
     return f"""<!doctype html><html><head><title>GetComics</title></head>
 <body><div id="content"><main class="site-content" id="primary">
   <article class="post type-post">
@@ -144,7 +165,7 @@ def search_html() -> str:
     <h1 class="post-title entry-title">
       <a href="https://getcomics.org/comic/saga-1-2012/">Saga #1 (2012)</a>
     </h1>
-    <p class="post-info">Year : 2012 | Size : 45 MB | Format : CBZ</p>
+    <p class="post-info">Year : 2012 | Size : {size} | Format : CBZ</p>
     <time datetime="{recent}">recently</time>
   </article>
 </main></div></body></html>"""
@@ -185,14 +206,18 @@ def _newznab_search_xml() -> str:
     # the decision engine rejects it for retention with a verbatim reason. It is
     # never grabbed — it exists only to populate a rejected row in the overlay.
     old = dt.datetime(2015, 1, 1, tzinfo=dt.timezone.utc).strftime("%a, %d %b %Y %H:%M:%S +0000")
+    # Advertise the TRUE fixture size rather than a fictitious 50 MiB; this
+    # release is rejected for retention (age), not size, so an honest size does
+    # not change the outcome — it just removes the size lie.
+    size = _cbz_size_bytes()
     item = (
         "<item>"
         "<title>Saga 001 (2012) (Digital) (old-usenet-post)</title>"
         "<guid>saga-001-usenet-old</guid>"
-        '<enclosure url="http://mockhub:8080/newznab/nzb/1" length="52428800" type="application/x-nzb"/>'
+        f'<enclosure url="http://mockhub:8080/newznab/nzb/1" length="{size}" type="application/x-nzb"/>'
         f"<pubDate>{old}</pubDate>"
         '<newznab:attr name="category" value="7030"/>'
-        '<newznab:attr name="size" value="52428800"/>'
+        f'<newznab:attr name="size" value="{size}"/>'
         "</item>"
     )
     return (
@@ -215,7 +240,29 @@ def build_app() -> FastAPI:
     # ---- ComicVine (http) ----
     @app.get("/api/volumes/")
     async def cv_search(request: Request) -> JSONResponse:
-        return JSONResponse(_list_envelope([_volume_object(with_issue_stubs=False)]))
+        # Exercise the REAL client query construction (foragerr.metadata.comicvine
+        # ComicVineClient.search_series): it sends ``api_key`` + a
+        # ``filter=name:<term>`` param (plus field_list/sort/offset/limit). A
+        # keyless request is rejected 401; the Saga volume is returned ONLY when
+        # the parsed name term matches "saga" (case-insensitive), else an empty
+        # result set — so a malformed client query fails the add-series scenario
+        # instead of silently passing.
+        if not request.query_params.get("api_key"):
+            return JSONResponse(
+                {"error": "Invalid API Key", "status_code": 100, "results": []},
+                status_code=401,
+            )
+        term = ""
+        for clause in request.query_params.get("filter", "").split(","):
+            field, sep, value = clause.partition(":")
+            if sep and field.strip().casefold() == "name":
+                term = value.strip()
+                break
+        if "saga" in term.casefold():
+            return JSONResponse(
+                _list_envelope([_volume_object(with_issue_stubs=False)])
+            )
+        return JSONResponse(_list_envelope([]))
 
     @app.get("/api/volume/4050-{volume_id}/")
     async def cv_volume(volume_id: int) -> JSONResponse:

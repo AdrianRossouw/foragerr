@@ -125,6 +125,21 @@ print("root folder seeded")
 PY
 
 # --- 6. run the suite --------------------------------------------------------
+# Clear any prior run's artifacts FIRST: a crashed Playwright must never be able
+# to leave a stale (possibly GREEN) results.json or acceptance-report.md in
+# place for the generator to re-emit. Playwright recreates results/ itself.
+echo "==> clearing stale results + report"
+rm -rf "${HERE}/results" "${HERE}/acceptance-report.md"
+
+# Bootstrap: "one command" includes a fresh checkout — install the harness's
+# own deps and browser if absent (both are gitignored artifacts; the install
+# command is an idempotent fast no-op when the browser is already present).
+if [ ! -d "${HERE}/node_modules" ]; then
+    echo "==> npm ci (e2e harness deps)"
+    (cd "${HERE}" && npm ci)
+fi
+(cd "${HERE}" && npx playwright install chromium)
+
 echo "==> playwright test"
 cd "${HERE}"
 set +e
@@ -133,11 +148,22 @@ PW_EXIT=$?
 set -e
 
 # --- 7. generate the acceptance report --------------------------------------
+# No `|| true`: if results.json is missing/unparseable (crash/interrupt), the
+# generator writes an explicit RED "run did not produce results" report and
+# exits non-zero. Capture that so run.sh fails even if Playwright returned 0.
 echo "==> generating acceptance-report.md"
+GEN_EXIT=0
 node "${HERE}/scripts/acceptance-report.mjs" \
-  "${HERE}/results/results.json" "${HERE}/acceptance-report.md" || true
+  "${HERE}/results/results.json" "${HERE}/acceptance-report.md" || GEN_EXIT=$?
 
+# Preserve Playwright's exit-code propagation first; a scenario failure is the
+# most specific signal and the report already names it.
 if [ "${PW_EXIT}" -ne 0 ]; then
   echo "!! e2e FAILED (see e2e/acceptance-report.md and results/html)" >&2
+  exit "${PW_EXIT}"
 fi
-exit "${PW_EXIT}"
+# Playwright passed but the report is RED (no results / not-run) — still a failure.
+if [ "${GEN_EXIT}" -ne 0 ]; then
+  echo "!! e2e report is RED: run did not produce a clean results set" >&2
+  exit "${GEN_EXIT}"
+fi

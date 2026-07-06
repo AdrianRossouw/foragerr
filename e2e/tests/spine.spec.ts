@@ -16,6 +16,19 @@ const LIBRARY_DIR = RUN_DIR ? path.join(RUN_DIR, 'library') : '';
 const CBZ_SOURCE = RUN_DIR ? path.join(RUN_DIR, 'data', 'saga-001.cbz') : '';
 
 const COMIC_MIME = 'application/vnd.comicbook+zip';
+// The exact OPDS 1.2 feed media types the backend emits
+// (foragerr.opds.atom NAV_KIND / ACQ_KIND). Assert the FULL base type
+// ('application/atom+xml' + 'profile=opds-catalog') AND the kind param, not a
+// bare 'kind=...' substring that a plain 'application/xml' response could fake.
+const OPDS_BASE = 'application/atom+xml';
+const OPDS_PROFILE = 'profile=opds-catalog';
+
+function expectOpdsFeedType(contentType: string | undefined, kind: 'navigation' | 'acquisition') {
+  expect(contentType, 'OPDS content-type present').toBeTruthy();
+  expect(contentType).toContain(OPDS_BASE);
+  expect(contentType).toContain(OPDS_PROFILE);
+  expect(contentType).toContain(`kind=${kind}`);
+}
 
 let api: APIRequestContext;
 // State threaded across the serial spine.
@@ -202,7 +215,7 @@ test('FRG-PROC-010 FRG-OPDS-001 FRG-OPDS-002 FRG-OPDS-003 FRG-OPDS-005: OPDS nav
   // Root navigation feed advertises the All Series shelf.
   const root = await api.get('/opds');
   expect(root.status()).toBe(200);
-  expect(root.headers()['content-type']).toContain('kind=navigation');
+  expectOpdsFeedType(root.headers()['content-type'], 'navigation');
   expect(await root.text()).toContain('/opds/series');
 
   // All-series navigation feed lists our series.
@@ -211,7 +224,7 @@ test('FRG-PROC-010 FRG-OPDS-001 FRG-OPDS-002 FRG-OPDS-003 FRG-OPDS-005: OPDS nav
 
   // The series acquisition feed carries a comic-typed, id-only download link.
   const acq = await api.get(`/opds/series/${seriesId}`);
-  expect(acq.headers()['content-type']).toContain('kind=acquisition');
+  expectOpdsFeedType(acq.headers()['content-type'], 'acquisition');
   const acqText = await acq.text();
   expect(acqText).toContain(COMIC_MIME);
   const fileHref = acqText.match(/\/opds\/file\/\d+/)?.[0];

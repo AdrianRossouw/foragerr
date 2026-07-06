@@ -3,8 +3,9 @@
 _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.mjs` — do not edit by hand (FRG-PROC-010)._
 
 - **Verdict:** GREEN
-- **Scenarios:** 9 (8 pass, 0 fail, 1 skipped)
-- **Run started:** 2026-07-06T03:59:59.711Z
+- **Scenarios:** 9 (8 pass, 0 fail, 1 skipped, 0 flaky, 0 not run)
+- **Run started:** 2026-07-06T04:37:38.892Z
+- **Duration:** 55.2s
 
 ## Scenario → requirement coverage
 
@@ -44,3 +45,6 @@ _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.m
 | FRG-UI-007 | PASS |
 | FRG-UI-008 | PASS |
 
+---
+
+_Hermetic-fixture coverage has known limits: this run does NOT exercise multi-host DDL landing-page parsing/failover, real redirect chains, or real SABnzbd unless the live tier runs. See the **Coverage limits** section of `e2e/README.md` before over-reading this report._

@@ -45,6 +45,28 @@ Each test title names the FRG ids it exercises;
 into `acceptance-report.md` (scenario → ids → pass/fail/skipped). There is no
 hand-authored criteria matrix.
 
+## Coverage limits
+
+The hermetic fixtures deliberately model ONE happy DDL path so the whole
+download→verify→import→OPDS chain runs in-process. Read the generated
+`acceptance-report.md` with these gaps in mind — a GREEN verdict does **not**
+attest to any of the following, which the fixtures do NOT exercise:
+
+- **Multi-host DDL landing-page parsing / failover.** The GetComics fixture
+  serves one first-party download link. Real GetComics posts link out to
+  pixeldrain / mediafire / mega / zippyshare mirrors with host-specific landing
+  pages and failover between them — none of that HTML-scraping or host-selection
+  logic is driven here.
+- **Real redirect chains.** The fixture download endpoint returns the bytes
+  directly; real DDL hosts bounce through multiple 3xx hops (and interstitials)
+  before the file. The redirect-walk / hop-check code paths are only
+  unit-tested, not end-to-end here.
+- **Real SABnzbd / usenet.** The usenet+SAB grab→poll→import path is only
+  covered by the env-gated **live tier** (`E2E_LIVE_SAB=1` + credentials); the
+  default hermetic run skips it. A hermetic GREEN says nothing about SAB.
+- **Real ComicVine / Newznab upstreams.** Metadata and indexer responses come
+  from the in-repo mock, not the live services.
+
 ## Download path: built-in DDL, not usenet/SAB
 
 The grab drives the **built-in DDL client** (GetComics-shaped fixture pages +
