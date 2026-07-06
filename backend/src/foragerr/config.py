@@ -235,6 +235,25 @@ class Settings(BaseSettings):
             "backups/; the oldest beyond this count are pruned (FRG-DB-003)."
         ),
     )
+    db_backup_interval_seconds: int = Field(
+        default=86_400,
+        ge=3600,
+        description=(
+            "How often the scheduled backup-database task writes a consistent "
+            "copy of the database and config file to backups/scheduled-<ts>/ "
+            "(FRG-DB-009). Default daily (86400 s); documented minimum 1 hour "
+            "(3600 s) — a smaller value is rejected at load."
+        ),
+    )
+    db_scheduled_backup_retention: int = Field(
+        default=7,
+        ge=1,
+        description=(
+            "Number of scheduled backups retained under backups/scheduled-*; "
+            "the oldest beyond this count are pruned after each run (FRG-DB-009). "
+            "Independent of db_backup_retention (the pre-migration pool)."
+        ),
+    )
     workers_search: int = Field(
         default=1,
         ge=1,
