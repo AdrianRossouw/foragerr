@@ -123,11 +123,11 @@ guard alongside.
       timeout, per-client rate cap + its 0-disables safety-valve note; WS max
       connections + inbound-frame size/rate), with defaults and floors. No other
       manual section changes (the NFR budgets are internal quality gates). [FRG-PROC-011]
-- [ ] 4.3 Registry flips (FRG-NFR-001, FRG-NFR-002, FRG-NFR-003, FRG-NFR-007,
+- [x] 4.3 Registry flips (FRG-NFR-001, FRG-NFR-002, FRG-NFR-003, FRG-NFR-007,
       FRG-NFR-014 → implemented) + matrix regen (`tools/trace.py` exit 0);
       `tools/soup_check.py` exit 0 (no SOUP change expected — if a dependency is
       added, update `docs/security/soup-register.md` in this change).
       [FRG-PROC-004, FRG-PROC-005, FRG-PROC-012]
-- [ ] 4.4 Suites green (backend + any perf/soak marked runs exercised once);
+- [x] 4.4 Suites green (backend + any perf/soak marked runs exercised once);
       review gate (8-angle + Codex); fixes; `--no-ff` merge; main suites green;
       tag the release per FRG-PROC-013. [FRG-PROC-007]
