@@ -28,8 +28,10 @@ verified (see `downloads.md`). For each one it:
    structurally valid (see below); it must not look like a sample/junk file; the
    destination volume must have enough free space (with a safety margin); the issue
    must not already have this file; and if the issue already has a *different*
-   file, the new one must be an upgrade under your profile — an equal-or-worse file
-   is blocked as "not an upgrade".
+   file, the new one must be an upgrade under your profile — a worse file is
+   blocked as "not an upgrade", and a file of *equal* format rank goes to the
+   duplicate constraint (see "Duplicate handling" below) instead of an automatic
+   block.
 4. **Executes** the import: the file is renamed according to your naming template
    and moved into the series folder, the issue gains a file record, the download is
    marked imported, and — only after all of that succeeded, and only if the client's
@@ -165,13 +167,16 @@ fails, the file lands untagged with a warning in history.
 The **Library Import** screen (sidebar → Library Import) ingests a collection
 that predates foragerr. Pick a configured root folder and run a scan: the walk
 enumerates comic files under it (skipping junk — AppleDouble/`@eaDir`
-directories, `._` resource forks, dotfiles, zero-byte files, unpack-temp
-folders), removes database records for files that vanished from disk, and
-groups everything unmapped by normalized series name. Each group is staged with
-its file count, parse confidence, and — when a plausible match exists — a
-proposed ComicVine volume (poster, name, year, publisher). Staging is
-persisted, so the review survives a restart; scans propose matches for a
-bounded number of groups per run (the rest defer to a re-scan, and say so).
+directories, `._` resource forks, dotfiles, `_unpack_`-prefixed temp folders —
+zero-byte files are not silently skipped; they surface as visibly blocked),
+removes database records for files that vanished from disk, and
+groups everything unmapped by normalized series name. Groups appear as soon as
+the walk finishes; ComicVine match proposals (poster, name, year, publisher)
+then attach group by group. Staging is persisted, so the review survives a
+restart; one scan proposes matches for a bounded number of groups
+(`library_import_proposal_cap`, default 50 — each proposal is a rate-limited
+live search). Proposals already attached carry forward across re-scans, so a
+re-scan spends its budget on groups that don't have one yet.
 
 Review the groups: confirm proposals, correct one via the inline ComicVine
 search, or skip a group. Groups the scan could not parse or match are staged

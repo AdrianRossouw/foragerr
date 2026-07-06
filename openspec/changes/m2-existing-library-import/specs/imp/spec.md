@@ -4,7 +4,7 @@
 
 ### Requirement: FRG-IMP-022 — Library scan walk
 
-The library scanner SHALL recursively enumerate comic files under configured root/series paths, recognizing extensions case-insensitively and skipping junk (AppleDouble/`@eaDir` dirs, `._` resource forks, dotfiles, zero-byte files, unpack-temp folders), and SHALL reconcile the database against disk by removing file records whose files have vanished before evaluating unmapped files.
+The library scanner SHALL recursively enumerate comic files under configured root/series paths, recognizing extensions case-insensitively and skipping junk (AppleDouble/`@eaDir` dirs, `._` resource forks, dotfiles, `_unpack_`-prefixed temp folders), and SHALL reconcile the database against disk by removing file records whose files have vanished before evaluating unmapped files. Zero-byte files are NOT silently skipped at walk time: they enumerate and are rejected visibly at decision time (the junk-size floor), preserving the visible-blocked guarantee for truncated payloads.
 
 - **Milestone**: M2
 - **Source**: MFP §2.1 (directory walk skips); SA §5.5 (DiskScanService, MediaFileTableCleanupService); MFS capability map IMP (recursive library scan).
@@ -12,8 +12,8 @@ The library scanner SHALL recursively enumerate comic files under configured roo
 
 #### Scenario: Junk artifacts are skipped by the shared walk
 
-- **WHEN** a scanned tree contains AppleDouble/`@eaDir` directories, `._` resource-fork files, dotfiles, zero-byte archives, and an unpack-temp folder (`_UNPACK_*`-style) alongside real archives including one with an uppercase extension
-- **THEN** the walk yields exactly the real archives (uppercase extension recognized), none of the junk, and never descends into the junk/unpack directories
+- **WHEN** a scanned tree contains AppleDouble/`@eaDir` directories, `._` resource-fork files, dotfiles, zero-byte archives, and an unpack-temp folder (`_UNPACK_`-prefixed) alongside real archives including one with an uppercase extension
+- **THEN** the walk yields the real archives (uppercase extension recognized) plus the zero-byte archive (surfaced as a visible decision-time rejection, never silently dropped), skips the dot/AppleDouble artifacts, and never descends into the junk/unpack directories — a user folder that merely starts with `_unpack` but lacks the trailing underscore (e.g. `_unpacked extras`) is walked normally
 
 #### Scenario: Vanished files are reconciled before unmapped evaluation
 
@@ -40,8 +40,8 @@ The system SHALL stage library-scan parse results grouped by normalized series n
 
 #### Scenario: Mass import with per-group override and re-check
 
-- **WHEN** the user confirms some groups as proposed, overrides the ComicVine match on one ambiguous group, deselects another, and triggers import
-- **THEN** confirmed groups create their series and run their files through the shared `import_candidate` pipeline (same specs, same history events); the overridden group uses the corrected volume; the deselected group stays staged; and a re-check re-evaluates staged groups against the now-larger library without duplicating already-imported files
+- **WHEN** the user selects groups (selecting a proposed group with an attached match counts as confirming it), overrides the ComicVine match on one ambiguous group, deselects another, and triggers import
+- **THEN** selected groups create their series and run their files through the shared `import_candidate` pipeline (same specs, same history events); the overridden group uses the corrected volume (an override becomes the group's proposal, so what the card displays is always what imports); the deselected group stays staged; per-file blocked reasons persist on the group verbatim; and a re-check re-evaluates staged groups against the now-larger library without duplicating already-imported files — two selected groups confirmed to the same volume are rejected up front, and a group whose volume already exists in the library never has its files moved out of their folder
 
 #### Scenario: In-place import registers files without moving them
 
