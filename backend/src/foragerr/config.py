@@ -393,18 +393,14 @@ class Settings(BaseSettings):
             "when ComicVine's image CDN changes."
         ),
     )
-    dognzb_api_key: SecretStr = Field(
-        default=SecretStr(""),
-        description="DogNZB indexer API key (secret; empty by default, supply at runtime).",
-    )
-    nzbsu_api_key: SecretStr = Field(
-        default=SecretStr(""),
-        description="NZB.su indexer API key (secret; empty by default, supply at runtime).",
-    )
-    sabnzbd_api_key: SecretStr = Field(
-        default=SecretStr(""),
-        description="SABnzbd API key (secret; empty by default, supply at runtime).",
-    )
+    # Per-provider credentials (DogNZB/NZB.su/SABnzbd API keys) live in per-row
+    # provider settings JSON entered through the Settings UI (FRG-IDX-001 /
+    # FRG-DL-002), NOT as global config-file fields. The vestigial global
+    # dognzb_api_key/nzbsu_api_key/sabnzbd_api_key SecretStr fields (zero
+    # consumers) were removed under FRG-DEP-003 (m2-first-run-defaults): the
+    # only global secret placeholder in the documented config is
+    # comicvine_api_key. extra="ignore" plus load_settings' unknown-key pop keep
+    # an existing config.yaml carrying the stale keys loading (logged warning).
     track_downloads_interval_seconds: int = Field(
         default=60,
         ge=60,
