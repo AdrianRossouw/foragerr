@@ -184,9 +184,14 @@ async def test_unmapped_remote_path_blocks_naming_the_fix(db, seed, import_ctx):
 
 
 @pytest.mark.req("FRG-PP-010")
-async def test_upgrade_quarantines_replaced_file_and_swaps_row(db, seed, import_ctx):
+@pytest.mark.req("FRG-PP-013")
+async def test_upgrade_quarantines_replaced_file_and_swaps_row(db, seed, import_ctx, tmp_path):
     s = await seed()
-    ctx = import_ctx()
+    # M2: the replaced file goes to the configured recycle bin (FRG-PP-013); with
+    # no bin it would be permanently deleted (covered in test_recycle_bin.py).
+    recycle_bin = tmp_path / "recycle"
+    recycle_bin.mkdir()
+    ctx = import_ctx(recycle_bin_path=str(recycle_bin))
     # Existing lower-format file already imported for the issue.
     old = s.series_path / "Batman 404 old.cbr"
     old.write_bytes(b"old-cbr-file-contents-longer-than-floor" * 4)
@@ -214,9 +219,47 @@ async def test_upgrade_quarantines_replaced_file_and_swaps_row(db, seed, import_
     # The issue_files row was swapped to the new file (old row gone).
     assert len(files) == 1
     assert files[0].path.endswith(".cbz")
-    # The replaced file was quarantined (moved, never deleted) and recorded.
+    # The replaced file was recycled (moved, never deleted) and recorded.
     assert not old.exists()
     upgrade_event = events[-1]
     assert upgrade_event.event_type == "upgrade_replaced"
     assert upgrade_event.quarantine_path is not None
     assert Path(upgrade_event.quarantine_path).exists()
+    assert recycle_bin in Path(upgrade_event.quarantine_path).parents
+
+
+@pytest.mark.req("FRG-PP-013")
+async def test_upgrade_without_bin_deletes_permanently_but_records_event(
+    db, seed, import_ctx
+):
+    """No recycle bin configured (`recycle_bin_path=""`): the superseded file is
+    permanently deleted, yet the upgrade is still recorded with no recycle path."""
+    s = await seed()
+    ctx = import_ctx()  # recycle_bin_path defaults to "" → permanent delete
+    old = s.series_path / "Batman 404 old.cbr"
+    old.write_bytes(b"old-cbr-file-contents-longer-than-floor" * 4)
+    async with db.write_session() as session:
+        from foragerr.library import repo
+
+        await repo.add_issue_file(
+            session, issue_id=s.issue_id, path=str(old), size=old.stat().st_size
+        )
+
+    dl_dir = Path(ctx.config_dir).parent / "up2"
+    make_cbz(dl_dir / "Batman 404 (1987).cbz")
+    await _add_grab(
+        db, download_id="dl-up2", series_id=s.series_id, issue_id=s.issue_id,
+        title="Batman 404 (1987)",
+    )
+    outcomes = await _run(
+        db, CompletedDownloadSource(download_id="dl-up2", output_path=str(dl_dir)), ctx
+    )
+
+    assert outcomes[0].status is ImportStatus.IMPORTED
+    assert outcomes[0].upgraded
+    assert not old.exists()  # permanently deleted
+    async with db.read_session() as session:
+        events = await history.events_for_issue(session, s.issue_id)
+    upgrade_event = events[-1]
+    assert upgrade_event.event_type == "upgrade_replaced"
+    assert upgrade_event.quarantine_path is None  # no recycle path recorded

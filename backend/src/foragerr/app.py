@@ -155,6 +155,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(library_config_router, prefix="/api/v1")
 
+    # --- config resources + rename (m2-settings-naming-config): typed
+    #     naming/media-management config singletons (FRG-API-013) and the
+    #     rename preview/execute endpoints (FRG-PP-012) under /api/v1. Importing
+    #     the library flows above registered the rename-series command. ---
+    from foragerr.api.config_resources import router as config_resources_router
+    from foragerr.api.rename import router as rename_router
+
+    app.include_router(config_resources_router, prefix="/api/v1")
+    app.include_router(rename_router, prefix="/api/v1")
+
     # --- search integration (m1-search-indexers, area 3): importing registers
     #     the search / grab / prune commands + handlers (FRG-SRCH-008/009/014,
     #     FRG-API-008); mount the interactive-search release router; register

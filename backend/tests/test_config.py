@@ -205,6 +205,26 @@ def test_invalid_config_reports_all_fields_in_one_pass(config_dir):
     assert "log_level" in message and "DEBUG" in message
 
 
+@pytest.mark.req("FRG-PP-009")
+@pytest.mark.parametrize(
+    "template",
+    [
+        "{Series Title} ({Year})",  # no issue token at all → issues 7 and 8 collide
+        "{Series Title} {Issue Number:000} ({Year})",  # no id tag → same-number collision
+    ],
+)
+def test_file_template_without_issue_identity_is_rejected(config_dir, template):
+    """A naming template that renders the SAME name for distinct issues would
+    silently overwrite one library file with another on rename, so config rejects
+    it (injectivity guard, FRG-PP-009 data-loss corollary)."""
+    (config_dir / CONFIG_FILENAME).write_text(
+        f"file_naming_template: {template!r}\n", encoding="utf-8"
+    )
+    with pytest.raises(ConfigError) as excinfo:
+        load_settings()
+    assert "file_naming_template" in str(excinfo.value)
+
+
 @pytest.mark.req("FRG-NFR-009")
 @pytest.mark.parametrize("reserved", ["/", "/api", "/api/v1", "/health"])
 def test_opds_base_path_rejects_reserved_mount_paths(config_dir, reserved):

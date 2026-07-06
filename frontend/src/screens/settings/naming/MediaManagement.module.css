@@ -1,0 +1,354 @@
+/* Media-management / naming settings (FRG-UI-012). Sonarr settings school:
+ * underlined section headings, monospace template inputs with a live example
+ * line, a save-bar in the toolbar. Tokens only — ant accent for the save/primary
+ * affordance, no brand literals. */
+
+.page {
+  padding: var(--spacing-lg);
+  max-width: var(--layout-content-max-width);
+}
+
+.section {
+  margin-bottom: var(--spacing-xl);
+}
+
+.sectionHeading {
+  font-size: var(--font-size-heading);
+  font-weight: var(--font-weight-normal);
+  padding-bottom: var(--spacing-sm);
+  margin: 0 0 var(--spacing-md);
+  border-bottom: 1px solid var(--surface-border);
+}
+
+.sectionHelp {
+  color: var(--text-secondary);
+  margin: 0 0 var(--spacing-md);
+  font-size: var(--font-size-base);
+}
+
+.stateText {
+  color: var(--text-secondary);
+}
+
+/* --- Save bar --- */
+
+.saveButton {
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--color-accent);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  color: var(--color-accent-contrast);
+  font-size: var(--font-size-base);
+  cursor: pointer;
+}
+
+.saveButton:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+}
+
+.saveButton:disabled {
+  background: var(--surface-card);
+  border-color: var(--surface-border);
+  color: var(--text-muted);
+  cursor: default;
+}
+
+/* --- Bespoke template field --- */
+
+.row {
+  margin-bottom: var(--spacing-md);
+}
+
+.labelRow {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-xs);
+}
+
+.label {
+  color: var(--text-primary);
+  font-size: var(--font-size-base);
+}
+
+.helpTrigger {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid var(--surface-border);
+  background: var(--surface-card);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.helpTrigger:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+/* Sits at the right edge of the label row (help trigger stays last). */
+.resetDefault {
+  margin-left: auto;
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.resetDefault:hover {
+  color: var(--color-accent);
+}
+
+.templateInput {
+  width: 100%;
+  padding: var(--spacing-sm);
+  background: var(--surface-page);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-base);
+}
+
+.templateInput:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.exampleLine {
+  margin-top: var(--spacing-xs);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.exampleLabel {
+  color: var(--text-muted);
+}
+
+.exampleValue {
+  font-family: var(--font-family-mono);
+  color: var(--text-primary);
+}
+
+.exampleMuted {
+  color: var(--text-muted);
+  font-family: var(--font-family-base);
+}
+
+.fieldError {
+  margin-top: var(--spacing-xs);
+  color: var(--color-danger);
+  font-size: var(--font-size-sm);
+}
+
+/* --- Token help popover --- */
+
+.tokenHelp {
+  min-width: 260px;
+  max-width: 340px;
+}
+
+.tokenHelpTitle {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  margin-bottom: var(--spacing-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.tokenList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.tokenItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tokenName {
+  font-family: var(--font-family-mono);
+  color: var(--color-accent);
+  font-size: var(--font-size-base);
+}
+
+.tokenAliases {
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+/* --- Rename preview picker + modal --- */
+
+.renamePicker {
+  display: flex;
+  gap: var(--spacing-sm);
+  align-items: center;
+}
+
+.picker {
+  min-width: 240px;
+  padding: var(--spacing-sm);
+  background: var(--surface-page);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: var(--font-size-base);
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--surface-overlay);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 6vh var(--spacing-md);
+  z-index: 100;
+}
+
+.modal {
+  background: var(--surface-chrome);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-overlay);
+  width: min(720px, 100%);
+  max-height: 84vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.modalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--layout-header-height);
+  padding: 0 var(--spacing-lg);
+  border-bottom: 1px solid var(--surface-border);
+  flex-shrink: 0;
+}
+
+.modalTitle {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-medium);
+}
+
+.modalBody {
+  padding: var(--spacing-lg);
+  overflow-y: auto;
+}
+
+.modalFooter {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-md) var(--spacing-lg);
+  border-top: 1px solid var(--surface-border);
+  flex-shrink: 0;
+}
+
+.footerSpacer {
+  flex: 1;
+}
+
+.iconButton {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: var(--icon-size-lg);
+  line-height: 1;
+  cursor: pointer;
+  padding: var(--spacing-xs);
+}
+
+.iconButton:hover {
+  color: var(--text-primary);
+}
+
+.button {
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--surface-card);
+  color: var(--text-primary);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-base);
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--surface-card-hover);
+}
+
+.button:disabled {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.buttonPrimary {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-accent-contrast);
+}
+
+.buttonPrimary:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+}
+
+.renameTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-sm);
+}
+
+.renameTable th,
+.renameTable td {
+  text-align: left;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-bottom: 1px solid var(--surface-border);
+  vertical-align: top;
+}
+
+.renameOld {
+  color: var(--text-secondary);
+  font-family: var(--font-family-mono);
+}
+
+.renameNew {
+  color: var(--text-primary);
+  font-family: var(--font-family-mono);
+}
+
+.renameArrow {
+  color: var(--text-muted);
+  padding: 0 var(--spacing-xs);
+}
+
+.commandChip {
+  margin-top: var(--spacing-md);
+  display: inline-block;
+  padding: 2px var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.formError {
+  margin-top: var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-sm);
+  color: var(--color-danger);
+  font-size: var(--font-size-base);
+}

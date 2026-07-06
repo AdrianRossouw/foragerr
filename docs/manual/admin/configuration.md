@@ -64,6 +64,15 @@ under the top level of `config.yaml`.
 | `sabnzbd_api_key` | `FORAGERR_SABNZBD_API_KEY` | *(empty, secret)* | See `secrets.md`. |
 | `track_downloads_interval_seconds` | `FORAGERR_TRACK_DOWNLOADS_INTERVAL_SECONDS` | `60` | Minimum 60s (download pool is serialized). |
 | `auto_redownload_failed` | `FORAGERR_AUTO_REDOWNLOAD_FAILED` | `true` | Self-healing re-search after a failed download. |
+| `rename_enabled` | `FORAGERR_RENAME_ENABLED` | `true` | Rename files on import per the naming template. Off = keep source filenames. |
+| `file_naming_template` | `FORAGERR_FILE_NAMING_TEMPLATE` | `{Series Title} {Issue Number:000} ({Year}) [__{IssueId}__]` | Token template for imported file names. Must render a name that re-parses to the same issue (validated at startup/save). |
+| `folder_naming_template` | `FORAGERR_FOLDER_NAMING_TEMPLATE` | `{Series Title} ({Year})` | Token template for series folders. |
+| `replace_illegal_characters` | `FORAGERR_REPLACE_ILLEGAL_CHARACTERS` | `true` | Replace filesystem-illegal characters in rendered names (off = strip). |
+| `import_transfer_mode` | `FORAGERR_IMPORT_TRANSFER_MODE` | `move` | How download imports place files: `move`, `copy`, or `hardlink` (falls back to copy across volumes). |
+| `library_import_mode` | `FORAGERR_LIBRARY_IMPORT_MODE` | `in_place` | How the existing-library import (M2 change 3) treats files already under a root: `in_place` (never moved) or `move`. |
+| `recycle_bin_path` | `FORAGERR_RECYCLE_BIN_PATH` | *(empty)* | Directory upgrade-replaced and user-deleted files are moved to. **Empty = permanently delete.** Must be writable when set; destinations are confinement-checked. |
+| `recycle_bin_retention_days` | `FORAGERR_RECYCLE_BIN_RETENTION_DAYS` | `0` | Days before housekeeping permanently prunes bin entries. `0` = keep forever. |
+| `config_backup_retention` | `FORAGERR_CONFIG_BACKUP_RETENTION` | `3` | Pre-migration `config.yaml` backups kept under `backups/`. |
 
 Unknown keys found in `config.yaml` are ignored with a logged warning rather than
 failing startup, so a config file from a slightly different version doesn't brick
@@ -76,3 +85,13 @@ variable, the environment variable wins — this is deliberate so a Docker Compo
 file (env vars) can override a persisted config file without editing it. To change a
 setting persistently without an environment variable, edit `config.yaml` under the
 config directory and restart.
+
+## Config file versioning
+
+`config.yaml` carries a `config_schema_version` stamp. On upgrade, an older file is
+migrated forward one step at a time; before any rewrite the original is backed up to
+`backups/pre-config-migration-<version>-<timestamp>/` (keeping the newest
+`config_backup_retention` backups). A config stamped **newer** than the running
+build refuses startup with a precise error and the file is left untouched — restore
+the matching build or the backed-up file. Operator-set values survive migration
+verbatim.

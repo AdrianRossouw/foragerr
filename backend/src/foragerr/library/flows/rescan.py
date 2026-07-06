@@ -43,6 +43,7 @@ from foragerr.importer import (
     RescanSource,
     gather,
     import_candidate,
+    media_management_fields,
 )
 from foragerr.library import repo
 from foragerr.library.models import IssueFileRow, IssueRow
@@ -134,6 +135,7 @@ async def rescan_series(
         reference_year=reference_year,
         now=now,
         offload=offload,
+        **media_management_fields(settings),
     )
 
     # Which linked files have vanished (checked off the loop when offloaded).

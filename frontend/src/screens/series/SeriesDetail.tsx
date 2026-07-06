@@ -13,9 +13,11 @@ import {
   PersonIcon,
   RefreshIcon,
   SearchIcon,
+  TableIcon,
   TrashIcon,
   WrenchIcon,
 } from '../../components/icons';
+import { RenamePreviewPanel } from '../settings/naming/RenamePreviewPanel';
 import {
   useBulkSetIssuesMonitored,
   useCommandStatus,
@@ -210,6 +212,7 @@ export function SeriesDetail() {
   const [selected, setSelected] = useState<ReadonlySet<number>>(new Set());
   const [showDelete, setShowDelete] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
+  const [showRename, setShowRename] = useState(false);
 
   const interactiveIssueId = useUiStore((s) => s.interactiveSearchIssueId);
   const openInteractiveSearch = useUiStore((s) => s.openInteractiveSearch);
@@ -292,6 +295,11 @@ export function SeriesDetail() {
               onClick={() => dispatch('Search', 'series-search', { series_id: seriesId })}
             />
             <ToolbarSeparator />
+            <ToolbarButton
+              icon={<TableIcon />}
+              label="Rename Files"
+              onClick={() => setShowRename(true)}
+            />
             <ToolbarButton icon={<WrenchIcon />} label="Edit" onClick={() => setShowEdit(true)} />
             <ToolbarButton icon={<TrashIcon />} label="Delete" onClick={() => setShowDelete(true)} />
           </span>
@@ -474,6 +482,14 @@ export function SeriesDetail() {
               { onSuccess: () => navigate('/') },
             )
           }
+        />
+      )}
+
+      {showRename && (
+        <RenamePreviewPanel
+          seriesId={seriesId}
+          seriesTitle={series.title}
+          onClose={() => setShowRename(false)}
         />
       )}
 

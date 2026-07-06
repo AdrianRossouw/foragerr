@@ -536,4 +536,22 @@ async def _handle_housekeeping(command: BaseCommand, ctx: HandlerContext) -> str
         ctx.settings.job_history_retention_days if ctx.settings is not None else 30
     )
     pruned = await prune_job_history(ctx.db, retention_days)
-    return f"pruned {pruned} job_history row(s)"
+    summary = f"pruned {pruned} job_history row(s)"
+
+    # Recycle-bin housekeeping (FRG-PP-013): migrate any leftover M1 quarantine
+    # files into the bin, then prune aged entries. Lazy-imported to keep the
+    # commands core free of an importer dependency at module load.
+    settings = ctx.settings
+    if settings is not None and settings.recycle_bin_path:
+        from foragerr.importer import recycle
+
+        swept = await recycle.sweep_quarantine_to_recycle(
+            ctx.db,
+            config_dir=str(settings.config_dir),
+            recycle_bin_path=settings.recycle_bin_path,
+        )
+        removed = await recycle.prune_recycle_bin(
+            settings.recycle_bin_path, settings.recycle_bin_retention_days
+        )
+        summary += f", swept {swept} quarantine file(s), pruned {removed} recycle entry(ies)"
+    return summary

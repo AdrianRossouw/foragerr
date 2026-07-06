@@ -31,7 +31,7 @@ ORM model onto ``Base.metadata`` (same convention as the downloads area).
 
 from __future__ import annotations
 
-from foragerr.importer.context import ImportContext
+from foragerr.importer.context import ImportContext, media_management_fields
 from foragerr.importer.models import ImportHistoryRow
 from foragerr.importer.pipeline import (
     ImportOutcome,
@@ -63,4 +63,5 @@ __all__ = [
     "RescanSource",
     "gather",
     "import_candidate",
+    "media_management_fields",
 ]
