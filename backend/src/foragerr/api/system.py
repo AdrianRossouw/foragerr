@@ -92,9 +92,17 @@ class HealthWarningItem(BaseModel):
 
 
 class SystemHealthComponent(BaseModel):
-    """One ``GET /api/v1/system/health`` per-component row (FRG-NFR-011)."""
+    """One ``GET /api/v1/system/health`` per-component row (FRG-NFR-011).
+
+    ``component`` is the stable machine id (e.g. ``"indexer:3"``) the UI keys
+    rows and polling diffs on; ``label`` is the human-readable display name
+    (e.g. ``"Indexer: DogNZB"``) the Health screen renders — the domain
+    ``ComponentHealth`` already carries both, so this resource surfaces the
+    one the frontend was missing rather than re-deriving it.
+    """
 
     component: str
+    label: str
     state: str
     message: str | None
     last_success: dt.datetime | None
@@ -105,6 +113,7 @@ class SystemHealthComponent(BaseModel):
     def from_domain(cls, component: ComponentHealth) -> "SystemHealthComponent":
         return cls(
             component=component.component,
+            label=component.label,
             state=component.state,
             message=component.message,
             last_success=component.last_success,

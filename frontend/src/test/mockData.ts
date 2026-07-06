@@ -556,9 +556,16 @@ export function makeHealthWarning(
   };
 }
 
-/** One GET /api/v1/system/health per-component row. */
+/**
+ * One GET /api/v1/system/health per-component row. `component` and `label`
+ * are both required overrides (no default) — the real service always emits
+ * a hyphenated `kind:numeric-id` machine id (e.g. "indexer:3") alongside a
+ * distinct human-readable label (e.g. "Indexer: DogNZB"), and a mock that
+ * defaulted `label` risks silently drifting back to the machine id.
+ */
 export function makeHealthComponent(
-  overrides: Partial<SystemHealthComponent> & Pick<SystemHealthComponent, 'component'>,
+  overrides: Partial<SystemHealthComponent> &
+    Pick<SystemHealthComponent, 'component' | 'label'>,
 ): SystemHealthComponent {
   return {
     state: 'ok',
@@ -570,15 +577,23 @@ export function makeHealthComponent(
   };
 }
 
-/** GET /api/v1/system/health for an all-healthy system, one row per component area. */
+/**
+ * GET /api/v1/system/health for an all-healthy system, one row per component
+ * area — machine ids and labels match the real `HealthService` shapes
+ * (backend/src/foragerr/health/service.py): hyphenated `kind:numeric-id`
+ * ids, distinct human-readable labels.
+ */
 export const mockHealthyComponents: SystemHealthComponent[] = [
-  makeHealthComponent({ component: 'comicvine' }),
-  makeHealthComponent({ component: 'indexer:DogNZB' }),
-  makeHealthComponent({ component: 'download_client:SABnzbd' }),
-  makeHealthComponent({ component: 'scheduler' }),
-  makeHealthComponent({ component: 'database' }),
-  makeHealthComponent({ component: 'root_folders' }),
-  makeHealthComponent({ component: 'disk_space' }),
+  makeHealthComponent({ component: 'comicvine', label: 'ComicVine' }),
+  makeHealthComponent({ component: 'indexer:3', label: 'Indexer: DogNZB' }),
+  makeHealthComponent({
+    component: 'download-client:1',
+    label: 'Download client: SABnzbd',
+  }),
+  makeHealthComponent({ component: 'scheduler', label: 'Scheduler' }),
+  makeHealthComponent({ component: 'database', label: 'Database' }),
+  makeHealthComponent({ component: 'root-folder:1', label: 'Root folder: /comics' }),
+  makeHealthComponent({ component: 'disk-space', label: 'Config volume free space' }),
 ];
 
 /** One GET /api/v1/system/task row. */

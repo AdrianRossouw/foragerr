@@ -180,20 +180,31 @@ async def test_system_health_every_component_represented_with_frontend_shape(
 
     for c in components:
         assert c["state"] in ("ok", "degraded", "error")
-        # Matches the frontend's COMMITTED SystemHealthComponent type exactly:
-        # no `kind`/`label`/`remediation` (the domain ComponentHealth's extra
-        # fields) leak onto the wire.
+        # Matches the frontend's SystemHealthComponent type exactly: `label`
+        # (the human-readable display name) is carried, but `kind`/
+        # `remediation` (the domain ComponentHealth's other extra fields)
+        # still do not leak onto the wire.
         assert set(c.keys()) == {
             "component",
+            "label",
             "state",
             "message",
             "last_success",
             "last_failure",
             "disabled_until",
         }
+        # label is the human-readable name; component stays the stable
+        # machine id — the two must not collapse into the same string, or
+        # the UI would still be showing the raw id to the user.
+        assert c["label"]
+        assert c["label"] != c["component"]
 
     scheduler_comp = next(c for c in components if c["component"] == "scheduler")
     assert scheduler_comp["state"] == "ok"  # deterministic: status() succeeds
+    assert scheduler_comp["label"] == "Scheduler"
+
+    database_comp = next(c for c in components if c["component"] == "database")
+    assert database_comp["label"] == "Database"
 
 
 # --- GET /api/v1/system/task + POST force-run (FRG-API-014 / FRG-DB-009) ---

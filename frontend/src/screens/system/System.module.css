@@ -114,6 +114,16 @@
   font-size: var(--font-size-sm);
 }
 
+.componentLabel {
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+}
+
+.componentId {
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
 .chip {
   display: inline-block;
   padding: 2px var(--spacing-sm);

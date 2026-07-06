@@ -598,10 +598,13 @@ export type ComponentHealthState = 'ok' | 'degraded' | 'error';
 /**
  * One GET /api/v1/system/health per-component row (design decision 6). A
  * `degraded` indexer/provider carries `disabled_until` (back-off countdown);
- * `database` reflects integrity + last-backup age instead.
+ * `database` reflects integrity + last-backup age instead. `component` is the
+ * stable machine id (e.g. "indexer:3") the UI keys rows on; `label` is the
+ * human-readable display name (e.g. "Indexer: DogNZB") to render.
  */
 export interface SystemHealthComponent {
   component: string;
+  label: string;
   state: ComponentHealthState;
   message: string | null;
   last_success: string | null;

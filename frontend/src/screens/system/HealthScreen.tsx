@@ -102,7 +102,10 @@ export function HealthScreen() {
                       key={component.component}
                       data-testid={`health-component-${component.component}`}
                     >
-                      <td>{component.component}</td>
+                      <td>
+                        <div className={styles.componentLabel}>{component.label}</div>
+                        <div className={styles.componentId}>{component.component}</div>
+                      </td>
                       <td>
                         <span
                           className={`${styles.chip} ${COMPONENT_CHIP_CLASS[component.state]}`}

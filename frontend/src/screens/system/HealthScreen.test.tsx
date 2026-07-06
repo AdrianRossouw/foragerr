@@ -21,7 +21,8 @@ import { HealthScreen } from './HealthScreen';
 const oneHourFromNow = new Date(Date.now() + 60 * 60 * 1000).toISOString();
 
 const degradedIndexer = makeHealthComponent({
-  component: 'indexer:DogNZB',
+  component: 'indexer:3',
+  label: 'Indexer: DogNZB',
   state: 'degraded',
   last_failure: '2026-07-06T10:00:00Z',
   disabled_until: oneHourFromNow,
@@ -31,14 +32,14 @@ describe('FRG-UI-016: system health screen', () => {
   it('FRG-UI-016 — Health screen shows warnings with remediation and per-component state', async () => {
     const warnings = [
       makeHealthWarning({
-        source: 'indexer:DogNZB',
+        source: 'indexer:3',
         type: 'warning',
         message: 'DogNZB is disabled after repeated failures.',
         remediationHint: 'Check the indexer credentials and try again.',
       }),
     ];
     const components = [
-      ...mockHealthyComponents.filter((c) => c.component !== 'indexer:DogNZB'),
+      ...mockHealthyComponents.filter((c) => c.component !== 'indexer:3'),
       degradedIndexer,
     ];
     const { fetcher } = fakeFetcher((path) => {
@@ -48,13 +49,18 @@ describe('FRG-UI-016: system health screen', () => {
     });
     renderWithProviders(<HealthScreen />, { fetcher });
 
-    const warningRow = await screen.findByTestId('health-warning-indexer:DogNZB');
+    const warningRow = await screen.findByTestId('health-warning-indexer:3');
     expect(within(warningRow).getByText('DogNZB is disabled after repeated failures.')).toBeInTheDocument();
     expect(
       within(warningRow).getByText('Check the indexer credentials and try again.'),
     ).toBeInTheDocument();
 
-    const componentRow = screen.getByTestId('health-component-indexer:DogNZB');
+    const componentRow = screen.getByTestId('health-component-indexer:3');
+    // The human-readable label is the primary name shown to the user; the
+    // machine id stays visible too (secondary), but must not be the only
+    // thing rendered (FRG-UI-016 — no raw machine ids as the primary name).
+    expect(within(componentRow).getByText('Indexer: DogNZB')).toBeInTheDocument();
+    expect(within(componentRow).getByText('indexer:3')).toBeInTheDocument();
     expect(within(componentRow).getByText('Degraded')).toBeInTheDocument();
     // A disabled-until countdown is rendered ("in Xm"/"in Xh Ym"), not a dash.
     const cells = within(componentRow).getAllByRole('cell');
@@ -88,7 +94,7 @@ describe('FRG-UI-016: system health screen', () => {
           ? []
           : [
               makeHealthWarning({
-                source: 'indexer:DogNZB',
+                source: 'indexer:3',
                 remediationHint: 'Check the indexer credentials and try again.',
               }),
             ];
@@ -97,7 +103,7 @@ describe('FRG-UI-016: system health screen', () => {
         return recovered
           ? mockHealthyComponents
           : [
-              ...mockHealthyComponents.filter((c) => c.component !== 'indexer:DogNZB'),
+              ...mockHealthyComponents.filter((c) => c.component !== 'indexer:3'),
               degradedIndexer,
             ];
       }
@@ -115,7 +121,7 @@ describe('FRG-UI-016: system health screen', () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0);
       });
-      expect(screen.getByTestId('health-warning-indexer:DogNZB')).toBeInTheDocument();
+      expect(screen.getByTestId('health-warning-indexer:3')).toBeInTheDocument();
 
       recovered = true;
       // Advance past two poll intervals so both independently-scheduled
@@ -128,6 +134,6 @@ describe('FRG-UI-016: system health screen', () => {
     }
 
     expect(screen.getByTestId('health-all-healthy')).toBeInTheDocument();
-    expect(screen.queryByTestId('health-warning-indexer:DogNZB')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('health-warning-indexer:3')).not.toBeInTheDocument();
   });
 });
