@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
+import { screen, waitFor, within, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../../test/renderWithProviders';
 import { fakeFetcher } from '../../test/fakeFetcher';
+import { makeFakeSocketFactory } from '../../test/fakeSocket';
+import { WebSocketBridge } from '../../ws/WebSocketBridge';
 import { makeCommand, makeWantedRecord, pageOf } from '../../test/mockData';
 import { WantedScreen } from './WantedScreen';
 
@@ -109,6 +111,76 @@ describe('FRG-UI-011: wanted screen', () => {
     );
     // A completed search may have grabbed releases: the wanted list refetched.
     await waitFor(() => expect(wantedCalls).toBe(2));
+  });
+
+  it('FRG-UI-011 — per-row automatic searches are disabled while Search All runs; interactive search stays available', async () => {
+    const { fetcher } = fakeFetcher((path, init) => {
+      if (init?.method === 'POST' && path === '/api/v1/command') {
+        return makeCommand({ id: 99, name: 'backlog-search', status: 'queued' });
+      }
+      // Hold the command non-terminal so the running window is observable.
+      if (path === '/api/v1/command/99') {
+        return makeCommand({ id: 99, name: 'backlog-search', status: 'started' });
+      }
+      return pageOf(wantedRecords, { pageSize: 20 });
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<WantedScreen />, { fetcher });
+
+    const row = await screen.findByTestId('wanted-row-72');
+    await user.click(screen.getByRole('button', { name: 'Search All' }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('command-status')).toHaveTextContent(
+        'Search All: started',
+      ),
+    );
+    // The single shared watcher is busy: per-row automatic searches are disabled
+    // (so they cannot hijack Search All's completion), but interactive search —
+    // which never touches that watcher — stays open.
+    expect(
+      within(row).getByRole('button', { name: 'Automatic search for issue 1.5' }),
+    ).toBeDisabled();
+    expect(
+      within(screen.getByTestId('wanted-row-73')).getByRole('button', {
+        name: 'Automatic search for issue 1.MU',
+      }),
+    ).toBeDisabled();
+    expect(
+      within(row).getByRole('button', { name: 'Interactive search for issue 1.5' }),
+    ).toBeEnabled();
+    // Search All itself is likewise disabled while its command runs.
+    expect(screen.getByRole('button', { name: 'Search All' })).toBeDisabled();
+  });
+
+  it('FRG-UI-011 — a wanted WS push invalidates the missing list without manual action', async () => {
+    let calls = 0;
+    const { fetcher } = fakeFetcher(() => {
+      calls += 1;
+      return calls === 1
+        ? pageOf([wantedRecords[0]], { pageSize: 20 })
+        : pageOf(wantedRecords, { pageSize: 20 });
+    });
+    const { factory, last } = makeFakeSocketFactory();
+    renderWithProviders(
+      <>
+        <WantedScreen />
+        <WebSocketBridge socketFactory={factory} />
+      </>,
+      { fetcher },
+    );
+
+    await screen.findByTestId('wanted-row-72');
+    expect(screen.queryByTestId('wanted-row-73')).not.toBeInTheDocument();
+
+    act(() => last().emitOpen());
+    // File-presence change → the backend's dedicated wanted push; the derived
+    // missing list is invalidated and refetched (no queue piggyback needed).
+    act(() =>
+      last().emitMessage({ name: 'wanted', action: 'updated', resource: null }),
+    );
+
+    await screen.findByTestId('wanted-row-73');
   });
 
   it('FRG-UI-011 — the empty state is explicit and distinct from loading/error', async () => {

@@ -141,7 +141,7 @@ describe('FRG-UI-010: history screen', () => {
     expect(screen.queryByTestId('history-row-2')).not.toBeInTheDocument();
   });
 
-  it('FRG-UI-010 — a queue WS push invalidates history so a new event appears without manual refresh', async () => {
+  it('FRG-UI-010 — a dedicated history WS push invalidates history so a new event appears without manual refresh', async () => {
     let calls = 0;
     const { spy, fetcher } = fakeFetcher(() => {
       calls += 1;
@@ -162,16 +162,13 @@ describe('FRG-UI-010: history screen', () => {
     expect(spy).toHaveBeenCalledTimes(1);
 
     act(() => last().emitOpen());
+    // m2-daily-surfaces: the backend now emits a dedicated history push on every
+    // history write (no queue piggyback). The bridge invalidates ['history'];
+    // the refetched page shows the newly-written imported event.
     act(() =>
-      last().emitMessage({
-        name: 'queue',
-        action: 'updated',
-        resource: { downloadId: 'SABnzbd_nzo_cycle', status: 'imported' },
-      }),
+      last().emitMessage({ name: 'history', action: 'updated', resource: null }),
     );
 
-    // The history family is invalidated by the queue push (imports write
-    // history rows); the refetched page now shows the imported event.
     await screen.findByTestId('history-row-2');
   });
 });

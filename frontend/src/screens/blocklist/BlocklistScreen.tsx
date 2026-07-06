@@ -27,7 +27,7 @@ export function BlocklistScreen() {
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<ReadonlySet<number>>(new Set());
   const [notice, setNotice] = useState<string | null>(null);
-  const { data, isLoading, isError } = useBlocklistPage(page);
+  const { data, isLoading, isError } = useBlocklistPage(page, setPage);
   const removeOne = useRemoveBlocklistItem();
   const bulkRemove = useBulkRemoveBlocklist();
 

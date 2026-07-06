@@ -6,6 +6,7 @@ import { createQueryClient } from '../queryClient';
 import { FetcherProvider } from '../api/fetcher';
 import {
   useCommandStatus,
+  useHistoryPage,
   useSeriesDetail,
   useSeriesList,
   useQueuePage,
@@ -16,7 +17,7 @@ import { WebSocketBridge } from './WebSocketBridge';
 import { useConnectionStore } from './connectionStore';
 import { makeFakeSocketFactory } from '../test/fakeSocket';
 import { fakeFetcher } from '../test/fakeFetcher';
-import { makeCommand, mockSeriesList, mockQueuePage1 } from '../test/mockData';
+import { makeCommand, mockSeriesList, mockQueuePage1, pageOf } from '../test/mockData';
 
 beforeEach(() => {
   // Reset the shared connection store between cases (module singleton).
@@ -210,6 +211,52 @@ describe('FRG-UI-001: WebSocketBridge maps messages to cache operations', () => 
     // Refetch observed — invalidation, not an in-place patch.
     await waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
     expect(spy).toHaveBeenLastCalledWith('/api/v1/queue?page=1');
+  });
+
+  it('FRG-UI-001 — a queue updated push no longer piggybacks history (dedicated pushes own it)', async () => {
+    const client = createQueryClient();
+    const { spy, fetcher } = fakeFetcher((path) =>
+      String(path).startsWith('/api/v1/history')
+        ? pageOf([], { pageSize: 20 })
+        : mockQueuePage1,
+    );
+    const { factory, last } = makeFakeSocketFactory();
+
+    function Harness() {
+      useQueuePage(1); // ['queue', 1]
+      useHistoryPage(1); // ['history', 1, …]
+      return <WebSocketBridge socketFactory={factory} />;
+    }
+
+    render(
+      <QueryClientProvider client={client}>
+        <FetcherProvider fetcher={fetcher}>
+          <Harness />
+        </FetcherProvider>
+      </QueryClientProvider>,
+    );
+
+    // Both observers make their initial fetch.
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
+
+    act(() => last().emitOpen());
+    act(() =>
+      last().emitMessage({
+        name: 'queue',
+        action: 'updated',
+        resource: { downloadId: 'SABnzbd_nzo_900', status: 'imported' },
+      }),
+    );
+
+    // The queue page refetches…
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith('/api/v1/queue?page=1'),
+    );
+    // …but history is NOT re-invalidated by a queue push: still one call.
+    const historyCalls = spy.mock.calls.filter(([p]) =>
+      String(p).startsWith('/api/v1/history'),
+    );
+    expect(historyCalls).toHaveLength(1);
   });
 
   it('FRG-UI-001 — a command updated message invalidates ["command", id] and the status query refetches', async () => {
