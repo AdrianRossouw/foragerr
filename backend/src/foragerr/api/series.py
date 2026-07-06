@@ -198,6 +198,10 @@ class LookupCandidateResource(BaseModel):
     name: str | None
     publisher: str | None
     start_year: int | None
+    #: ComicVine issue count for the volume (FRG-META-007) — lets the add
+    #: screen show how many issues a candidate has; ``None`` when ComicVine
+    #: did not supply it.
+    count_of_issues: int | None
     image_url: str | None
     name_similarity: float
     year_proximity: int | None
@@ -286,6 +290,7 @@ async def lookup_series(
             name=candidate.series.name,
             publisher=candidate.series.publisher,
             start_year=candidate.series.start_year,
+            count_of_issues=candidate.series.count_of_issues,
             image_url=candidate.series.image_url,
             name_similarity=candidate.plausibility.name_similarity,
             year_proximity=candidate.plausibility.year_proximity,

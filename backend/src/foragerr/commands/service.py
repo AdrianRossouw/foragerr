@@ -30,6 +30,7 @@ from foragerr.db import (
     Database,
     JobHistoryRow,
     TERMINAL_STATUSES,
+    queue_event,
     utcnow,
 )
 from foragerr.commands.registry import (
@@ -93,6 +94,21 @@ async def daemon_offload(func: Callable[..., Any], /, *args: Any, **kwargs: Any)
         daemon=True,
     ).start()
     return await future
+
+
+@dataclass(frozen=True)
+class CommandStatusChanged:
+    """A command reached a new status (FRG-API-010 WS-push source).
+
+    Queued post-commit inside the enqueue and terminal writes, so a WS client
+    sees command lifecycle transitions (queued -> completed/failed) without
+    polling. Delivered only if a bus is wired (``Database.event_publisher``);
+    bare command services discard it.
+    """
+
+    id: int
+    name: str
+    status: str
 
 
 @dataclass(frozen=True)
@@ -346,6 +362,7 @@ class CommandService:
             session.add(row)
             await session.flush()
             record = CommandRecord.from_row(row)
+            queue_event(session, CommandStatusChanged(row.id, name, row.status))
         self._wake.set()
         return record
 
@@ -500,6 +517,7 @@ class CommandService:
                     error=error,
                 )
             )
+            queue_event(session, CommandStatusChanged(record.id, record.name, outcome))
 
 
 # --- built-in handlers -------------------------------------------------------

@@ -206,6 +206,19 @@ def test_invalid_config_reports_all_fields_in_one_pass(config_dir):
 
 
 @pytest.mark.req("FRG-NFR-009")
+@pytest.mark.parametrize("reserved", ["/", "/api", "/api/v1", "/health"])
+def test_opds_base_path_rejects_reserved_mount_paths(config_dir, reserved):
+    """An OPDS base that collides with a core mount (the SPA root, /api, or
+    /health) must fail validation, not silently shadow that route."""
+    (config_dir / CONFIG_FILENAME).write_text(
+        f"opds_base_path: {reserved!r}\n", encoding="utf-8"
+    )
+    with pytest.raises(ConfigError) as excinfo:
+        load_settings()
+    assert "opds_base_path" in str(excinfo.value)
+
+
+@pytest.mark.req("FRG-NFR-009")
 @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
 def test_unwritable_config_dir_is_named_in_the_failure(config_dir):
     (config_dir / CONFIG_FILENAME).write_text("log_level: INFO\n", encoding="utf-8")

@@ -11,7 +11,11 @@ rendered here: change 6 moves that to the one token renaming engine
 (:func:`foragerr.importer.renamer.render_series_folder`, SER-008 template
 ownership transfer, FRG-PP-010). :func:`series_folder_name` now delegates to it,
 byte-for-byte unchanged for existing rows. Systematic destination-path
-confinement (safe-join) lives in ``security.paths``.
+confinement (safe-join) lives in ``security.paths``, and so does the read-side
+containment check for stored paths: ``validate_under_root`` relocated there at
+change-7 integration (same single-ownership rule). The names are re-exported
+here unchanged for existing callers; ``PathNotUnderRootError`` is now an alias
+of :class:`foragerr.security.paths.PathConfinementError`.
 """
 
 from __future__ import annotations
@@ -19,9 +23,20 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from foragerr.security.paths import (
+    PathConfinementError as PathNotUnderRootError,
+)
+from foragerr.security.paths import (
+    validate_under_root,
+)
 
-class PathNotUnderRootError(ValueError):
-    """A series path does not resolve under any registered root folder."""
+__all__ = [
+    "PathNotUnderRootError",
+    "build_series_path",
+    "rename_series_directory",
+    "series_folder_name",
+    "validate_under_root",
+]
 
 
 def series_folder_name(title: str, start_year: int | None) -> str:
@@ -44,22 +59,6 @@ def series_folder_name(title: str, start_year: int | None) -> str:
 def build_series_path(root_folder_path: str | Path, title: str, start_year: int | None) -> Path:
     """The default series path: ``{root}/{safe series title} ({start_year})``."""
     return Path(root_folder_path) / series_folder_name(title, start_year)
-
-
-def validate_under_root(path: str | Path, root_folders: "list[str | Path] | tuple[str | Path, ...]") -> Path:
-    """Resolve ``path`` and confirm it sits at or under a registered root.
-
-    Raises :class:`PathNotUnderRootError` otherwise. Returns the resolved
-    path so callers can persist a normalized form.
-    """
-    candidate = Path(path).resolve()
-    for root in root_folders:
-        root_path = Path(root).resolve()
-        if candidate == root_path or root_path in candidate.parents:
-            return candidate
-    raise PathNotUnderRootError(
-        f"{candidate} is not under any registered root folder"
-    )
 
 
 def rename_series_directory(old_path: str | Path, new_path: str | Path) -> None:

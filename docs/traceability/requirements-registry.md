@@ -202,22 +202,22 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-API-007 | Queue endpoint backed by tracked downloads | api | implemented | M1 |
 | FRG-API-008 | Release endpoint: interactive search with cached grab | api | implemented | M1 |
 | FRG-API-009 | Provider schema and test endpoints | api | implemented | M1 |
-| FRG-API-010 | WebSocket resource-change push | api | approved | M1 |
+| FRG-API-010 | WebSocket resource-change push | api | implemented | M1 |
 | FRG-API-011 | History endpoint | api | approved | M2 |
 | FRG-API-012 | Wanted/missing endpoint | api | approved | M2 |
 | FRG-API-013 | Config resource endpoints | api | approved | M2 |
 | FRG-API-014 | System status, health, and task endpoints | api | approved | M2 |
 | FRG-API-015 | Manual import endpoint | api | approved | M2 |
 | FRG-API-016 | Parse debug endpoint | api | approved | B |
-| FRG-UI-001 | SPA architecture: server state via React Query + WS invalidation | ui | approved | M1 |
-| FRG-UI-002 | Design token layer with ant/foraging theme | ui | approved | M1 |
-| FRG-UI-003 | Library index screen | ui | approved | M1 |
-| FRG-UI-004 | Series detail screen | ui | approved | M1 |
-| FRG-UI-005 | Add-series search screen | ui | approved | M1 |
-| FRG-UI-006 | Activity: queue screen | ui | approved | M1 |
-| FRG-UI-007 | Interactive search overlay | ui | approved | M1 |
-| FRG-UI-008 | Settings: indexers with schema-driven forms and test buttons | ui | approved | M1 |
-| FRG-UI-009 | Settings: download clients | ui | approved | M1 |
+| FRG-UI-001 | SPA architecture: server state via React Query + WS invalidation | ui | implemented | M1 |
+| FRG-UI-002 | Design token layer with ant/foraging theme | ui | implemented | M1 |
+| FRG-UI-003 | Library index screen | ui | implemented | M1 |
+| FRG-UI-004 | Series detail screen | ui | implemented | M1 |
+| FRG-UI-005 | Add-series search screen | ui | implemented | M1 |
+| FRG-UI-006 | Activity: queue screen | ui | implemented | M1 |
+| FRG-UI-007 | Interactive search overlay | ui | implemented | M1 |
+| FRG-UI-008 | Settings: indexers with schema-driven forms and test buttons | ui | implemented | M1 |
+| FRG-UI-009 | Settings: download clients | ui | implemented | M1 |
 | FRG-UI-010 | Activity: history screen | ui | approved | M2 |
 | FRG-UI-011 | Wanted screen | ui | approved | M2 |
 | FRG-UI-012 | Settings: media management and naming with rename preview | ui | approved | M2 |
@@ -227,12 +227,12 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-UI-016 | System status and tasks screens | ui | approved | M2 |
 | FRG-UI-017 | Blocklist screen | ui | approved | M2 |
 | FRG-UI-018 | Weekly pull / calendar view | ui | approved | M3 |
-| FRG-OPDS-001 | OPDS 1.2 Atom catalog with navigation root | opds | approved | M1 |
-| FRG-OPDS-002 | Acquisition feeds with per-entry metadata | opds | approved | M1 |
-| FRG-OPDS-003 | Library-id-based file resolution only (no client-supplied paths) | opds | approved | M1 |
-| FRG-OPDS-004 | Parameterized queries throughout | opds | approved | M1 |
-| FRG-OPDS-005 | Whole-file download with correct comic MIME types | opds | approved | M1 |
-| FRG-OPDS-006 | Feed pagination with totals | opds | approved | M1 |
+| FRG-OPDS-001 | OPDS 1.2 Atom catalog with navigation root | opds | implemented | M1 |
+| FRG-OPDS-002 | Acquisition feeds with per-entry metadata | opds | implemented | M1 |
+| FRG-OPDS-003 | Library-id-based file resolution only (no client-supplied paths) | opds | implemented | M1 |
+| FRG-OPDS-004 | Parameterized queries throughout | opds | implemented | M1 |
+| FRG-OPDS-005 | Whole-file download with correct comic MIME types | opds | implemented | M1 |
+| FRG-OPDS-006 | Feed pagination with totals | opds | implemented | M1 |
 | FRG-OPDS-007 | Working OpenSearch (or none) | opds | approved | M2 |
 | FRG-OPDS-008 | OPDS-PSE page streaming | opds | approved | M3 |
 | FRG-OPDS-009 | Cached page counts and page index | opds | approved | M3 |
@@ -273,7 +273,7 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-SCHED-009 | in-process event bus | sched | implemented | M1 |
 | FRG-SCHED-010 | command status push to UI | sched | approved | M2 |
 | FRG-SCHED-011 | graceful queue drain on shutdown | sched | implemented | M1 |
-| FRG-DEP-001 | Docker image per linuxserver.io conventions | dep | approved | M1 |
+| FRG-DEP-001 | Docker image per linuxserver.io conventions | dep | implemented | M1 |
 | FRG-DEP-002 | all persistent state under /config | dep | implemented | M1 |
 | FRG-DEP-003 | configuration via environment variables and config file | dep | implemented | M1 |
 | FRG-DEP-004 | versioned config-file migration | dep | approved | M2 |
@@ -283,7 +283,7 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-DEP-008 | graceful shutdown | dep | implemented | M1 |
 | FRG-DEP-009 | no self-update (explicit divergence from Mylar) | dep | implemented | M1 |
 | FRG-DEP-010 | version and build info | dep | implemented | M1 |
-| FRG-DEP-011 | Tailscale-scoped exposure | dep | approved | M1 |
+| FRG-DEP-011 | Tailscale-scoped exposure | dep | implemented | M1 |
 | FRG-DEP-012 | secrets-stripped diagnostic bundle | dep | approved | B |
 | FRG-AUTH-001 | M1/M2 no-auth accepted risk | auth | implemented | M1 |
 | FRG-AUTH-002 | single-user web login | auth | approved | M5 |

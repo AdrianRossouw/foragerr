@@ -22,6 +22,8 @@ from foragerr.db.base import utcnow
 from foragerr.indexers.models import USAGE_PATHS, IndexerRow
 from foragerr.indexers.registry import get_implementation, validate_settings
 from foragerr.logging import register_secret
+from foragerr.providers.partial import UNSET as _UNSET
+from foragerr.providers.partial import apply_partial_update
 
 logger = logging.getLogger("foragerr.indexers.repo")
 
@@ -103,6 +105,64 @@ async def create_indexer(
         await session.flush()
         session.expunge(row)
     return row
+
+
+async def get_indexer(db, indexer_id: int) -> IndexerRow | None:
+    """Load one indexer row by id (detached), or ``None`` (FRG-IDX-001)."""
+    async with db.read_session() as session:
+        row = await session.get(IndexerRow, indexer_id)
+        if row is not None:
+            session.expunge(row)
+        return row
+
+
+async def update_indexer(
+    db,
+    indexer_id: int,
+    *,
+    name: object = _UNSET,
+    priority: object = _UNSET,
+    enabled: object = _UNSET,
+    enable_rss: object = _UNSET,
+    enable_auto: object = _UNSET,
+    enable_interactive: object = _UNSET,
+    settings: object = _UNSET,
+) -> IndexerRow | None:
+    """Partially update an indexer row (FRG-IDX-001/002); omitted kwargs are
+    left untouched. ``settings`` (when given) is an already-validated settings
+    model — the caller is responsible for merging omitted secret keys onto the
+    stored value BEFORE validating, so a write-only secret survives an edit that
+    doesn't resupply it (FRG-API-009). Returns the detached row, or ``None`` if
+    no such indexer exists."""
+    async with db.write_session() as session:
+        row = await session.get(IndexerRow, indexer_id)
+        if row is None:
+            return None
+        apply_partial_update(
+            row,
+            {
+                "name": name,
+                "priority": priority,
+                "enabled": enabled,
+                "enable_rss": enable_rss,
+                "enable_auto": enable_auto,
+                "enable_interactive": enable_interactive,
+            },
+            settings=settings,
+        )
+        await session.flush()
+        session.expunge(row)
+        return row
+
+
+async def delete_indexer(db, indexer_id: int) -> bool:
+    """Delete one indexer row (FRG-IDX-001). ``True`` if a row was removed."""
+    async with db.write_session() as session:
+        row = await session.get(IndexerRow, indexer_id)
+        if row is None:
+            return False
+        await session.delete(row)
+        return True
 
 
 @dataclass(frozen=True, slots=True)

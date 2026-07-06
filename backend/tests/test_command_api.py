@@ -58,8 +58,21 @@ def test_every_route_is_under_api_v1_except_health(tmp_path):
     app = create_app(make_settings(tmp_path, "prefix"))
     paths = all_paths(app)
     assert paths  # sanity: routes actually exist
+    # Sanctioned top-level surfaces outside /api/v1 (design decision 5,
+    # m1-ui-opds-deploy): the /health probe and the OPDS catalog listener,
+    # mounted at the configured base path (default /opds, FRG-OPDS-001).
+    # Pin the literal default here rather than reading it back from settings:
+    # changing the OPDS base for the app is fine, but this route-boundary test
+    # must then be updated deliberately (reading it back auto-whitelists any
+    # mount the router registers, defeating the boundary check).
+    opds_base = "/opds"
     for path in paths:
-        assert path == "/health" or path.startswith("/api/v1"), path
+        assert (
+            path == "/health"
+            or path.startswith("/api/v1")
+            or path == opds_base
+            or path.startswith(opds_base + "/")
+        ), path
 
 
 @pytest.mark.req("FRG-API-001")

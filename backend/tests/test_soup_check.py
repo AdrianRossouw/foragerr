@@ -32,15 +32,20 @@ soup_check = _load_soup_check()
 
 @pytest.mark.req("FRG-PROC-012")
 def test_soup_check_passes_on_committed_register():
-    """The register backfilled in this change matches backend/pyproject.toml
-    exactly, with no frontend manifest yet -- check() must report zero
-    problems against the real, committed repository state."""
+    """The committed register matches both manifests exactly -- check() must
+    report zero problems against the real repository state. Once the frontend
+    manifest exists (m1-ui-opds-deploy), its rows are covered too."""
     problems, counts, has_frontend = soup_check.check(REPO_ROOT)
 
     assert problems == []
     assert counts["backend runtime"] > 0
     assert counts["backend tooling"] > 0
-    assert has_frontend is False
+    # frontend/package.json exists on this branch, so the frontend manifest MUST
+    # be detected — a hard assert (not `if has_frontend:`) so a regression in
+    # frontend detection fails loudly instead of silently skipping its rows.
+    assert has_frontend is True
+    assert counts["frontend runtime"] > 0
+    assert counts["frontend tooling"] > 0
 
 
 @pytest.fixture

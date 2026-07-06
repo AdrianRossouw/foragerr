@@ -148,6 +148,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(downloadclient_router, prefix="/api/v1")
 
+    # --- library config lists (m1-ui-opds-deploy): read-only root-folder and
+    #     format-profile pickers for the add-series flow (FRG-SER-008,
+    #     FRG-QUAL-001, FRG-UI-005) under /api/v1 ---
+    from foragerr.api.library_config import router as library_config_router
+
+    app.include_router(library_config_router, prefix="/api/v1")
+
     # --- search integration (m1-search-indexers, area 3): importing registers
     #     the search / grab / prune commands + handlers (FRG-SRCH-008/009/014,
     #     FRG-API-008); mount the interactive-search release router; register
@@ -239,6 +246,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     app.state.startup_hooks.append(_register_ddl_tasks)
+
+    # --- ws area (m1-ui-opds-deploy, area: ws): mount /api/v1/ws and, at
+    #     startup, subscribe the broadcaster to app.state.events (created by
+    #     register_scheduler above, so this MUST follow it) (FRG-API-010). ---
+    from foragerr.ws import register_ws
+
+    register_ws(app)
+
+    # --- opds area (m1-ui-opds-deploy, area: opds): mount the OPDS 1.2
+    #     catalog at the configured base path (default /opds). Unauthenticated
+    #     read surface; id-only file resolution (FRG-OPDS-001..006). ---
+    from foragerr.opds import register_opds
+
+    register_opds(app)
+
+    # --- spa area (m1-ui-opds-deploy, area: deploy): serve the built React SPA
+    #     statically at "/" (FRG-DEP-001). Mounted LAST so the API / OPDS / health
+    #     routers above always win; only unclaimed paths reach the SPA. No-op when
+    #     the dist bundle is absent (running from source / tests) so create_app
+    #     stays importable without a frontend build. ---
+    from foragerr.spa import register_spa
+
+    register_spa(app)
 
     return app
 
