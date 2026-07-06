@@ -44,11 +44,11 @@
 - [x] 4.1 Manual (FRG-PROC-011): troubleshooting entry "series search returns
       nothing" (key unset/invalid, where to set it); Add Series section notes
       the error/incomplete states. [FRG-PROC-011]
-- [ ] 4.2 Traceability: regen matrix; registry rows FRG-META-004/API-003/UI-005
+- [x] 4.2 Traceability: regen matrix; registry rows FRG-META-004/API-003/UI-005
       unchanged in status (already implemented — amended behavior), verify tags
       resolve; `tools/soup_check.py` exits 0 (no dependency changes).
       [FRG-PROC-004, FRG-PROC-005]
-- [ ] 4.3 Full backend + frontend suites green on the change branch; pre-merge
+- [x] 4.3 Full backend + frontend suites green on the change branch; pre-merge
       review cycle (/code-review + /simplify); archive change; `--no-ff` merge;
       suites on main. [FRG-PROC-007]
 
