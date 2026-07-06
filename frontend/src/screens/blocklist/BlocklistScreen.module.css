@@ -1,0 +1,53 @@
+/* Shared table/link/button/state chrome (FRG-UI-010/011/017). */
+.table {
+  composes: table from '../../components/dataTable.module.css';
+}
+
+.seriesLink {
+  composes: seriesLink from '../../components/dataTable.module.css';
+}
+
+.muted {
+  composes: muted from '../../components/dataTable.module.css';
+}
+
+.numeric {
+  composes: numeric from '../../components/dataTable.module.css';
+}
+
+.btn {
+  composes: btn from '../../components/dataTable.module.css';
+}
+
+.toolbarActions {
+  composes: toolbarActions from '../../components/dataTable.module.css';
+}
+
+.state {
+  composes: state from '../../components/dataTable.module.css';
+}
+
+/* --- Per-screen columns / controls --- */
+
+.selectCol {
+  width: 2rem;
+}
+
+.reasonCell {
+  max-width: 28rem;
+  overflow-wrap: anywhere;
+}
+
+.actionsCell {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.notice {
+  margin: var(--spacing-sm) var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-sm);
+  color: var(--color-warning);
+  font-size: var(--font-size-sm);
+}

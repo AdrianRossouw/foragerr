@@ -1,0 +1,69 @@
+/* Shared table/link/button/state chrome (FRG-UI-010/011/017). */
+.table {
+  composes: table from '../../components/dataTable.module.css';
+}
+
+.seriesLink {
+  composes: seriesLink from '../../components/dataTable.module.css';
+}
+
+.numeric {
+  composes: numeric from '../../components/dataTable.module.css';
+}
+
+.btn {
+  composes: btn from '../../components/dataTable.module.css';
+}
+
+.toolbarActions {
+  composes: toolbarActions from '../../components/dataTable.module.css';
+}
+
+.state {
+  composes: state from '../../components/dataTable.module.css';
+}
+
+/* --- Per-screen columns / controls --- */
+
+.actionsCell {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.iconButton {
+  appearance: none;
+  font: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-xs);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--surface-border);
+  background: var(--surface-card);
+  color: var(--text-primary);
+  cursor: pointer;
+  margin-left: var(--spacing-xs);
+}
+
+.iconButton:hover:not(:disabled) {
+  background: var(--surface-card-hover);
+}
+
+.iconButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.iconButton:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.commandChip {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--spacing-sm);
+  white-space: nowrap;
+}

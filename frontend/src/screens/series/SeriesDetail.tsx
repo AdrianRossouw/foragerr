@@ -18,8 +18,10 @@ import {
   WrenchIcon,
 } from '../../components/icons';
 import { RenamePreviewPanel } from '../settings/naming/RenamePreviewPanel';
+import { useMediaManagementConfig } from '../settings/naming/namingHooks';
 import {
   useBulkSetIssuesMonitored,
+  useDeleteIssueFile,
   useDeleteSeries,
   useIssues,
   useRunCommand,
@@ -49,12 +51,15 @@ function DeleteDialog({
   title,
   busy,
   error,
+  commandStatus,
   onCancel,
   onConfirm,
 }: {
   title: string;
   busy: boolean;
   error: string | null;
+  /** Live status of the async delete-series-files command (202 path), if any. */
+  commandStatus: string | null;
   onCancel: () => void;
   onConfirm: (deleteFiles: boolean) => void;
 }) {
@@ -74,10 +79,24 @@ function DeleteDialog({
             <input
               type="checkbox"
               checked={deleteFiles}
+              disabled={busy}
               onChange={(e) => setDeleteFiles(e.target.checked)}
             />
             Also delete files from disk
           </label>
+          {/* Truthful since m2-daily-surfaces: deleteFiles=true is implemented
+              (each file routed through the recycle bin before the rows go). */}
+          <p className={styles.dialogHint}>
+            Files are moved to the recycle bin when one is configured; otherwise
+            they are permanently deleted. Unchecked, files stay on disk.
+          </p>
+          {/* deleteFiles=true returns 202: the file removal runs as a watched
+              delete-series-files command whose status shows here until terminal. */}
+          {commandStatus && (
+            <p className={styles.dialogHint} data-testid="delete-command-status">
+              Deleting files: {commandStatus}
+            </p>
+          )}
           {error && <p className={styles.errorNote}>{error}</p>}
         </div>
         <footer className={styles.dialogFooter}>
@@ -91,6 +110,102 @@ function DeleteDialog({
             onClick={() => onConfirm(deleteFiles)}
           >
             Delete
+          </button>
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Per-issue delete-file confirmation (FRG-UI-004, m2-daily-surfaces). The
+ * dialog names the real consequence by reading the media-management config
+ * (mounted only while open, so the config is fetched on demand): a configured
+ * recycle bin means the file is moved there; none means permanent deletion.
+ * Confirm stays disabled until the consequence is known.
+ */
+function DeleteFileDialog({
+  issue,
+  seriesId,
+  onClose,
+}: {
+  issue: IssueResource;
+  seriesId: number;
+  onClose: () => void;
+}) {
+  const mmQuery = useMediaManagementConfig();
+  const deleteFile = useDeleteIssueFile(seriesId);
+  const issueLabel = issue.issue_number ?? String(issue.id);
+
+  const recycleConfigured = (mmQuery.data?.recycle_bin_path ?? '') !== '';
+  const consequence = mmQuery.isLoading
+    ? 'Checking the recycle-bin configuration…'
+    : mmQuery.isError
+      ? 'Could not read the recycle-bin configuration — the file may be permanently deleted.'
+      : recycleConfigured
+        ? 'This moves the file to the recycle bin.'
+        : 'This permanently deletes the file from disk — no recycle bin is configured.';
+
+  return (
+    <div className={styles.overlay}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Delete file for issue ${issueLabel}`}
+        className={styles.dialog}
+      >
+        <header className={styles.dialogHeader}>
+          <strong>Delete File — #{issueLabel}</strong>
+          <button
+            type="button"
+            className={styles.iconButton}
+            aria-label="Close"
+            onClick={onClose}
+          >
+            <CloseIcon size={14} />
+          </button>
+        </header>
+        <div className={styles.dialogBody}>
+          {issue.file && <p className={styles.dialogPath}>{issue.file.path}</p>}
+          <p>{consequence}</p>
+          {/* Config fetch failed: the consequence is UNKNOWN, so Delete stays
+              disabled (below); offer an explicit retry rather than a dead end. */}
+          {mmQuery.isError && (
+            <button
+              type="button"
+              className={styles.button}
+              disabled={mmQuery.isFetching}
+              onClick={() => void mmQuery.refetch()}
+            >
+              {mmQuery.isFetching ? 'Retrying…' : 'Retry'}
+            </button>
+          )}
+          {deleteFile.error && (
+            <p className={styles.errorNote}>{deleteFile.error.message}</p>
+          )}
+        </div>
+        <footer className={styles.dialogFooter}>
+          <button type="button" className={styles.button} onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className={`${styles.button} ${styles.danger}`}
+            // Disabled until the consequence is KNOWN: no file, delete in
+            // flight, config still loading, OR the config fetch errored.
+            disabled={
+              issue.file === null ||
+              deleteFile.isPending ||
+              mmQuery.isLoading ||
+              mmQuery.isError
+            }
+            onClick={() => {
+              if (issue.file) {
+                deleteFile.mutate(issue.file.id, { onSuccess: onClose });
+              }
+            }}
+          >
+            Delete File
           </button>
         </footer>
       </div>
@@ -189,6 +304,17 @@ export function SeriesDetail() {
   const { start } = command;
   const [commandLabel, setCommandLabel] = useState<string | null>(null);
 
+  // The deleteFiles path returns 202 + a delete-series-files command; watch it
+  // so the dialog shows progress, then leave for the library once it finishes.
+  // On completion the file_deleted history rows and Wanted changes have landed.
+  const deleteCommand = useWatchedCommand((status) => {
+    if (status === 'completed') {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.wanted.all() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.history.all() });
+    }
+    navigate('/');
+  });
+
   // A refresh command queued by the add flow rides in as router state so the
   // detail screen shows it live on arrival (FRG-UI-005 add scenario).
   const refreshFromAdd = (location.state as { refreshCommandId?: number } | null)
@@ -204,6 +330,7 @@ export function SeriesDetail() {
   const [showDelete, setShowDelete] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
   const [showRename, setShowRename] = useState(false);
+  const [deleteFileIssue, setDeleteFileIssue] = useState<IssueResource | null>(null);
 
   const interactiveIssueId = useUiStore((s) => s.interactiveSearchIssueId);
   const openInteractiveSearch = useUiStore((s) => s.openInteractiveSearch);
@@ -440,6 +567,17 @@ export function SeriesDetail() {
                     >
                       <PersonIcon size={14} />
                     </button>
+                    {issue.file && (
+                      <button
+                        type="button"
+                        className={styles.iconDanger}
+                        aria-label={`Delete file for issue ${issue.issue_number ?? issue.id}`}
+                        title="Delete file"
+                        onClick={() => setDeleteFileIssue(issue)}
+                      >
+                        <TrashIcon size={14} />
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -469,15 +607,31 @@ export function SeriesDetail() {
       {showDelete && (
         <DeleteDialog
           title={series.title}
-          busy={deleteSeries.isPending}
+          busy={deleteSeries.isPending || deleteCommand.running}
           error={deleteSeries.error ? deleteSeries.error.message : null}
+          commandStatus={deleteCommand.status}
           onCancel={() => setShowDelete(false)}
           onConfirm={(deleteFiles) =>
             deleteSeries.mutate(
               { seriesId, deleteFiles },
-              { onSuccess: () => navigate('/') },
+              {
+                onSuccess: (result) => {
+                  // 202 → watch the delete-series-files command (navigate when it
+                  // finishes); 204 plain delete → the series is already gone.
+                  if (result) deleteCommand.start(result.id);
+                  else navigate('/');
+                },
+              },
             )
           }
+        />
+      )}
+
+      {deleteFileIssue && (
+        <DeleteFileDialog
+          issue={deleteFileIssue}
+          seriesId={seriesId}
+          onClose={() => setDeleteFileIssue(null)}
         />
       )}
 

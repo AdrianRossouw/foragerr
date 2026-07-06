@@ -9,21 +9,29 @@ raw ids:
 - ``GET /api/v1/formatprofile`` — the seeded/managed format profiles
   (FRG-QUAL-001; the entity these list, served read-only for the add flow).
 
-Both are plain arrays (no paging envelope): the sets are tiny and unbounded
-growth is not a concern here. No mutation surface lives here — root-folder and
-profile management are separate concerns (out of M1 scope for this change).
+Both list GETs are plain arrays (no paging envelope): the sets are tiny and
+unbounded growth is not a concern here. Root-folder *management*
+(registration + removal, FRG-SER-008) also lives here now: without a create
+surface a fresh install had no way to register a root folder — a first-run
+blocker for series add, downloading, and library import. Format-profile
+management remains a separate concern (out of scope for this change).
 """
 
 from __future__ import annotations
 
+import json
+import os
 import shutil
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from starlette.concurrency import run_in_threadpool
 
+from foragerr.api.errors import ApiError
+from foragerr.db import CommandRow
 from foragerr.library import repo
+from foragerr.library.models import LibraryImportGroupRow
 from foragerr.quality.models import FormatProfileRow, decode_formats
 
 router = APIRouter(tags=["config"])
@@ -39,6 +47,12 @@ class RootFolderResource(BaseModel):
     id: int
     path: str
     free_space: int | None
+
+
+class RootFolderCreate(BaseModel):
+    """Request body for ``POST /api/v1/rootfolder`` (FRG-SER-008)."""
+
+    path: str
 
 
 class FormatProfileResource(BaseModel):
@@ -62,6 +76,162 @@ async def list_root_folders_endpoint(request: Request) -> list[RootFolderResourc
         )
         for row in rows
     ]
+
+
+@router.post("/rootfolder", status_code=201, response_model=RootFolderResource)
+async def create_root_folder_endpoint(
+    body: RootFolderCreate, request: Request
+) -> RootFolderResource:
+    """Register a new library root folder (FRG-SER-008).
+
+    Validates up front — the path must be absolute, an existing directory, and
+    writable, and must neither duplicate nor nest with (under or containing) an
+    existing root — and rejects any failure with a field-precise 400 naming the
+    exact problem against ``path``. On success the row is persisted and returned
+    with free space (the same resource the list serves)."""
+    db = request.app.state.db
+    async with db.write_session() as session:
+        existing = await repo.list_root_folders(session)
+        await run_in_threadpool(_validate_new_root, body.path, existing)
+        row = await repo.create_root_folder(session, body.path)
+        rid, path = row.id, row.path
+    return RootFolderResource(id=rid, path=path, free_space=await _free_space(path))
+
+
+@router.delete("/rootfolder/{root_folder_id}", status_code=204)
+async def delete_root_folder_endpoint(root_folder_id: int, request: Request) -> None:
+    """Remove a root folder (FRG-SER-008), files on disk untouched.
+
+    404 when the id is unknown; 409 (naming the count) while any series still
+    references it — deleting it would dangle those series' stored paths. Two
+    further 409 guards protect the library-import staging this root owns (whose
+    ``library_import_groups`` rows CASCADE-delete with the root, silently
+    discarding a pending review): the delete is refused while any staged group
+    exists for the root, and while a ``library-import-scan`` or
+    ``library-import`` command for it is queued or running."""
+    db = request.app.state.db
+    async with db.write_session() as session:
+        row = await repo.get_root_folder(session, root_folder_id)
+        if row is None:
+            raise ApiError(404, f"root folder {root_folder_id} not found")
+        referencing = await repo.count_series_for_root(session, root_folder_id)
+        if referencing:
+            raise ApiError(
+                409,
+                f"root folder {root_folder_id} is still used by {referencing} "
+                f"series — remove or relocate them first",
+            )
+        # Command guard first: an in-flight execute references still-present
+        # group rows, so it would also trip the staged-group guard below —
+        # naming the command is the more actionable 409, so it wins.
+        await _fail_if_import_command_pending(session, root_folder_id)
+        staged = await session.scalar(
+            select(func.count())
+            .select_from(LibraryImportGroupRow)
+            .where(LibraryImportGroupRow.root_folder_id == root_folder_id)
+        )
+        if staged:
+            raise ApiError(
+                409,
+                f"root folder {root_folder_id} has {staged} staged library-import "
+                f"group(s) — clear the import review first (deleting the root "
+                f"would discard them)",
+            )
+        await repo.delete_root_folder(session, root_folder_id)
+    return None
+
+
+async def _fail_if_import_command_pending(session, root_folder_id: int) -> None:
+    """Refuse (409) the root delete while a ``library-import-scan`` or
+    ``library-import`` command for this root is queued/started.
+
+    A scan is matched by its ``root_folder_id`` payload; an execute by whether
+    any group id it holds belongs to this root (the ``_fail_if_execute_pending``
+    pattern in ``library.flows.library_import``). Deleting the root mid-command
+    would pull its rows out from under the running import."""
+    rows = (
+        (
+            await session.execute(
+                select(CommandRow).where(
+                    CommandRow.name.in_(("library-import-scan", "library-import")),
+                    CommandRow.status.in_(("queued", "started")),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for row in rows:
+        try:
+            payload = json.loads(row.payload)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if row.name == "library-import-scan":
+            if payload.get("root_folder_id") == root_folder_id:
+                raise ApiError(
+                    409,
+                    f"a library-import scan (command {row.id}, {row.status}) is "
+                    f"running for root folder {root_folder_id} — wait for it to "
+                    f"finish before removing the root",
+                )
+            continue
+        group_ids = list(payload.get("group_ids") or [])
+        if not group_ids:
+            continue
+        hit = await session.scalar(
+            select(LibraryImportGroupRow.id)
+            .where(
+                LibraryImportGroupRow.id.in_(group_ids),
+                LibraryImportGroupRow.root_folder_id == root_folder_id,
+            )
+            .limit(1)
+        )
+        if hit is not None:
+            raise ApiError(
+                409,
+                f"a library-import execute (command {row.id}, {row.status}) is "
+                f"importing groups of root folder {root_folder_id} — wait for it "
+                f"to finish before removing the root",
+            )
+
+
+def _validate_new_root(path: str, existing: list) -> None:
+    """Reject a bad root-folder registration with a field-precise
+    :class:`ApiError` (400, ``field="path"``) naming the exact problem.
+
+    Runs the blocking ``os.path`` stats in the thread pool (a wedged network
+    mount must not freeze the loop). ``existing`` are the already-registered
+    :class:`RootFolderRow`s to compare against for duplicate/nesting."""
+    if not os.path.isabs(path):
+        _reject(f"path {path!r} must be absolute")
+    if not os.path.isdir(path):
+        _reject(f"path {path!r} is not an existing directory")
+    if not os.access(path, os.W_OK):
+        _reject(f"path {path!r} is not writable")
+
+    candidate = os.path.realpath(path)
+    for root in existing:
+        root_real = os.path.realpath(root.path)
+        if candidate == root_real:
+            _reject(f"path {path!r} is already registered as a root folder")
+        if _is_within(root_real, candidate):
+            _reject(f"path {path!r} is inside an existing root folder ({root.path})")
+        if _is_within(candidate, root_real):
+            _reject(f"path {path!r} contains an existing root folder ({root.path})")
+
+
+def _is_within(ancestor: str, candidate: str) -> bool:
+    """True if ``candidate`` sits at or beneath ``ancestor`` (segment-aware)."""
+    if candidate == ancestor:
+        return True
+    try:
+        return os.path.commonpath([ancestor, candidate]) == ancestor
+    except ValueError:  # different drives / mixed absolute+relative
+        return False
+
+
+def _reject(message: str) -> None:
+    raise ApiError(400, message, field="path")
 
 
 @router.get("/formatprofile", response_model=list[FormatProfileResource])

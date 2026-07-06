@@ -36,7 +36,12 @@ from __future__ import annotations
 from typing import Any
 
 from foragerr.commands.service import CommandStatusChanged
-from foragerr.downloads.tracking import DownloadFailedEvent, TrackedStateChanged
+from foragerr.downloads.tracking import (
+    BlocklistChanged,
+    DownloadFailedEvent,
+    TrackedStateChanged,
+)
+from foragerr.importer.history import HistoryEventRecorded, WantedInvalidated
 from foragerr.library.flows import SeriesRefreshed
 
 #: (name, action, resource) — the three fields of the wire envelope.
@@ -47,9 +52,10 @@ def map_event(event: Any) -> ResourceMessage | None:
     """Translate a published domain event into a push envelope, or ``None``.
 
     Coverage (FRG-API-010): queue (tracked-download state + failures), series
-    (metadata refresh), command (status change). Issue-file changes have no
-    backend emitter in M1 (design note: M1 scopes broadcast to queue+command);
-    the mapping is trivially extensible when such an event lands.
+    (metadata refresh), command (status change), history (any history write),
+    wanted (a file-presence history write — import/upgrade/delete), and
+    blocklist (a blocklist write). One backend history write may queue two
+    events (history + wanted); each maps here to its own single envelope.
     """
     if isinstance(event, TrackedStateChanged):
         # `status` here is the lifecycle state string the frontend calls
@@ -77,6 +83,19 @@ def map_event(event: Any) -> ResourceMessage | None:
         )
     if isinstance(event, SeriesRefreshed):
         return ("series", "updated", {"id": event.series_id, "partial": event.partial})
+    if isinstance(event, WantedInvalidated):
+        # Checked BEFORE HistoryEventRecorded is irrelevant (distinct types),
+        # but a file-presence history write queues BOTH a HistoryEventRecorded
+        # and a WantedInvalidated, so the wanted screen invalidates too.
+        return ("wanted", "updated", {"seriesId": event.series_id})
+    if isinstance(event, HistoryEventRecorded):
+        return (
+            "history",
+            "updated",
+            {"eventType": event.event_type, "seriesId": event.series_id},
+        )
+    if isinstance(event, BlocklistChanged):
+        return ("blocklist", "updated", {})
     if isinstance(event, CommandStatusChanged):
         return (
             "command",

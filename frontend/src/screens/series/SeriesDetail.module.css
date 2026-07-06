@@ -315,3 +315,21 @@
   color: var(--color-danger);
   font-size: var(--font-size-sm);
 }
+
+.dialogHint {
+  margin: var(--spacing-xs) 0 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.dialogPath {
+  margin: 0 0 var(--spacing-sm);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  overflow-wrap: anywhere;
+}
+
+.iconDanger {
+  composes: iconButton;
+  color: var(--color-danger);
+}

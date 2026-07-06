@@ -19,8 +19,15 @@ UI (`admin/network.md`). Do not expose the port beyond the tailnet.
 
 ## What the catalog looks like
 
-- The **root** is a navigation feed listing only non-empty shelves — currently that is
-  **All Series**.
+- The **root** is a navigation feed listing only non-empty shelves — **All
+  Series** and **Recent Additions**.
+- **Recent Additions** lists the most recently imported issues, newest first by
+  import time (not release date) — pick up this week's haul without hunting
+  through series shelves. Entries are full acquisition entries; download
+  directly from the feed.
+- The root also advertises **search**: readers that support OpenSearch (Panels,
+  Chunky, ...) can search the catalog by series title from inside the app; the
+  results feed navigates into each matched series' shelf.
 - Each series is an **acquisition feed** of its downloadable issues, built
   entirely from foragerr's database: series and issue metadata, file sizes, and
   cover thumbnails from the local cover cache. foragerr never opens an archive to

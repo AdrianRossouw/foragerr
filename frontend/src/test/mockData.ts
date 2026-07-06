@@ -1,11 +1,14 @@
 import type {
   ApiPage,
+  BlocklistRecord,
   CommandResource,
   FormatProfileResource,
+  HistoryRecord,
   IssueResource,
   LibraryImportGroup,
   LookupCandidate,
   ManualImportEntry,
+  MediaManagementConfig,
   QueuePageResponse,
   QueueResourceRaw,
   ReleaseDecision,
@@ -15,6 +18,7 @@ import type {
   SeriesDetail,
   SeriesResource,
   SeriesStatisticsResource,
+  WantedIssueRecord,
 } from '../api/types';
 
 /** Typed MOCK data used to drive the fake fetcher. No live backend is contacted. */
@@ -402,6 +406,82 @@ export function makeLibraryImportGroup(
     imageUrl: null,
     rejections: [],
     message: null,
+    ...overrides,
+  };
+}
+
+/*
+ * ---------------------------------------------------------------------------
+ * Daily-surfaces mocks (m2-daily-surfaces: FRG-UI-010/011/017) — camelCase
+ * wire records like the queue's, in the shared ApiPage envelope via pageOf().
+ * ---------------------------------------------------------------------------
+ */
+
+/** One GET /api/v1/history record with sensible defaults; override per test. */
+export function makeHistoryRecord(
+  overrides: Partial<HistoryRecord> & Pick<HistoryRecord, 'id'>,
+): HistoryRecord {
+  return {
+    eventType: 'imported',
+    sourceTitle: 'Saga 041 (2017) (Digital)',
+    downloadId: `SABnzbd_nzo_${overrides.id}`,
+    date: '2026-07-05T12:00:00Z',
+    data: {},
+    series: { id: 1, title: 'Saga' },
+    issue: { id: 411, issueNumber: '41', title: 'Chapter Forty-One' },
+    ...overrides,
+  };
+}
+
+/** One GET /api/v1/wanted/missing record; override per test. */
+export function makeWantedRecord(
+  overrides: Partial<WantedIssueRecord> & Pick<WantedIssueRecord, 'id'>,
+): WantedIssueRecord {
+  return {
+    series_id: 1,
+    cv_issue_id: 900041,
+    issue_number: '41',
+    title: 'Chapter Forty-One',
+    cover_date: '2017-01-31',
+    store_date: '2017-01-25',
+    issue_type: 'issue',
+    monitored: true,
+    series: { id: 1, title: 'Saga' },
+    ...overrides,
+  };
+}
+
+/** One GET /api/v1/blocklist record; `message` is the verbatim ban reason. */
+export function makeBlocklistRecord(
+  overrides: Partial<BlocklistRecord> & Pick<BlocklistRecord, 'id'>,
+): BlocklistRecord {
+  return {
+    sourceTitle: 'Saga 041 scanned',
+    indexer: 'DogNZB',
+    guid: 'guid-41',
+    downloadId: 'dl-41',
+    date: '2026-07-04T09:00:00Z',
+    message: 'Download failed: archive is corrupt',
+    protocol: 'usenet',
+    series: { id: 1, title: 'Saga' },
+    issue: { id: 411, issueNumber: '41', title: null },
+    ...overrides,
+  };
+}
+
+/** GET /api/v1/config/mediamanagement with a recycle bin configured. */
+export function makeMediaManagementConfig(
+  overrides: Partial<MediaManagementConfig> = {},
+): MediaManagementConfig {
+  return {
+    import_transfer_mode: 'move',
+    library_import_mode: 'in_place',
+    recycle_bin_path: '/recycle',
+    recycle_bin_retention_days: 7,
+    duplicate_constraint: 'larger-size',
+    duplicate_dump_path: '',
+    library_import_proposal_cap: 25,
+    library_import_similarity_floor: 0.6,
     ...overrides,
   };
 }

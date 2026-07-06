@@ -88,11 +88,11 @@ The UI SHALL provide a library index screen listing all series with poster art, 
 
 ### Requirement: FRG-UI-004 — Series detail screen
 
-The UI SHALL provide a series detail screen showing series metadata (poster, publisher, year, status, overview), the full issue list with per-issue monitored toggle, file presence/format, and per-issue actions (automatic search, interactive search), plus series-level actions (refresh, rescan, edit, delete with optional folder removal) dispatched via the command endpoint.
+The UI SHALL provide a series detail screen showing series metadata (poster, publisher, year, status, overview), the full issue list with per-issue monitored toggle, file presence/format, and per-issue actions (automatic search, interactive search, file deletion), plus series-level actions (refresh, rescan, edit, delete with optional file removal) dispatched via the command endpoint.
 
 - **Milestone**: M1
 - **Source**: sonarr-architecture.md §7.4 (Series details), §7.2 command endpoint; mylar-feature-surface.md §SER (per-series overrides, forceRescan).
-- **Notes**: NO reading/preview affordance on issue rows — reader is permanently out of scope; the consumption path is OPDS. Per-series overrides (alternate search names, etc.) are M2 fields on this screen.
+- **Notes**: NO reading/preview affordance on issue rows — reader is permanently out of scope; the consumption path is OPDS. m2-daily-surfaces: the delete dialog's "also delete files" option is now real (was an always-501 checkbox), and issue rows with a file gain a delete-file action routed through the recycle bin.
 
 #### Scenario: Banner header renders derived stats and toggles monitored
 
@@ -118,6 +118,16 @@ The UI SHALL provide a series detail screen showing series metadata (poster, pub
 
 - **WHEN** the user clicks an issue row's interactive-search button
 - **THEN** the interactive search overlay opens scoped to that issue's id
+
+#### Scenario: Deleting an issue file routes through the recycle bin
+
+- **WHEN** the user deletes an issue's file from its row (confirmation required)
+- **THEN** the file moves to the recycle bin (or is permanently deleted only when no bin is configured, and the confirmation says so), the issue reverts to file-less (back on Wanted), and a `file_deleted` history event records the action as manual
+
+#### Scenario: Series delete with files is real
+
+- **WHEN** the user deletes a series with "also delete files" checked
+- **THEN** every issue file routes through the recycle bin before the series/issue rows are removed — no 501, and unchecking the box preserves files exactly as before
 
 ### Requirement: FRG-UI-005 — Add-series search screen
 
@@ -275,12 +285,22 @@ The UI SHALL provide a paged history screen of pipeline events with event-type i
 
 - **Milestone**: M2
 - **Source**: sonarr-architecture.md §7.4 (Activity/History), §7.3 HistoryResource.
-- **Notes**: Depends on API history endpoint (M2).
+- **Notes**: Lives in the Activity nav group beside Queue. Real server-side pagination (the queue's fixed-page-1 shortcut is not acceptable here — history grows unboundedly); reasons render through the shared verbatim-reasons presentation.
 
-#### Scenario: Baseline acceptance
+#### Scenario: Grab-and-import cycle renders linked
 
-- **WHEN** this requirement is verified against the implementation
-- **THEN** After one grab→import cycle the screen shows both events linked to the same series/issue; filtering to "failed" hides them.
+- **WHEN** the screen loads after one grab→import cycle
+- **THEN** both events render with type indicators, the shared downloadId's series/issue links, and dates, newest first; filtering to a different event type hides them
+
+#### Scenario: Expandable details carry verbatim reasons
+
+- **WHEN** the user expands an `import_blocked` event
+- **THEN** the per-event data renders (source, provenance) with the rejection reasons verbatim and never re-sorted
+
+#### Scenario: Pagination is real
+
+- **WHEN** more events exist than one page holds
+- **THEN** page controls navigate the server-side envelope (per-page query keys), and a new event arriving via WS invalidation appears on page 1
 
 ### Requirement: FRG-UI-011 — Wanted screen
 
@@ -288,12 +308,22 @@ The UI SHALL provide a wanted screen listing missing issues (monitored, publishe
 
 - **Milestone**: M2
 - **Source**: sonarr-architecture.md §7.4 (Wanted/Missing), §2.4 (searches triggered from Wanted screens).
-- **Notes**: Cutoff-unmet tab arrives with format-profile cutoffs (B if profiles are late).
+- **Notes**: Plain missing only — the cutoff-unmet tab is REMOVED with the API's cutoff half (M2 reshape). Per-issue actions reuse the existing interactive-search overlay; search-all enqueues the backlog-search command.
 
-#### Scenario: Baseline acceptance
+#### Scenario: Derived list with search actions
 
-- **WHEN** this requirement is verified against the implementation
-- **THEN** A monitored, fileless issue appears; "Search all" enqueues a search command covering the listed issues.
+- **WHEN** a monitored, published, fileless issue exists
+- **THEN** it renders with its series link and release date; the row's automatic-search action enqueues an issue search, and its interactive-search action opens the existing overlay scoped to the issue
+
+#### Scenario: Search all covers the listed set
+
+- **WHEN** the user clicks "Search all"
+- **THEN** one backlog-search command is enqueued covering the wanted set, and its command status is visible until terminal
+
+#### Scenario: Empty state is explicit
+
+- **WHEN** nothing is missing
+- **THEN** the screen says so plainly (distinct from a loading or error state)
 
 ### Requirement: FRG-UI-012 — Settings: media management and naming with rename preview
 
@@ -301,7 +331,17 @@ The UI SHALL provide media-management/naming settings (rename on/off, folder and
 
 - **Milestone**: M2
 - **Source**: sonarr-architecture.md §5.4 naming engine ("Rename is previewable"), §7.1 Config/naming; mylar-feature-surface.md §PP (FILE_FORMAT/FOLDER_FORMAT tokens); docs/research/sonarr-ui §10 (media-management screen: monospace template inputs, live "Example:" line, `?` token popover, save-bar model).
-- **Notes**: Bespoke single-form settings page (not the provider list+modal machinery), reusing the `components/schemaForm/SchemaForm` field renderer for standard fields plus two bespoke panels — the live example preview and the per-series rename-preview table (design decision 11). Token help renders from one shared vocabulary (`renamer._TOKEN_ALIASES`). Field errors reuse the `settings.`-prefix `mapApiError` mapping. Tag test: `frontend/src/screens/settings/MediaManagement.test.tsx` + an e2e for the preview→confirm flow.
+- **Notes**: Bespoke single-form settings page (not the provider list+modal machinery), reusing the `components/schemaForm/SchemaForm` field renderer for standard fields plus two bespoke panels — the live example preview and the per-series rename-preview table (design decision 11). Token help renders from one shared vocabulary (`renamer._TOKEN_ALIASES`). Field errors reuse the `settings.`-prefix `mapApiError` mapping. m2-daily-surfaces: the requirement text always promised root folders on this page; the shipped screen omitted them entirely (a fresh install had NO way to register one) — the Root Folders section is now mandatory.
+
+#### Scenario: Root folders are manageable from settings
+
+- **WHEN** the Media Management page renders
+- **THEN** a Root Folders section lists registered roots with free space, adds a new root by path (validation errors from the API render against the input verbatim), and removes an unreferenced root after confirmation — a root still referenced by series shows the refusal reason instead of deleting
+
+#### Scenario: First run points at root-folder setup
+
+- **WHEN** no root folder is registered and the user opens Add Series or Library Import
+- **THEN** the root-folder-required state links to the Media Management settings section where one can actually be created (no dead end)
 
 #### Scenario: Live example recomputes as the template is edited
 
@@ -426,12 +466,17 @@ The UI SHALL provide a paged blocklist screen showing blocklisted releases (sour
 
 - **Milestone**: M2
 - **Source**: sonarr-architecture.md §7.4 (Activity/Blocklist), §4.6 blocklist service.
-- **Notes**: Thin screen over the blocklist API; blocklist behavior itself is DL/SRCH area.
+- **Notes**: Thin screen over the new blocklist read/delete API; blocklist WRITE behavior stays DL/SRCH area. Lives in the Activity nav group.
 
-#### Scenario: Baseline acceptance
+#### Scenario: Banned release visible with reason, removable
 
-- **WHEN** this requirement is verified against the implementation
-- **THEN** A failed download's release appears on the blocklist and can be removed so it becomes grabbable again.
+- **WHEN** a failed download's release is on the blocklist
+- **THEN** it renders with source title, series/issue link, indexer, date, and the ban reason verbatim; removing it deletes the row so the release becomes grabbable again
+
+#### Scenario: Bulk removal
+
+- **WHEN** the user selects several rows and removes them
+- **THEN** all selected rows are deleted and the list refreshes; a mid-batch failure reports which removals did not happen
 
 ### Requirement: FRG-UI-018 — Weekly pull / calendar view
 

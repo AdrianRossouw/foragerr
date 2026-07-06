@@ -51,18 +51,18 @@ Draft files: LD=library-domain, ACQ=acquisition, FD=files-domain, IF=interfaces,
 | RISK-037 | CBL reading-list import parses untrusted XML from the internet (XXE/entity expansion). | DoS/Info disclosure | Import/Archive | L | M | **Mitigate** → LD (library-domain) `ARC — CBL reading-list import` Notes (hardened parser, no entity expansion) + SEC-new `Hardened XML parsing`. | fs §2; analysis |
 | RISK-038 | Spoofed browser User-Agent to ComicVine (ToS/politeness inheritance). | Repudiation/ToS | ComicVine | L | L | **Mitigate** → LD `META — ComicVine client fundamentals` (honest configurable UA — diverges from Mylar). | cv §4 |
 | RISK-039 | External weekly-pull JSON source (unofficial third party) as an outbound dependency and untrusted-content ingress. | Info disclosure/Tampering | Pull source | L | L | **Mitigate** → LD `PULL — External pull-source fetch` (timeouts, error-code handling, degraded-health) + PF `NFR — untrusted external content handling` + SEC-new `SSRF egress controls`. | fs §1 |
-| RISK-040 | Unbounded `import_history` growth from a blocked-item retry loop: a still-completed `import_blocked` item is re-fed to `import_pending` by every ~1-min tracking cycle (the deliberate retry-on-evidence-change path), and each failed retry writes a fresh `import_blocked` history event — a permanently stuck item ping-pongs and accretes ~1.4k rows/day until the user acts. | DoS (disk/DB, slow) | PP/DB | M | L | **Accept (documented latent, found at the change-6 gate)** — single-user tool; growth is slow, bounded per item per cycle, and the stuck item is loudly visible in the queue with its blocking reasons, which is the designed prompt for user action. **Review trigger**: M2 history UI / housekeeping change — add blocked-event dedup (don't rewrite an identical reasons-set) or history pruning there. | analysis (change-6 gate review) |
+| RISK-040 | Unbounded `import_history` growth from a blocked-item retry loop: a still-completed `import_blocked` item is re-fed to `import_pending` by every ~1-min tracking cycle (the deliberate retry-on-evidence-change path), and each failed retry writes a fresh `import_blocked` history event — a permanently stuck item ping-pongs and accretes ~1.4k rows/day until the user acts. | DoS (disk/DB, slow) | PP/DB | M | L | **Mitigate (m2-daily-surfaces)** — blocked-event dedup at the history writer: an identical `import_blocked`/`import_failed` outcome (same downloadId, same event type, byte-identical canonical data payload) is recorded once; any evidence change writes a new row. The deliberate blocked→pending retry loop is untouched — only the duplicate row write is suppressed. The stuck item stays loudly visible in the queue with its blocking reasons. | analysis (change-6 gate review) |
 
 ## Counts
 
 - **Total risks**: 40
-- **Mitigate**: 33 (RISK-001–014, 018–030, 032, 033, 035–039) — several with a partial/residual
-  note; RISK-015 is mitigate-partial + accept-residual and is counted once under mitigate.
-- **Accept**: 7 — RISK-016 (DDL ToS evasion), RISK-017 (per-provider proxy excluded), RISK-020
+- **Mitigate**: 34 (RISK-001–014, 018–030, 032, 033, 035–040) — several with a partial/residual
+  note; RISK-015 is mitigate-partial + accept-residual and is counted once under mitigate;
+  RISK-040 moved from accept to mitigate in m2-daily-surfaces (blocked-event dedup).
+- **Accept**: 6 — RISK-016 (DDL ToS evasion), RISK-017 (per-provider proxy excluded), RISK-020
   (**the M1 no-auth accepted risk**), RISK-031 (script hooks excluded), RISK-034 (self-update
-  excluded), RISK-040 (blocked-item history-growth latent, review at M2), plus RISK-015's
-  residual (malware/AV depth) recorded within its mitigate row.
-  (If RISK-015 residual is tallied separately: 33 mitigate / 7 accept + 1 partial-accept.)
+  excluded), plus RISK-015's residual (malware/AV depth) recorded within its mitigate row.
+  (If RISK-015 residual is tallied separately: 34 mitigate / 6 accept + 1 partial-accept.)
 
 ## Canonical ownership note (as required)
 

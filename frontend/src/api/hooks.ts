@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
+  keepPreviousData,
   useMutation,
   useQuery,
   useQueryClient,
@@ -11,8 +12,12 @@ import { useFetcher, type Fetcher } from './fetcher';
 import { toQueueItem } from './queue';
 import type {
   ApiPage,
+  BlocklistBulkDeleteResult,
+  BlocklistRecord,
   CommandResource,
   FormatProfileResource,
+  HistoryRecord,
+  IssueFileDeleteResult,
   IssueResource,
   LookupResponse,
   QueueItem,
@@ -24,6 +29,7 @@ import type {
   SeriesCreatedResource,
   SeriesEditPayload,
   SeriesResource,
+  WantedIssueRecord,
 } from './types';
 
 /*
@@ -149,6 +155,46 @@ export function useRootFolders(): UseQueryResult<RootFolderResource[]> {
   });
 }
 
+/**
+ * POST /api/v1/rootfolder — register a new root folder (FRG-SER-008). A
+ * validation failure rejects with an `ApiRequestError` whose body carries the
+ * backend's field-precise 400 verbatim; the settings screen renders that
+ * message against the path input. On success the rootfolder list is invalidated.
+ */
+export function useCreateRootFolder(): UseMutationResult<
+  RootFolderResource,
+  Error,
+  { path: string }
+> {
+  const fetcher = useFetcher();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { path: string }) =>
+      fetcher<RootFolderResource>('/api/v1/rootfolder', {
+        method: 'POST',
+        body,
+      }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: queryKeys.rootFolder.all() }),
+  });
+}
+
+/**
+ * DELETE /api/v1/rootfolder/{id} — remove a root folder (FRG-SER-008). The
+ * backend refuses (409) while any series references it, carrying the count in
+ * its message; the caller surfaces that reason. On success the list refreshes.
+ */
+export function useDeleteRootFolder(): UseMutationResult<void, Error, number> {
+  const fetcher = useFetcher();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) =>
+      fetcher<void>(`/api/v1/rootfolder/${id}`, { method: 'DELETE' }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: queryKeys.rootFolder.all() }),
+  });
+}
+
 /** Format profiles for the add-flow picker (FRG-UI-005). */
 export function useFormatProfiles(): UseQueryResult<FormatProfileResource[]> {
   const fetcher = useFetcher();
@@ -215,6 +261,198 @@ export function useWatchedCommand(onFinished: (status: string) => void): {
   }, [finished]);
 
   return { status, running, start: setCommandId };
+}
+
+/*
+ * Real server-side pagination (FRG-UI-010/011/017 — design decision 5). One
+ * shared paged-query hook over the standard envelope; History/Wanted/Blocklist
+ * are thin wrappers. The queue's fixed-page-1 shortcut stays queue-only.
+ */
+
+/** Page size the daily surfaces request (well under the FRG-API-006 cap). */
+export const SURFACE_PAGE_SIZE = 20;
+
+const PAGED_FAMILIES = {
+  history: queryKeys.history,
+  wanted: queryKeys.wanted,
+  blocklist: queryKeys.blocklist,
+} as const;
+
+export interface PagedQueryOptions {
+  family: keyof typeof PAGED_FAMILIES;
+  /** API path, e.g. '/api/v1/history'. */
+  path: string;
+  page: number;
+  /** Server sort; omitted entirely to accept the endpoint's default order. */
+  sortKey?: string;
+  sortDirection?: 'asc' | 'desc';
+  /** Filter query params; entries with an empty value are omitted. */
+  filters?: Record<string, string>;
+  /**
+   * Clamp callback: invoked with the real last page when the fetched page is
+   * empty but records still exist (the current page fell off the end because
+   * its last rows were just removed). Screens wire this to their `setPage`.
+   */
+  onClampPage?: (page: number) => void;
+}
+
+/**
+ * One page of a paged endpoint under the family-page key convention
+ * (['history', page, filtersHash] — mirrors ['queue', page]). The previous
+ * page's data is kept as placeholder while the next page loads so page
+ * controls never flash a loading state mid-navigation.
+ *
+ * Page clamp: when a removal empties the final page, the server returns an
+ * empty page for a page number now past the end (`records:[]`, `totalRecords>0`)
+ * — which would otherwise render "Page N of N-1" over a false empty state. On
+ * that exact signal the hook clamps back to the real last page via `onClampPage`
+ * (a genuinely empty list stays on page 1 and shows its empty state).
+ */
+export function usePagedQuery<T>({
+  family,
+  path,
+  page,
+  sortKey,
+  sortDirection = 'desc',
+  filters,
+  onClampPage,
+}: PagedQueryOptions): UseQueryResult<ApiPage<T>> {
+  const fetcher = useFetcher();
+  const active = Object.entries(filters ?? {}).filter(([, value]) => value !== '');
+  const filtersHash = active.map(([key, value]) => `${key}=${value}`).join('&');
+  const params = new URLSearchParams([
+    ['page', String(page)],
+    ['pageSize', String(SURFACE_PAGE_SIZE)],
+    ...(sortKey ? [['sortKey', sortKey], ['sortDirection', sortDirection]] : []),
+    ...active,
+  ]);
+  const query = useQuery({
+    queryKey: PAGED_FAMILIES[family].page(page, filtersHash),
+    queryFn: () => fetcher<ApiPage<T>>(`${path}?${params.toString()}`),
+    placeholderData: keepPreviousData,
+  });
+
+  // Clamp off the end. Act only on FRESH data for THIS page (never the
+  // keepPreviousData placeholder of another page, guarded by data.page === page).
+  const data = query.data;
+  const isPlaceholder = query.isPlaceholderData;
+  useEffect(() => {
+    if (!onClampPage || !data || isPlaceholder) return;
+    if (data.page !== page) return;
+    if (data.records.length > 0 || page <= 1 || data.totalRecords <= 0) return;
+    const lastPage = Math.max(1, Math.ceil(data.totalRecords / data.pageSize));
+    if (lastPage < page) onClampPage(lastPage);
+  }, [data, isPlaceholder, page, onClampPage]);
+
+  return query;
+}
+
+/** GET /api/v1/history — paged pipeline events (FRG-UI-010 / FRG-API-011). */
+export function useHistoryPage(
+  page: number,
+  filters: { eventType?: string; seriesId?: string } = {},
+  onClampPage?: (page: number) => void,
+): UseQueryResult<ApiPage<HistoryRecord>> {
+  return usePagedQuery<HistoryRecord>({
+    family: 'history',
+    path: '/api/v1/history',
+    page,
+    sortKey: 'created_at',
+    sortDirection: 'desc',
+    filters: {
+      eventType: filters.eventType ?? '',
+      seriesId: filters.seriesId ?? '',
+    },
+    onClampPage,
+  });
+}
+
+/** GET /api/v1/wanted/missing — the derived missing list (FRG-UI-011). */
+export function useWantedPage(
+  page: number,
+  onClampPage?: (page: number) => void,
+): UseQueryResult<ApiPage<WantedIssueRecord>> {
+  return usePagedQuery<WantedIssueRecord>({
+    family: 'wanted',
+    path: '/api/v1/wanted/missing',
+    page,
+    onClampPage,
+  });
+}
+
+/** GET /api/v1/blocklist — paged banned releases (FRG-UI-017). */
+export function useBlocklistPage(
+  page: number,
+  onClampPage?: (page: number) => void,
+): UseQueryResult<ApiPage<BlocklistRecord>> {
+  return usePagedQuery<BlocklistRecord>({
+    family: 'blocklist',
+    path: '/api/v1/blocklist',
+    page,
+    onClampPage,
+  });
+}
+
+/** DELETE /api/v1/blocklist/{id} — the release becomes grabbable again. */
+export function useRemoveBlocklistItem(): UseMutationResult<unknown, Error, number> {
+  const fetcher = useFetcher();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) =>
+      fetcher(`/api/v1/blocklist/${id}`, { method: 'DELETE' }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: queryKeys.blocklist.all() }),
+  });
+}
+
+/**
+ * POST /api/v1/blocklist/delete {ids} — bulk removal. The response reports
+ * partial failure ({deleted, missing}); the screen surfaces `missing` ids.
+ */
+export function useBulkRemoveBlocklist(): UseMutationResult<
+  BlocklistBulkDeleteResult,
+  Error,
+  number[]
+> {
+  const fetcher = useFetcher();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: number[]) =>
+      fetcher<BlocklistBulkDeleteResult>('/api/v1/blocklist/delete', {
+        method: 'POST',
+        body: { ids },
+      }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: queryKeys.blocklist.all() }),
+  });
+}
+
+/**
+ * DELETE /api/v1/issuefile/{id} (FRG-UI-004): route one issue's file through
+ * the recycle bin. The issue reverts to file-less, so series detail, its
+ * issues, the wanted list, and history are all stale on success.
+ */
+export function useDeleteIssueFile(
+  seriesId: number,
+): UseMutationResult<IssueFileDeleteResult, Error, number> {
+  const fetcher = useFetcher();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (issueFileId: number) =>
+      fetcher<IssueFileDeleteResult>(`/api/v1/issuefile/${issueFileId}`, {
+        method: 'DELETE',
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.series.detail(seriesId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.issues.forSeries(seriesId),
+      });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.wanted.all() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.history.all() });
+    },
+  });
 }
 
 export function useQueuePage(page: number): UseQueryResult<QueueItem[]> {
@@ -320,9 +558,23 @@ export function useUpdateSeries(
   });
 }
 
-/** DELETE /api/v1/series/{id}?deleteFiles= — remove a series (FRG-UI-004). */
+/**
+ * DELETE /api/v1/series/{id}?deleteFiles= — remove a series (FRG-UI-004).
+ *
+ * Two backend shapes (m2-daily-surfaces):
+ *   - plain delete (deleteFiles=false) → 204, resolves `null`;
+ *   - deleteFiles=true → 202 with the enqueued `delete-series-files`
+ *     CommandResource, resolved here so the caller can WATCH it and reflect its
+ *     status (the files are removed asynchronously by that command).
+ *
+ * The series row and its missing Wanted issues are gone the moment either
+ * request returns, so the list/detail/wanted caches are refreshed on success.
+ * The deleteFiles command's file_deleted HISTORY rows land only when it reaches
+ * terminal — the caller re-invalidates history/wanted then (and the WS
+ * history/wanted pushes cover any observer that has already navigated away).
+ */
 export function useDeleteSeries(): UseMutationResult<
-  void,
+  CommandResource | null,
   Error,
   { seriesId: number; deleteFiles: boolean }
 > {
@@ -330,15 +582,20 @@ export function useDeleteSeries(): UseMutationResult<
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ seriesId, deleteFiles }) =>
-      fetcher<void>(`/api/v1/series/${seriesId}?deleteFiles=${deleteFiles}`, {
-        method: 'DELETE',
-      }),
+      fetcher<CommandResource | null>(
+        `/api/v1/series/${seriesId}?deleteFiles=${deleteFiles}`,
+        { method: 'DELETE' },
+      ),
     onSuccess: (_data, { seriesId }) => {
       queryClient.removeQueries({ queryKey: queryKeys.series.detail(seriesId) });
       void queryClient.invalidateQueries({
         queryKey: queryKeys.series.all(),
         exact: true,
       });
+      // The series' missing issues leave Wanted immediately; history's
+      // file_deleted rows follow the delete-series-files command's completion.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.wanted.all() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.history.all() });
     },
   });
 }

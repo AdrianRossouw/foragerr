@@ -113,6 +113,54 @@ def define_command(
     return register_command(cls)
 
 
+async def seed_series_issue(db, tmp_path) -> tuple[int, int]:
+    """One monitored series ("Spawn") with one monitored issue (#1) under a
+    fresh root folder; returns ``(series_id, issue_id)``.
+
+    Shared by the daily-surfaces API test files (history / blocklist / …) that
+    each used to carry an identical private copy of this seed."""
+    import datetime as dt
+
+    from sqlalchemy import select
+
+    from foragerr.library import repo
+    from foragerr.quality.models import DEFAULT_PROFILE_NAME, FormatProfileRow
+
+    root = tmp_path / "lib-root"
+    root.mkdir(exist_ok=True)
+    async with db.read_session() as session:
+        profile_id = (
+            await session.execute(
+                select(FormatProfileRow.id).where(
+                    FormatProfileRow.name == DEFAULT_PROFILE_NAME
+                )
+            )
+        ).scalar_one()
+    async with db.write_session() as session:
+        rf = await repo.create_root_folder(session, str(root))
+        series = await repo.create_series(
+            session,
+            cv_volume_id=987654,
+            title="Spawn",
+            start_year=2024,
+            format_profile_id=profile_id,
+            root_folder_id=rf.id,
+            path=str(root / "Spawn"),
+            monitored=True,
+        )
+        await session.flush()
+        issue = await repo.create_issue(
+            session,
+            series_id=series.id,
+            cv_issue_id=123456,
+            issue_number="1",
+            cover_date=dt.date(2024, 1, 1),
+            monitored=True,
+        )
+        await session.flush()
+        return series.id, issue.id
+
+
 @pytest.fixture
 async def service(db, command_registry):
     """A running CommandService with default pool sizes and a fast poll."""

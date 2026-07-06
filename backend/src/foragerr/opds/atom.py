@@ -56,9 +56,13 @@ ACQ_KIND = "application/atom+xml; profile=opds-catalog; kind=acquisition"
 REL_SELF = "self"
 REL_START = "start"
 REL_SUBSECTION = "subsection"
+REL_SEARCH = "search"
 REL_ACQUISITION = "http://opds-spec.org/acquisition"
 REL_IMAGE = "http://opds-spec.org/image"
 REL_THUMBNAIL = "http://opds-spec.org/image/thumbnail"
+
+#: Media type of an OpenSearch description document (FRG-OPDS-007).
+OPENSEARCH_DESC_KIND = "application/opensearchdescription+xml"
 
 
 @dataclass(frozen=True)
@@ -158,3 +162,26 @@ def render_feed(feed: Feed) -> str:
     parts.extend(_entry_el(entry) for entry in feed.entries)
     parts.append("</feed>")
     return "".join(parts)
+
+
+def render_opensearch_description(
+    *, short_name: str, description: str, template: str, results_type: str
+) -> str:
+    """Serialize an OpenSearch 1.1 description document (FRG-OPDS-007).
+
+    ``template`` is the OpenSearch URL template and carries the LITERAL
+    ``{searchTerms}`` placeholder — it is an attribute value like any other
+    here (quoted/escaped), never interpolated. Built through the same
+    escaping serializer discipline as the feeds: this module still constructs
+    no XML parser (FRG-SEC-002).
+    """
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        f"<OpenSearchDescription xmlns={_quoteattr(OPENSEARCH_NS)}>"
+        f"<ShortName>{_escape(short_name)}</ShortName>"
+        f"<Description>{_escape(description)}</Description>"
+        "<InputEncoding>UTF-8</InputEncoding>"
+        "<OutputEncoding>UTF-8</OutputEncoding>"
+        f"<Url type={_quoteattr(results_type)} template={_quoteattr(template)}/>"
+        "</OpenSearchDescription>"
+    )

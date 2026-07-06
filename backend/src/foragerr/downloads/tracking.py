@@ -64,6 +64,7 @@ from foragerr.downloads.state import (
     TrackedDownloadState,
 )
 from foragerr.events import Event
+from foragerr.importer import history as import_history
 from foragerr.library.models import IssueRow, SeriesRow
 from foragerr.parser import parse
 from foragerr.providers.backoff import ProviderBackoff
@@ -95,6 +96,15 @@ class TrackedStateChanged(Event):
     status: str
     series_id: int | None
     issue_id: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class BlocklistChanged(Event):
+    """A blocklist row was written (FRG-API-010/FRG-UI-017 WS-push source).
+
+    Emitted by both writers — the automatic failure loop and the manual
+    queue-remove — so a WS client invalidates the blocklist screen without
+    polling. Payload-free: the screen re-fetches its current page."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -503,12 +513,36 @@ async def process_failures(
                 .all()
             )
             issues = _affected_issues(row, grabs)
+            message = "; ".join(decode_messages(row.status_messages)) or None
             write_blocklist_row(
                 session,
                 row=row,
                 grabs=grabs,
                 now=now,
-                message="; ".join(decode_messages(row.status_messages)) or None,
+                message=message,
+            )
+            first_grab = grabs[0] if grabs else None
+            # The user-facing `download_failed` history event (FRG-API-011):
+            # written in the SAME transaction as the blocklist row, so the
+            # single-source /history feed and the blocklist can never disagree
+            # about a failure.
+            import_history.record_event(
+                session,
+                event_type=import_history.EVENT_DOWNLOAD_FAILED,
+                series_id=row.series_id,
+                issue_id=row.issue_id,
+                download_id=row.download_id,
+                source_title=(first_grab.title if first_grab else row.title),
+                source=import_history.SOURCE_DOWNLOAD,
+                data={
+                    "downloadId": row.download_id,
+                    "message": message,
+                    "indexer": (
+                        first_grab.indexer_name if first_grab else row.indexer_name
+                    ),
+                    "protocol": (first_grab.protocol if first_grab else row.protocol),
+                },
+                now=now,
             )
             row.state = TrackedDownloadState.FAILED.value
             row.status = TRACKED_STATUS_ERROR
@@ -592,6 +626,11 @@ def write_blocklist_row(
             created_at=now,
         )
     )
+    # WS invalidation (FRG-UI-017): the blocklist screen has no queue push to
+    # infer from, so both writers announce a change here. Post-commit; a bare
+    # session (no post-commit wiring) is a silent no-op.
+    if session.info.get("post_commit_events") is not None:
+        queue_event(session, BlocklistChanged())
 
 
 async def _enqueue_research(commands, settings, infos: list[_FailureInfo]) -> None:
@@ -754,6 +793,7 @@ async def _handle_track_downloads(
 
 
 __all__ = [
+    "BlocklistChanged",
     "ClientObservation",
     "DownloadFailedEvent",
     "TrackDownloadsCommand",

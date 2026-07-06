@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Toolbar } from '../../components/Toolbar';
 import { Poster } from '../../components/Poster';
 import { SearchIcon, CloseIcon } from '../../components/icons';
@@ -155,25 +155,39 @@ function AddOptionsPanel({
   const selectedRootFolderId = rootFolderId ?? rootFolders.data?.[0]?.id ?? null;
   const selectedProfileId =
     formatProfileId ?? formatProfiles.data?.[0]?.id ?? null;
+  // No-roots state (FRG-UI-012 first-run scenario): a fresh install has no
+  // registered root folder, so adding is impossible — point at the settings
+  // section where one can actually be created instead of a dead-end select.
+  const noRootFolders =
+    rootFolders.data !== undefined && rootFolders.data.length === 0;
 
   return (
     <div className={styles.addPanel} data-testid="add-options-panel">
-      <label className={styles.formRow}>
-        <span>Root Folder</span>
-        <select
-          aria-label="Root folder"
-          value={selectedRootFolderId ?? ''}
-          onChange={(e) => setRootFolderId(Number(e.target.value))}
-        >
-          {rootFolders.data?.map((folder) => (
-            <option key={folder.id} value={folder.id}>
-              {folder.path}
-              {folder.free_space !== null &&
-                ` — ${formatBytes(folder.free_space)} free`}
-            </option>
-          ))}
-        </select>
-      </label>
+      {noRootFolders ? (
+        <p className={styles.errorNote} role="alert" data-testid="add-no-roots">
+          No root folders are registered, so the series has nowhere to live.
+          Add your comics folder as a root folder in{' '}
+          <Link to="/settings/media-management">Media Management settings</Link>{' '}
+          first.
+        </p>
+      ) : (
+        <label className={styles.formRow}>
+          <span>Root Folder</span>
+          <select
+            aria-label="Root folder"
+            value={selectedRootFolderId ?? ''}
+            onChange={(e) => setRootFolderId(Number(e.target.value))}
+          >
+            {rootFolders.data?.map((folder) => (
+              <option key={folder.id} value={folder.id}>
+                {folder.path}
+                {folder.free_space !== null &&
+                  ` — ${formatBytes(folder.free_space)} free`}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <label className={styles.formRow}>
         <span>Format Profile</span>
         <select

@@ -173,6 +173,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(manual_import_router, prefix="/api/v1")
 
+    # --- issue-file deletion (m2-daily-surfaces): user file deletion routed
+    #     through the recycle bin via the delete_issue_file flow
+    #     (FRG-API-003, FRG-UI-004, FRG-PP-013) under /api/v1. ---
+    from foragerr.api.issuefile import router as issuefile_router
+
+    app.include_router(issuefile_router, prefix="/api/v1")
+
     # --- library import (m2-existing-library-import): the scan/execute
     #     commands + handlers registered via the ``foragerr.library.flows``
     #     import above (FRG-IMP-022/023); mount the staging review endpoints. ---
@@ -230,6 +237,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     app.state.startup_hooks.append(_register_tracking_task)
+
+    # --- daily surfaces (m2-daily-surfaces): the history feed over
+    #     import_history (FRG-API-011), the derived wanted/missing list
+    #     (FRG-API-012), and the blocklist read/remove surface (FRG-UI-017)
+    #     under /api/v1. Read-only over existing tables (plus the blocklist
+    #     row deletes); no new commands or tasks. ---
+    from foragerr.api.blocklist import router as blocklist_router
+    from foragerr.api.history import router as history_router
+    from foragerr.api.wanted import router as wanted_router
+
+    app.include_router(history_router, prefix="/api/v1")
+    app.include_router(wanted_router, prefix="/api/v1")
+    app.include_router(blocklist_router, prefix="/api/v1")
 
     # --- import flows (m1-import-pipeline, area: flows): importing the module
     #     registers ProcessImportsCommand + handler (FRG-DL-009/010); register

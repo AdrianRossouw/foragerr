@@ -55,9 +55,9 @@ When an import replaces an issue's existing file (an upgrade), the displaced
 file goes to the **recycle bin** —
 the directory configured as `recycle_bin_path`, organized into dated subfolders
 with collision-safe names. Its location is recorded on the issue's history
-event, so a mistaken upgrade is recoverable. (User-initiated deletion of a
-single library file is not yet exposed in the app; when it lands it will route
-displaced files through the same bin.) A housekeeping task
+event, so a mistaken upgrade or deletion is recoverable. User-initiated
+deletes (a single issue's file from the series detail screen, or a series
+deleted with its files) route through the same bin. A housekeeping task
 prunes bin entries older than `recycle_bin_retention_days` (0 keeps them
 forever), and it only ever touches the bin's own dated folders.
 

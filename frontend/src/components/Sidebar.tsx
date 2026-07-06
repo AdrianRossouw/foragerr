@@ -12,8 +12,10 @@ interface NavGroup {
   items: NavItem[];
 }
 
-// Placeholder navigation — the real screens (FRG-UI-003..009) mount at these
-// routes in change 7 proper; here they are stubs proving the shell/routing.
+// Sonarr-shaped navigation over the real screens: the library cluster
+// (FRG-UI-003..005, FRG-UI-015), Wanted as its own group (FRG-UI-011), the
+// Activity group (queue FRG-UI-006, history FRG-UI-010, blocklist FRG-UI-017),
+// and settings (FRG-UI-008/009/012).
 const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Library',
@@ -24,8 +26,16 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    label: 'Wanted',
+    items: [{ to: '/wanted', label: 'Missing' }],
+  },
+  {
     label: 'Activity',
-    items: [{ to: '/queue', label: 'Queue' }],
+    items: [
+      { to: '/queue', label: 'Queue' },
+      { to: '/history', label: 'History' },
+      { to: '/blocklist', label: 'Blocklist' },
+    ],
   },
   {
     label: 'Settings',

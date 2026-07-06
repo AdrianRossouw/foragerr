@@ -204,8 +204,8 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-API-008 | Release endpoint: interactive search with cached grab | api | implemented | M1 |
 | FRG-API-009 | Provider schema and test endpoints | api | implemented | M1 |
 | FRG-API-010 | WebSocket resource-change push | api | implemented | M1 |
-| FRG-API-011 | History endpoint | api | approved | M2 |
-| FRG-API-012 | Wanted/missing endpoint | api | approved | M2 |
+| FRG-API-011 | History endpoint | api | implemented | M2 |
+| FRG-API-012 | Wanted/missing endpoint | api | implemented | M2 |
 | FRG-API-013 | Config resource endpoints | api | implemented | M2 |
 | FRG-API-014 | System status, health, and task endpoints | api | approved | M2 |
 | FRG-API-015 | Manual import endpoint | api | implemented | M2 |
@@ -219,14 +219,14 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-UI-007 | Interactive search overlay | ui | implemented | M1 |
 | FRG-UI-008 | Settings: indexers with schema-driven forms and test buttons | ui | implemented | M1 |
 | FRG-UI-009 | Settings: download clients | ui | implemented | M1 |
-| FRG-UI-010 | Activity: history screen | ui | approved | M2 |
-| FRG-UI-011 | Wanted screen | ui | approved | M2 |
+| FRG-UI-010 | Activity: history screen | ui | implemented | M2 |
+| FRG-UI-011 | Wanted screen | ui | implemented | M2 |
 | FRG-UI-012 | Settings: media management and naming with rename preview | ui | implemented | M2 |
 | FRG-UI-013 | Settings: notifications | ui | approved | B |
 | FRG-UI-014 | Manual import overlay | ui | implemented | M2 |
 | FRG-UI-015 | Library import (existing files) flow | ui | implemented | M2 |
 | FRG-UI-016 | System status and tasks screens | ui | approved | M2 |
-| FRG-UI-017 | Blocklist screen | ui | approved | M2 |
+| FRG-UI-017 | Blocklist screen | ui | implemented | M2 |
 | FRG-UI-018 | Weekly pull / calendar view | ui | approved | M3 |
 | FRG-OPDS-001 | OPDS 1.2 Atom catalog with navigation root | opds | implemented | M1 |
 | FRG-OPDS-002 | Acquisition feeds with per-entry metadata | opds | implemented | M1 |
@@ -234,13 +234,13 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-OPDS-004 | Parameterized queries throughout | opds | implemented | M1 |
 | FRG-OPDS-005 | Whole-file download with correct comic MIME types | opds | implemented | M1 |
 | FRG-OPDS-006 | Feed pagination with totals | opds | implemented | M1 |
-| FRG-OPDS-007 | Working OpenSearch (or none) | opds | approved | M2 |
+| FRG-OPDS-007 | Working OpenSearch (or none) | opds | implemented | M2 |
 | FRG-OPDS-008 | OPDS-PSE page streaming | opds | approved | M3 |
 | FRG-OPDS-009 | Cached page counts and page index | opds | approved | M3 |
 | FRG-OPDS-010 | Natural page ordering within archives | opds | approved | M3 |
 | FRG-OPDS-011 | Cover and thumbnail links with local fallback | opds | approved | M3 |
 | FRG-OPDS-012 | Resource limits on archive and image handling | opds | approved | M3 |
-| FRG-OPDS-013 | Recent Additions shelf | opds | approved | M2 |
+| FRG-OPDS-013 | Recent Additions shelf | opds | implemented | M2 |
 | FRG-OPDS-014 | Publisher browse shelf | opds | approved | B |
 | FRG-OPDS-015 | Single OPDS version; no OPDS 2.0 | opds | approved | B |
 | FRG-NOTIF-001 | Generic notifier provider abstraction | notif | approved | B |
@@ -272,7 +272,7 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-SCHED-007 | force-run of any scheduled task | sched | implemented | M1 |
 | FRG-SCHED-008 | persisted job history | sched | implemented | M1 |
 | FRG-SCHED-009 | in-process event bus | sched | implemented | M1 |
-| FRG-SCHED-010 | command status push to UI | sched | approved | M2 |
+| FRG-SCHED-010 | command status push to UI | sched | implemented | M2 |
 | FRG-SCHED-011 | graceful queue drain on shutdown | sched | implemented | M1 |
 | FRG-DEP-001 | Docker image per linuxserver.io conventions | dep | implemented | M1 |
 | FRG-DEP-002 | all persistent state under /config | dep | implemented | M1 |

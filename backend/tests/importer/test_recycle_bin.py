@@ -209,6 +209,9 @@ async def test_user_deletion_routes_through_the_bin(db, seed, library_root, tmp_
     assert remaining == []  # the issue_files row was removed (issue → Wanted)
     deleted = [e for e in events if e.event_type == history.EVENT_FILE_DELETED]
     assert len(deleted) == 1 and deleted[0].quarantine_path == recycle_path
+    # Default provenance is MANUAL — deleting a library file is a user action,
+    # not a rescan (m2-daily-surfaces, the series-detail screen requirement).
+    assert deleted[0].source == history.SOURCE_MANUAL
 
 
 @pytest.mark.req("FRG-PP-013")

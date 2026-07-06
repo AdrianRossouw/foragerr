@@ -22,8 +22,16 @@ from sqlalchemy.sql import ColumnElement
 from sqlalchemy.sql.selectable import Select
 
 from foragerr.api.errors import ApiError
+from foragerr.library.models import IssueRow, SeriesRow
 
-__all__ = ["SortWhitelist", "envelope", "paginate", "resolve_sort_order"]
+__all__ = [
+    "SortWhitelist",
+    "envelope",
+    "load_issue_map",
+    "load_series_map",
+    "paginate",
+    "resolve_sort_order",
+]
 
 #: name -> fixed column expression; never a client-supplied string.
 SortWhitelist = Mapping[str, "ColumnElement[Any]"]
@@ -87,18 +95,33 @@ async def paginate(
     sort_key: str,
     sort_direction: str,
     whitelist: SortWhitelist,
+    tiebreak: "ColumnElement[Any] | None" = None,
 ) -> dict[str, Any]:
     """Run ``stmt`` (a bare, un-ordered/un-limited SELECT over one entity)
     through whitelist-checked sorting, offset/limit paging, and a total
     count, returning the paging envelope with ORM rows in ``records``.
+
+    ``tiebreak`` composes a deterministic SECOND sort term (in the SAME
+    direction as the primary sort) after the whitelisted column, so rows that
+    tie on the primary sort key — e.g. a whole import batch sharing one
+    ``created_at`` — keep a total, stable order across page boundaries.
+    Without it, the database is free to return tied rows in any order per
+    query, which duplicates or skips rows when the client walks the pages
+    (the primary sort alone is not a stable slice). Pass the entity's ``id``
+    column (unique) for a guaranteed total order.
     """
     order = resolve_sort_order(sort_key, sort_direction, whitelist)
+    order_terms: list[ColumnElement[Any]] = [order]
+    if tiebreak is not None:
+        order_terms.append(
+            tiebreak.asc() if sort_direction == "asc" else tiebreak.desc()
+        )
     total = (
         await session.execute(select(func.count()).select_from(stmt.subquery()))
     ).scalar_one()
     rows = (
         await session.execute(
-            stmt.order_by(order).offset((page - 1) * page_size).limit(page_size)
+            stmt.order_by(*order_terms).offset((page - 1) * page_size).limit(page_size)
         )
     ).scalars().all()
     return envelope(
@@ -109,3 +132,38 @@ async def paginate(
         total_records=total,
         records=rows,
     )
+
+
+async def load_series_map(
+    session: AsyncSession, ids: set[int | None]
+) -> dict[int, SeriesRow]:
+    """Batch-load the series display rows for one page of list resources.
+
+    Shared by every list endpoint that nests a series display object
+    (history, wanted, blocklist, queue) so the one-query-per-page batch load
+    is never re-implemented per router."""
+    real = [i for i in ids if i is not None]
+    if not real:
+        return {}
+    rows = (
+        (await session.execute(select(SeriesRow).where(SeriesRow.id.in_(real))))
+        .scalars()
+        .all()
+    )
+    return {row.id: row for row in rows}
+
+
+async def load_issue_map(
+    session: AsyncSession, ids: set[int | None]
+) -> dict[int, IssueRow]:
+    """Batch-load the issue display rows for one page of list resources
+    (the issue counterpart of :func:`load_series_map`)."""
+    real = [i for i in ids if i is not None]
+    if not real:
+        return {}
+    rows = (
+        (await session.execute(select(IssueRow).where(IssueRow.id.in_(real))))
+        .scalars()
+        .all()
+    )
+    return {row.id: row for row in rows}

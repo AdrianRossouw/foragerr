@@ -90,6 +90,84 @@ def test_map_event_covers_queue_series_command_and_ignores_the_rest():
     assert map_event(object()) is None  # unmapped -> dropped
 
 
+@pytest.mark.req("FRG-API-010")
+def test_map_event_covers_the_daily_surface_families():
+    """The daily-surfaces emitters (gate fix): history/wanted/blocklist writes
+    now announce themselves so those screens invalidate without a queue push."""
+    from foragerr.downloads.tracking import BlocklistChanged
+    from foragerr.importer.history import HistoryEventRecorded, WantedInvalidated
+
+    assert map_event(HistoryEventRecorded(event_type="imported", series_id=4)) == (
+        "history",
+        "updated",
+        {"eventType": "imported", "seriesId": 4},
+    )
+    assert map_event(WantedInvalidated(series_id=4)) == (
+        "wanted",
+        "updated",
+        {"seriesId": 4},
+    )
+    assert map_event(BlocklistChanged()) == ("blocklist", "updated", {})
+
+
+@pytest.mark.req("FRG-API-010")
+async def test_import_history_write_pushes_history_and_wanted_frames(db):
+    """End-to-end: a file-presence history write (an import) queued inside a
+    write_session reaches a WS client as BOTH a `history` and a `wanted`
+    invalidation frame — the two screens the frontend infers from these."""
+    from foragerr.importer import history
+
+    bus = EventBus()
+    broadcaster = WsBroadcaster(debounce_seconds=0.02)
+    broadcaster.subscribe(bus)
+    conn = broadcaster.connect()
+    db.event_publisher = bus.publish  # wire post-commit delivery to the bus
+
+    async with db.write_session() as session:
+        history.record_event(
+            session,
+            event_type=history.EVENT_IMPORTED,
+            series_id=1,
+            issue_id=2,
+            source=history.SOURCE_MANUAL,
+            data={"imported_path": "/lib/x.cbz"},
+        )
+    await asyncio.sleep(0.06)
+
+    by = {(m["name"], m["action"]) for m in _drain(conn)}
+    assert ("history", "updated") in by
+    assert ("wanted", "updated") in by
+
+
+@pytest.mark.req("FRG-API-010")
+async def test_grabbed_history_write_pushes_history_only_not_wanted(db):
+    """A `grabbed` event changes no file presence, so it invalidates history
+    but NOT wanted (only import/upgrade/delete move the missing list)."""
+    from foragerr.importer import history
+
+    bus = EventBus()
+    broadcaster = WsBroadcaster(debounce_seconds=0.02)
+    broadcaster.subscribe(bus)
+    conn = broadcaster.connect()
+    db.event_publisher = bus.publish
+
+    async with db.write_session() as session:
+        history.record_event(
+            session,
+            event_type=history.EVENT_GRABBED,
+            series_id=1,
+            issue_id=2,
+            download_id="nzo-1",
+            source=history.SOURCE_DOWNLOAD,
+            data={"indexer": "DogNZB"},
+        )
+    await asyncio.sleep(0.06)
+
+    by = {(m["name"], m["action"]) for m in _drain(conn)}
+    assert ("history", "updated") in by
+    assert ("wanted", "updated") not in by
+
+
 # -- push without polling -----------------------------------------------------
 
 

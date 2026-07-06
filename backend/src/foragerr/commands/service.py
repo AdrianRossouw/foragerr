@@ -98,12 +98,12 @@ async def daemon_offload(func: Callable[..., Any], /, *args: Any, **kwargs: Any)
 
 @dataclass(frozen=True)
 class CommandStatusChanged:
-    """A command reached a new status (FRG-API-010 WS-push source).
+    """A command reached a new status (FRG-API-010/FRG-SCHED-010 WS-push source).
 
-    Queued post-commit inside the enqueue and terminal writes, so a WS client
-    sees command lifecycle transitions (queued -> completed/failed) without
-    polling. Delivered only if a bus is wired (``Database.event_publisher``);
-    bare command services discard it.
+    Queued post-commit inside the enqueue, claim, and terminal writes, so a WS
+    client sees every command lifecycle transition (queued -> started ->
+    completed/failed) without polling. Delivered only if a bus is wired
+    (``Database.event_publisher``); bare command services discard it.
     """
 
     id: int
@@ -461,6 +461,13 @@ class CommandService:
                         added_group = group
                     row.status = "started"
                     row.started_at = utcnow()
+                    # Push the started transition (FRG-SCHED-010): queued and
+                    # terminal already emit; without this the UI never sees
+                    # "running". Queued inside the same write session, so it is
+                    # published only if the claim commits.
+                    queue_event(
+                        session, CommandStatusChanged(row.id, row.name, row.status)
+                    )
                     return CommandRecord.from_row(row)
             return None
         except BaseException:
