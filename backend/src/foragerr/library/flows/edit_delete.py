@@ -11,14 +11,17 @@ and raises before touching anything.
 
 from __future__ import annotations
 
+import datetime as dt
 import logging
+import os
 
 from sqlalchemy import select
 
 from foragerr.config import Settings
-from foragerr.db import Database
+from foragerr.db import Database, utcnow
+from foragerr.importer import fileops, history
 from foragerr.library import paths, repo
-from foragerr.library.models import RootFolderRow, SeriesRow
+from foragerr.library.models import IssueFileRow, IssueRow, RootFolderRow, SeriesRow
 from foragerr.library.paths import PathNotUnderRootError, validate_under_root
 from foragerr.quality.models import FormatProfileRow
 
@@ -33,6 +36,10 @@ from foragerr.library.flows._common import (
 )
 
 logger = logging.getLogger("foragerr.library.flows.edit_delete")
+
+
+class IssueFileNotFoundError(LookupError):
+    """No ``issue_files`` row exists for the requested id (FRG-PP-013)."""
 
 
 async def edit_series(
@@ -166,6 +173,57 @@ async def delete_series(
                     "cover cache cleanup for deleted series %d failed (%s): %s",
                     series_id, stale, exc,
                 )
+
+
+async def delete_issue_file(
+    db: Database,
+    settings: Settings | None,
+    issue_file_id: int,
+    *,
+    now: dt.datetime | None = None,
+) -> str | None:
+    """Delete one library file through the app, routing it via the recycle bin
+    (FRG-PP-013).
+
+    When a recycle bin is configured the backing file is moved there (never
+    hard-deleted); with no bin configured it is permanently deleted. Either way
+    the ``issue_files`` row is removed — which alone returns the issue to the
+    derived Wanted state (FRG-SER-004) — and an ``EVENT_FILE_DELETED`` history row
+    records the deletion (carrying the recycle path, or ``None`` when permanently
+    deleted). The file move happens inside the write transaction, so a rollback
+    leaves the row intact rather than orphaning a moved file. Returns the recycle
+    destination path, or ``None`` when the file was permanently deleted / absent.
+    """
+    now = now or utcnow()
+    async with db.write_session() as session:
+        row = await session.get(IssueFileRow, issue_file_id)
+        if row is None:
+            raise IssueFileNotFoundError(f"no issue_files row {issue_file_id}")
+        path = row.path
+        issue = await session.get(IssueRow, row.issue_id)
+        series_id = issue.series_id if issue is not None else None
+
+        recycle_path: str | None = None
+        if os.path.exists(path):
+            if settings is not None and settings.recycle_bin_path:
+                recycle_path = str(
+                    fileops.recycle_file(path, settings.recycle_bin_path, now=now)
+                )
+            else:
+                os.remove(path)  # no bin configured → permanent delete
+
+        await repo.remove_issue_file(session, issue_file_id)
+        history.record_event(
+            session,
+            event_type=history.EVENT_FILE_DELETED,
+            series_id=series_id,
+            issue_id=row.issue_id,
+            source=history.SOURCE_RESCAN,
+            data={"path": path, "recycle_path": recycle_path},
+            quarantine_path=recycle_path,
+            now=now,
+        )
+    return recycle_path
 
 
 async def _require_profile(session, format_profile_id: int) -> None:

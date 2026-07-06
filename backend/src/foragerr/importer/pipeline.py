@@ -410,8 +410,9 @@ async def execute(
     )
     size = placed.stat().st_size
 
-    # 2. Only now that the new file is durable: quarantine the superseded file
-    #    (never deleted) and drop its stale row, then add the new row. If any of
+    # 2. Only now that the new file is durable: send the superseded file to the
+    #    recycle bin (FRG-PP-013) — or permanently delete it when no bin is
+    #    configured — and drop its stale row, then add the new row. If any of
     #    this rolls back, the placed file's id tag keeps it recoverable.
     quarantine_path: str | None = None
     upgraded = False
@@ -420,15 +421,21 @@ async def execute(
         and ev.existing_file_path != str(placed)
         and os.path.exists(ev.existing_file_path)
     ):
-        quarantine_path = str(
-            await _run_fs(
-                ctx,
-                fileops.quarantine_file,
-                ev.existing_file_path,
-                ctx.config_dir,
-                now=ctx.now,
+        if ctx.recycle_bin_path:
+            quarantine_path = str(
+                await _run_fs(
+                    ctx,
+                    fileops.recycle_file,
+                    ev.existing_file_path,
+                    ctx.recycle_bin_path,
+                    now=ctx.now,
+                )
             )
-        )
+        else:
+            # No bin configured: permanently delete the replaced file, but still
+            # record the replacement (with no recycle path) on the history event.
+            await _run_fs(ctx, os.remove, ev.existing_file_path)
+            quarantine_path = None
         upgraded = True
         old_row = (
             await session.execute(

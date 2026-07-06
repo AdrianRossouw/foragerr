@@ -14,6 +14,13 @@ thread via the command handler's ``offload`` and are unit-testable in isolation.
   guard with a configurable margin, checked *before* any bytes are copied.
 - :func:`quarantine_file` — move a superseded file under ``<config>/quarantine/
   <date>/`` (the M1 recycle-bin stand-in, FRG-PP-010 / design decision 8).
+- :func:`recycle_file` — the M2 first-class recycle bin (FRG-PP-013): move a
+  superseded or user-deleted file under ``<recycle_root>/<date>/`` with the same
+  collision-safe naming and cross-device fallback, its destination constructed
+  through :func:`foragerr.security.paths.safe_join` so an adversarial source name
+  can never escape the bin root (design decisions 4-5).
+- :func:`prune_recycle_bin` — housekeeping retention prune of aged recycle-bin
+  entries (design decision 7).
 - :func:`cleanup_empty_dirs` — after a move, remove emptied source directories
   up to (but not including) a stop root (FRG-PP-010).
 """
@@ -28,6 +35,8 @@ import shutil
 import tempfile
 from enum import Enum
 from pathlib import Path
+
+from foragerr.security.paths import safe_join
 
 logger = logging.getLogger("foragerr.importer.fileops")
 
@@ -205,6 +214,91 @@ def quarantine_file(
     return dest
 
 
+def recycle_file(
+    src: str | os.PathLike[str],
+    recycle_root: str | os.PathLike[str],
+    *,
+    now: dt.datetime | None = None,
+) -> Path:
+    """Move a superseded/deleted file into the recycle bin (FRG-PP-013).
+
+    The M2 first-class replacement for :func:`quarantine_file`: the file is moved
+    (never deleted) under ``<recycle_root>/<date>/`` with the same collision-safe
+    numeric-suffix naming and cross-device copy-verify-delete fallback. The
+    destination is built via :func:`safe_join` under the resolved bin root, so a
+    source basename engineered to traverse (``..``, absolute) is reduced to a
+    single safe segment and can never land outside the bin (FRG-SEC-004, design
+    decision 5). Returns the destination path (recorded on the history event).
+    """
+    date = (now or dt.datetime.now(dt.timezone.utc)).date().isoformat()
+    src_path = Path(src)
+    dest = safe_join(recycle_root, date, src_path.name)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    counter = 1
+    while dest.exists():
+        dest = safe_join(recycle_root, date, f"{src_path.stem}.{counter}{src_path.suffix}")
+        counter += 1
+    # Best-effort same-volume rename; fall back across devices, verifying the copy
+    # before the source is removed so a bin on another mount never loses bytes.
+    try:
+        os.replace(src_path, dest)
+    except OSError as exc:
+        if exc.errno != errno.EXDEV:
+            raise
+        _copy_verify_delete(src_path, dest, delete_source=True)
+    return dest
+
+
+def prune_recycle_bin(
+    recycle_root: str | os.PathLike[str],
+    retention_days: int,
+    *,
+    now: dt.datetime | None = None,
+) -> int:
+    """Permanently remove recycle-bin entries older than ``retention_days`` (FRG-PP-013).
+
+    Recycle-bin files live under dated ``<recycle_root>/<date>/`` folders, so a
+    whole day's folder is pruned once its ISO date falls before the retention
+    cutoff (a folder whose name is not an ISO date, or a loose file, is judged by
+    mtime instead). ``retention_days <= 0`` keeps everything (``0`` = keep
+    forever). Returns the number of top-level entries removed. Never raises on a
+    missing bin — an absent/empty bin prunes nothing.
+    """
+    if retention_days <= 0:
+        return 0
+    root = Path(recycle_root)
+    if not root.is_dir():
+        return 0
+    now = now or dt.datetime.now(dt.timezone.utc)
+    cutoff = now - dt.timedelta(days=retention_days)
+    removed = 0
+    for entry in sorted(root.iterdir()):
+        if _recycle_entry_aged(entry, cutoff):
+            if entry.is_dir():
+                shutil.rmtree(entry)
+            else:
+                with _suppress_missing():
+                    entry.unlink()
+            removed += 1
+    return removed
+
+
+def _recycle_entry_aged(entry: Path, cutoff: dt.datetime) -> bool:
+    """True if a recycle-bin entry predates the retention cutoff.
+
+    Prefers the ISO date encoded in a dated folder name (``recycle_file`` writes
+    ``<root>/<YYYY-MM-DD>/``); falls back to the filesystem mtime for anything
+    else, so a hand-placed file or an odd folder name is still prunable.
+    """
+    try:
+        folder_date = dt.date.fromisoformat(entry.name)
+    except ValueError:
+        folder_date = None
+    if folder_date is not None:
+        return folder_date < cutoff.date()
+    return dt.datetime.fromtimestamp(entry.stat().st_mtime, dt.timezone.utc) < cutoff
+
+
 def cleanup_empty_dirs(
     start_dir: str | os.PathLike[str],
     stop_root: str | os.PathLike[str],
@@ -262,5 +356,7 @@ __all__ = [
     "free_bytes",
     "free_space_ok",
     "place_file",
+    "prune_recycle_bin",
     "quarantine_file",
+    "recycle_file",
 ]

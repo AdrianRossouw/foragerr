@@ -34,8 +34,18 @@ from foragerr.library.flows._common import (
     encode_aliases,
 )
 from foragerr.library.flows.add import AddSeriesResult, add_series
-from foragerr.library.flows.edit_delete import delete_series, edit_series
+from foragerr.library.flows.edit_delete import (
+    IssueFileNotFoundError,
+    delete_issue_file,
+    delete_series,
+    edit_series,
+)
 from foragerr.library.flows.refresh import refresh_series
+from foragerr.library.flows.rename import (
+    RenameSeriesCommand,
+    preview_series_renames,
+    rename_series,
+)
 from foragerr.library.flows.rescan import (
     RescanReport,
     RescanSeriesCommand,
@@ -50,9 +60,11 @@ __all__ = [
     "AddOptions",
     "AddSeriesResult",
     "DeleteFilesNotSupportedError",
+    "IssueFileNotFoundError",
     "MAX_ALIAS_LENGTH",
     "MONITOR_STRATEGIES",
     "RefreshSeriesCommand",
+    "RenameSeriesCommand",
     "RescanReport",
     "RescanSeriesCommand",
     "ScanSeriesCommand",
@@ -64,11 +76,14 @@ __all__ = [
     "comicvine_factory",
     "decode_add_options",
     "decode_aliases",
+    "delete_issue_file",
     "delete_series",
     "edit_series",
     "encode_add_options",
     "encode_aliases",
+    "preview_series_renames",
     "refresh_series",
+    "rename_series",
     "rescan_series",
     "scan_series",
 ]

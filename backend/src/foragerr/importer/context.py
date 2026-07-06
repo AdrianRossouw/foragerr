@@ -49,6 +49,12 @@ class ImportContext:
     file_template: str = DEFAULT_FILE_TEMPLATE
     folder_template: str = DEFAULT_FOLDER_TEMPLATE
     transfer_mode: fileops.TransferMode = fileops.TransferMode.MOVE
+    #: Recycle-bin root for upgrade-replaced files (FRG-PP-013). ``""`` = the
+    #: superseded file is permanently deleted on replacement (no bin configured).
+    recycle_bin_path: str = ""
+    #: Days recycle-bin entries are retained before housekeeping prunes them
+    #: (``0`` = keep forever). Carried for the housekeeping prune, not execute.
+    recycle_bin_retention_days: int = 0
     now: dt.datetime | None = None
     #: Free-space probe seam (path → free bytes); default is the real probe.
     free_space_probe: Callable[[str], int] = field(default=fileops.free_bytes)
@@ -65,9 +71,43 @@ class ImportContext:
     )
 
 
+#: Maps a config ``Settings`` attribute to the :class:`ImportContext` seam it
+#: feeds (design decisions 3-4). Any attribute absent on the supplied object is
+#: skipped, so a minimal stub settings keeps the engine defaults.
+_SETTINGS_TO_CTX: dict[str, str] = {
+    "rename_enabled": "rename_enabled",
+    "file_naming_template": "file_template",
+    "folder_naming_template": "folder_template",
+    "recycle_bin_path": "recycle_bin_path",
+    "recycle_bin_retention_days": "recycle_bin_retention_days",
+}
+
+
+def media_management_fields(settings: Any) -> dict[str, Any]:
+    """The naming/media-management :class:`ImportContext` seams sourced from the
+    config ``Settings`` (FRG-PP-012/013, design decisions 3-4).
+
+    Duck-typed on ``settings`` (read by attribute, missing attributes skipped) so
+    this stays free of a ``config`` import — the pipeline context is pure — and a
+    minimal stub settings (some tests pass only ``config_dir``) keeps the engine
+    defaults. Returns an empty mapping for ``None`` (bare/direct callers)."""
+    if settings is None:
+        return {}
+    fields: dict[str, Any] = {
+        ctx_key: getattr(settings, s_attr)
+        for s_attr, ctx_key in _SETTINGS_TO_CTX.items()
+        if hasattr(settings, s_attr)
+    }
+    mode = getattr(settings, "import_transfer_mode", None)
+    if mode is not None:
+        fields["transfer_mode"] = fileops.TransferMode(mode)
+    return fields
+
+
 __all__ = [
     "DEFAULT_JUNK_SIZE_FLOOR_BYTES",
     "DEFAULT_MAX_WALK_DEPTH",
     "ImportContext",
     "OffloadFn",
+    "media_management_fields",
 ]

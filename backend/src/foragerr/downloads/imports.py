@@ -74,6 +74,7 @@ from foragerr.importer import (
     gather,
     history,
     import_candidate,
+    media_management_fields,
 )
 from foragerr.library import repo
 from foragerr.library.models import IssueFileRow, IssueRow, SeriesRow
@@ -122,6 +123,7 @@ async def build_import_context(
         reference_year=now.year,
         now=now,
         offload=offload,
+        **media_management_fields(settings),
     )
 
 
