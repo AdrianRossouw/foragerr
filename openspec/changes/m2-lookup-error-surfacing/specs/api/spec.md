@@ -4,7 +4,7 @@
 
 ### Requirement: FRG-API-003 — Series resources with ComicVine lookup
 
-The API SHALL provide series endpoints: `GET /series` (library index), `GET/POST/PUT/DELETE /series/{id}`, and `GET /series/lookup?term=` performing a live ComicVine volume search returning candidate series with remote poster, year, publisher, and external id; POST accepts add options (root folder, monitoring strategy, format profile) as write-only fields. Lookup SHALL distinguish outcome classes: a ComicVine authentication failure yields a structured error response (not an empty 200), and a successful-but-degraded walk is marked incomplete in the response envelope so callers can tell it apart from a clean empty result.
+The API SHALL provide series endpoints: `GET /series` (library index), `GET/POST/PUT/DELETE /series/{id}`, and `GET /series/lookup?term=` performing a live ComicVine volume search returning candidate series with remote poster, year, publisher, and external id; POST accepts add options (root folder, monitoring strategy, format profile) as write-only fields. Lookup SHALL distinguish outcome classes: a ComicVine authentication failure yields a structured error response (not an empty 200) carrying a machine-readable field discriminator so clients never classify by message prose, and the response envelope marks a degraded walk (`complete`) and a deliberately capped walk (`truncated`) as distinct conditions, both distinguishable from a clean empty result.
 
 - **Milestone**: M1
 - **Source**: sonarr-architecture.md §7.1 (Series + lookup), §7.3 SeriesResource shape, §1.2 add flow.
@@ -23,12 +23,12 @@ The API SHALL provide series endpoints: `GET /series` (library index), `GET/POST
 #### Scenario: Lookup surfaces ComicVine auth failure as a structured error
 
 - **WHEN** `GET /api/v1/series/lookup?term=` is called and ComicVine rejects the request as unauthorized (missing, empty, or invalid API key)
-- **THEN** the endpoint returns a structured upstream-error response (502-class, message identifying the ComicVine credential as the cause) rather than `200` with an empty list, and neither the response nor the log line contains the API key value
+- **THEN** the endpoint returns a structured upstream-error response (HTTP 503, message identifying the ComicVine credential as the cause, and an errors entry with `field="comicvine_api_key"` as the machine-readable discriminator) rather than `200` with an empty list; a warning log line names the credential failure, and neither the response nor the log line contains the API key value
 
-#### Scenario: Lookup exposes walk completeness distinctly from clean-empty
+#### Scenario: Lookup exposes walk completeness and truncation distinctly from clean-empty
 
-- **WHEN** the lookup's pagination walk degrades on a non-auth failure and returns partial candidates with `complete=False`
-- **THEN** the response envelope marks the result incomplete so the client can distinguish it from a complete walk that genuinely matched nothing (which stays a `200` complete-and-empty response)
+- **WHEN** the lookup's pagination walk degrades on a non-auth failure (`complete=False`) or stops at the configured result cap (`truncated=True`)
+- **THEN** the response envelope carries both flags distinctly so the client can tell a transient degrade (retry may help) from a deliberate cap (retry cannot help; narrow the term) and from a complete walk that genuinely matched nothing (which stays a `200` complete-and-empty response)
 
 #### Scenario: POST validates and returns the queued refresh command id
 

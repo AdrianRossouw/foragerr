@@ -29,7 +29,12 @@ matched nothing. Other outcomes are reported distinctly:
   reports it as an error instead of pretending the search found nothing.
 - **"Results may be incomplete"** — the search degraded part-way (rate limiting,
   a ComicVine outage, a malformed page). Whatever candidates were retrieved are
-  shown; retry in a moment for the full list.
+  shown; re-run the same search in a moment for the full list. If the degrade
+  happened on the very first page, the screen reports it as a lookup failure
+  instead of showing an empty list with a footnote.
+- **"Too many results"** — the search hit the configured result cap (around
+  1000 candidates). Retrying will not change this; use a narrower term (add a
+  year, a fuller title) instead.
 
 ## What a refresh does
 

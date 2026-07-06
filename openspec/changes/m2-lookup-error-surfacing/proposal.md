@@ -18,14 +18,21 @@ degrading it to a partial result is wrong even under FRG-META-004's own rational
   into a partial/empty result. All other `ComicVineError`s keep the existing
   degrade-to-`complete=False` behavior.
 - `GET /api/v1/series/lookup`: maps `ComicVineAuthError` to a distinct
-  client-visible error response (502-class with a message naming the ComicVine
-  credential, never echoing the key). The response model additionally exposes the
-  walk's `complete` flag so a degraded partial result is distinguishable from a
+  client-visible error response (HTTP 503 with a message naming the ComicVine
+  credential plus a machine-readable `field="comicvine_api_key"` errors entry,
+  never echoing the key; a warning is logged). The response model additionally
+  exposes the walk's `complete` and `truncated` flags so a degraded partial
+  result and a capped result are distinguishable from each other and from a
   clean empty result.
 - Add Series screen: renders an explicit error state ("ComicVine API key missing
   or invalid — check Settings") on lookup auth failure instead of the empty
-  "no results" state, and a lighter "results may be incomplete" notice when the
-  lookup returns `complete=false`.
+  "no results" state; a "results may be incomplete" notice when a degraded
+  lookup still returned candidates (error styling when it returned none); a
+  "narrow your search" notice for capped results; exactly one outcome state at
+  a time; and a same-term re-search always issues a fresh lookup.
+- POST `/api/v1/series` (add flow): a ComicVine auth failure during the
+  existence check surfaces the same credential guidance instead of a generic
+  "could not be fetched" message.
 - Tests tagged `FRG-META-004`, `FRG-API-003`, `FRG-UI-005` cover the new
   scenarios (pytest `@pytest.mark.req`, vitest name tags).
 
