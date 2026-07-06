@@ -848,6 +848,77 @@ already-cached `['series']` React Query data (titles/aliases already delivered
 to the browser) with **no network request per keystroke** and no new endpoint.
 It adds no attack surface.
 
+### 2026-07-06 — m2-ops-health-backups (M2 change 5)
+
+Four new surfaces, none of them a new listener: scheduled DB+config backup
+files on disk (COMP 10 — Database), a startup restore-marker hook (COMP 10 /
+COMP 13), and two additive endpoint groups on the existing authenticated
+`/api/v1` surface (COMP 1) — system status/health and force-run. Disposition:
+
+- **Backup artifacts (information disclosure, COMP 10 / T-DB-2)**: the
+  `backup-database` scheduled task (FRG-DB-009) writes a consistent copy of the
+  SQLite DB and the config file to `/config/backups/scheduled-<ts>/` on its
+  interval; both files carry the same plaintext provider credentials as the
+  live DB/config. This is not a new class of exposure — T-DB-2 already flags
+  "secrets in the DB file (and backups)" — but it is the first change that
+  actually makes scheduled backups happen, so it is recorded as its own
+  accepted risk rather than folded silently into RISK-013: **RISK-041**
+  (plaintext provider credentials in database/config backups), accepted for
+  M2–M4 on the same footing as RISK-020. Compensating controls unchanged from
+  the design: backups are written ONLY under `/config/backups/` (no off-box/
+  cloud/download-backup feature exists to move a copy outside the
+  container-private volume), they inherit `/config`'s non-root PUID/PGID
+  ownership, and credential values are never logged. See
+  `docs/security/risk-register.md` RISK-041 for the full acceptance and its
+  review trigger.
+- **Restore-marker hook (path confinement, COMP 10)**: the startup
+  `/config/restore-from` marker (FRG-DB-010, `db/restore.py`) names a backup
+  directory to swap in before the engine opens. The marker's raw content is
+  attacker-adjacent only in the sense that it is a file an operator (or
+  anything with write access to `/config`) can drop — there is no HTTP path to
+  it. `_resolve_target` treats the marker's content as untrusted: it is
+  resolved against `<config>/backups` and passed through the existing
+  `security.paths.validate_under_root` confinement (the same primitive
+  RISK-001/RISK-019 rely on), so an absolute path or a `../` escape is refused,
+  never followed — the live DB and config are left byte-for-byte untouched on
+  refusal, and the refusal is logged loudly. Before any swap, the target
+  backup's database must pass a full `PRAGMA integrity_check`
+  (`run_full_integrity_check`); a corrupt or missing backup is refused the same
+  way. The current live DB (+ config) is snapshotted aside to
+  `pre-restore-<ts>/` via the same consistent-backup primitive BEFORE the swap,
+  so a bad restore is itself recoverable. The marker is deleted only on a
+  completed restore; on a refusal it is left in place but the hook does not
+  retry — it simply boots against the untouched live database, so a refused
+  marker does not loop, it just needs the operator to fix or remove it before
+  the next restart. Consistent with the design's Non-Goal:
+  there is deliberately no live/HTTP restore endpoint, so this surface is
+  reachable only by an operator with filesystem access to `/config`, not by any
+  network client.
+- **`/api/v1/system/status`, `/api/v1/health`, `/api/v1/system/health`
+  (information disclosure, COMP 1)**: these extend the existing authenticated
+  `/api/v1` surface (T-API-1's no-auth acceptance, RISK-020, applies
+  unchanged — no new trust boundary). The extended `system/status` payload adds
+  runtime info (uptime, Python version, OS) and managed paths (config dir, db
+  path, backups dir, root-folder count) — paths only, never a secret value or
+  a config field that carries one; the health warnings/component views
+  (FRG-API-014/FRG-NFR-011) surface component state, timestamps, and
+  remediation-hint text built from static strings and non-secret identifiers
+  (provider names, ids, paths) — no provider API key or credential is ever
+  read into a `ComponentHealth`/`HealthWarning` value. Both are read-only GETs;
+  within the accepted no-auth trust boundary (same tailnet-only exposure as
+  every other `/api/v1` route) this is acceptable disclosure of operational
+  state to the operator, not a new class of exposure.
+- **`POST /api/v1/system/task/{name}` force-run (elevation, COMP 1 / COMP 12)**:
+  reuses `scheduler.force_run` verbatim (FRG-SCHED-007) — the same
+  enqueue/dedup/timer-reset path every other force-run-shaped action already
+  rides, and the same authz posture (T-API-1/T-SCHED-1, unauthenticated within
+  the tailnet, RISK-020/RISK-032). No new command-execution surface: an
+  unknown task name 404s rather than running arbitrary work, and the only
+  effect is enqueuing an already-registered, already-vetted command
+  (`backup-database` for "Back up now"). No new `RISK-` row needed for this
+  arm — it composes existing hardened scheduler infrastructure exactly as
+  m2-search-autosuggest composed the existing ComicVine client.
+
 ## Coverage summary
 
 - **Well covered by the five drafts** (mitigation named, no new requirement needed): OPDS

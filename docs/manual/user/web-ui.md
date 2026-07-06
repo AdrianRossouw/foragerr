@@ -147,3 +147,51 @@ From here (or from a series' **Rename Files** toolbar button) you can open the
 names to template-rendered names. Nothing is renamed until you confirm, and the
 executed renames match the preview exactly — each one recorded as a history
 event.
+
+## System
+
+The System nav group is the operator's view of the running application:
+Status, Health, and Tasks.
+
+### Status
+
+Version and build (version string, commit, build date), the managed paths
+foragerr is using (config directory, database path, backups directory,
+number of registered root folders), and runtime info (uptime, Python version,
+OS). Nothing sensitive is shown here — no provider key or other secret ever
+appears on this screen.
+
+### Health
+
+The Health screen answers "is anything wrong that I should act on?" — it is
+deliberately distinct from the container-level `/health` liveness probe Docker
+uses. It has two parts:
+
+- **Warnings** — the current, actionable problems: a backed-off indexer or
+  download client, a low-disk-space condition, a failing database integrity
+  check, an overdue scheduled backup, and so on. Each item names its source
+  and carries a remediation hint (e.g. "verify its URL and API key", "stop the
+  container and restore the most recent good backup"). A fully healthy system
+  shows an explicit **"All healthy — no active warnings"** state rather than
+  an empty-looking screen.
+- **Components** — every tracked component (ComicVine, each indexer, each
+  download client/DDL provider, the scheduler, the database, each root
+  folder, disk space) with its current state (OK / Degraded / Error), its
+  last-success and last-failure times, and — for a provider in back-off — how
+  long it stays disabled.
+
+The screen polls automatically, so a component that recovers (an indexer's
+back-off clears, disk space is freed) drops off the warnings list on its own,
+with no need to reload the page or restart the container.
+
+### Tasks
+
+The Tasks screen lists every scheduled task — including the daily
+`backup-database` task — with its interval and its last/next run time. Every
+row has a **Run Now** button to force-run it immediately (resetting its
+timer); the `backup-database` row's button is labelled **"Back up now"**
+instead, but it is the exact same force-run action. A running task shows its
+live status inline, and the last/next-run columns update once it finishes.
+See `../admin/configuration.md` → "Scheduled backups" for what the backup
+task actually does, and `../admin/deployment.md` → "Restoring from a backup"
+for how to use what it writes.

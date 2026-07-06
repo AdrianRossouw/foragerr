@@ -93,6 +93,72 @@ database, workers, scheduler, and migration state are all up. On `docker stop`
 a bounded grace period (under 30s), checkpoints the SQLite WAL, and exits cleanly
 (`FRG-DEP-008`).
 
+## Restoring from a backup
+
+foragerr writes backups under `/config/backups/` — scheduled `scheduled-*`
+backups (daily by default, see `configuration.md` → "Scheduled backups") and
+event-triggered `pre-migration-*` / `pre-config-migration-*` safety copies.
+There is **no restore button in the running app**: a running foragerr holds
+the database file open (single-writer, WAL side files), so safely swapping it
+out from under the live process is not possible. Restore is always an
+**offline** operation, in one of two supported forms.
+
+### Form 1 — offline file swap (always available)
+
+1. `docker stop foragerr`.
+2. Under the `/config` volume, copy the chosen backup's database file and
+   `config.yaml` over the live ones (back up the current live files yourself
+   first if you want a way back — the app does not do this for you in this
+   form).
+3. `docker start foragerr`.
+
+This works for any retained backup and needs nothing but file access to the
+`/config` volume.
+
+### Form 2 — the `restore-from` startup marker (first-class, automatic)
+
+Instead of copying files yourself, you can ask foragerr to do the swap safely
+at its next startup:
+
+1. `docker stop foragerr`.
+2. Create a file named exactly **`restore-from`** directly under `/config`
+   (i.e. `/config/restore-from`), whose entire contents is the name of the
+   backup directory to restore — either just the directory name (e.g.
+   `scheduled-20260706120000000000`) or a path, which is always resolved
+   **relative to `/config/backups/`**. An absolute path is accepted only if it
+   still resolves inside `/config/backups/`; anything that would resolve
+   outside it (a `../` escape, or an absolute path elsewhere) is refused, not
+   followed.
+3. `docker start foragerr`.
+
+On startup, **before** the database engine opens or any migration runs,
+foragerr:
+
+1. resolves the marker's target and confirms it is confined under
+   `/config/backups/` — a traversal or absolute escape is refused;
+2. runs a full integrity check (`PRAGMA integrity_check`) against the named
+   backup's database — a corrupt or missing backup is refused;
+3. if both checks pass, snapshots the **current** live database and config
+   aside to a fresh `/config/backups/pre-restore-<timestamp>/` directory (so a
+   botched restore is itself recoverable), clears any stale WAL/SHM files, and
+   copies the backup's database and config file into place as the live files;
+4. deletes the `restore-from` marker so the restore never repeats on the next
+   boot;
+5. normal startup then proceeds (migration check → serve) against the
+   restored database.
+
+**Refusal is loud and safe.** If the marker names a target outside
+`/config/backups/`, or the target's database fails its integrity check, or the
+target is missing altogether, foragerr logs the reason at error level, leaves
+the marker in place, and boots normally against the **untouched** live
+database and config — nothing is swapped, nothing is deleted. Fix or remove
+the marker before the next restart; it is never retried automatically.
+
+A restore of either form loses any writes made after the backup you chose was
+taken — pick the most recent good backup for the smallest gap. The System →
+Status screen (see `../user/web-ui.md`) lists the managed paths, including
+`/config/backups/`, so you can see what is available before choosing.
+
 ## Network exposure
 
 ### Tailscale-only is the compensating control
@@ -153,6 +219,10 @@ the image.
 ## Related
 
 - `network.md` — the no-auth posture and Tailscale-only exposure model in full.
-- `configuration.md` — every `FORAGERR_*` / `config.yaml` setting.
+- `configuration.md` — every `FORAGERR_*` / `config.yaml` setting, including
+  "Scheduled backups" (what a backup contains, retention, the plaintext-
+  credentials caveat).
 - `secrets.md` — how to supply API keys.
-- `docs/security/risk-register.md` — `RISK-020` and the review triggers.
+- `../user/web-ui.md` — the System area (Status, Health, Tasks/"Back up now").
+- `docs/security/risk-register.md` — `RISK-020` and `RISK-041`, and their
+  review triggers.
