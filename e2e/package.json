@@ -1,0 +1,17 @@
+{
+  "name": "foragerr-e2e",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Browser-driven Playwright end-to-end verification harness for foragerr (FRG-PROC-010).",
+  "type": "module",
+  "scripts": {
+    "e2e": "bash ./run.sh",
+    "test": "playwright test",
+    "report": "node scripts/acceptance-report.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.49.1",
+    "@types/node": "^26.1.0",
+    "typescript": "^6.0.3"
+  }
+}
