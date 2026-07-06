@@ -13,13 +13,13 @@ http://<your-tailnet-address>:8789/opds
 ```
 
 (The `/opds` base path is configurable — `FORAGERR_OPDS_BASE_PATH`; see
-`admin/configuration.md`.) No credentials are required in M1: the catalog is
+`admin/configuration.md`.) No credentials are required in M1/M2: the catalog is
 protected only by your tailnet — the same Tailscale-only exposure rule as the web
 UI (`admin/network.md`). Do not expose the port beyond the tailnet.
 
 ## What the catalog looks like
 
-- The **root** is a navigation feed listing only non-empty shelves — in M1 that is
+- The **root** is a navigation feed listing only non-empty shelves — currently that is
   **All Series**.
 - Each series is an **acquisition feed** of its downloadable issues, built
   entirely from foragerr's database: series and issue metadata, file sizes, and
@@ -39,4 +39,4 @@ byte is served. An id that resolves outside the library simply returns "not
 found".
 
 Page-by-page streaming (reading without downloading the whole file first) is a
-later milestone (`FRG-OPDS-008..012`); in M1 readers download whole files.
+later milestone (`FRG-OPDS-008..012`); for now readers download whole files.

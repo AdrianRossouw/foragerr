@@ -68,7 +68,7 @@ covers on-add and manual refresh.
 ## Cover art
 
 Series and issue cover images are downloaded through the same rate-limited, egress-
-controlled path and cached locally under the config directory. The UI (once it exists)
+controlled path and cached locally under the config directory. The UI
 and OPDS serve covers only from that local cache — your browser or reader never makes
 a direct request to ComicVine. A cover is only re-fetched when ComicVine's image URL
 for it actually changes.
