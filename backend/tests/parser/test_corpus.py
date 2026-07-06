@@ -61,6 +61,7 @@ def test_corpus_row(row: Row):
     assert r.year == row.year
     assert r.booktype.value == row.booktype
     assert r.scan_group == row.scan_group
+    assert r.fix_revision == row.fix_revision
     assert r.issue_id == row.issue_id
     assert r.type == row.ext
     assert r.alt_series == row.alt_series

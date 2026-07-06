@@ -43,7 +43,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from foragerr.importer import fileops, history
 from foragerr.importer.context import ImportContext
-from foragerr.importer.decisions import ImportDecision, ImportEvaluation, decide
+from foragerr.importer.decisions import (
+    ImportDecision,
+    ImportEvaluation,
+    decide,
+    duplicate_win_reason,
+    same_rung,
+)
 from foragerr.importer.evidence import (
     PROV_COMICINFO,
     PROV_COMICINFO_CONFLICT,
@@ -70,6 +76,7 @@ from foragerr.metadata.comicinfo import (
     read_embedded_metadata,
     tag_cbz,
 )
+from foragerr.parser import parse
 from foragerr.parser.result import Booktype, IssueClassification
 from foragerr.quality.models import FormatProfileRow, decode_formats
 from foragerr.security.archives import inspect_archive
@@ -110,6 +117,10 @@ class ExecuteResult:
     size: int
     quarantine_path: str | None
     upgraded: bool
+    #: Why the incoming file won a same-rung duplicate tie (FRG-PP-014), or
+    #: ``None`` for a fresh import / profile-order upgrade. Recorded on the
+    #: replacement history event so the outcome and its reason are visible.
+    duplicate_reason: str | None = None
 
 
 async def _run_fs(ctx: ImportContext, func, *args, **kwargs):
@@ -457,6 +468,8 @@ async def build_evaluation(
 
     existing_path: str | None = None
     existing_format: str | None = None
+    existing_size: int | None = None
+    existing_fix_revision: int | None = None
     ladder: tuple[str, ...] = ()
     dest_dir = ctx.library_root
     if series_id is not None:
@@ -477,6 +490,12 @@ async def build_evaluation(
         if existing is not None:
             existing_path = existing.path
             existing_format = _ext(existing.path)
+            existing_size = existing.size
+            # The existing file's `(fN)` fixed-release marker (FRG-PP-014),
+            # read from its stored basename via the one parser.
+            existing_fix_revision = parse(
+                Path(existing.path).name, reference_year=ctx.reference_year
+            ).fix_revision
 
     free = ctx.free_space_probe(dest_dir or ctx.library_root)
 
@@ -505,6 +524,10 @@ async def build_evaluation(
         embedded_cv_issue_id=embedded.cv_issue_id if embedded is not None else None,
         embedded_verified=evidence.provenance.get("issue") == PROV_COMICINFO,
         comicinfo_conflict=PROV_COMICINFO_CONFLICT in evidence.provenance,
+        existing_size=existing_size,
+        existing_fix_revision=existing_fix_revision,
+        new_fix_revision=evidence.fix_revision,
+        duplicate_constraint=ctx.duplicate_constraint,
     )
 
 
@@ -607,12 +630,31 @@ async def execute(
     #    this rolls back, the placed file's id tag keeps it recoverable.
     quarantine_path: str | None = None
     upgraded = False
+    duplicate_reason: str | None = None
     if (
         ev.existing_file_path is not None
         and ev.existing_file_path != str(placed)
         and os.path.exists(ev.existing_file_path)
     ):
-        if ctx.recycle_bin_path:
+        # A replacement at the SAME profile rung is a duplicate resolution
+        # (FRG-PP-014) — the decision engine only approves such a candidate when
+        # DuplicateConstraintSpec let it win the tie. Its loser goes to the
+        # duplicate-dump folder when one is configured; a profile-order UPGRADE
+        # keeps the recycle/delete disposal below unchanged.
+        duplicate_resolution = same_rung(ev)
+        if duplicate_resolution:
+            duplicate_reason = duplicate_win_reason(ev)
+        if duplicate_resolution and ctx.duplicate_dump_path:
+            quarantine_path = str(
+                await _run_fs(
+                    ctx,
+                    fileops.dump_file,
+                    ev.existing_file_path,
+                    ctx.duplicate_dump_path,
+                    now=ctx.now,
+                )
+            )
+        elif ctx.recycle_bin_path:
             quarantine_path = str(
                 await _run_fs(
                     ctx,
@@ -661,6 +703,7 @@ async def execute(
         size=size,
         quarantine_path=quarantine_path,
         upgraded=upgraded,
+        duplicate_reason=duplicate_reason,
     )
 
 
@@ -809,6 +852,10 @@ async def import_candidate(
             result = await execute(session, candidate, ev, ctx)
             data["imported_path"] = result.imported_path
             data["size"] = result.size
+            if result.duplicate_reason is not None:
+                # FRG-PP-014: the same-rung duplicate outcome carries its reason
+                # into history, mirroring the rejection-side reason list.
+                data["duplicate_reason"] = result.duplicate_reason
             history.record_event(
                 session,
                 event_type=(

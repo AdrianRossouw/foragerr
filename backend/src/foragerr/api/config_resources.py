@@ -101,6 +101,9 @@ class MediaManagementConfig(BaseModel):
     library_import_mode: str
     recycle_bin_path: str
     recycle_bin_retention_days: int
+    # Same-rung duplicate handling (FRG-PP-014): constraint + optional dump root.
+    duplicate_constraint: str
+    duplicate_dump_path: str
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "MediaManagementConfig":
@@ -109,6 +112,8 @@ class MediaManagementConfig(BaseModel):
             library_import_mode=settings.library_import_mode,
             recycle_bin_path=settings.recycle_bin_path,
             recycle_bin_retention_days=settings.recycle_bin_retention_days,
+            duplicate_constraint=settings.duplicate_constraint,
+            duplicate_dump_path=settings.duplicate_dump_path,
         )
 
 

@@ -56,6 +56,9 @@ _OPDS_RESERVED_PATHS = ("/api", "/health")
 _TRANSFER_MODES = ("move", "copy", "hardlink")
 _LIBRARY_IMPORT_MODES = ("in_place", "move")
 
+#: Allowed values for the same-rung duplicate constraint (FRG-PP-014).
+_DUPLICATE_CONSTRAINTS = ("larger-size", "preferred-format")
+
 #: Documented safe ranges for interval settings: name -> (floor, ceiling).
 #: Out-of-range supplied values are clamped with a warning (FRG-NFR-009).
 INTERVAL_RANGES: dict[str, tuple[int, int]] = {
@@ -488,6 +491,28 @@ class Settings(BaseSettings):
             "removes them (FRG-PP-013). 0 keeps them forever."
         ),
     )
+    duplicate_constraint: str = Field(
+        default="larger-size",
+        description=(
+            "How a same-rung duplicate — an incoming file for an issue whose "
+            "existing file ties on the format-profile ladder — is resolved "
+            "(FRG-PP-014): larger-size (the incoming file must be strictly larger "
+            "to replace the existing one) or preferred-format (the profile's "
+            "format preference decides; a true tie keeps the existing file). "
+            "Fixed-release markers like (f1)/(f2) always win regardless of this "
+            "constraint. Profile-order upgrades are unaffected."
+        ),
+    )
+    duplicate_dump_path: str = Field(
+        default="",
+        description=(
+            "Directory the losing file of a duplicate resolution is moved to, in "
+            "dated subfolders, instead of being deleted or recycled (FRG-PP-014). "
+            "Empty means the normal replaced-file handling (recycle bin, or "
+            "permanent delete) applies. Not a recycle bin: retention pruning "
+            "never removes anything under it."
+        ),
+    )
     comicinfo_tag_on_import: bool = Field(
         default=False,
         description=(
@@ -621,11 +646,21 @@ class Settings(BaseSettings):
             raise ValueError(f"must be one of {', '.join(_LIBRARY_IMPORT_MODES)}")
         return normalized
 
-    @field_validator("recycle_bin_path")
+    @field_validator("duplicate_constraint")
+    @classmethod
+    def _valid_duplicate_constraint(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in _DUPLICATE_CONSTRAINTS:
+            raise ValueError(f"must be one of {', '.join(_DUPLICATE_CONSTRAINTS)}")
+        return normalized
+
+    @field_validator("recycle_bin_path", "duplicate_dump_path")
     @classmethod
     def _recycle_bin_usable(cls, value: str) -> str:
-        """Empty is allowed (permanent delete); a set path must be a writable,
-        confinement-safe directory — same fail-fast posture as ``config_dir``."""
+        """Empty is allowed (permanent delete / normal disposal); a set path must
+        be a writable, confinement-safe directory — same fail-fast posture as
+        ``config_dir``. Shared by the recycle bin (FRG-PP-013) and the
+        duplicate-dump folder (FRG-PP-014)."""
         text = value.strip()
         if not text:
             return ""

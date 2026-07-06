@@ -65,6 +65,7 @@ class AnnotationKind(Enum):
     PAGE_TAG = "page-tag"
     EDITION = "edition"
     SCAN_GROUP = "scan-group"
+    FIX_MARKER = "fix-marker"
     GENERIC = "generic"
 
 
@@ -129,6 +130,11 @@ class ParseResult:
     booktype: Booktype = Booktype.ISSUE
     annotations: tuple[Annotation, ...] = ()
     scan_group: str | None = None
+    #: `(fN)` fixed-release marker revision (FRG-PP-014): a re-released "fixed"
+    #: scan carries `(f1)`, `(f2)`, ... near the end of the name. ``None`` =
+    #: unfixed. Only a trailing-ish standalone group reads as a marker, so an
+    #: `f1` inside a series title never sets this.
+    fix_revision: int | None = None
     issue_id: str | None = None
     type: str | None = None
     mode: ParseMode = ParseMode.FILENAME
@@ -184,6 +190,7 @@ class ParseResult:
                 {"text": a.text, "kind": a.kind.value} for a in self.annotations
             ],
             "scan_group": self.scan_group,
+            "fix_revision": self.fix_revision,
             "issue_id": self.issue_id,
             "type": self.type,
             "mode": self.mode.value,

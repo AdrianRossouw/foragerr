@@ -19,6 +19,10 @@ thread via the command handler's ``offload`` and are unit-testable in isolation.
   collision-safe naming and cross-device fallback, its destination constructed
   through :func:`foragerr.security.paths.safe_join` so an adversarial source name
   can never escape the bin root (design decisions 4-5).
+- :func:`dump_file` — move the loser of a duplicate resolution into the
+  duplicate-dump folder (FRG-PP-014): the recycle bin's dated-subfolder and
+  collision mechanics, but the dump root is never marked as a recycle bin, so
+  the retention prune can never touch it.
 - :func:`prune_recycle_bin` — housekeeping retention prune of aged recycle-bin
   entries (design decision 7).
 - :func:`cleanup_empty_dirs` — after a move, remove emptied source directories
@@ -221,6 +225,38 @@ def quarantine_file(
     return dest
 
 
+def _move_into_dated_dir(
+    src_path: Path,
+    root: str | os.PathLike[str],
+    *,
+    now: dt.datetime | None = None,
+) -> Path:
+    """Move ``src_path`` under ``<root>/<date>/`` — the shared dated-subfolder
+    mechanics of the recycle bin (FRG-PP-013) and the duplicate-dump folder
+    (FRG-PP-014): collision-safe numeric-suffix naming (an earlier entry is
+    never overwritten) and the cross-device copy-verify-delete fallback. The
+    destination is built via :func:`safe_join` under the resolved root, so a
+    source basename engineered to traverse (``..``, absolute) is reduced to a
+    single safe segment and can never land outside it (FRG-SEC-004).
+    """
+    date = (now or dt.datetime.now(dt.timezone.utc)).date().isoformat()
+    dest = safe_join(root, date, src_path.name)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    counter = 1
+    while dest.exists():
+        dest = safe_join(root, date, f"{src_path.stem}.{counter}{src_path.suffix}")
+        counter += 1
+    # Best-effort same-volume rename; fall back across devices, verifying the copy
+    # before the source is removed so a root on another mount never loses bytes.
+    try:
+        os.replace(src_path, dest)
+    except OSError as exc:
+        if exc.errno != errno.EXDEV:
+            raise
+        _copy_verify_delete(src_path, dest, delete_source=True)
+    return dest
+
+
 def recycle_file(
     src: str | os.PathLike[str],
     recycle_root: str | os.PathLike[str],
@@ -230,33 +266,33 @@ def recycle_file(
     """Move a superseded/deleted file into the recycle bin (FRG-PP-013).
 
     The M2 first-class replacement for :func:`quarantine_file`: the file is moved
-    (never deleted) under ``<recycle_root>/<date>/`` with the same collision-safe
-    numeric-suffix naming and cross-device copy-verify-delete fallback. The
-    destination is built via :func:`safe_join` under the resolved bin root, so a
-    source basename engineered to traverse (``..``, absolute) is reduced to a
-    single safe segment and can never land outside the bin (FRG-SEC-004, design
-    decision 5). Returns the destination path (recorded on the history event).
+    (never deleted) under ``<recycle_root>/<date>/`` via the shared
+    :func:`_move_into_dated_dir` mechanics (collision-safe naming, cross-device
+    fallback, ``safe_join`` confinement — FRG-SEC-004, design decision 5).
+    Returns the destination path (recorded on the history event).
     """
-    date = (now or dt.datetime.now(dt.timezone.utc)).date().isoformat()
-    src_path = Path(src)
-    dest = safe_join(recycle_root, date, src_path.name)
-    dest.parent.mkdir(parents=True, exist_ok=True)
     # Stamp the bin so a later housekeeping prune can positively identify this
     # directory as a foragerr recycle bin before it deletes anything (FRG-PP-013).
     _mark_recycle_bin(recycle_root)
-    counter = 1
-    while dest.exists():
-        dest = safe_join(recycle_root, date, f"{src_path.stem}.{counter}{src_path.suffix}")
-        counter += 1
-    # Best-effort same-volume rename; fall back across devices, verifying the copy
-    # before the source is removed so a bin on another mount never loses bytes.
-    try:
-        os.replace(src_path, dest)
-    except OSError as exc:
-        if exc.errno != errno.EXDEV:
-            raise
-        _copy_verify_delete(src_path, dest, delete_source=True)
-    return dest
+    return _move_into_dated_dir(Path(src), recycle_root, now=now)
+
+
+def dump_file(
+    src: str | os.PathLike[str],
+    dump_root: str | os.PathLike[str],
+    *,
+    now: dt.datetime | None = None,
+) -> Path:
+    """Move the losing file of a duplicate resolution into the dump folder
+    (FRG-PP-014).
+
+    Same dated-subfolder + collision-suffix + cross-device mechanics as the
+    recycle bin, with one deliberate difference: the dump root is NEVER stamped
+    with :data:`RECYCLE_BIN_MARKER`, so :func:`prune_recycle_bin` — which
+    refuses to delete anything without that marker — can never prune under the
+    dump root. Dumped files are kept until the operator removes them.
+    """
+    return _move_into_dated_dir(Path(src), dump_root, now=now)
 
 
 def _mark_recycle_bin(recycle_root: str | os.PathLike[str]) -> None:
@@ -373,6 +409,7 @@ __all__ = [
     "TransferError",
     "TransferMode",
     "cleanup_empty_dirs",
+    "dump_file",
     "ensure_free_space",
     "free_bytes",
     "free_space_ok",

@@ -117,9 +117,12 @@ def test_put_naming_blank_template_is_a_field_precise_400(client):
 
 
 @pytest.mark.req("FRG-API-013")
+@pytest.mark.req("FRG-PP-014")
 def test_put_media_management_round_trips_its_fields(client, tmp_path):
     bin_dir = tmp_path / "recycle"
     bin_dir.mkdir()
+    dump_dir = tmp_path / "dupes"
+    dump_dir.mkdir()
     put = client.put(
         "/api/v1/config/mediamanagement",
         json={
@@ -127,6 +130,8 @@ def test_put_media_management_round_trips_its_fields(client, tmp_path):
             "library_import_mode": "move",
             "recycle_bin_path": str(bin_dir),
             "recycle_bin_retention_days": 14,
+            "duplicate_constraint": "preferred-format",
+            "duplicate_dump_path": str(dump_dir),
         },
     )
     assert put.status_code == 200
@@ -136,27 +141,72 @@ def test_put_media_management_round_trips_its_fields(client, tmp_path):
         "library_import_mode": "move",
         "recycle_bin_path": str(bin_dir),
         "recycle_bin_retention_days": 14,
+        "duplicate_constraint": "preferred-format",
+        "duplicate_dump_path": str(dump_dir),
     }
     # The running settings reflect the change.
     assert client.app.state.settings.import_transfer_mode == "copy"
     assert client.app.state.settings.recycle_bin_path == str(bin_dir)
+    assert client.app.state.settings.duplicate_constraint == "preferred-format"
+    assert client.app.state.settings.duplicate_dump_path == str(dump_dir)
+
+
+def _mm_body(**overrides) -> dict:
+    body = {
+        "import_transfer_mode": "move",
+        "library_import_mode": "in_place",
+        "recycle_bin_path": "",
+        "recycle_bin_retention_days": 0,
+        "duplicate_constraint": "larger-size",
+        "duplicate_dump_path": "",
+    }
+    body.update(overrides)
+    return body
 
 
 @pytest.mark.req("FRG-API-013")
 def test_put_media_management_bad_recycle_path_is_field_precise_400(client):
     resp = client.put(
         "/api/v1/config/mediamanagement",
-        json={
-            "import_transfer_mode": "move",
-            "library_import_mode": "in_place",
-            "recycle_bin_path": "/nonexistent-xyz/deeper/bin",
-            "recycle_bin_retention_days": 0,
-        },
+        json=_mm_body(recycle_bin_path="/nonexistent-xyz/deeper/bin"),
     )
     assert resp.status_code == 400
     assert resp.json()["errors"][0]["field"] == "settings.recycle_bin_path"
     # Unchanged: still the empty default.
     assert client.app.state.settings.recycle_bin_path == ""
+
+
+@pytest.mark.req("FRG-PP-014")
+def test_media_management_defaults_include_the_duplicate_fields(client):
+    got = client.get("/api/v1/config/mediamanagement").json()
+    assert got["duplicate_constraint"] == "larger-size"  # documented default
+    assert got["duplicate_dump_path"] == ""  # unset → normal disposal
+
+
+@pytest.mark.req("FRG-PP-014")
+def test_put_media_management_rejects_an_unknown_duplicate_constraint(client):
+    resp = client.put(
+        "/api/v1/config/mediamanagement",
+        json=_mm_body(duplicate_constraint="biggest-wins"),
+    )
+    assert resp.status_code == 400
+    body = resp.json()
+    assert body["errors"][0]["field"] == "settings.duplicate_constraint"
+    assert "larger-size" in body["errors"][0]["message"]
+    assert client.app.state.settings.duplicate_constraint == "larger-size"
+
+
+@pytest.mark.req("FRG-PP-014")
+def test_put_media_management_bad_dump_path_is_field_precise_400(client):
+    """The dump folder gets the same fail-fast writable-directory posture as the
+    recycle bin."""
+    resp = client.put(
+        "/api/v1/config/mediamanagement",
+        json=_mm_body(duplicate_dump_path="/nonexistent-xyz/deeper/dupes"),
+    )
+    assert resp.status_code == 400
+    assert resp.json()["errors"][0]["field"] == "settings.duplicate_dump_path"
+    assert client.app.state.settings.duplicate_dump_path == ""
 
 
 @pytest.mark.req("FRG-PP-012")
