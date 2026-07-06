@@ -96,11 +96,11 @@ pytest `@pytest.mark.req("FRG-...")`; vitest tests include the ID in the name.
       offline swap + `/config/restore-from` marker hook; where backups live under
       `/config`); `user/web-ui.md` (System area: Status / Health with remediation
       hints / Tasks with force-run + "Back up now"). [FRG-PROC-011]
-- [ ] 4.3 Registry flips (FRG-DB-009, FRG-DB-010, FRG-DB-012, FRG-API-014,
+- [x] 4.3 Registry flips (FRG-DB-009, FRG-DB-010, FRG-DB-012, FRG-API-014,
       FRG-UI-016, FRG-NFR-011 → implemented) + matrix regen (`tools/trace.py`
       exit 0); `tools/soup_check.py` exit 0 (no SOUP change expected — if a
       dependency is added, update `docs/security/soup-register.md` in this
       change). [FRG-PROC-004, FRG-PROC-005, FRG-PROC-012]
-- [ ] 4.4 Suites green (backend + frontend); the review gate (8-angle + Codex);
+- [x] 4.4 Suites green (backend + frontend); the review gate (8-angle + Codex);
       fixes; `--no-ff` merge; main suites green; tag the release per FRG-PROC-013.
       [FRG-PROC-007]
