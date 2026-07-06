@@ -88,6 +88,17 @@
   min-height: 0;
 }
 
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  height: var(--layout-header-height);
+  padding: 0 var(--spacing-lg);
+  background: var(--surface-chrome);
+  border-bottom: 1px solid var(--surface-border);
+  position: relative;
+}
+
 .toolbar {
   display: flex;
   align-items: center;

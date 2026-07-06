@@ -5,10 +5,19 @@ import { MemoryRouter } from 'react-router-dom';
 import { createQueryClient } from '../queryClient';
 import { FetcherProvider, type Fetcher } from '../api/fetcher';
 
+/**
+ * A plain path, or `{ pathname, state }` when a test needs to seed
+ * `useLocation().state` (e.g. the header quick-search fall-through's
+ * prefilled term carried into Add Series — FRG-UI-005/FRG-UI-019).
+ * (react-router-dom does not publicly export its `InitialEntry` type, so this
+ * mirrors just the shape `MemoryRouter`'s `initialEntries` accepts.)
+ */
+export type RouteEntry = string | { pathname: string; state?: unknown };
+
 interface Options {
   client?: QueryClient;
   fetcher?: Fetcher;
-  route?: string;
+  route?: RouteEntry;
   withRouter?: boolean;
 }
 

@@ -8,6 +8,16 @@
   color: var(--text-secondary);
 }
 
+/* --- autosuggest dropdown (FRG-UI-005) ------------------------------------ */
+
+.suggestDropdown {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  max-width: 900px;
+  margin: 0 auto var(--spacing-lg);
+}
+
 /* --- search box ---------------------------------------------------------- */
 
 .searchForm {
