@@ -700,6 +700,42 @@ has running code behind it. Disposition:
   tests pin both documents so an edit cannot silently reintroduce an
   all-interfaces example.
 
+### 2026-07-07 — m2-manual-import (M2 change 2)
+
+COMP 7's two remaining anticipated arms go live: untrusted archive METADATA is now
+parsed (ComicInfo.xml read, FRG-IMP-024) and archives are REWRITTEN in-process
+(ComicInfo tagging, FRG-PP-017). Disposition:
+
+- **ComicInfo read (`T-ARCH` XML arm, RISK-024)**: member selected from the
+  already-vetted central directory only (root-level `ComicInfo.xml`), declared-size
+  pre-checked against a dedicated 1 MiB cap before any read, read in memory (never
+  extracted), parsed exclusively through the generalized single hardened XML site
+  (`parse_untrusted_xml`; the static guard forbidding parser construction anywhere
+  else passes unchanged). Hostile/malformed metadata degrades to a parse-noted
+  empty result — evidence, never an exception.
+- **Embedded-id trust**: an embedded ComicVine id only wins reconciliation when
+  VERIFIED — it must resolve to an issue already in the library, and in scoped
+  contexts belong to the in-scope series; a resolvable-but-conflicting id BLOCKS
+  the file as a review item (`EmbeddedIdConflictSpec`) rather than silently
+  steering it, and a manual override outranks embedded data everywhere. A hostile
+  archive therefore cannot file itself into an arbitrary series: at worst it
+  surfaces as a visibly blocked conflict.
+- **cbz rewrite (`T-ARCH-2` write arm, RISK-010)**: `tag_cbz` gates honestly on
+  `safe_to_extract` (magic-only cbr/cb7 and any unvetted archive are excluded by
+  construction), streams member-to-member with a per-member name re-check
+  (defense in depth under the inspection) and size caps, writes to a same-dir
+  temp with fsync and atomic `os.replace`, and unlinks the temp on ANY failure —
+  the placed file is byte-identical on every non-success path. Tagging runs only
+  AFTER the import (row + event) has succeeded and can never unwind it. XML
+  OUTPUT is built from library records only via the stdlib writer (no parser).
+- **Manual import (FRG-PP-016/API-015)**: overrides pin only the series/issue
+  mapping and are validated against real rows; the archive/junk/space/upgrade
+  safety specs still bind — there is no force path. The listing endpoint resolves
+  paths through the canonical containment check against library roots (plus
+  tracked-download staging for blocked items); `/config` and arbitrary
+  filesystem paths are unreachable, and the folder walk is the same bounded
+  intake the rescan uses.
+
 ## Coverage summary
 
 - **Well covered by the five drafts** (mitigation named, no new requirement needed): OPDS
