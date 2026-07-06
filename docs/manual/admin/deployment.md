@@ -152,7 +152,9 @@ foragerr:
 target is missing altogether, foragerr logs the reason at error level, leaves
 the marker in place, and boots normally against the **untouched** live
 database and config — nothing is swapped, nothing is deleted. Fix or remove
-the marker before the next restart; it is never retried automatically.
+the marker before the next restart; while it remains in place, each start
+re-attempts the restore and refuses again harmlessly — the refusal never
+touches the live files.
 
 A restore of either form loses any writes made after the backup you chose was
 taken — pick the most recent good backup for the smallest gap. The System →

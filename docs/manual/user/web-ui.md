@@ -168,8 +168,9 @@ deliberately distinct from the container-level `/health` liveness probe Docker
 uses. It has two parts:
 
 - **Warnings** — the current, actionable problems: a backed-off indexer or
-  download client, a low-disk-space condition, a failing database integrity
-  check, an overdue scheduled backup, and so on. Each item names its source
+  download client, a low-disk-space condition (free space below 1 GiB on the
+  config volume), a failing database integrity check, an overdue scheduled
+  backup, and so on. Each item names its source
   and carries a remediation hint (e.g. "verify its URL and API key", "stop the
   container and restore the most recent good backup"). A fully healthy system
   shows an explicit **"All healthy — no active warnings"** state rather than
