@@ -15,11 +15,18 @@ from __future__ import annotations
 import datetime as dt
 from dataclasses import dataclass
 
-from sqlalchemy import Select, exists, func, or_, select
+from sqlalchemy import Select, case, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from foragerr.db.base import utcnow
-from foragerr.library.models import IssueFileRow, IssueRow, RootFolderRow, SeriesRow
+from foragerr.library.grouping import franchise_display_title, franchise_key
+from foragerr.library.models import (
+    IssueFileRow,
+    IssueRow,
+    RootFolderRow,
+    SeriesGroupRow,
+    SeriesRow,
+)
 from foragerr.library.ordering import ordering_key_for
 from foragerr.parser.normalize import matching_key
 
@@ -127,6 +134,190 @@ async def set_series_monitored(session: AsyncSession, series_id: int, monitored:
     if row is None:
         raise LookupError(f"no series {series_id}")
     row.monitored = monitored
+
+
+# --- franchise grouping (FRG-SER-016/017) -----------------------------------
+#
+# Grouping is a DISPLAY-ONLY layer: nothing here (or downstream) ever reaches
+# `wanted_issues()` or `series_statistics` — a series' group has no bearing on
+# what it *is*, only on how the grouped view renders it.
+
+
+async def find_or_create_group(
+    session: AsyncSession, grouping_key: str, default_title: str
+) -> SeriesGroupRow:
+    """Return the franchise group for ``grouping_key``, creating it if absent.
+
+    Only sets ``title`` on CREATE — an existing group (including one the
+    operator renamed, ``manual_title=True``) is returned untouched, so
+    auto-derivation never relabels a group (FRG-SER-017)."""
+    existing = await session.scalar(
+        select(SeriesGroupRow).where(SeriesGroupRow.grouping_key == grouping_key)
+    )
+    if existing is not None:
+        return existing
+    row = SeriesGroupRow(
+        title=default_title,
+        grouping_key=grouping_key,
+        manual_title=False,
+        created_at=utcnow(),
+    )
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def prune_group_if_empty(session: AsyncSession, group_id: int) -> bool:
+    """Delete a franchise group left with zero members. Returns whether it was
+    pruned (design default: prune emptied groups rather than orphan them)."""
+    remaining = await session.scalar(
+        select(func.count())
+        .select_from(SeriesRow)
+        .where(SeriesRow.series_group_id == group_id)
+    )
+    if remaining:
+        return False
+    group = await session.get(SeriesGroupRow, group_id)
+    if group is not None:
+        await session.delete(group)
+    return True
+
+
+async def apply_autogrouping(session: AsyncSession, series: SeriesRow) -> None:
+    """Auto-derive and set a series' franchise group (FRG-SER-016).
+
+    A no-op when the series is ``group_locked`` (the operator reassigned or
+    detached it — FRG-SER-017 keeps that choice across refreshes). Otherwise
+    computes :func:`franchise_key` from the title: an empty key leaves the
+    series ungrouped; a real key find-or-creates the group and links it. A
+    previous group left empty by a move is pruned.
+
+    Touches ONLY ``series.series_group_id`` — never any issue/file/monitor/
+    wanted state (the grouping invariant)."""
+    if series.group_locked:
+        return
+    previous_group_id = series.series_group_id
+    key = franchise_key(series.title)
+    if key is None:
+        series.series_group_id = None
+    else:
+        group = await find_or_create_group(
+            session, key, franchise_display_title(series.title)
+        )
+        series.series_group_id = group.id
+    await session.flush()
+    if previous_group_id is not None and previous_group_id != series.series_group_id:
+        await prune_group_if_empty(session, previous_group_id)
+
+
+@dataclass(frozen=True, slots=True)
+class GroupRollup:
+    """One franchise group's aggregated roll-up — computed by a single bounded
+    aggregate query, NEVER the per-series ``series_statistics`` path per group."""
+
+    group_id: int
+    title: str
+    manual_title: bool
+    series_count: int
+    issue_count: int
+    owned_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class SeriesRollup:
+    """One ungrouped series' aggregated roll-up (its singleton franchise)."""
+
+    series_id: int
+    issue_count: int
+    owned_count: int
+
+
+def _owned_issue_id_expr():
+    """`IssueRow.id` when the issue has a file, else NULL — so
+    ``count(distinct ...)`` over it yields the owned (file-backed) issue count
+    without a fan-out join to ``issue_files`` (one file-per-issue would be fine,
+    many would double-count a plain join)."""
+    has_file = exists().where(IssueFileRow.issue_id == IssueRow.id)
+    return case((has_file, IssueRow.id), else_=None)
+
+
+async def series_group_rollup(session: AsyncSession) -> list[GroupRollup]:
+    """Aggregated roll-up for EVERY franchise group in ONE query (FRG-API-020).
+
+    Joins ``series_groups`` <- ``series`` <- ``issues`` and groups by the
+    franchise, yielding per-group series count, total issue count, and owned
+    (file-backed) issue count. This is the bounded alternative to the
+    per-series statistics N+1: the number of rows/queries scales with the
+    number of groups, never with the number of issues."""
+    stmt = (
+        select(
+            SeriesGroupRow.id,
+            SeriesGroupRow.title,
+            SeriesGroupRow.manual_title,
+            func.count(func.distinct(SeriesRow.id)),
+            func.count(func.distinct(IssueRow.id)),
+            func.count(func.distinct(_owned_issue_id_expr())),
+        )
+        .select_from(SeriesGroupRow)
+        .outerjoin(SeriesRow, SeriesRow.series_group_id == SeriesGroupRow.id)
+        .outerjoin(IssueRow, IssueRow.series_id == SeriesRow.id)
+        .group_by(SeriesGroupRow.id)
+    )
+    result = await session.execute(stmt)
+    return [
+        GroupRollup(
+            group_id=gid,
+            title=title,
+            manual_title=bool(manual),
+            series_count=series_count,
+            issue_count=issue_count,
+            owned_count=owned_count,
+        )
+        for gid, title, manual, series_count, issue_count, owned_count in result.all()
+    ]
+
+
+async def ungrouped_series_rollup(session: AsyncSession) -> dict[int, SeriesRollup]:
+    """Aggregated roll-up for every ungrouped (``series_group_id IS NULL``)
+    series in ONE query — each is its own singleton franchise in the grouped
+    view. Same bounded aggregation as :func:`series_group_rollup`."""
+    stmt = (
+        select(
+            SeriesRow.id,
+            func.count(func.distinct(IssueRow.id)),
+            func.count(func.distinct(_owned_issue_id_expr())),
+        )
+        .select_from(SeriesRow)
+        .outerjoin(IssueRow, IssueRow.series_id == SeriesRow.id)
+        .where(SeriesRow.series_group_id.is_(None))
+        .group_by(SeriesRow.id)
+    )
+    result = await session.execute(stmt)
+    return {
+        sid: SeriesRollup(series_id=sid, issue_count=issue_count, owned_count=owned_count)
+        for sid, issue_count, owned_count in result.all()
+    }
+
+
+async def list_grouped_series(session: AsyncSession) -> list[SeriesRow]:
+    """Every series that belongs to a franchise group, in title order — the
+    members the grouped view nests under their headers. One query."""
+    result = await session.execute(
+        select(SeriesRow)
+        .where(SeriesRow.series_group_id.is_not(None))
+        .order_by(SeriesRow.sort_title)
+    )
+    return list(result.scalars().all())
+
+
+async def list_ungrouped_series(session: AsyncSession) -> list[SeriesRow]:
+    """Every ungrouped series, in title order — the singleton franchises."""
+    result = await session.execute(
+        select(SeriesRow)
+        .where(SeriesRow.series_group_id.is_(None))
+        .order_by(SeriesRow.sort_title)
+    )
+    return list(result.scalars().all())
 
 
 # --- issues -----------------------------------------------------------------

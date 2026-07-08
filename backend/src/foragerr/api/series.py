@@ -22,7 +22,7 @@ import logging
 from dataclasses import asdict
 from pathlib import Path
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import FileResponse, Response
@@ -35,7 +35,9 @@ from foragerr.api.paging import paginate
 from foragerr.commands import CommandValidationError
 from foragerr.library import repo
 from foragerr.library.flows import (
+    GROUP_EDIT_ACTIONS,
     MAX_ALIAS_LENGTH,
+    GroupEdit,
     SeriesNotFoundError,
     SeriesValidationError,
     add_series,
@@ -112,6 +114,7 @@ def _series_fields(row: SeriesRow, stats: SeriesStatistics) -> dict:
         "refreshed_at": row.refreshed_at,
         "description_sanitized": row.description_sanitized,
         "aliases": list(decode_aliases(row.aliases, series_id=row.id)),
+        "series_group_id": row.series_group_id,
         "statistics": SeriesStatisticsResource.from_stats(stats),
     }
 
@@ -139,6 +142,10 @@ class SeriesResource(BaseModel):
     #: User-editable alternate search names the search engine maps releases
     #: through (FRG-SRCH-003). Empty when the series has none.
     aliases: list[str]
+    #: The franchise group this series belongs to (FRG-SER-016), or ``None``
+    #: when ungrouped — lets the flat view render a group affordance without a
+    #: second call. Display-only; unrelated to identity/wanted state.
+    series_group_id: int | None
     statistics: SeriesStatisticsResource
 
     @classmethod
@@ -183,6 +190,20 @@ class SeriesCreateResponse(SeriesResource):
         return cls(**_series_fields(row, stats), refresh_command_id=refresh_command_id)
 
 
+class SeriesGroupEdit(BaseModel):
+    """A franchise-grouping correction (FRG-SER-017), nested in ``SeriesEdit``.
+
+    ``action``: ``reassign`` (needs ``series_group_id``) moves the series to a
+    group and LOCKS it; ``detach`` ungroups + locks it; ``rename`` (needs
+    ``title``) relabels the series' current group; ``unlock`` clears the lock
+    so the next refresh re-derives. Reassign/detach/rename are validated by the
+    flow (unknown/missing target -> 400)."""
+
+    action: Literal[GROUP_EDIT_ACTIONS]  # type: ignore[valid-type]
+    series_group_id: int | None = None
+    title: str | None = None
+
+
 class SeriesEdit(BaseModel):
     """Request body for ``PUT /api/v1/series/{id}``; ``None`` = don't change
     (mirrors ``edit_series``'s own kwargs semantics exactly)."""
@@ -197,6 +218,9 @@ class SeriesEdit(BaseModel):
     #: Each alias is capped at ``MAX_ALIAS_LENGTH`` chars (422 otherwise), the
     #: pydantic mirror of the flow-level ``validate_aliases`` bound.
     aliases: list[Annotated[str, Field(max_length=MAX_ALIAS_LENGTH)]] | None = None
+    #: A single franchise-grouping correction (FRG-SER-017); ``None`` leaves
+    #: the series' grouping unchanged.
+    group: SeriesGroupEdit | None = None
 
 
 class LookupCandidateResource(BaseModel):
@@ -258,6 +282,70 @@ class SuggestResponse(BaseModel):
 
     records: list[SuggestCandidateResource]
     complete: bool
+
+
+class GroupedSeriesResource(BaseModel):
+    """A minimal member-series view nested under a franchise header
+    (FRG-API-020) — enough to render a row and navigate, deliberately WITHOUT
+    per-series statistics (those would reintroduce the N+1 the group roll-up
+    exists to avoid; the flat ``GET /series`` carries full stats)."""
+
+    id: int
+    cv_volume_id: int
+    title: str
+    sort_title: str
+    status: str
+    start_year: int | None
+    monitored: bool
+    series_group_id: int | None
+
+    @classmethod
+    def from_row(cls, row: SeriesRow) -> "GroupedSeriesResource":
+        return cls(
+            id=row.id,
+            cv_volume_id=row.cv_volume_id,
+            title=row.title,
+            sort_title=row.sort_title,
+            status=row.status,
+            start_year=row.start_year,
+            monitored=row.monitored,
+            series_group_id=row.series_group_id,
+        )
+
+
+class SeriesGroupResource(BaseModel):
+    """One franchise in the grouped view (FRG-API-020): a real group, or an
+    ungrouped series as its own franchise of one.
+
+    ``id`` is the group id, or ``None`` for a singleton (ungrouped) franchise;
+    ``kind`` disambiguates (``"group"`` / ``"series"``). The counts are the
+    aggregated roll-up from a bounded query — never per-series stats per
+    group. ``series`` nests the member rows (one, for a singleton)."""
+
+    id: int | None
+    kind: str
+    title: str
+    series_count: int
+    issue_count: int
+    owned_count: int
+    series: list[GroupedSeriesResource]
+
+
+class SeriesGroupPage(BaseModel):
+    """Paging envelope (FRG-API-006) specialized for franchise groups."""
+
+    page: int
+    pageSize: int
+    sortKey: str
+    sortDirection: str
+    totalRecords: int
+    records: list[SeriesGroupResource]
+
+
+#: Whitelisted sort keys for the grouped projection (FRG-API-006). The
+#: projection is composed in-process (groups + singletons from bounded
+#: aggregate queries), so these map to resource attributes, not SQL columns.
+_GROUP_SORT_KEYS = ("title", "issue_count", "owned_count", "series_count")
 
 
 # --- routes -------------------------------------------------------------------
@@ -326,6 +414,97 @@ async def list_series(
             records.append(SeriesResource.from_row_and_stats(row, stats))
     result["records"] = records
     return SeriesPage(**result)
+
+
+# NOTE: registered BEFORE "/{series_id}" (like "/lookup") so "groups" is never
+# swallowed by the int-typed path parameter.
+@router.get("/groups", response_model=SeriesGroupPage)
+async def list_series_groups(
+    request: Request,
+    page: int = Query(1, ge=1),
+    pageSize: int = Query(20, ge=1, le=200),
+    sortKey: str = Query("title"),
+    sortDirection: str = Query("asc"),
+) -> SeriesGroupPage:
+    """The grouped-library read projection (FRG-API-020).
+
+    Franchise groups (each with member series and an AGGREGATED roll-up) plus
+    every ungrouped series as its own franchise of one. The roll-up counts
+    come from bounded aggregate queries (``repo.series_group_rollup`` /
+    ``ungrouped_series_rollup``) — NOT the per-series ``series_statistics``
+    path multiplied per group (no N+1). Read-only; exposes no secret. Standard
+    paging envelope; the franchise list is composed and paged in-process."""
+    if sortDirection not in ("asc", "desc"):
+        raise ApiError(
+            400,
+            f"sortDirection must be one of ('asc', 'desc') (got {sortDirection!r})",
+            field="sortDirection",
+        )
+    if sortKey not in _GROUP_SORT_KEYS:
+        raise ApiError(
+            400,
+            f"unknown sortKey {sortKey!r}; must be one of {sorted(_GROUP_SORT_KEYS)}",
+            field="sortKey",
+        )
+
+    db = request.app.state.db
+    async with db.read_session() as session:
+        rollups = await repo.series_group_rollup(session)
+        grouped_members = await repo.list_grouped_series(session)
+        ungrouped_stats = await repo.ungrouped_series_rollup(session)
+        ungrouped = await repo.list_ungrouped_series(session)
+
+    members_by_group: dict[int, list[SeriesRow]] = {}
+    for member in grouped_members:
+        members_by_group.setdefault(member.series_group_id, []).append(member)
+
+    franchises: list[SeriesGroupResource] = []
+    for rollup in rollups:
+        franchises.append(
+            SeriesGroupResource(
+                id=rollup.group_id,
+                kind="group",
+                title=rollup.title,
+                series_count=rollup.series_count,
+                issue_count=rollup.issue_count,
+                owned_count=rollup.owned_count,
+                series=[
+                    GroupedSeriesResource.from_row(m)
+                    for m in members_by_group.get(rollup.group_id, [])
+                ],
+            )
+        )
+    for series in ungrouped:
+        stats = ungrouped_stats.get(series.id)
+        franchises.append(
+            SeriesGroupResource(
+                id=None,
+                kind="series",
+                title=series.title,
+                series_count=1,
+                issue_count=stats.issue_count if stats else 0,
+                owned_count=stats.owned_count if stats else 0,
+                series=[GroupedSeriesResource.from_row(series)],
+            )
+        )
+
+    reverse = sortDirection == "desc"
+    if sortKey == "title":
+        franchises.sort(key=lambda f: f.title.casefold(), reverse=reverse)
+    else:
+        franchises.sort(key=lambda f: getattr(f, sortKey), reverse=reverse)
+
+    total = len(franchises)
+    start = (page - 1) * pageSize
+    window = franchises[start : start + pageSize]
+    return SeriesGroupPage(
+        page=page,
+        pageSize=pageSize,
+        sortKey=sortKey,
+        sortDirection=sortDirection,
+        totalRecords=total,
+        records=window,
+    )
 
 
 # NOTE: registered BEFORE "/{series_id}" so "lookup" is never swallowed by
@@ -496,6 +675,15 @@ async def update_series(
     series_id: int, body: SeriesEdit, request: Request
 ) -> SeriesResource:
     db = request.app.state.db
+    group_op = (
+        GroupEdit(
+            action=body.group.action,
+            series_group_id=body.group.series_group_id,
+            title=body.group.title,
+        )
+        if body.group is not None
+        else None
+    )
     try:
         row = await edit_series(
             db,
@@ -506,6 +694,7 @@ async def update_series(
             root_folder_id=body.root_folder_id,
             path=body.path,
             aliases=body.aliases,
+            group_op=group_op,
         )
     except SeriesNotFoundError as exc:
         raise ApiError(404, str(exc)) from exc

@@ -174,6 +174,10 @@ async def add_series(
             ),
         )
 
+        # Auto-derive the franchise group for this run (FRG-SER-016) — a
+        # display-only link; issue creation / wanted logic is untouched.
+        await repo.apply_autogrouping(session, series)
+
     # --- enqueue the refresh chain (after commit) --------------------------
     if not enqueue_refresh:
         return AddSeriesResult(series=series, refresh_command_id=None)

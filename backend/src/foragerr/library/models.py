@@ -89,6 +89,43 @@ class RootFolderRow(Base):
     path: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
 
 
+class SeriesGroupRow(Base):
+    """A franchise group over series (FRG-SER-016) — a *display-only* grouping
+    of successive ComicVine volumes of one title ("Batman (2011)",
+    "Batman (2016)") under a single franchise header.
+
+    A group is purely additive: it has NO files, monitor flag, or wanted
+    state, and never participates in the derived-wanted choke point
+    (``repo.wanted_issues``) or per-series statistics. It carries only a
+    display ``title`` and the normalized ``grouping_key`` its members fold to.
+    """
+
+    __tablename__ = "series_groups"
+
+    id: Mapped[int] = mapped_column(StrictInteger, primary_key=True, autoincrement=True)
+    #: Display title — the franchise name shown in the grouped view. Defaults
+    #: to the derived (year/``Vol N``-stripped) title of the first member;
+    #: an operator rename sets ``manual_title`` so a re-derivation never
+    #: relabels it. Plain ``Text``: internally derived by default, and the
+    #: operator-rename path is a local edit, not externally-sourced free text
+    #: (same rationale as ``series.matching_key``/``path``).
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    #: The normalized franchise key its members share, from
+    #: :func:`foragerr.library.grouping.franchise_key` (``matching_key`` with
+    #: trailing volume-year / ``Vol N`` designators stripped). Deterministic
+    #: internal derivation — plain ``Text``, like ``series.matching_key``.
+    grouping_key: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    #: Set once the operator renames the group (FRG-SER-017): a marker that the
+    #: title is operator-owned. Auto-grouping never relabels an existing group
+    #: regardless, so this is the durable record of the operator's intent.
+    manual_title: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[dt.datetime] = mapped_column(StrictDateTime, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("grouping_key", name="uq_series_groups_grouping_key"),
+    )
+
+
 class SeriesRow(Base):
     """A watched series keyed by ComicVine volume ID (FRG-SER-001)."""
 
@@ -136,6 +173,20 @@ class SeriesRow(Base):
     #: build time). `None` means no aliases. User-maintained only — there is
     #: no external alias feed. Plain `Text`: internally-serialized JSON.
     aliases: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: Franchise group this series belongs to (FRG-SER-016) — a *display-only*
+    #: link, additive and nullable. ``ON DELETE SET NULL`` so removing a group
+    #: never cascades to (let alone deletes) its member series. ``None`` = the
+    #: series is ungrouped (empty franchise key, or the operator detached it),
+    #: rendered as its own franchise of one in the grouped view.
+    series_group_id: Mapped[int | None] = mapped_column(
+        StrictInteger,
+        ForeignKey("series_groups.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    #: The operator reassigned/detached this series (FRG-SER-017), so
+    #: auto-derivation at refresh MUST NOT re-group over their choice. Cleared
+    #: to return the series to auto-derivation on the next refresh.
+    group_locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     issues: Mapped[list["IssueRow"]] = relationship(
         back_populates="series", cascade="all, delete-orphan", passive_deletes=True
@@ -149,6 +200,7 @@ class SeriesRow(Base):
         ),
         Index("ix_series_matching_key", "matching_key"),
         Index("ix_series_root_folder_id", "root_folder_id"),
+        Index("ix_series_series_group_id", "series_group_id"),
     )
 
 

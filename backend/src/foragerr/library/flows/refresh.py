@@ -109,6 +109,10 @@ async def refresh_series(
         series.description_sanitized = record.description
         series.refreshed_at = utcnow()
 
+        # Re-derive the franchise group unless the operator locked it
+        # (FRG-SER-016/017) — display-only; never touches issues/wanted.
+        await repo.apply_autogrouping(session, series)
+
         applied = await _apply_add_strategy_once(session, series)
 
         queue_event(session, SeriesRefreshed(series_id, partial=not page.complete))
