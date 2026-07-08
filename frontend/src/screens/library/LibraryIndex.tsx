@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { Toolbar } from '../../components/Toolbar';
 import { ToolbarButton, ToolbarSeparator } from '../../components/ToolbarButton';
@@ -252,6 +252,28 @@ function FranchiseGroup({
 }) {
   const [expanded, setExpanded] = useState(true);
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuWrapRef = useRef<HTMLDivElement>(null);
+
+  // Dismiss the actions menu on an outside click or Escape (matching the shared
+  // Popover pattern), not only after a successful mutation — an opened menu the
+  // user decides against must close without forcing an edit.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDocMouseDown = (e: MouseEvent) => {
+      if (menuWrapRef.current && !menuWrapRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDocMouseDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onDocMouseDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [menuOpen]);
 
   return (
     <section className={styles.franchise} data-testid="franchise-group">
@@ -273,7 +295,7 @@ function FranchiseGroup({
           <ProgressPill have={group.owned_count} total={group.issue_count} monitored />
           <span className={styles.runCount}>{group.series_count} runs</span>
         </span>
-        <div className={styles.franchiseMenuWrap}>
+        <div className={styles.franchiseMenuWrap} ref={menuWrapRef}>
           <button
             type="button"
             className={styles.menuButton}
@@ -325,17 +347,31 @@ function FranchiseGroupedView({
 }) {
   const franchises = useMemo(() => {
     const needle = filter.trim().toLowerCase();
+    const filtering = needle.length > 0;
     return groups
       .map((group) => {
         const resolved = group.series
           .map((m) => seriesById.get(m.id))
           .filter((s): s is SeriesResource => s !== undefined);
         const members = resolved
-          .filter((s) => (needle ? s.title.toLowerCase().includes(needle) : true))
+          .filter((s) => (filtering ? s.title.toLowerCase().includes(needle) : true))
           .sort((a, b) => a.sort_title.localeCompare(b.sort_title));
-        return { group, members, multiRun: resolved.length > 1 };
+        // Multi-run is an AUTHORITATIVE property of the projection, not of how
+        // many members happen to be cached in the flat index right now: a real
+        // 2-run franchise must render as a header + roll-up even if only one of
+        // its runs has resolved in the flat cache yet (otherwise it silently
+        // degrades to a bare single card whose header counts disagree with the
+        // cards shown). The header stats below come straight from the group.
+        const multiRun = group.kind === 'group' || group.series_count > 1;
+        return { group, members, multiRun };
       })
-      .filter((f) => f.members.length > 0)
+      // Drop a franchise only when it genuinely has nothing to show: an active
+      // filter no member matches, or a single-run franchise whose sole run has
+      // not resolved in the flat cache (there is no resource to render a card
+      // from). A multi-run franchise with a not-yet-cached member is KEPT — its
+      // header + roll-up stand on the projection, and the missing run is simply
+      // omitted from the card row rather than collapsing the whole group.
+      .filter((f) => (f.multiRun && !filtering ? true : f.members.length > 0))
       .sort((a, b) => a.group.title.localeCompare(b.group.title));
   }, [groups, seriesById, filter]);
 
@@ -416,15 +452,21 @@ export function LibraryIndex() {
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
             />
-            <select
-              className={styles.sortSelect}
-              aria-label="Sort"
-              value={sortKey}
-              onChange={(e) => setSortKey(e.target.value as LibrarySortKey)}
-            >
-              <option value="title">Sort: Title</option>
-              <option value="added">Sort: Date Added</option>
-            </select>
+            {/* Grouped mode orders franchises by title only (the group
+                projection is fetched sortKey=title), so a Sort control would be
+                inert — hide it while grouping is on rather than present a
+                dropdown that does nothing. */}
+            {!groupByFranchise && (
+              <select
+                className={styles.sortSelect}
+                aria-label="Sort"
+                value={sortKey}
+                onChange={(e) => setSortKey(e.target.value as LibrarySortKey)}
+              >
+                <option value="title">Sort: Title</option>
+                <option value="added">Sort: Date Added</option>
+              </select>
+            )}
             <ToolbarSeparator />
             <ToolbarButton
               icon={<FolderScanIcon />}

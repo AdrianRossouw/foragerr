@@ -177,6 +177,32 @@ describe('FRG-UI-001: WebSocketBridge maps messages to cache operations', () => 
     expect(spy).toHaveBeenCalledWith('/api/v1/series/5');
   });
 
+  it('FRG-UI-021 — an id-carrying series push also invalidates the grouped projection ["series","groups"]', async () => {
+    const client = createQueryClient();
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    const { fetcher } = fakeFetcher(() => mockSeriesList);
+    const { factory, last } = makeFakeSocketFactory();
+
+    render(
+      <QueryClientProvider client={client}>
+        <FetcherProvider fetcher={fetcher}>
+          <WebSocketBridge socketFactory={factory} />
+        </FetcherProvider>
+      </QueryClientProvider>,
+    );
+
+    act(() => last().emitOpen());
+    act(() =>
+      last().emitMessage({ name: 'series', action: 'updated', resource: { id: 5 } }),
+    );
+
+    // The grouped view (a sibling of the exact ['series'] key) is refreshed too,
+    // so a franchise projection stays in sync with the pushed series change.
+    await waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.series.groups() }),
+    );
+  });
+
   it('FRG-UI-001 — a queue updated message invalidates ["queue"] and the queue query refetches', async () => {
     const client = createQueryClient();
     const { spy, fetcher } = fakeFetcher(() => mockQueuePage1);

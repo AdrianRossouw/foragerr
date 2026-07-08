@@ -347,6 +347,96 @@ describe('FRG-UI-021: grouped library view', () => {
     });
   });
 
+  it('FRG-UI-021 — a group with series_count 2 renders as a franchise header even if only one member is cached in the flat index', async () => {
+    // The flat index holds only run id 1; the projection still reports a 2-run
+    // Batman franchise. It must render as a header + roll-up (not degrade to a
+    // bare single card), with the not-yet-cached run simply omitted.
+    const partialSeries: SeriesResource[] = [
+      makeSeriesResource({
+        id: 1,
+        title: 'Batman (2011)',
+        sort_title: 'batman (2011)',
+        series_group_id: 1,
+      }),
+    ];
+    const groups: SeriesGroupResource[] = [
+      makeSeriesGroup({
+        id: 1,
+        kind: 'group',
+        title: 'Batman',
+        series: [makeGroupMember({ id: 1 }), makeGroupMember({ id: 2 })],
+        series_count: 2,
+        issue_count: 50,
+        owned_count: 30,
+      }),
+    ];
+    renderGrouped(partialSeries, groups);
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId('series-card')).toHaveLength(1),
+    );
+    await user.click(screen.getByTestId('group-by-toggle'));
+
+    // Still a franchise header (from the projection), with the roll-up counts.
+    await waitFor(() =>
+      expect(screen.getByTestId('franchise-group')).toBeInTheDocument(),
+    );
+    const header = screen.getByTestId('franchise-group-header');
+    expect(within(header).getByText('Batman')).toBeInTheDocument();
+    expect(within(header).getByText('30/50')).toBeInTheDocument();
+    expect(within(header).getByText('2 runs')).toBeInTheDocument();
+    // Only the one cached run is shown as a card; the group did NOT collapse.
+    expect(screen.getAllByTestId('series-card')).toHaveLength(1);
+  });
+
+  it('FRG-UI-021 — the Sort control is hidden while grouping is on', async () => {
+    renderGrouped();
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId('series-card')).toHaveLength(3),
+    );
+    // Sort control is present in flat mode.
+    expect(screen.getByLabelText('Sort')).toBeInTheDocument();
+
+    await user.click(screen.getByTestId('group-by-toggle'));
+    await waitFor(() =>
+      expect(screen.getByTestId('franchise-group')).toBeInTheDocument(),
+    );
+    // Grouped order is title-only, so the (inert) Sort control is hidden.
+    expect(screen.queryByLabelText('Sort')).not.toBeInTheDocument();
+
+    // Toggling back restores it.
+    await user.click(screen.getByTestId('group-by-toggle'));
+    expect(screen.getByLabelText('Sort')).toBeInTheDocument();
+  });
+
+  it('FRG-UI-021 — the franchise actions menu closes on Escape and on an outside click', async () => {
+    renderGrouped();
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId('series-card')).toHaveLength(3),
+    );
+    await user.click(screen.getByTestId('group-by-toggle'));
+    await waitFor(() =>
+      expect(screen.getByTestId('franchise-group')).toBeInTheDocument(),
+    );
+
+    // Open → Escape closes.
+    await user.click(screen.getByTestId('franchise-group-menu'));
+    expect(screen.getByTestId('franchise-menu')).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByTestId('franchise-menu')).not.toBeInTheDocument();
+
+    // Open again → an outside click (on the stats footer) closes.
+    await user.click(screen.getByTestId('franchise-group-menu'));
+    expect(screen.getByTestId('franchise-menu')).toBeInTheDocument();
+    await user.click(document.body);
+    expect(screen.queryByTestId('franchise-menu')).not.toBeInTheDocument();
+  });
+
   it('FRG-UI-021 — detach affordance reassigns a run out of the group (FRG-SER-017)', async () => {
     const { spy } = renderGrouped();
     const user = userEvent.setup();

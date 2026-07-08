@@ -119,7 +119,14 @@ export function WebSocketBridge({
             queryKey: queryKeys.series.all(),
             exact: true,
           });
+          // The grouped projection (['series','groups']) is a sibling of the
+          // exact ['series'] key, so the targeted invalidation above misses it
+          // — refresh it explicitly so a franchise view stays in sync with the
+          // pushed series change (membership, counts, or a pruned group).
+          void queryClient.invalidateQueries({ queryKey: queryKeys.series.groups() });
         } else {
+          // An id-less push invalidates the whole ['series'] prefix, which
+          // already sweeps the nested groups key.
           void queryClient.invalidateQueries({ queryKey: queryKeys.series.all() });
         }
         return;

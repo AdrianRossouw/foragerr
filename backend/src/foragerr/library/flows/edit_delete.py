@@ -109,6 +109,16 @@ async def edit_series(
         if series is None:
             raise SeriesNotFoundError(f"no series {series_id}")
 
+        # Apply (and thereby validate) the group op FIRST — BEFORE the
+        # irreversible on-disk path rename below. A bad op (e.g. reassign to a
+        # nonexistent group) must raise while the transaction can still roll
+        # back cleanly with nothing moved on disk; ordering it after the rename
+        # would move the directory and only then discover the op is invalid,
+        # rolling back the row while leaving the directory moved (disk/DB
+        # divergence). Grouping touches only group columns, never the path.
+        if group_op is not None:
+            await _apply_group_edit(session, series, group_op)
+
         if format_profile_id is not None:
             await _require_profile(session, format_profile_id)
         if root_folder_id is not None:
@@ -165,8 +175,6 @@ async def edit_series(
             series.format_profile_id = format_profile_id
         if aliases is not None:
             series.aliases = encode_aliases(aliases)
-        if group_op is not None:
-            await _apply_group_edit(session, series, group_op)
 
     return series
 
@@ -268,7 +276,14 @@ async def delete_series(
             series = await repo.get_series(session, series_id)
             if series is None:
                 raise SeriesNotFoundError(f"no series {series_id}")
+            previous_group_id = series.series_group_id
             await session.delete(series)
+            await session.flush()
+            if previous_group_id is not None:
+                # Deleting the last member of a franchise group must not leave a
+                # phantom zero-member group behind (it would otherwise surface
+                # in GET /series/groups).
+                await repo.prune_group_if_empty(session, previous_group_id)
         summary = f"series {series_id} deleted; files=0 binned=0 (rows only)"
 
     if settings is not None:
@@ -436,6 +451,7 @@ async def _commit_series_deletion(
             # Raced away between the read and this transaction; the caller's
             # compensation restores any files already moved to the bin.
             raise SeriesNotFoundError(f"no series {series_id}")
+        previous_group_id = series.series_group_id
         await session.delete(series)
         for file_id, path, issue_id in files:
             recycle_path = recycled.get(file_id)
@@ -449,6 +465,11 @@ async def _commit_series_deletion(
                 quarantine_path=recycle_path,
                 now=now,
             )
+        if previous_group_id is not None:
+            # Deleting the last member of a franchise group must not orphan a
+            # phantom zero-member group (mirrors the rows-only delete path).
+            await session.flush()
+            await repo.prune_group_if_empty(session, previous_group_id)
 
 
 async def delete_issue_file(

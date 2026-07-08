@@ -262,6 +262,9 @@ async def series_group_rollup(session: AsyncSession) -> list[GroupRollup]:
         .outerjoin(SeriesRow, SeriesRow.series_group_id == SeriesGroupRow.id)
         .outerjoin(IssueRow, IssueRow.series_id == SeriesRow.id)
         .group_by(SeriesGroupRow.id)
+        # A zero-member group (its last member was deleted/reassigned before the
+        # group was pruned) is a phantom — never surface it as a franchise.
+        .having(func.count(func.distinct(SeriesRow.id)) > 0)
     )
     result = await session.execute(stmt)
     return [

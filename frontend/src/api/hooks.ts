@@ -719,6 +719,10 @@ export function useDeleteSeries(): UseMutationResult<
         queryKey: queryKeys.series.all(),
         exact: true,
       });
+      // The grouped projection is a sibling key (['series','groups']) the
+      // exact ['series'] invalidation above does NOT touch — refresh it too so
+      // a franchise view reflects the removed run (and any pruned group).
+      void queryClient.invalidateQueries({ queryKey: queryKeys.series.groups() });
       // The series' missing issues leave Wanted immediately; history's
       // file_deleted rows follow the delete-series-files command's completion.
       void queryClient.invalidateQueries({ queryKey: queryKeys.wanted.all() });
@@ -747,6 +751,9 @@ export function useAddSeries(): UseMutationResult<
         queryKey: queryKeys.series.all(),
         exact: true,
       });
+      // The new series joins a franchise (or rides along as a singleton), so
+      // the grouped projection sibling key is stale too — refresh it.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.series.groups() });
     },
   });
 }

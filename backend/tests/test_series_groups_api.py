@@ -163,6 +163,60 @@ def test_ungrouped_series_is_returned_as_a_singleton_franchise(client, tmp_path)
 
 
 @pytest.mark.req("FRG-API-020")
+def test_group_rollup_does_not_double_count_multi_file_issue(client, tmp_path):
+    """An issue with MORE THAN ONE issue_files row must count exactly once in
+    both issue_count and owned_count — the EXISTS-based owned guard (and the
+    distinct issue-id count) must not fan out over the files."""
+    root = tmp_path / "lib"
+    root.mkdir()
+
+    async def _seed(app):
+        db = app.state.db
+        from foragerr.quality.models import DEFAULT_PROFILE_NAME, FormatProfileRow
+        from sqlalchemy import select
+
+        async with db.write_session() as session:
+            root_row = await repo.create_root_folder(session, str(root))
+            profile_id = await session.scalar(
+                select(FormatProfileRow.id).where(
+                    FormatProfileRow.name == DEFAULT_PROFILE_NAME
+                )
+            )
+            series = await repo.create_series(
+                session,
+                cv_volume_id=1,
+                title="Batman (2011)",
+                format_profile_id=profile_id,
+                root_folder_id=root_row.id,
+                path="/lib/Batman (2011)",
+            )
+            await repo.apply_autogrouping(session, series)
+            iss = await repo.create_issue(
+                session, series_id=series.id, cv_issue_id=100, issue_number="1"
+            )
+            # TWO files on the SAME issue (e.g. a dupe left before dedupe).
+            await repo.add_issue_file(
+                session, issue_id=iss.id, path="/lib/Batman (2011)/1a.cbz", size=10
+            )
+            await repo.add_issue_file(
+                session, issue_id=iss.id, path="/lib/Batman (2011)/1b.cbz", size=10
+            )
+
+    async def _rollup(app):
+        db = app.state.db
+        async with db.read_session() as session:
+            return await repo.series_group_rollup(session)
+
+    client.portal.call(_seed, client.app)
+    rollups = client.portal.call(_rollup, client.app)
+    assert len(rollups) == 1
+    batman = rollups[0]
+    assert batman.series_count == 1
+    assert batman.issue_count == 1  # one issue, not two (one per file)
+    assert batman.owned_count == 1  # counted once despite two files
+
+
+@pytest.mark.req("FRG-API-020")
 def test_series_groups_unknown_sort_key_is_400(client):
     response = client.get("/api/v1/series/groups", params={"sortKey": "bogus"})
     assert response.status_code == 400
