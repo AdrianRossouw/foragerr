@@ -52,6 +52,8 @@ from foragerr.providers.backoff import (
     PROVIDER_DDL,
     PROVIDER_DOWNLOAD_CLIENT,
     PROVIDER_INDEXER,
+    PROVIDER_PULL,
+    PULL_PROVIDER_ID,
     BackoffStatus,
     ProviderBackoff,
 )
@@ -152,6 +154,12 @@ class HealthService:
             component="providers",
             kind="provider",
             label="Providers",
+        )
+        components += await self._safe(
+            lambda: self._pull_source_component(),
+            component="pull-source",
+            kind="pull",
+            label="Weekly pull source",
         )
         components += await self._safe(
             lambda: self._scheduler_component(),
@@ -330,6 +338,53 @@ class HealthService:
             last_failure=status.last_failure_at,
             disabled_until=disabled_until,
         )
+
+    async def _pull_source_component(self) -> list[ComponentHealth]:
+        """The external weekly-pull source (FRG-PULL-002).
+
+        The source is optional enrichment (FRG-PULL-001 renders from local
+        metadata regardless), and it is a singleton on the shared back-off
+        ladder (``PROVIDER_PULL``) rather than a configured-provider table. So
+        the component is surfaced ONLY when the fetch client has recorded an
+        outage: an unconfigured/disabled or last-fetch-healthy source has no
+        back-off row and contributes nothing (no spurious "ok" item), while a
+        522/666/egress/malformed outage shows here as degraded with a
+        remediation hint (FRG-NFR-011 / FRG-API-014)."""
+        # A disabled source contributes nothing, even if a stale back-off row
+        # survives from when it was enabled: while disabled the fetch never runs,
+        # so nothing can clear the ladder (only a success resets it) and the item
+        # would otherwise show "degraded" forever for a feature the operator has
+        # turned off.
+        if not self._settings.pull_enabled:
+            return []
+        status = await self._backoff.status(PROVIDER_PULL, PULL_PROVIDER_ID)
+        if status.healthy:
+            return []
+        reason = f": {status.last_reason}" if status.last_reason else ""
+        message = (
+            f"Weekly pull source is degraded after {status.failure_count} "
+            f"failed fetch(es){reason}"
+        )
+        disabled_until = status.next_allowed_at if status.active else None
+        if disabled_until is not None:
+            message += f"; next retry after {disabled_until.isoformat()}"
+        return [
+            ComponentHealth(
+                component="pull-source",
+                kind="pull",
+                label="Weekly pull source",
+                state=_STATE_DEGRADED,
+                message=message,
+                remediation=(
+                    "The weekly pull source could not be reached or returned bad "
+                    "data; the weekly view still renders from your local library. "
+                    "Verify 'pull_source_url' and that the service is reachable — "
+                    "it recovers automatically on the next successful refresh."
+                ),
+                last_failure=status.last_failure_at,
+                disabled_until=disabled_until,
+            )
+        ]
 
     async def _scheduler_component(self) -> ComponentHealth:
         label = "Scheduler"

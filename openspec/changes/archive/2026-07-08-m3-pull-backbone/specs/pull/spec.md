@@ -1,12 +1,12 @@
-# PULL — Weekly Pull / Release Calendar Specification
+# pull — delta for m3-pull-backbone
 
-## Purpose
+Elaborates the approved PULL baseline (FRG-PULL-001..006) from SHALL + coarse
+acceptance to implementable requirements with scenario-level acceptance. The
+screen and per-entry actions (FRG-PULL-007..009, FRG-UI-018) are elaborated
+separately in m3-pull-experience (M3 change 2).
 
-Baseline requirements for weekly pull / release calendar, mined from the
-Phase 1 reference research (`docs/research/`). Baseline depth per the Phase 2 scope
-decision: SHALL + coarse acceptance; scenario-level elaboration happens in the
-milestone change that implements each requirement (FRG-PROC-003, FRG-PROC-009).
-## Requirements
+## MODIFIED Requirements
+
 ### Requirement: FRG-PULL-001 — Metadata-derived weekly release view
 
 The system SHALL compute a weekly release view **from local library metadata
@@ -293,43 +293,3 @@ recent, but SHALL NOT suppress a manual force-run.
 - **THEN** the refresh still executes now (timer reset, deduplicated), returning the
   enqueued command's id — the throttle suppresses only scheduled fetches, not a
   manual force-run
-
-### Requirement: FRG-PULL-007 — Pull view actions
-
-The pull/weekly view SHALL expose per-entry actions for entries linked to library issues — toggle monitored (want/skip) and trigger an immediate search — each delegating to the canonical issue-level operations.
-
-- **Milestone**: M3
-- **Source**: mylar-feature-surface.md capability map PULL (manual want/skip/search from the pull view); sonarr-architecture.md §8 (derived state).
-- **Notes**: D4. Entry display state (skipped/wanted/downloading/downloaded) is a projection of issue + queue state.
-
-#### Scenario: Baseline acceptance
-
-- **WHEN** this requirement is verified against the implementation
-- **THEN** Clicking "want" on a pull entry sets the linked issue's monitored flag; "search" queues an issue-search command; neither writes any pull-side status.
-
-### Requirement: FRG-PULL-008 — New-series surfacing (no auto-add)
-
-The system SHALL surface pull entries for new series debuts (issue #1/#0) that are not in the library as a distinct "new this week" list with a one-click add action (invoking the standard add flow), and SHALL NOT add series automatically.
-
-- **Milestone**: M3
-- **Source**: mylar-feature-surface.md §1 (future_check auto-add) and capability map PULL (auto-add of new #1s).
-- **Notes**: Deliberate divergence: Mylar auto-adds via fuzzy CV search — wrong-match risk and unbounded library growth for a single-user tool. Surfacing keeps the discovery value.
-
-#### Scenario: Baseline acceptance
-
-- **WHEN** this requirement is verified against the implementation
-- **THEN** A fixture week with a new #1 shows it under "new series" with an add affordance; no series record exists until the user acts.
-
-### Requirement: FRG-PULL-009 — Future/solicited releases
-
-The system SHALL retain pull-source entries for future-dated weeks when the source provides them and include watched-series matches in the weekly view's forward navigation.
-
-- **Milestone**: M3
-- **Source**: mylar-feature-surface.md §1 (futureupcoming) and capability map PULL (future-release watching).
-- **Notes**: Thin requirement by design: with derived wanted, "watching" a future issue is just monitoring it once refresh creates it — no `add2futurewatchlist` machinery.
-
-#### Scenario: Baseline acceptance
-
-- **WHEN** this requirement is verified against the implementation
-- **THEN** A future-week entry for a watched series appears when navigating to that week, marked not-yet-released.
-

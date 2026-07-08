@@ -278,6 +278,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(wanted_router, prefix="/api/v1")
     app.include_router(blocklist_router, prefix="/api/v1")
 
+    # --- pull area (m3-pull-backbone, area E): the read-only weekly pull
+    #     resource, GET /api/v1/pull (FRG-API-019) — the metadata-derived
+    #     projection (FRG-PULL-001) merged with any stored pull entries
+    #     (FRG-PULL-003). No commands/tasks registered here: the fetch client,
+    #     matcher, and refresh command (areas B/C/D of this same change) land
+    #     in later commits and this router works standalone against whatever
+    #     is already in the library + `pull_entries` (empty table included). ---
+    from foragerr.api.pull import router as pull_router
+
+    app.include_router(pull_router, prefix="/api/v1")
+
+    # --- pull refresh (m3-pull-backbone, area D): importing the module registers
+    #     the pull-refresh command + handler (fetch → store → match →
+    #     refresh-series trigger, FRG-PULL-005/006). Register the scheduled
+    #     weekly-pull task, interval from config (default 4 h, min-clamped to
+    #     1 h). Runs after register_scheduler above (which creates
+    #     app.state.scheduler). Manual force-refresh is the generic FRG-SCHED-007
+    #     surface (POST /api/v1/system/task/pull-refresh), which bypasses the
+    #     scheduler's interval gate (the re-poll throttle). ---
+    import foragerr.pull.commands  # noqa: F401 — command/handler registration
+    from foragerr.pull.commands import register_pull_refresh_task
+
+    async def _register_pull_refresh_task(app: FastAPI) -> None:
+        await register_pull_refresh_task(app.state.scheduler, app.state.settings)
+
+    app.state.startup_hooks.append(_register_pull_refresh_task)
+
     # --- import flows (m1-import-pipeline, area: flows): importing the module
     #     registers ProcessImportsCommand + handler (FRG-DL-009/010); register
     #     the ~1-minute pp-pool drain that runs the completed downloads through
