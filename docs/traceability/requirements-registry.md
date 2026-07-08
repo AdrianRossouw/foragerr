@@ -68,12 +68,12 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-META-012 | Heuristic fields with provenance and override | meta | approved | B |
 | FRG-META-013 | Cover art download and cache | meta | implemented | M1 |
 | FRG-META-014 | ComicVine content is untrusted input | meta | implemented | M1 |
-| FRG-PULL-001 | Metadata-derived weekly release view | pull | approved | M3 |
-| FRG-PULL-002 | External pull-source fetch | pull | approved | M3 |
-| FRG-PULL-003 | Idempotent per-week storage | pull | approved | M3 |
-| FRG-PULL-004 | Matching pull entries to the library | pull | approved | M3 |
-| FRG-PULL-005 | Refresh trigger for missing pulled issues | pull | approved | M3 |
-| FRG-PULL-006 | Scheduled and manual pull refresh | pull | approved | M3 |
+| FRG-PULL-001 | Metadata-derived weekly release view | pull | implemented | M3 |
+| FRG-PULL-002 | External pull-source fetch | pull | implemented | M3 |
+| FRG-PULL-003 | Idempotent per-week storage | pull | implemented | M3 |
+| FRG-PULL-004 | Matching pull entries to the library | pull | implemented | M3 |
+| FRG-PULL-005 | Refresh trigger for missing pulled issues | pull | implemented | M3 |
+| FRG-PULL-006 | Scheduled and manual pull refresh | pull | implemented | M3 |
 | FRG-PULL-007 | Pull view actions | pull | approved | M3 |
 | FRG-PULL-008 | New-series surfacing (no auto-add) | pull | approved | M3 |
 | FRG-PULL-009 | Future/solicited releases | pull | approved | M3 |
@@ -212,7 +212,7 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-API-016 | Parse debug endpoint | api | approved | B |
 | FRG-API-017 | ComicVine suggest (bounded lookup variant) | api | implemented | M2 |
 | FRG-API-018 | ComicVine credential settings resource | api | implemented | M2 |
-| FRG-API-019 | Pull/weekly resource endpoint | api | proposed | M3 |
+| FRG-API-019 | Pull/weekly resource endpoint | api | implemented | M3 |
 | FRG-UI-001 | SPA architecture: server state via React Query + WS invalidation | ui | implemented | M1 |
 | FRG-UI-002 | Design token layer with ant/foraging theme | ui | implemented | M1 |
 | FRG-UI-003 | Library index screen | ui | implemented | M1 |

@@ -62,6 +62,9 @@ under the top level of `config.yaml`.
 | `comicvine_ignored_publishers` | `FORAGERR_COMICVINE_IGNORED_PUBLISHERS` | *(empty)* | Comma-separated, case-insensitive. |
 | `comicvine_image_hosts` | `FORAGERR_COMICVINE_IMAGE_HOSTS` | `comicvine.gamespot.com,comicvine1.cbsistatic.com,static.comicvine.com` | Allowlisted cover-image hostnames. |
 | `track_downloads_interval_seconds` | `FORAGERR_TRACK_DOWNLOADS_INTERVAL_SECONDS` | `60` | Minimum 60s (download pool is serialized). |
+| `pull_enabled` | `FORAGERR_PULL_ENABLED` | `false` | Master switch for the external weekly-pull source fetch (FRG-PULL-002). **Off by default** — the weekly view works from local library metadata alone; the external source is opt-in enrichment. When false the scheduled `pull-refresh` task no-ops and no third-party traffic is issued. See "Weekly pull" below. |
+| `pull_source_url` | `FORAGERR_PULL_SOURCE_URL` | `https://walksoftly.itsaninja.party/newcomics.php` | URL of the unofficial weekly-pull JSON source. Fetched only when `pull_enabled` is true, over the hardened **external** egress profile — a loopback/private/link-local host is refused per-hop and surfaced as a degraded source, never used to reach an internal host. An empty value disables the fetch. |
+| `pull_refresh_interval_seconds` | `FORAGERR_PULL_REFRESH_INTERVAL_SECONDS` | `14400` (4h) | How often the scheduled `pull-refresh` task runs. Clamped **up** to a documented 1 hour (3600s) floor to protect the unofficial source — a smaller value is raised, not rejected. A manual force-run bypasses the interval gate. |
 | `auto_redownload_failed` | `FORAGERR_AUTO_REDOWNLOAD_FAILED` | `true` | Self-healing re-search after a failed download. |
 | `opds_base_path` | `FORAGERR_OPDS_BASE_PATH` | `/opds` | Base URL path the OPDS catalog is mounted at. Must start with `/`; trailing slash stripped; in-feed links are built relative to it. |
 | `opds_page_size` | `FORAGERR_OPDS_PAGE_SIZE` | `50` | Default entries per OPDS feed page when the client doesn't ask. |
@@ -224,3 +227,39 @@ logged. Treat `/config/backups/` with the same care as `/config` itself if you
 ever copy it off the host.
 
 See `deployment.md` → "Restoring from a backup" for how to use these files.
+
+## Weekly pull
+
+foragerr can enrich the weekly release view (the pull list) with an **unofficial
+external source** of what shipped each week. This is **opt-in and off by default**
+(`pull_enabled=false`): with no source configured the weekly view still works
+entirely from your local library metadata (the issues of watched series dated in
+the target week) — the external source only *cross-checks and discovers* books you
+do not already follow, and the feature keeps working when the third party is down.
+
+When enabled (`pull_enabled=true`), a scheduled **`pull-refresh` task** fetches the
+current and previous release weeks from `pull_source_url`, stores them, matches them
+against your library, and — for a matched book whose issue record does not exist
+yet — enqueues the ordinary `refresh-series` metadata refresh so the issue is
+created and your series' monitor-new-items policy decides whether it becomes wanted.
+The pull side never writes issue status itself.
+
+- **`pull_source_url`** defaults to the walksoftly / League-of-Comic-Geeks-derived
+  JSON API. It is fetched over the hardened **external** egress profile (see
+  `docs/security/`): the resolved host is validated per-hop and a
+  loopback/private/link-local address is refused, so a mistyped or hostile URL can
+  never be used to reach an internal service. The response body is treated as
+  untrusted input (byte-capped, stdlib-parsed) and any ComicVine IDs it supplies are
+  candidates the matcher still guards — never authority.
+- **`pull_refresh_interval_seconds`** defaults to 4 hours and is clamped **up** to a
+  1-hour floor to stay polite to the unofficial source.
+- Like every scheduled task, `pull-refresh` appears on the System → Tasks screen
+  with its interval and last/next run, and can be **force-run on demand** — a manual
+  force-run bypasses the interval gate and runs immediately even inside the normal
+  cadence.
+- **Degraded-source health item.** If the source times out, returns a documented
+  outage code (`522` backend-down / `666` client-update-required), or a transport
+  failure occurs, the previously-stored week is left **intact** and the pull source
+  is marked **degraded** on the health surface (System → Health) with a remediation
+  hint, rather than failing silently or discarding good data. A bad-date `619`
+  response skips only the affected week; the other week is still fetched.

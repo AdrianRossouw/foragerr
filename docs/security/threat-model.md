@@ -1068,6 +1068,59 @@ ComicVine/indexer host) rather than a new trust boundary, and the
 byte-identical-behavior housekeeping guarding a structural import-cycle
 fragility, not a threat closure.
 
+### 2026-07-08 — m3-pull-backbone (M3 change 1)
+
+New attack surface: one outbound integration (the unofficial weekly-pull JSON
+source, FRG-PULL-002) and one untrusted-content ingress (ingress #5, the source
+JSON). This is the disposition of both — no new STRIDE category, no new COMP, no
+new risk id (RISK-039 already reserved this integration).
+
+- **Pull-source SSRF arm CLOSED** (`T-IDX-3`/`T-SAB-4` class, RISK-025 pull-source
+  arm, gap G-3's pull arm): the fetch runs exclusively over the change-1 outbound
+  factory's **external** profile (`factory.external()`, FRG-SEC-001) — per-hop
+  scheme/DNS validation refusing loopback/link-local/private/ULA hosts, TLS verify,
+  mandatory timeouts (FRG-NFR-006), auto-redirects disabled. The
+  operator-configurable `pull_source_url` is therefore a config-supplied outbound
+  host that **cannot** be pointed at an internal service — a loopback/private URL is
+  refused per-hop and surfaced as a degraded source, never fetched. The
+  DNS-rebinding TOCTOU residual recorded for RISK-025 applies here unchanged; no new
+  residual. With `T-IDX-3` (indexer) and the ComicVine-cover arm already closed,
+  the only RISK-025 arm now open is the SAB `local_service` host (deliberately
+  operator-scoped) — no cross-cutting egress gap remains for external hosts.
+- **Untrusted source JSON handled without trust** (ingress #5, `T-CV-3` class for
+  the pull arm, RISK-039 tampering half): the response body is **byte-capped and
+  stdlib-parsed** (FRG-NFR-012) into the typed pull-entry model; a malformed,
+  oversized, or hostile body **degrades to a source-outage outcome without raising
+  and writes no partial week** (the per-week replace is transactional — a mid-run
+  failure leaves the prior week intact). No XML/expat path exists on this traffic,
+  so XXE (`T-IDX-2`) does not apply. Any ComicVine IDs the source supplies are
+  recorded as **candidates the matcher still guards** (id match carries a book-type
+  guard; name match is sequence/date-window bounded) — the third party is never an
+  authority over library identity.
+- **Outage/availability contained → degraded-health, not silent failure** (RISK-039
+  availability half, FRG-NFR-011 / FRG-API-014): documented source codes are mapped
+  explicitly — `619` (bad date) skips only the affected week; `522` (backend down),
+  `666` (client-update-required), and transport/timeout failures are treated as a
+  source outage that **leaves the previously-stored week intact** and marks the pull
+  source **degraded** on the health surface via the shared provider back-off ladder,
+  with a remediation hint. The weekly view still renders from local metadata, so the
+  third party being down or hostile cannot break the feature.
+- **Opt-in by default** (defence-in-depth): `pull_enabled` defaults **off** — no
+  third-party traffic is issued at all until the operator opts in, and the scheduled
+  `pull-refresh` task no-ops cleanly when disabled.
+- **Storage adds no network surface** (COMP 10): the new `pull_entries` table rides
+  the existing WAL-SQLite + guarded-migration discipline (FRG-DB-002/008); entries
+  carry only a nullable **link** to a library issue and a `match_type`, never their
+  own wanted/downloaded status, so the pull side is a read-through projection and
+  cannot flip issue state (the refresh trigger enqueues the ordinary `refresh-series`
+  command; wanting is decided by the series' monitor policy).
+
+RISK-039's mitigation is thereby **realised** (timeouts, documented error-code
+handling, degraded-health surfacing, untrusted-JSON treatment) and RISK-025's
+pull-source arm **closed** via the external egress profile. Both are updated to
+implemented-status in the risk register; no new risk id and no SOUP change (the
+fetch reuses the existing `httpx` factory; parsing is stdlib).
+
 ## Coverage summary
 
 - **Well covered by the five drafts** (mitigation named, no new requirement needed): OPDS

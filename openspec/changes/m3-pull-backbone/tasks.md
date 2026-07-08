@@ -114,11 +114,11 @@ router registration (shared wiring — orchestrator merges). Depends on A's stor
 *Subtlety: security judgment (risk-row updates) is non-mechanical; the rest is
 process.* Owns: `docs/`, registry, matrix.
 
-- [ ] F.1 Manual (FRG-PROC-011): `docs/manual/admin/configuration.md` gains a "Weekly
+- [x] F.1 Manual (FRG-PROC-011): `docs/manual/admin/configuration.md` gains a "Weekly
       pull" subsection (source URL, refresh interval + clamp, `pull_enabled`, the
       degraded-source health item) and the scheduled-tasks list gains `pull-refresh`.
       No user-facing/README behavior change (the screen is change 2). [FRG-PROC-011]
-- [ ] F.2 Security (FRG-PROC-006): `docs/security/threat-model.md` gains a STRIDE note
+- [x] F.2 Security (FRG-PROC-006): `docs/security/threat-model.md` gains a STRIDE note
       on the pull fetch (untrusted-JSON ingress #5 + config-supplied outbound host);
       `docs/security/risk-register.md` **RISK-039** updated to implemented-status
       (timeouts, error-code handling, degraded-health, untrusted-JSON), and **RISK-025**
@@ -126,7 +126,7 @@ process.* Owns: `docs/`, registry, matrix.
       id expected. If any dependency is added, update `docs/security/soup-register.md`
       in this same change and keep `tools/soup_check.py` at exit 0 (default: no SOUP
       change). [FRG-PROC-006, FRG-PROC-012]
-- [ ] F.3 Registry + matrix: FRG-API-019 row already allocated at proposal time flips
+- [x] F.3 Registry + matrix: FRG-API-019 row already allocated at proposal time flips
       `proposed → implemented`; FRG-PULL-001..006 flip `approved → implemented`;
       traceability matrix regenerated; `tools/trace.py` exit 0. [FRG-PROC-004, FRG-PROC-005]
 - [ ] F.4 Gate: backend suite green; pre-merge review cycle (`/code-review` +
