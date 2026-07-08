@@ -187,6 +187,23 @@ class SeriesRow(Base):
     #: auto-derivation at refresh MUST NOT re-group over their choice. Cleared
     #: to return the series to auto-derivation on the next refresh.
     group_locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    #: Collected-edition (trade) book-type (FRG-SER-018) — a lowercased/
+    #: underscored parser ``Booktype`` value (``tpb``/``gn``/``hc``/
+    #: ``one_shot``); ``None`` = an ordinary single-issues run. Auto-derived
+    #: from the title cue at add/refresh (unless ``booktype_locked``). This is
+    #: DISPLAY/NAMING metadata ONLY: no book-type predicate ever reaches
+    #: ``repo.wanted_issues()`` / ``series_statistics`` — trades and singles are
+    #: independent tracks (FRG-SER-019). Plain ``Text``: an internally-derived
+    #: enum value (from the title), not external free text, and ``None`` is the
+    #: meaningful "single-issues" default, so no ``SentinelFreeText`` folding.
+    #: Deliberately distinct from the issue-level ``IssueRow.issue_type``
+    #: vocabulary, which types an *issue* and DOES feed the pull matcher's guard.
+    booktype: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: The operator set the book-type explicitly (FRG-SER-018), so
+    #: auto-derivation at refresh MUST NOT re-derive over their choice (mirrors
+    #: ``group_locked`` / FRG-SER-017). Cleared to return the series to
+    #: auto-derivation on the next refresh.
+    booktype_locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     issues: Mapped[list["IssueRow"]] = relationship(
         back_populates="series", cascade="all, delete-orphan", passive_deletes=True

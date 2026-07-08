@@ -19,6 +19,7 @@ from foragerr.config import Settings
 from foragerr.db import Database
 from foragerr.http import HttpClientFactory
 from foragerr.library import repo
+from foragerr.library.booktype import detect_series_booktype
 from foragerr.library.models import RootFolderRow, SeriesRow
 from foragerr.library.paths import (
     PathNotUnderRootError,
@@ -173,6 +174,13 @@ async def add_series(
                 search_on_add=search_on_add,
             ),
         )
+
+        # Auto-derive the collected-edition (trade) book-type from the title
+        # (FRG-SER-018) — a display/naming attribute. A brand-new series is
+        # never locked, so this always applies at add. Never touches issue
+        # creation / wanted logic (FRG-SER-019).
+        if not series.booktype_locked:
+            series.booktype = detect_series_booktype(title)
 
         # Auto-derive the franchise group for this run (FRG-SER-016) — a
         # display-only link; issue creation / wanted logic is untouched.

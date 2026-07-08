@@ -67,6 +67,32 @@ class GroupEdit:
     title: str | None = None
 
 
+# --- collected-edition book-type override (FRG-SER-018) ---------------------
+
+#: The two operator corrections to the auto-derived collected-edition typing,
+#: applied through the series edit flow (mirroring the grouping-override
+#: precedent, FRG-SER-017): ``set`` an explicit book-type (LOCKS it so a later
+#: refresh won't re-derive) or ``unlock`` it (returns it to auto-derivation on
+#: the next refresh).
+BOOKTYPE_EDIT_ACTIONS = ("set", "unlock")
+
+
+@dataclass(frozen=True)
+class BooktypeEdit:
+    """One collected-edition book-type correction on a series (FRG-SER-018).
+
+    ``action`` is one of :data:`BOOKTYPE_EDIT_ACTIONS`. ``booktype`` is the
+    explicit value for ``set`` — one of
+    :data:`foragerr.library.booktype.COLLECTED_BOOKTYPES` (validated by the
+    edit flow; a bad value raises :class:`SeriesValidationError` -> HTTP 400).
+    ``unlock`` needs no value. Display/naming only — never touches issue/file/
+    wanted state (FRG-SER-019).
+    """
+
+    action: str
+    booktype: str | None = None
+
+
 # --- domain event -----------------------------------------------------------
 
 

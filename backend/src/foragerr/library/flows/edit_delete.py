@@ -26,6 +26,7 @@ from foragerr.config import Settings
 from foragerr.db import Database, utcnow
 from foragerr.importer import IMPORT_FILE_MUTATION_GROUP, fileops, history
 from foragerr.library import paths, repo
+from foragerr.library.booktype import COLLECTED_BOOKTYPES
 from foragerr.library.models import (
     IssueFileRow,
     IssueRow,
@@ -37,6 +38,7 @@ from foragerr.library.paths import PathNotUnderRootError, validate_under_root
 from foragerr.quality.models import FormatProfileRow
 
 from foragerr.library.flows._common import (
+    BooktypeEdit,
     GroupEdit,
     SeriesNotFoundError,
     SeriesValidationError,
@@ -83,6 +85,7 @@ async def edit_series(
     path: str | None = None,
     aliases: list[str] | None = None,
     group_op: GroupEdit | None = None,
+    booktype_op: BooktypeEdit | None = None,
 ) -> SeriesRow:
     """Update only the supplied fields of a series (FRG-SER-014).
 
@@ -98,6 +101,12 @@ async def edit_series(
     never re-derives over the choice), rename the series' group, or unlock
     (returns it to auto-derivation on the next refresh). An emptied group is
     pruned.
+
+    ``booktype_op`` (when supplied) applies one collected-edition book-type
+    correction (FRG-SER-018): ``set`` an explicit book-type (LOCKS it so a
+    later refresh never re-derives) or ``unlock`` (re-derivation happens on the
+    next refresh, not inline). Display/naming only — never touches wanted
+    state (FRG-SER-019).
     """
     if monitor_new_items is not None:
         validate_monitor_new_items(monitor_new_items)
@@ -118,6 +127,12 @@ async def edit_series(
         # divergence). Grouping touches only group columns, never the path.
         if group_op is not None:
             await _apply_group_edit(session, series, group_op)
+
+        # The book-type override is validated and applied BEFORE the path
+        # rename too, for the same reason (a bad value must fail with nothing
+        # moved on disk). Touches only the two booktype columns, never the path.
+        if booktype_op is not None:
+            _apply_booktype_edit(series, booktype_op)
 
         if format_profile_id is not None:
             await _require_profile(session, format_profile_id)
@@ -221,6 +236,27 @@ async def _apply_group_edit(session, series: SeriesRow, op: GroupEdit) -> None:
         series.group_locked = False
     else:  # pragma: no cover - vocabulary validated at the API boundary
         raise SeriesValidationError(f"unknown group action {op.action!r}")
+
+
+def _apply_booktype_edit(series: SeriesRow, op: BooktypeEdit) -> None:
+    """Apply one collected-edition book-type correction inside the edit
+    transaction (FRG-SER-018). Touches only ``series.booktype`` /
+    ``series.booktype_locked`` — never any issue/file/wanted state, so it can
+    never suppress a single issue (FRG-SER-019)."""
+    if op.action == "set":
+        if op.booktype not in COLLECTED_BOOKTYPES:
+            raise SeriesValidationError(
+                f"invalid booktype {op.booktype!r}; expected one of "
+                f"{list(COLLECTED_BOOKTYPES)}"
+            )
+        series.booktype = op.booktype
+        series.booktype_locked = True
+    elif op.action == "unlock":
+        # Clear the lock only — re-derivation happens on the NEXT refresh
+        # (FRG-SER-018), never inline here.
+        series.booktype_locked = False
+    else:  # pragma: no cover - vocabulary validated at the API boundary
+        raise SeriesValidationError(f"unknown booktype action {op.action!r}")
 
 
 async def delete_series(

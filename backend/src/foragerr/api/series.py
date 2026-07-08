@@ -35,8 +35,10 @@ from foragerr.api.paging import paginate
 from foragerr.commands import CommandValidationError
 from foragerr.library import repo
 from foragerr.library.flows import (
+    BOOKTYPE_EDIT_ACTIONS,
     GROUP_EDIT_ACTIONS,
     MAX_ALIAS_LENGTH,
+    BooktypeEdit,
     GroupEdit,
     SeriesNotFoundError,
     SeriesValidationError,
@@ -115,6 +117,7 @@ def _series_fields(row: SeriesRow, stats: SeriesStatistics) -> dict:
         "description_sanitized": row.description_sanitized,
         "aliases": list(decode_aliases(row.aliases, series_id=row.id)),
         "series_group_id": row.series_group_id,
+        "booktype": row.booktype,
         "statistics": SeriesStatisticsResource.from_stats(stats),
     }
 
@@ -146,6 +149,10 @@ class SeriesResource(BaseModel):
     #: when ungrouped — lets the flat view render a group affordance without a
     #: second call. Display-only; unrelated to identity/wanted state.
     series_group_id: int | None
+    #: The collected-edition (trade) book-type (FRG-SER-018): ``tpb``/``gn``/
+    #: ``hc``/``one_shot``, or ``None`` for an ordinary single-issues run.
+    #: Display/naming metadata only — never affects wanted state (FRG-SER-019).
+    booktype: str | None
     statistics: SeriesStatisticsResource
 
     @classmethod
@@ -204,6 +211,20 @@ class SeriesGroupEdit(BaseModel):
     title: str | None = None
 
 
+class SeriesBooktypeEdit(BaseModel):
+    """A collected-edition book-type correction (FRG-SER-018), nested in
+    ``SeriesEdit`` (mirroring the ``group`` sub-object precedent).
+
+    ``action``: ``set`` (needs ``booktype``, one of ``tpb``/``gn``/``hc``/
+    ``one_shot``) types the series and LOCKS it so refresh won't re-derive;
+    ``unlock`` clears the lock so the next refresh re-derives. A bad/missing
+    value for ``set`` is rejected by the flow (-> 400). Display/naming only —
+    never changes wanted state (FRG-SER-019)."""
+
+    action: Literal[BOOKTYPE_EDIT_ACTIONS]  # type: ignore[valid-type]
+    booktype: str | None = None
+
+
 class SeriesEdit(BaseModel):
     """Request body for ``PUT /api/v1/series/{id}``; ``None`` = don't change
     (mirrors ``edit_series``'s own kwargs semantics exactly)."""
@@ -221,6 +242,9 @@ class SeriesEdit(BaseModel):
     #: A single franchise-grouping correction (FRG-SER-017); ``None`` leaves
     #: the series' grouping unchanged.
     group: SeriesGroupEdit | None = None
+    #: A single collected-edition book-type correction (FRG-SER-018); ``None``
+    #: leaves the series' typing unchanged.
+    booktype: SeriesBooktypeEdit | None = None
 
 
 class LookupCandidateResource(BaseModel):
@@ -389,6 +413,7 @@ async def list_series(
     pageSize: int = Query(20, ge=1, le=200),
     sortKey: str = Query("sort_title"),
     sortDirection: str = Query("asc"),
+    collected: bool | None = Query(None),
 ) -> SeriesPage:
     """Paged series index with nested statistics (FRG-API-003, FRG-API-006).
 
@@ -396,12 +421,23 @@ async def list_series(
     row (issue count, file count/size, next/last release date) — a known
     N+1 across the page (up to ~4 * pageSize queries), acceptable at M1
     scale (int aggregates over indexed FKs, no heavy joins) but NOT free;
-    not fixed here (see the API-area report for rationale)."""
+    not fixed here (see the API-area report for rationale).
+
+    ``collected`` (FRG-SER-018) optionally partitions by collected-edition
+    typing: ``true`` -> only typed (``booktype IS NOT NULL``) series, ``false``
+    -> only single-issues (``booktype IS NULL``) series, absent -> no filter.
+    A display filter only; it composes with sort/paging and never touches
+    wanted state (FRG-SER-019)."""
     db = request.app.state.db
+    stmt = select(SeriesRow)
+    if collected is True:
+        stmt = stmt.where(SeriesRow.booktype.is_not(None))
+    elif collected is False:
+        stmt = stmt.where(SeriesRow.booktype.is_(None))
     async with db.read_session() as session:
         result = await paginate(
             session,
-            stmt=select(SeriesRow),
+            stmt=stmt,
             page=page,
             page_size=pageSize,
             sort_key=sortKey,
@@ -684,6 +720,11 @@ async def update_series(
         if body.group is not None
         else None
     )
+    booktype_op = (
+        BooktypeEdit(action=body.booktype.action, booktype=body.booktype.booktype)
+        if body.booktype is not None
+        else None
+    )
     try:
         row = await edit_series(
             db,
@@ -695,6 +736,7 @@ async def update_series(
             path=body.path,
             aliases=body.aliases,
             group_op=group_op,
+            booktype_op=booktype_op,
         )
     except SeriesNotFoundError as exc:
         raise ApiError(404, str(exc)) from exc
