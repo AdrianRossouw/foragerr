@@ -70,6 +70,7 @@ from foragerr.parser.result import IssueClassification
 from foragerr.parser.vocab import ANNUAL_MARKERS
 from foragerr.pull import repo
 from foragerr.pull.models import PullEntryRow
+from foragerr.pull.projection import week_date_range
 
 #: Guarded name match: issue number must be within this many positions AHEAD of
 #: (or equal to) the series' latest known issue — Mylar's ``0 <= delta < 3``
@@ -281,9 +282,21 @@ def _try_name_match(entry: PullEntryRow, index: LibraryMatchIndex) -> MatchResul
     if not (Fraction(0) <= delta < Fraction(_MAX_SEQ_DELTA)):
         return None
 
-    # Date guard: an already-present library issue carrying this number must be
-    # dated within ±2 days of the entry — the check that rejects a wrong-volume
-    # collision (same name+number, far-off date). No existing issue ⇒ a
+    # Week guard (FRG-PULL-004: "release date within the pull week ±2 days"): the
+    # entry's own ship date must fall in the ISO week it was stored under, ±2
+    # days. This holds whether or not a local issue exists — critically, a
+    # matched-but-*missing* future issue whose date is nowhere near this week must
+    # NOT sequence-match and trigger a refresh (a plausible #next with a far-off
+    # date is exactly the case the week window rejects).
+    week_start, week_end = week_date_range(entry.week)
+    window = dt.timedelta(days=_DATE_WINDOW_DAYS)
+    if not (week_start - window <= entry.release_date <= week_end + window):
+        return None
+
+    # Collision guard (additional): an already-present library issue carrying this
+    # number must be dated within ±2 days of the entry — rejects a wrong-volume
+    # collision (same name+number in the watched series, but a far-off real date)
+    # that the week window alone would let through. No existing issue ⇒ a
     # matched-but-missing future issue (link stays None; area D refreshes).
     existing = series.by_value.get(entry_value)
     if existing is not None and existing.date is not None:

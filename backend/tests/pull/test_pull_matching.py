@@ -216,6 +216,26 @@ async def test_name_match_future_issue_is_matched_but_missing(db, tmp_path):
 
 
 @pytest.mark.req("FRG-PULL-004")
+async def test_name_match_rejected_when_release_date_outside_pull_week(db, tmp_path):
+    # A sequence-plausible MISSING issue (delta 1, no local issue to date-check)
+    # whose ship date is nowhere near the stored pull week must be rejected by the
+    # week window (FRG-PULL-004 "release date within the pull week ±2 days") — else
+    # it would name_seq-match and wrongly enqueue refresh-series. WEEK is 2026-W28.
+    ids = await _seed(
+        db,
+        tmp_path / "lib",
+        [{"title": "Saga", "cv_volume_id": 20, "issues": [{"number": "10", "cv_issue_id": 6000}]}],
+    )
+    [result] = await _match(
+        db,
+        [ParsedPullEntry(series_name="Saga", issue_number="11", release_date=dt.date(2027, 1, 1))],
+    )
+    assert result.match_type == "unmatched"
+    assert result.matched_issue_id is None
+    assert result.matched_series_id is None
+
+
+@pytest.mark.req("FRG-PULL-004")
 async def test_name_match_rejected_when_sequence_delta_too_large(db, tmp_path):
     await _seed(
         db,

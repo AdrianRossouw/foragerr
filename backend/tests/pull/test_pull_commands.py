@@ -44,7 +44,10 @@ from foragerr.pull.commands import (
 from foragerr.pull.models import ParsedPullEntry
 from foragerr.pull.source import PullFetchOutcome, PullWeekResult
 
-WEEK, YEAR = 27, 2026
+# 2026-07-08 (the ship date the fixtures use) is ISO week 2026-W28, so the stored
+# week must be W28 — the name-match week guard (FRG-PULL-004) requires the entry's
+# release date to fall within the week it is stored under.
+WEEK, YEAR = 28, 2026
 WEEK_KEY = f"{YEAR}-W{WEEK:02d}"
 
 
@@ -206,9 +209,12 @@ async def test_present_matched_issue_triggers_no_refresh(
 ):
     """A pull entry whose matched issue already exists locally records the link
     and enqueues NO refresh-series (steady-state weeks do not churn refreshes)."""
-    await seed_series_issue(db, tmp_path)  # Spawn #1 exists, cover_date 2024-01-01
+    await seed_series_issue(db, tmp_path)  # Spawn #1 exists (cv_issue_id 123456)
+    # Present issue → an id match (the high-confidence path, independent of the
+    # week window); it resolves to the existing local issue, so no refresh fires.
     _install_client(
-        monkeypatch, _outcome(_entry("Spawn", "1", day=dt.date(2024, 1, 1)))
+        monkeypatch,
+        _outcome(_entry("Spawn", "1", day=dt.date(2026, 7, 8), cv_issue_id=123456)),
     )
     ctx, _svc = await _ctx(db, _settings(config_dir))
 
