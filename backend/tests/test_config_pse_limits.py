@@ -8,7 +8,7 @@ from __future__ import annotations
 import pytest
 
 from foragerr.config import Settings
-from foragerr.security.archives import ArchiveLimits
+from foragerr.security.archives import DEFAULT_ARCHIVE_LIMITS, ArchiveLimits
 
 
 @pytest.fixture
@@ -29,10 +29,17 @@ def test_pse_limits_defaults_and_archive_limits_helper(config_dir):
 
     limits = settings.opds_pse_archive_limits()
     assert isinstance(limits, ArchiveLimits)
-    # The two central-directory caps fold into the per-request override; total /
+    # The member-count cap folds into the per-request LISTING override; total /
     # nesting stay at the shared archive defaults.
     assert limits.max_members == 5000
-    assert limits.max_member_bytes == 64 * 1024 * 1024
+    # Listability is DECOUPLED from the tight per-page byte cap (FIX-1b): the
+    # listing limit's member-size cap stays at the DEFAULT import cap, NOT
+    # opds_pse_max_page_bytes — so an archive is streamable iff it passed import,
+    # and a single oversized page is refused only at read time (a per-page 502)
+    # rather than 404-ing the whole archive. The tight per-page cap therefore does
+    # NOT appear here.
+    assert limits.max_member_bytes == DEFAULT_ARCHIVE_LIMITS.max_member_bytes
+    assert limits.max_member_bytes != settings.opds_pse_max_page_bytes
 
 
 @pytest.mark.req("FRG-OPDS-012")

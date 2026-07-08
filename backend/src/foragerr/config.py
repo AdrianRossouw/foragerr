@@ -37,7 +37,7 @@ from foragerr.config_migrations import (
 )
 from foragerr.logging import register_secret
 from foragerr.naming import DEFAULT_FILE_TEMPLATE, DEFAULT_FOLDER_TEMPLATE
-from foragerr.security.archives import ArchiveLimits
+from foragerr.security.archives import DEFAULT_ARCHIVE_LIMITS, ArchiveLimits
 
 logger = _stdlog.getLogger("foragerr.config")
 
@@ -915,18 +915,27 @@ class Settings(BaseSettings):
         return self
 
     def opds_pse_archive_limits(self) -> ArchiveLimits:
-        """Per-request archive-safety limits for the OPDS-PSE page/cover surface.
+        """Per-request archive-safety limits for the OPDS-PSE *listing* surface.
 
-        Folds the ``opds_pse_*`` member/byte caps into an :class:`ArchiveLimits`
-        override the stream and cover endpoints pass to ``list_image_members`` /
-        ``read_image_member`` (FRG-OPDS-012), tightening the shared import
-        defaults for the untrusted OPDS decode path. ``opds_pse_max_page_bytes``
-        maps to the per-member declared-size cap; ``opds_pse_max_members`` to the
-        member-count cap. Total-size and nesting stay at the shared defaults.
+        Folds ``opds_pse_max_members`` into an :class:`ArchiveLimits` override the
+        stream and cover endpoints pass to ``list_image_members`` (FRG-OPDS-012),
+        tightening only the member-count cap for the untrusted OPDS listing path.
+
+        Crucially, ``max_member_bytes`` stays at the shared DEFAULT import cap —
+        NOT the tight ``opds_pse_max_page_bytes``. Listability must match what the
+        import producer decided (which counts under the default import limits): if
+        this used the tight per-page cap, a CBZ with one page larger than
+        ``opds_pse_max_page_bytes`` would be listed (and counted) at import yet
+        return ``None`` from ``list_image_members`` at stream time, 404-ing the
+        WHOLE archive. The tight per-page byte cap is instead enforced ONLY at
+        read time, in ``read_image_member(..., max_bytes=opds_pse_max_page_bytes)``,
+        so a single over-64-MiB page returns a bounded per-page 502 while every
+        other page still streams. Net: an archive is streamable iff it passed
+        import. Total-size and nesting stay at the shared defaults.
         """
         return ArchiveLimits(
             max_members=self.opds_pse_max_members,
-            max_member_bytes=self.opds_pse_max_page_bytes,
+            max_member_bytes=DEFAULT_ARCHIVE_LIMITS.max_member_bytes,
         )
 
     def secret_fields(self) -> dict[str, SecretStr]:

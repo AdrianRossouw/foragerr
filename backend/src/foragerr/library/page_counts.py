@@ -17,6 +17,7 @@ here, and this module never resolves or mutates ``issue_file.path``.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -54,7 +55,10 @@ async def resolve_page_count(
     if issue_file.page_count is not None and issue_file.size == current_size:
         return issue_file.page_count  # trusted cache — no archive open
 
-    members = list_image_members(resolved_path, limits)
+    # Offload the central-directory listing: it is synchronous archive I/O and
+    # must never run on the event loop (this coroutine may be awaited from a
+    # request handler).
+    members = await asyncio.to_thread(list_image_members, resolved_path, limits)
     count = len(members) if members is not None else None
     issue_file.page_count = count
     # Refresh the invalidation key so a subsequent access hits the fast path (the

@@ -10,9 +10,10 @@ stream fails loudly (``LOAD_TRUNCATED_IMAGES`` stays off on this untrusted path)
 from __future__ import annotations
 
 import io
+import os
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageFile
 
 from foragerr.security.images import ImageRenderError, render_page
 
@@ -22,6 +23,17 @@ _BIG_PIXELS = 100_000_000  # a cap wide enough that small fixtures never trip it
 def _jpeg(width: int, height: int, color=(200, 60, 40)) -> bytes:
     buf = io.BytesIO()
     Image.new("RGB", (width, height), color).save(buf, "JPEG")
+    return buf.getvalue()
+
+
+def _jpeg_noise(width: int, height: int) -> bytes:
+    """A NOISE JPEG (poorly compressible), so a mid-stream truncation leaves the
+    header intact but the scan data incomplete — the case that decodes only when
+    ``LOAD_TRUNCATED_IMAGES`` is enabled and raises otherwise."""
+    buf = io.BytesIO()
+    Image.frombytes("RGB", (width, height), os.urandom(width * height * 3)).save(
+        buf, "JPEG", quality=95
+    )
     return buf.getvalue()
 
 
@@ -112,3 +124,35 @@ def test_truncated_image_raises_render_error():
     truncated = full[: len(full) // 2]
     with pytest.raises(ImageRenderError):
         render_page(truncated, max_width=None, max_pixels=_BIG_PIXELS)
+
+
+@pytest.mark.req("FRG-OPDS-012")
+def test_render_resets_load_truncated_flag_per_call(monkeypatch):
+    """FIX-7: ``LOAD_TRUNCATED_IMAGES`` is a process-global mutable flag; another
+    module flipping it to True must NOT let a truncated stream decode on this
+    untrusted path. ``render_page`` re-asserts ``False`` per call, so a mid-stream
+    truncation still raises even with the global pre-set True — and the flag is
+    left False afterwards."""
+    monkeypatch.setattr(ImageFile, "LOAD_TRUNCATED_IMAGES", True)
+    full = _jpeg_noise(400, 400)
+    truncated = full[: int(len(full) * 0.6)]  # header intact, scan incomplete
+
+    with pytest.raises(ImageRenderError):
+        render_page(truncated, max_width=None, max_pixels=_BIG_PIXELS)
+    # The per-call reset ran regardless of the global the caller set.
+    assert ImageFile.LOAD_TRUNCATED_IMAGES is False
+
+
+@pytest.mark.req("FRG-OPDS-011")
+def test_force_jpeg_flattens_alpha_source_to_jpeg():
+    """FIX-5a: the cover path forces JPEG so its ``.jpg`` cache + ``image/jpeg``
+    content type stay truthful — an alpha source is flattened, never returned as
+    mislabeled PNG bytes."""
+    data = _png_rgba(60, 40)
+    out, content_type = render_page(
+        data, max_width=None, max_pixels=_BIG_PIXELS, force_jpeg=True
+    )
+    assert content_type == "image/jpeg"
+    img = Image.open(io.BytesIO(out))
+    assert img.format == "JPEG"
+    assert img.mode == "RGB"  # flattened — no alpha channel survives

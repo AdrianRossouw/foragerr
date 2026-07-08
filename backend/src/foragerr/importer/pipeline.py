@@ -874,9 +874,15 @@ async def execute(
     # the page count for a fully-listed archive; an unlistable one (magic-only
     # cbr/cb7, or none inspected) stays NULL and is resolved lazily on first OPDS
     # access.
+    #
+    # Gate on ``kind == "zip"``, NOT ``listed`` alone: the OPDS page reader is
+    # zip-only (``list_image_members`` opens the file as a ``ZipFile``), so a CBR
+    # that ``rarfile`` DID list (``listed=True``) would otherwise advertise a
+    # non-NULL count the stream endpoint then 404s on. A non-zip listable archive
+    # therefore stays NULL — no PSE link — matching what the consumer can serve.
     file_row.page_count = (
         ev.archive.image_count
-        if ev.archive is not None and ev.archive.listed
+        if ev.archive is not None and ev.archive.kind == "zip" and ev.archive.listed
         else None
     )
     await session.flush()

@@ -64,6 +64,44 @@ async def test_unlistable_cbr_import_leaves_page_count_null(db, seed, import_ctx
 
 
 @pytest.mark.req("FRG-OPDS-009")
+async def test_listed_cbr_import_still_leaves_page_count_null(
+    db, seed, import_ctx, monkeypatch
+):
+    """FIX-1a: even a CBR that ``rarfile`` DID enumerate (report.listed=True,
+    kind='rar', image_count>0) must leave page_count NULL. The OPDS page reader is
+    zip-only, so advertising PSE for a non-zip archive would 404 every page —
+    listability alone must not gate the producer; the container kind must be zip."""
+    from foragerr.importer import pipeline as pl
+    from foragerr.security.archives import ArchiveReport
+
+    s = await seed()
+    cbr = s.series_path / "Batman 404 (1987).cbr"
+    cbr.write_bytes(_RAR_MAGIC + b"\x00" * 256)
+    ctx = import_ctx()
+
+    real_inspect = pl.inspect_archive
+
+    def _fake_inspect(path, *args, **kwargs):
+        report = real_inspect(path, *args, **kwargs)
+        if report.kind == "rar":
+            # Simulate rarfile present and successfully listing the CBR's members.
+            return ArchiveReport(
+                ok=True, kind="rar", member_count=7, image_count=7,
+                listed=True, safe_to_extract=True,
+            )
+        return report
+
+    monkeypatch.setattr(pl, "inspect_archive", _fake_inspect)
+
+    outcomes = await _run(db, RescanSource(series_id=s.series_id), ctx)
+
+    assert [o.status for o in outcomes] == [ImportStatus.IMPORTED]
+    async with db.read_session() as session:
+        row = (await session.execute(select(IssueFileRow))).scalar_one()
+    assert row.page_count is None  # listed rar, but not zip → no PSE count
+
+
+@pytest.mark.req("FRG-OPDS-009")
 async def test_page_count_column_round_trips(db, seed):
     """The nullable column round-trips a written value straight through the ORM."""
     s = await seed()

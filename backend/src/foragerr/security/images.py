@@ -20,8 +20,10 @@ Two Pillow safety switches are set at import:
 * ``Image.MAX_IMAGE_PIXELS`` is pinned to a safe global ceiling — Pillow's own
   decompression-bomb backstop that raises ``DecompressionBombError`` on a
   pathological image even if a caller passes a lax ``max_pixels``.
-* ``LOAD_TRUNCATED_IMAGES`` is left DISABLED — on this untrusted path a truncated
-  stream must fail loudly, not be silently completed with garbage padding.
+* ``LOAD_TRUNCATED_IMAGES`` is DISABLED — on this untrusted path a truncated
+  stream must fail loudly, not be silently completed with garbage padding. It is
+  a process-global mutable flag, so :func:`render_page` re-asserts ``False`` per
+  call (the import-time set is only a process-wide default).
 """
 
 from __future__ import annotations
@@ -39,12 +41,20 @@ logger = logging.getLogger(__name__)
 Image.MAX_IMAGE_PIXELS = 64_000_000
 
 #: Untrusted-path defense-in-depth: a truncated/hostile stream must fail loudly,
-#: not be silently completed with padding. ``LOAD_TRUNCATED_IMAGES`` defaults to
-#: ``False``; we pin it so no import elsewhere can flip it for this path.
+#: not be silently completed with padding. ``LOAD_TRUNCATED_IMAGES`` is a
+#: process-global mutable flag, so pinning it once at import is NOT enough — any
+#: other module (or Pillow plugin) can flip it later. :func:`render_page` therefore
+#: re-asserts ``False`` per call, right before decode, so this untrusted path is
+#: self-defended regardless of global state. This import-time set is only a
+#: sensible default for the rest of the process.
 ImageFile.LOAD_TRUNCATED_IMAGES = False
 
 #: Modes that carry real transparency and must round-trip as PNG.
 _ALPHA_MODES = frozenset({"RGBA", "LA", "PA", "La"})
+
+#: Opaque background an alpha source is flattened onto when JPEG output is forced
+#: (the cover path — JPEG has no alpha channel). White matches typical page media.
+_FLATTEN_BACKGROUND = (255, 255, 255)
 
 
 class ImageRenderError(Exception):
@@ -58,7 +68,7 @@ class ImageRenderError(Exception):
 
 
 def render_page(
-    data: bytes, *, max_width: int | None, max_pixels: int
+    data: bytes, *, max_width: int | None, max_pixels: int, force_jpeg: bool = False
 ) -> tuple[bytes, str]:
     """Decode, downscale and re-encode one page image (FRG-OPDS-008/012).
 
@@ -75,13 +85,20 @@ def render_page(
        aspect ratio and NEVER upscaling (a source narrower than ``max_width`` is
        returned at its own size).
     5. **Encode** — JPEG for opaque/photographic pages; PNG only when the source
-       carries alpha.
+       carries alpha. When ``force_jpeg`` is set (the cover path — its ``.jpg``
+       cache + ``image/jpeg`` content type must always be truthful), an alpha
+       source is flattened onto an opaque background and encoded JPEG instead, so
+       the returned content type is ALWAYS ``image/jpeg``.
 
     Returns ``(encoded_bytes, content_type)`` e.g. ``(b"...", "image/jpeg")``.
     Raises :class:`ImageRenderError` on any over-cap, corrupt or undecodable
     input. Synchronous and CPU-bounded by the caps (the wall-clock bound is the
     caller's concern).
     """
+    # Re-assert the untrusted-path guard per call: ``LOAD_TRUNCATED_IMAGES`` is a
+    # process-global flag any other code could have flipped since import, so this
+    # is what actually guarantees a truncated stream fails loudly here.
+    ImageFile.LOAD_TRUNCATED_IMAGES = False
     try:
         img = Image.open(io.BytesIO(data))
     except (OSError, ValueError, Image.DecompressionBombError) as exc:
@@ -111,10 +128,18 @@ def render_page(
             img.thumbnail((max_width, 2**31 - 1), Image.LANCZOS)
 
         buffer = io.BytesIO()
-        if has_alpha:
+        if has_alpha and not force_jpeg:
             out = img if img.mode == "RGBA" else img.convert("RGBA")
             out.save(buffer, format="PNG", optimize=True)
             content_type = "image/png"
+        elif has_alpha:
+            # force_jpeg: JPEG has no alpha, so composite over an opaque
+            # background rather than letting Pillow drop the channel arbitrarily.
+            rgba = img if img.mode == "RGBA" else img.convert("RGBA")
+            background = Image.new("RGB", rgba.size, _FLATTEN_BACKGROUND)
+            background.paste(rgba, mask=rgba.split()[-1])
+            background.save(buffer, format="JPEG", quality=85)
+            content_type = "image/jpeg"
         else:
             out = img if img.mode == "RGB" else img.convert("RGB")
             out.save(buffer, format="JPEG", quality=85)
