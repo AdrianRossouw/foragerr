@@ -1121,6 +1121,45 @@ pull-source arm **closed** via the external egress profile. Both are updated to
 implemented-status in the risk register; no new risk id and no SOUP change (the
 fetch reuses the existing `httpx` factory; parsing is stdlib).
 
+### 2026-07-08 — m3-opds-page-streaming (M3 change 3)
+
+New attack surface on **COMP 3 — OPDS catalog server**: the first server-side
+**archive-open + image-decode** path reachable from the OPDS listener (previously the
+M1 catalog served whole files with zero archive I/O and no image library). Two new
+GET endpoints — `/page/{issue_file_id}/{pageNumber}` (PSE single-page stream) and
+`/cover/{issue_file_id}` (local first-page cover) — read and decode untrusted archive
+bytes from library files. No new STRIDE category, no new COMP, and **no new risk id**
+(RISK-005 already reserved this surface). Disposition:
+
+- **T-OPDS-3 (DoS — zip-bomb / decompression / pixel-bomb / truncated image),
+  RISK-005 CLOSED**: both endpoints open archives ONLY via `security.archives`
+  (`list_image_members`/`read_image_member`) — central-directory member/byte caps from
+  `inspect_archive`/`ArchiveLimits`, gated on `safe_to_extract` (never `ok`), declared-
+  member-size checked **before** read, `is_safe_member_name` re-checked per member
+  (zip-slip defence-in-depth). Decode is ONLY via `security.images.render_page`, which
+  sets `Image.MAX_IMAGE_PIXELS`, keeps `LOAD_TRUNCATED_IMAGES` **off**, and rejects an
+  over-pixel image **before** `.load()`. A **per-request wall-clock time bound**
+  (`asyncio.wait_for` over an offload thread) turns a pathological decode into a 503,
+  not a pinned core. Every cap is operator-configurable (`opds_pse_*`). The M1
+  **no-archive-I/O-at-feed-render** invariant is preserved — `pse:count` comes from the
+  cached `issue_files.page_count`, never from opening the archive at render (a NULL
+  count is filled lazily on first stream, off the render path).
+- **T-OPDS-1 (Information disclosure — path traversal) unchanged/closed**: both new
+  endpoints resolve strictly by `issue_file_id` through the same `validate_under_root`
+  confinement resolver as whole-file download (FRG-OPDS-003) — no request field is ever
+  used as a filesystem path; `pageNumber`/`width` are integers, bounds-checked.
+- **Reduced egress (privacy)**: the local cover/thumbnail fallback means a cover-less
+  issue no longer hotlinks a ComicVine CDN URL to the reader — thumbnails are served by
+  the application, so a tailnet reader makes no third-party request.
+- **New dependency**: **Pillow** is added (SOUP register updated, FRG-PROC-012) — used
+  ONLY on these two OPDS decode paths under the caps above, never wired into import,
+  metadata, or the UI. `rarfile` is deliberately NOT added: a CBR is unlistable, so it
+  gets no PSE link and no local cover (whole-file download unaffected) — avoiding a
+  shell-out-to-`unrar` surface.
+
+RISK-005 and the cover-extraction arm of RISK-010 are updated to implemented-status in
+the risk register; COMP 3 above remains accurate with the streaming subset now live.
+
 ## Coverage summary
 
 - **Well covered by the five drafts** (mitigation named, no new requirement needed): OPDS

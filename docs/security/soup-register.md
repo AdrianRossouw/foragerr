@@ -51,6 +51,7 @@ When live tooling becomes available, anomaly review is introduced in its own cha
 | uvicorn | `>=0.30` | PyPI | ASGI server that runs the FastAPI application | FRG-DEP-007 (health endpoint), FRG-DEP-008 (graceful shutdown), all FRG-API-* endpoints at runtime | BSD-3-Clause | Deferred — see methodology |
 | pyyaml | `>=6.0` | PyPI | YAML parsing/serialization of `/config/config.yaml` | FRG-DEP-003 (configuration via environment variables and config file) | MIT | Deferred — see methodology |
 | defusedxml | `>=0.7` | PyPI | Hardened XML parsing (guards against XXE, billion-laughs/entity-expansion, external-entity SSRF) for untrusted Newznab/RSS indexer responses | FRG-IDX-006 (Newznab response parsing and error mapping), FRG-SEC-* (untrusted-input handling), the STRIDE disposition in `docs/security/threat-model.md` for indexer response parsing | PSF-2.0 | Deferred — see methodology |
+| pillow | `>=11,<12` | PyPI | Image decode/downscale for OPDS-PSE page streaming and local first-page cover extraction; used only on the OPDS stream/cover paths under strict pixel/byte caps (`MAX_IMAGE_PIXELS` set, truncated-image loading disabled) — never wired into import/metadata/UI | FRG-OPDS-008 (PSE page streaming), FRG-OPDS-011 (local cover/thumbnail fallback), FRG-OPDS-012 (archive/image resource limits), the STRIDE disposition in `docs/security/threat-model.md` for the OPDS archive/image-decode surface | MIT-CMU (HPND) | Deferred — see methodology |
 
 ## Development/test tooling (backend)
 

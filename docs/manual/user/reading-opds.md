@@ -45,5 +45,27 @@ download is confinement-checked against your registered root folders before a
 byte is served. An id that resolves outside the library simply returns "not
 found".
 
-Page-by-page streaming (reading without downloading the whole file first) is a
-later milestone (`FRG-OPDS-008..012`); for now readers download whole files.
+## Page streaming (read without downloading the whole file)
+
+Readers that support the **OPDS Page Streaming Extension (OPDS-PSE)** — Panels and
+Chunky among them — can open a comic and stream it **one page at a time** instead of
+downloading the whole `.cbz` first. It opens faster and is lighter on a big issue,
+and it is what those readers use by default when they see the option.
+
+You don't configure anything: every issue entry advertises **both** page streaming
+and whole-file download, so your reader picks whichever it supports — a
+non-streaming reader just downloads the file as before, nothing changes for it.
+
+A few things worth knowing:
+
+- Streaming works for **`.cbz` (zip) comics**. A `.cbr` (rar) comic can still be
+  **downloaded** whole, but it is not page-streamed (foragerr does not bundle an
+  unrar tool); if you want streaming for a title, keep it as `.cbz`.
+- Every issue also shows a **cover**: if there's no ComicVine cover on file,
+  foragerr generates one from the comic's first page and serves it itself — so
+  covers and thumbnails always appear, and your reader never has to reach out to a
+  third-party image host to show them.
+- Pages are served in natural reading order, and the reader can ask for a reduced
+  width to save bandwidth. An operator can tune the streaming limits (see the
+  `opds_pse_*` settings in `admin/configuration.md`); the defaults are fine for
+  ordinary comics.
