@@ -31,6 +31,8 @@ import type {
   SeriesCreatePayload,
   SeriesCreatedResource,
   SeriesEditPayload,
+  SeriesGroupEditOp,
+  SeriesGroupResource,
   SeriesResource,
   SuggestResponse,
   SystemHealthComponent,
@@ -94,6 +96,29 @@ export function useSeriesIndex(): UseQueryResult<SeriesResource[]> {
         (page) =>
           `/api/v1/series?page=${page}&pageSize=${MAX_PAGE_SIZE}&sortKey=sort_title&sortDirection=asc`,
       ),
+  });
+}
+
+/**
+ * Franchise grouping projection under ['series','groups'] (FRG-UI-021 /
+ * FRG-API-020). Walks the paged aggregate endpoint like `useSeriesIndex`
+ * (ungrouped series ride along as singleton franchises, so the list is total
+ * and can exceed one 200-record page). `enabled` gates the fetch so the flat
+ * views pay nothing for it while grouping is toggled off.
+ */
+export function useSeriesGroups(
+  enabled = true,
+): UseQueryResult<SeriesGroupResource[]> {
+  const fetcher = useFetcher();
+  return useQuery({
+    queryKey: queryKeys.series.groups(),
+    queryFn: () =>
+      fetchAllPages<SeriesGroupResource>(
+        fetcher,
+        (page) =>
+          `/api/v1/series/groups?page=${page}&pageSize=${MAX_PAGE_SIZE}&sortKey=title&sortDirection=asc`,
+      ),
+    enabled,
   });
 }
 
@@ -624,6 +649,38 @@ export function useUpdateSeries(
         queryKey: queryKeys.series.all(),
         exact: true,
       });
+    },
+  });
+}
+
+/**
+ * PUT /api/v1/series/{id} carrying only a grouping override op (FRG-SER-017 /
+ * FRG-UI-021): rename a franchise group, or reassign/detach/unlock a series.
+ * Rename applies to the group ANY member series belongs to, so the caller
+ * passes a member's `seriesId`. On success the flat index (each row's
+ * `series_group_id`), that series' detail, and the grouping projection are all
+ * stale, so all three keys are refreshed.
+ */
+export function useUpdateSeriesGroup(): UseMutationResult<
+  SeriesResource,
+  Error,
+  { seriesId: number; group: SeriesGroupEditOp }
+> {
+  const fetcher = useFetcher();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ seriesId, group }) =>
+      fetcher<SeriesResource>(`/api/v1/series/${seriesId}`, {
+        method: 'PUT',
+        body: { group },
+      }),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(queryKeys.series.detail(updated.id), updated);
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.series.all(),
+        exact: true,
+      });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.series.groups() });
     },
   });
 }

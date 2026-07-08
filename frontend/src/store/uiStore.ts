@@ -14,6 +14,16 @@ interface UiState {
   setLibraryViewMode: (mode: LibraryViewMode) => void;
   librarySortKey: LibrarySortKey;
   setLibrarySortKey: (key: LibrarySortKey) => void;
+  /**
+   * Grouped-library toggle (FRG-UI-021): an ORTHOGONAL boolean over the
+   * poster/table view mode — when on, the index nests successive runs of one
+   * title under a collapsible franchise header instead of a flat list. Kept
+   * separate from `libraryViewMode` (not a 4th mode) so the two preferences
+   * compose independently.
+   */
+  libraryGroupByFranchise: boolean;
+  toggleLibraryGroupByFranchise: () => void;
+  setLibraryGroupByFranchise: (on: boolean) => void;
   sidebarCollapsed: boolean;
   toggleSidebar: () => void;
   /**
@@ -31,6 +41,11 @@ export const useUiStore = create<UiState>((set) => ({
   setLibraryViewMode: (libraryViewMode) => set({ libraryViewMode }),
   librarySortKey: 'title',
   setLibrarySortKey: (librarySortKey) => set({ librarySortKey }),
+  libraryGroupByFranchise: false,
+  toggleLibraryGroupByFranchise: () =>
+    set((s) => ({ libraryGroupByFranchise: !s.libraryGroupByFranchise })),
+  setLibraryGroupByFranchise: (libraryGroupByFranchise) =>
+    set({ libraryGroupByFranchise }),
   sidebarCollapsed: false,
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   interactiveSearchIssueId: null,

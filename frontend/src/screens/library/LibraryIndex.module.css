@@ -165,6 +165,163 @@
   color: var(--color-accent);
 }
 
+/* --- grouped (franchise) view ------------------------------------------ */
+
+.groupList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+}
+
+.franchise {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.franchiseHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding-bottom: var(--spacing-xs);
+  border-bottom: 1px solid var(--surface-border);
+}
+
+.collapseButton {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.chevron {
+  display: inline-block;
+  transform: rotate(90deg);
+  transition: transform 0.1s ease;
+  color: var(--text-muted);
+}
+
+.chevron[data-collapsed='true'] {
+  transform: rotate(0deg);
+}
+
+.franchiseTitle {
+  font-weight: var(--font-weight-bold);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.franchiseStats {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.runCount {
+  color: var(--text-muted);
+}
+
+.franchiseMenuWrap {
+  position: relative;
+}
+
+.menuButton {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: var(--font-size-lg);
+  line-height: 1;
+  padding: 0 var(--spacing-xs);
+  cursor: pointer;
+}
+
+.menuButton:hover {
+  color: var(--color-accent);
+}
+
+.franchiseMenu {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 10;
+  min-width: 220px;
+  margin-top: var(--spacing-xs);
+  padding: var(--spacing-sm);
+  background: var(--surface-card);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+}
+
+.renameRow {
+  display: flex;
+  gap: var(--spacing-xs);
+}
+
+.renameInput {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 var(--spacing-xs);
+  background: var(--surface-chrome);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.renameInput:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.detachList {
+  list-style: none;
+  margin: var(--spacing-xs) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.menuAction {
+  width: 100%;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.menuAction:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: var(--surface-card-hover);
+}
+
+.menuAction:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.franchiseMembers,
+.singleRun {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--spacing-md);
+}
+
 /* --- states + footer ---------------------------------------------------- */
 
 .stateNote {
