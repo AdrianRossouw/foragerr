@@ -26,8 +26,10 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import stat
 import zipfile
+import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -397,10 +399,147 @@ def _inspect_rar(path: Path, limits: ArchiveLimits) -> ArchiveReport:
     )
 
 
+# --- OPDS page streaming: ordered image-member listing + safe reader ---------
+# (FRG-OPDS-010, FRG-OPDS-012). These sit on top of ``inspect_archive`` and are
+# the archive half of the new OPDS page/cover surface. They never extract to
+# disk: listing reads only the central directory; the reader loads one vetted
+# member into memory under a byte cap. Both gate on ``safe_to_extract`` (never
+# ``ok``) — the archive module's documented rule for any extractor.
+
+
+class ArchiveMemberError(Exception):
+    """A single archive member could not be read safely (FRG-OPDS-012).
+
+    Raised by :func:`read_image_member` on a member-name violation (zip-slip /
+    absolute / symlink), a declared size over the caller's byte cap (checked
+    BEFORE any decompression), an absent member, or archive corruption caught
+    during the read. The caller degrades to a bounded 4xx/5xx, never a crash or
+    a memory blow-up.
+    """
+
+
+def natural_sort_key(name: str) -> tuple[tuple[int, object], ...]:
+    """Numeric-aware sort key so ``1.jpg, 2.jpg, 10.jpg`` sort in that order.
+
+    Splits the name into alternating non-digit / digit runs; digit runs compare
+    as integers (so zero-padding is irrelevant — ``02`` and ``2`` collate the
+    same and both precede ``10``), non-digit runs compare case-insensitively.
+    Each element is a ``(rank, value)`` tuple whose first slot keeps ints and
+    strings from ever being compared against each other.
+    """
+    key: list[tuple[int, object]] = []
+    for chunk in re.split(r"(\d+)", name):
+        if chunk.isdigit():
+            key.append((0, int(chunk)))
+        else:
+            key.append((1, chunk.lower()))
+    return tuple(key)
+
+
+def list_image_members(
+    path: str | os.PathLike[str],
+    limits: ArchiveLimits = DEFAULT_ARCHIVE_LIMITS,
+) -> list[str] | None:
+    """Ordered image members of a listable archive, or ``None`` (FRG-OPDS-010).
+
+    Returns the archive's image members (extensions in :data:`_IMAGE_EXTS`) in
+    :func:`natural_sort_key` order, EXCLUDING directory entries, symlink members,
+    ``..``/absolute member names, non-image members and ``ComicInfo.xml``. This
+    is exactly the OPDS "page" set — its length is the PSE ``pse:count`` and its
+    indexes address stream pages.
+
+    Returns ``None`` when the archive is not safely listable: gated on the
+    :class:`ArchiveReport` ``safe_to_extract`` flag (never ``ok``), so a CBR with
+    :mod:`rarfile` absent, an oversized/hostile archive, or a corrupt container
+    all degrade to "no pages". A listable archive with zero image members returns
+    an empty list (listable, no pages) — distinct from ``None`` (not listable).
+
+    ``limits.max_members`` is enforced by :func:`inspect_archive`, which sets
+    ``safe_to_extract=False`` when the member count is over cap.
+    """
+    report = inspect_archive(path, limits, require_image=False)
+    if not report.safe_to_extract:
+        return None
+    try:
+        with zipfile.ZipFile(path) as archive:
+            infos = archive.infolist()
+    except (zipfile.BadZipFile, OSError):
+        # A ``safe_to_extract`` non-zip container (e.g. a rar listed via
+        # ``rarfile``) is not page-streamable in the default deployment — the
+        # reader is zip-only — so it degrades to "no pages" (design §5).
+        return None
+
+    members: list[str] = []
+    for info in infos:
+        name = info.filename
+        if name.endswith("/"):
+            continue  # directory entry
+        if _is_symlink_member(info):
+            continue
+        if _unsafe_member_name(name):
+            continue
+        if Path(name).name.lower() == "comicinfo.xml":
+            continue
+        if not _is_image(name):
+            continue
+        members.append(name)
+
+    members.sort(key=natural_sort_key)
+    return members
+
+
+def read_image_member(
+    path: str | os.PathLike[str], member: str, *, max_bytes: int
+) -> bytes:
+    """Read one image member into memory under a byte cap (FRG-OPDS-012).
+
+    Defense-in-depth for the OPDS page path: re-checks the member name for the
+    zip-slip family (absolute / ``..`` / drive-qualified) even though
+    :func:`list_image_members` already filtered it, rejects a symlink member, and
+    checks the member's DECLARED decompressed size (``ZipInfo.file_size``) against
+    ``max_bytes`` BEFORE calling :meth:`ZipFile.read` — so a declared-oversize
+    member is refused pre-decompression. Mirrors the byte-cap-before-read idiom in
+    :func:`foragerr.metadata.comicinfo.read_embedded_metadata`.
+
+    Raises :class:`ArchiveMemberError` on any violation, an absent member, or
+    archive corruption caught during the read; never returns partial/oversized
+    bytes.
+    """
+    if not is_safe_member_name(member):
+        raise ArchiveMemberError(
+            f"unsafe member name refused (zip-slip guard): {member!r}"
+        )
+    try:
+        with zipfile.ZipFile(path) as archive:
+            try:
+                info = archive.getinfo(member)
+            except KeyError as exc:
+                raise ArchiveMemberError(f"member not found: {member!r}") from exc
+            if _is_symlink_member(info):
+                raise ArchiveMemberError(f"member is a symlink entry: {member!r}")
+            if info.file_size > max_bytes:
+                raise ArchiveMemberError(
+                    f"member {member!r} declares {info.file_size} bytes, over the "
+                    f"per-page cap of {max_bytes}"
+                )
+            return archive.read(member)
+    except (OSError, zipfile.BadZipFile, NotImplementedError, zlib.error) as exc:
+        # Archive passed listing but this member could not be read: an IO error /
+        # concurrent change (OSError, BadZipFile), an unsupported compression
+        # method (NotImplementedError), or a corrupt deflate stream (zlib.error).
+        raise ArchiveMemberError(
+            f"could not read member {member!r} from {path}: {exc}"
+        ) from exc
+
+
 __all__ = [
     "DEFAULT_ARCHIVE_LIMITS",
     "ArchiveLimits",
+    "ArchiveMemberError",
     "ArchiveReport",
     "inspect_archive",
     "is_safe_member_name",
+    "list_image_members",
+    "natural_sort_key",
+    "read_image_member",
 ]

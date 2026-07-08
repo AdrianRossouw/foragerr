@@ -19,7 +19,11 @@ import pytest
 from foragerr.security.archives import (
     DEFAULT_ARCHIVE_LIMITS,
     ArchiveLimits,
+    ArchiveMemberError,
     inspect_archive,
+    list_image_members,
+    natural_sort_key,
+    read_image_member,
 )
 
 _PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 24
@@ -240,3 +244,124 @@ def test_default_limits_accept_a_realistic_comic(tmp_path):
     report = inspect_archive(cbz, DEFAULT_ARCHIVE_LIMITS)
     assert report.ok
     assert report.image_count == 30
+
+
+# --- OPDS page streaming: ordered image-member listing (FRG-OPDS-010) ---------
+
+
+@pytest.mark.req("FRG-OPDS-010")
+def test_list_image_members_natural_order_ignores_dir_and_comicinfo(tmp_path):
+    # Members deliberately shuffled and unpadded so a lexical sort would give
+    # 1, 10, 2; natural order must give 1, 2, 10. A directory entry and a
+    # ComicInfo.xml member must not appear (nor shift numbering).
+    cbz = _write_zip(
+        tmp_path / "pages.cbz",
+        [
+            ("10.jpg", _PNG),
+            ("2.jpg", _PNG),
+            ("1.jpg", _PNG),
+            ("sub/", b""),
+            ("ComicInfo.xml", b"<ComicInfo/>"),
+        ],
+    )
+    members = list_image_members(cbz)
+    assert members == ["1.jpg", "2.jpg", "10.jpg"]
+    assert len(members) == 3  # count == len(list), ComicInfo/dir excluded
+
+
+@pytest.mark.req("FRG-OPDS-010")
+def test_list_image_members_excludes_non_image_members(tmp_path):
+    cbz = _write_zip(
+        tmp_path / "mixed.cbz",
+        [("01.jpg", _PNG), ("notes.txt", b"x"), ("02.png", _PNG)],
+    )
+    members = list_image_members(cbz)
+    assert members == ["01.jpg", "02.png"]  # non-image dropped
+
+
+@pytest.mark.req("FRG-OPDS-010")
+def test_list_image_members_none_when_archive_has_symlink_member(tmp_path):
+    # A symlink member makes the whole archive unlistable (inspect_archive
+    # rejects it, safe_to_extract=False), so there are no streamable pages. The
+    # in-listing symlink filter is defense-in-depth behind that gate.
+    cbz = _write_zip(
+        tmp_path / "link.cbz",
+        [("01.jpg", _PNG), ("evil.jpg", b"/etc/passwd")],
+        symlinks={"evil.jpg"},
+    )
+    assert list_image_members(cbz) is None
+
+
+@pytest.mark.req("FRG-OPDS-010")
+def test_list_image_members_zero_images_is_empty_not_none(tmp_path):
+    # A listable zip with no image members: [] (listable, no pages), NOT None.
+    cbz = _write_zip(tmp_path / "textonly.cbz", [("readme.txt", b"hello")])
+    assert list_image_members(cbz) == []
+
+
+@pytest.mark.req("FRG-OPDS-010")
+def test_list_image_members_unlistable_cbr_is_none(tmp_path):
+    # A RAR-magic file with no rarfile/unVERTED members: safe_to_extract=False,
+    # so no page listing (design §5 CBR degradation).
+    cbr = tmp_path / "book.cbr"
+    cbr.write_bytes(b"Rar!\x1a\x07\x00" + b"\x00" * 64)
+    assert list_image_members(cbr) is None
+
+
+@pytest.mark.req("FRG-OPDS-010")
+def test_list_image_members_corrupt_archive_is_none(tmp_path):
+    bad = tmp_path / "bad.cbz"
+    bad.write_bytes(b"<html>404</html>")
+    assert list_image_members(bad) is None
+
+
+@pytest.mark.req("FRG-OPDS-010")
+def test_natural_sort_key_is_padding_insensitive():
+    names = ["10.jpg", "0002.jpg", "1.jpg", "002.jpg"]
+    ordered = sorted(names, key=natural_sort_key)
+    assert ordered == ["1.jpg", "0002.jpg", "002.jpg", "10.jpg"]
+
+
+# --- OPDS page streaming: safe single-member reader (FRG-OPDS-012) ------------
+
+
+@pytest.mark.req("FRG-OPDS-012")
+def test_read_image_member_returns_bytes_within_cap(tmp_path):
+    cbz = _write_zip(tmp_path / "ok.cbz", [("01.jpg", _PNG)])
+    data = read_image_member(cbz, "01.jpg", max_bytes=1_000_000)
+    assert data == _PNG
+
+
+@pytest.mark.req("FRG-OPDS-012")
+def test_read_image_member_over_cap_refused_before_read(tmp_path):
+    payload = b"\xff" * 5_000
+    cbz = _write_zip(tmp_path / "big.cbz", [("01.jpg", payload)])
+    with pytest.raises(ArchiveMemberError):
+        # declared file_size (5000) > cap (100) => refused pre-decompression
+        read_image_member(cbz, "01.jpg", max_bytes=100)
+
+
+@pytest.mark.req("FRG-OPDS-012")
+def test_read_image_member_rejects_traversal_and_absolute_names(tmp_path):
+    cbz = _write_zip(tmp_path / "ok.cbz", [("01.jpg", _PNG)])
+    for evil in ("../escape.jpg", "/etc/passwd", "a/../../x.jpg"):
+        with pytest.raises(ArchiveMemberError):
+            read_image_member(cbz, evil, max_bytes=1_000_000)
+
+
+@pytest.mark.req("FRG-OPDS-012")
+def test_read_image_member_rejects_symlink_member(tmp_path):
+    cbz = _write_zip(
+        tmp_path / "link.cbz",
+        [("page.jpg", _PNG), ("evil.jpg", b"/etc/passwd")],
+        symlinks={"evil.jpg"},
+    )
+    with pytest.raises(ArchiveMemberError):
+        read_image_member(cbz, "evil.jpg", max_bytes=1_000_000)
+
+
+@pytest.mark.req("FRG-OPDS-012")
+def test_read_image_member_absent_member_raises(tmp_path):
+    cbz = _write_zip(tmp_path / "ok.cbz", [("01.jpg", _PNG)])
+    with pytest.raises(ArchiveMemberError):
+        read_image_member(cbz, "nope.jpg", max_bytes=1_000_000)
