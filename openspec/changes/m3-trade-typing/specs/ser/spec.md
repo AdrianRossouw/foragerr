@@ -29,14 +29,14 @@ identity, monitoring, wanted state, or matching. Where naming templates use
 
 ### Requirement: FRG-SER-019 — Trades never suppress single-issue wanted
 
-A series' collected-edition typing, and ownership of collected-edition (trade) files,
-SHALL NEVER remove, hide, or de-prioritise any single issue from wanted, missing, or
-searchable state — singles and trades are independent acquisition tracks. No book-type
-predicate SHALL be introduced into the derived-wanted computation (`wanted_issues`) or
-the series statistics (`series_statistics`); a trade line's files, being on a separate
-ComicVine volume → separate series, SHALL attach only to that trade line's issues and
-never to a single-issue series' issues. This invariant SHALL be verified by dedicated
-tests.
+The system SHALL guarantee that a series' collected-edition typing, and ownership of
+collected-edition (trade) files, never removes, hides, or de-prioritises any single
+issue from wanted, missing, or searchable state — singles and trades are independent
+acquisition tracks. No book-type predicate SHALL be introduced into the derived-wanted
+computation (`wanted_issues`) or the series statistics (`series_statistics`); a trade
+line's files, being on a separate ComicVine volume → separate series, SHALL attach only
+to that trade line's issues and never to a single-issue series' issues. This invariant
+SHALL be verified by dedicated tests.
 
 #### Scenario: Owning a full trade line leaves single issues wanted
 
