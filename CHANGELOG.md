@@ -8,6 +8,32 @@ foragerr is a private project — never released publicly. These entries record 
 tagged milestones on `main` for internal traceability and history. Each release is
 also published as a GitHub Release carrying the same notes.
 
+## [v0.3.2] — 2026-07-08
+
+M3 change 4: volume grouping.
+
+### Added
+- **Franchise grouping** on the Comics screen: foragerr now groups a title's
+  successive runs ("Batman (2011)", "Batman (2016)", …) into one franchise. A
+  **Group** toggle switches between the flat series list and a grouped view where each
+  franchise is a collapsible header with an owned/total issue roll-up and its runs
+  nested beneath. Grouping is derived automatically from the series title (trailing
+  volume year / `Vol N` stripped) and is **display-only** — it never changes what a
+  series is, how it's monitored, or which issues are wanted (FRG-SER-016, FRG-UI-021).
+- Correct a wrong grouping from a franchise's menu: **rename** a group (the name
+  survives metadata refreshes) or **detach** a run (its choice is locked so a later
+  refresh won't re-group it) (FRG-SER-017).
+- `GET /api/v1/series/groups` returns the franchise projection with a bounded,
+  single-query stat roll-up; the flat `GET /api/v1/series` gains each series'
+  `series_group_id` (FRG-API-020).
+
+### Notes
+- Grouping adds no new dependency and no new attack surface. Database migration 0013
+  adds the `series_groups` table and two additive series columns. A test proves
+  `wanted_issues`/`series_statistics` output is byte-identical before and after
+  grouping. Gate: 8 review angles + Codex → fixes applied; backend 1595 passed,
+  frontend 245 passed.
+
 ## [v0.3.1] — 2026-07-08
 
 M3 change 3: OPDS page streaming (the reading upgrade).

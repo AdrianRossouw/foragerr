@@ -62,6 +62,6 @@ id in the test name.
 - [x] C.2 Registry + matrix: FRG-SER-016/017, FRG-API-020, FRG-UI-021 flip
       `proposed → implemented`; matrix regenerated; `tools/trace.py` exit 0.
       [FRG-PROC-004, FRG-PROC-005]
-- [ ] C.3 Gate: backend + frontend suites green; pre-merge review cycle (8 Claude angles
+- [x] C.3 Gate: backend + frontend suites green; pre-merge review cycle (8 Claude angles
       + Codex); fixes; archive; `--no-ff` merge; CHANGELOG v0.3.2 + `pyproject` bump +
       tag v0.3.2 + GitHub Release per FRG-PROC-013. [FRG-PROC-007, FRG-PROC-013]
