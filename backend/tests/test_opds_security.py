@@ -62,7 +62,14 @@ def test_opds_routes_declare_no_path_parameter(client):
         for method_spec in spec.values():
             for param in method_spec.get("parameters", []):
                 if param.get("in") == "path":
-                    assert param["name"] in {"issue_file_id", "series_id"}, path
+                    # id-only surface: every path parameter is an integer — the
+                    # library id, series id, or the PSE 0-based page index (all
+                    # ints, never a filesystem path). FRG-OPDS-003/008.
+                    assert param["name"] in {
+                        "issue_file_id",
+                        "series_id",
+                        "page",
+                    }, path
                     assert param["schema"]["type"] == "integer", f"{path}:{param['name']}"
         if "/file/" in path:
             download_routes.append(path)
@@ -193,3 +200,81 @@ def test_search_oversized_query_is_bounded(client, tmp_path):
         query = parse_qs(urlsplit(el.get("href")).query)
         for value in query.get("q", []):
             assert len(value) <= router_mod.MAX_SEARCH_QUERY_LEN
+
+
+# --- FRG-OPDS-012: the page/cover decode surface is bounded -----------------
+# The stream/cover endpoints decode UNTRUSTED archive image bytes. A pixel-bomb
+# (a real image whose declared dimensions exceed the pixel cap) and an oversized
+# member (declared bytes over the per-page cap) must each yield a bounded, logged
+# 4xx/5xx — never a hang, an OOM, or a crash. Both are proven via a tightened
+# per-request cap so a small fixture trips the guard deterministically.
+
+
+def _bomb_client(tmp_path: Path, **overrides):
+    import io
+    import zipfile
+
+    from PIL import Image
+
+    cfg = tmp_path / "cfg"
+    cfg.mkdir()
+    app = create_app(opds_settings(cfg, **overrides))
+
+    def _cbz(width: int, height: int) -> bytes:
+        img = io.BytesIO()
+        Image.new("RGB", (width, height), (200, 60, 40)).save(img, "JPEG")
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("page01.jpg", img.getvalue())
+        return buf.getvalue()
+
+    return app, _cbz
+
+
+def _seed_one_cbz(client, tmp_path, cbz: bytes) -> int:
+    import datetime as dt
+
+    spec = {
+        "title": "Bomb",
+        "cv_volume_id": 4242,
+        "issues": [
+            {
+                "cv_issue_id": 42421,
+                "number": "1",
+                "cover_date": dt.date(2012, 1, 1),
+                "files": [{"name": "Bomb 001.cbz", "data": cbz}],
+            }
+        ],
+    }
+    data = client.portal.call(seed, client.app, tmp_path / "library", [spec])
+    return data["series"][0]["issues"][0]["files"][0]["id"]
+
+
+@pytest.mark.req("FRG-OPDS-012")
+def test_pixel_bomb_page_returns_bounded_error(tmp_path):
+    # A tiny 300x200 (60k px) image against a 100-pixel cap is a stand-in for a
+    # decompression bomb: it is refused on its DECLARED dimensions before any
+    # pixels are decoded.
+    app, cbz = _bomb_client(tmp_path, opds_pse_max_pixels=100)
+    with TestClient(app) as client:
+        fid = _seed_one_cbz(client, tmp_path, cbz(300, 200))
+        resp = client.get(f"/opds/page/{fid}/0")
+        assert 400 <= resp.status_code < 600  # bounded, never a hang/crash
+        assert resp.status_code != 200  # no oversized image bytes served
+        assert not resp.headers.get("content-type", "").startswith("image/")
+
+
+@pytest.mark.req("FRG-OPDS-012")
+def test_oversized_member_page_returns_bounded_error(tmp_path):
+    # A real JPEG whose declared decompressed size exceeds a tightened per-page
+    # byte cap is refused before it is read (the zip-bomb guard), degrading to a
+    # bounded 4xx/5xx rather than loading the member.
+    app, cbz = _bomb_client(tmp_path, opds_pse_max_page_bytes=8)
+    with TestClient(app) as client:
+        fid = _seed_one_cbz(client, tmp_path, cbz(64, 64))
+        resp = client.get(f"/opds/page/{fid}/0")
+        assert 400 <= resp.status_code < 600
+        assert resp.status_code != 200
+        # The local cover extraction is bounded the same way (first-page read).
+        cover = client.get(f"/opds/cover/{fid}")
+        assert 400 <= cover.status_code < 600

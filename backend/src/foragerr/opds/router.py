@@ -32,9 +32,12 @@ Tailscale-only deployment, so every request value is treated as hostile):
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import logging
 import math
+import os
+from pathlib import Path
 from urllib.parse import quote_plus, urljoin
 
 from fastapi import APIRouter, Query, Request
@@ -48,8 +51,15 @@ from foragerr.db.base import utcnow
 from foragerr.library import repo
 from foragerr.library.flows import decode_aliases
 from foragerr.library.models import IssueFileRow, IssueRow, SeriesRow
+from foragerr.library.page_counts import resolve_page_count
 from foragerr.parser.normalize import matching_key
 
+from foragerr.security.archives import (
+    ArchiveMemberError,
+    list_image_members,
+    read_image_member,
+)
+from foragerr.security.images import ImageRenderError, render_page
 from foragerr.security.paths import PathConfinementError, validate_under_root
 from foragerr.opds.atom import (
     ACQ_KIND,
@@ -57,6 +67,7 @@ from foragerr.opds.atom import (
     OPENSEARCH_DESC_KIND,
     REL_ACQUISITION,
     REL_IMAGE,
+    REL_PSE_STREAM,
     REL_SEARCH,
     REL_START,
     REL_SUBSECTION,
@@ -114,6 +125,42 @@ async def _count_and_page(session, stmt, *, order_by, page: int, page_size: int)
 def _cover_url(series_id: int) -> str:
     """Local cover-cache endpoint (FRG-META-013) — never a remote CDN URL."""
     return f"/api/v1/series/{series_id}/cover"
+
+
+#: Local first-page cover render widths (FRG-OPDS-011). The full cover is
+#: additionally bounded by ``opds_pse_max_width``; the thumbnail is smaller for
+#: list/grid rendering. Never upscaled (``render_page`` only ever shrinks).
+_COVER_MAX_WIDTH = 640
+_COVER_THUMB_WIDTH = 256
+
+#: Advertised media type of the OPDS-PSE stream + local-cover links. Photographic
+#: comic pages/covers re-encode to JPEG (``render_page`` returns PNG only for the
+#: rare alpha-bearing source; the cache still serves the bytes as an image).
+_PSE_IMAGE_TYPE = "image/jpeg"
+
+
+async def _resolve_confined_file(session, issue_file_id: int) -> tuple[IssueFileRow, Path]:
+    """Resolve an issue-file id to its row and confinement-checked on-disk path.
+
+    The id-only, root-confined resolution the whole OPDS file surface shares
+    (FRG-OPDS-003), identical to :func:`download_file`: ``session.get`` the row,
+    confirm its stored path resolves under a registered root
+    (:func:`validate_under_root`), and confirm it is a regular file. An unknown
+    id, an out-of-root path, or a missing file all degrade to the SAME 404 a
+    client cannot tell apart — no path outside a managed root is ever probed or
+    served, and no client-supplied string ever reaches the filesystem.
+    """
+    row = await session.get(IssueFileRow, issue_file_id)
+    if row is None:
+        raise ApiError(404, f"no issue-file {issue_file_id}")
+    roots = [rf.path for rf in await repo.list_root_folders(session)]
+    try:
+        resolved = validate_under_root(row.path, roots)
+    except PathConfinementError as exc:
+        raise ApiError(404, f"no issue-file {issue_file_id}") from exc
+    if not resolved.is_file():
+        raise ApiError(404, f"no issue-file {issue_file_id}")
+    return row, resolved
 
 
 def _effective_page_size(count: int | None, settings) -> int:
@@ -531,7 +578,164 @@ def build_opds_router(base_path: str) -> APIRouter:
             filename=resolved.name,
         )
 
+    @router.get("/page/{issue_file_id}/{page}")
+    async def stream_page(
+        issue_file_id: int,
+        page: int,
+        request: Request,
+        width: int | None = Query(None, ge=1),
+    ) -> Response:
+        """OPDS-PSE single-page stream (FRG-OPDS-008, FRG-OPDS-012).
+
+        Resolves the archive by issue-file id ONLY (id-only, root-confined —
+        :func:`_resolve_confined_file`), lists its ordered image members from the
+        central directory (no decompression), reads the requested member under a
+        declared-size cap, then decodes/downscales it under a pixel cap and a
+        per-request wall-clock timeout on an offload thread — so untrusted archive
+        bytes can neither exhaust memory nor wedge the event loop. An out-of-range
+        or negative ``page``, a non-listable archive (CBR without ``rarfile``,
+        corrupt/hostile), or an unknown/out-of-root id all return 404; a member
+        that cannot be read or an image that cannot be rendered returns a bounded
+        5xx; an over-budget decode returns 503. The optional ``width`` is clamped
+        to ``opds_pse_max_width`` and the image is never upscaled."""
+        settings = request.app.state.settings
+        limits = settings.opds_pse_archive_limits()
+        db = request.app.state.db
+        # A write session: a NULL/stale ``page_count`` is computed and persisted
+        # on first stream (the design's lazy write-back). The archive I/O here is
+        # only the cheap central-directory read the fast path skips entirely once
+        # the count is cached; the decode below runs AFTER the session closes.
+        async with db.write_session() as session:
+            row, resolved = await _resolve_confined_file(session, issue_file_id)
+            await resolve_page_count(session, row, resolved, limits=limits)
+
+        members = await asyncio.to_thread(list_image_members, resolved, limits)
+        if members is None:
+            raise ApiError(404, f"no streamable pages for issue-file {issue_file_id}")
+        if page < 0 or page >= len(members):
+            raise ApiError(
+                404, f"page {page} out of range for issue-file {issue_file_id}"
+            )
+
+        try:
+            data = await asyncio.to_thread(
+                read_image_member,
+                resolved,
+                members[page],
+                max_bytes=settings.opds_pse_max_page_bytes,
+            )
+        except ArchiveMemberError as exc:
+            logger.warning(
+                "opds page read refused (file=%s page=%d): %s",
+                issue_file_id, page, exc,
+            )
+            raise ApiError(502, f"page {page} could not be read") from exc
+
+        out, content_type = await _render_bounded(
+            settings,
+            data,
+            max_width=(
+                min(width, settings.opds_pse_max_width) if width is not None else None
+            ),
+            what=f"page {page} of issue-file {issue_file_id}",
+        )
+        return Response(content=out, media_type=content_type)
+
+    @router.get("/cover/{issue_file_id}")
+    async def local_cover(issue_file_id: int, request: Request) -> Response:
+        """Local first-page cover for a cover-less issue (FRG-OPDS-011).
+
+        The fallback the acquisition entry points image/thumbnail links at when a
+        series has NO remote ComicVine cover. The first archive page is extracted,
+        downscaled (a smaller image for ``?thumbnail``) and cached under
+        ``<config>/covers/pages/<id>[_thumb].jpg`` — a per-issue-file key space
+        deliberately separate from the per-series ComicVine cache. A cached file
+        is served straight from disk; otherwise it is extracted/rendered under the
+        same caps + timeout as the page stream, written atomically, then served.
+        No external host is ever contacted."""
+        settings = request.app.state.settings
+        thumbnail = "thumbnail" in request.query_params
+        limits = settings.opds_pse_archive_limits()
+
+        covers_dir = Path(settings.config_dir) / "covers" / "pages"
+        cache_path = covers_dir / f"{issue_file_id}{'_thumb' if thumbnail else ''}.jpg"
+        if cache_path.is_file():
+            return FileResponse(cache_path, media_type=_PSE_IMAGE_TYPE)
+
+        db = request.app.state.db
+        async with db.read_session() as session:
+            _row, resolved = await _resolve_confined_file(session, issue_file_id)
+
+        members = await asyncio.to_thread(list_image_members, resolved, limits)
+        if not members:  # None (not listable) or [] (no image pages)
+            raise ApiError(404, f"no cover for issue-file {issue_file_id}")
+
+        try:
+            data = await asyncio.to_thread(
+                read_image_member,
+                resolved,
+                members[0],
+                max_bytes=settings.opds_pse_max_page_bytes,
+            )
+        except ArchiveMemberError as exc:
+            logger.warning("opds cover read refused (file=%s): %s", issue_file_id, exc)
+            raise ApiError(502, "cover could not be read") from exc
+
+        out, _content_type = await _render_bounded(
+            settings,
+            data,
+            max_width=(
+                _COVER_THUMB_WIDTH
+                if thumbnail
+                else min(settings.opds_pse_max_width, _COVER_MAX_WIDTH)
+            ),
+            what=f"cover of issue-file {issue_file_id}",
+        )
+
+        # Atomic cache publish: write a unique temp then rename over the target so
+        # a concurrent reader never sees a half-written cover.
+        covers_dir.mkdir(parents=True, exist_ok=True)
+        tmp_path = cache_path.with_name(f"{cache_path.name}.{os.getpid()}.{id(out)}.tmp")
+        try:
+            tmp_path.write_bytes(out)
+            os.replace(tmp_path, cache_path)
+        except OSError as exc:
+            tmp_path.unlink(missing_ok=True)
+            logger.warning("opds cover cache write failed (file=%s): %s", issue_file_id, exc)
+            # The bytes are good even if caching failed — serve them directly.
+            return Response(content=out, media_type=_PSE_IMAGE_TYPE)
+        return FileResponse(cache_path, media_type=_PSE_IMAGE_TYPE)
+
     return router
+
+
+async def _render_bounded(
+    settings, data: bytes, *, max_width: int | None, what: str
+) -> tuple[bytes, str]:
+    """Decode+downscale ``data`` on an offload thread under a wall-clock timeout.
+
+    The single seam that applies the per-request time bound (design §4): the
+    CPU-bound :func:`render_page` runs via ``asyncio.to_thread`` so a wedged
+    decode never blocks the loop, wrapped in ``asyncio.wait_for`` so it can never
+    spin past ``opds_pse_request_timeout_seconds``. Over-budget → 503; an
+    over-cap/corrupt/undecodable image → a bounded 502; both are logged. Returns
+    ``(encoded_bytes, content_type)``."""
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(
+                render_page,
+                data,
+                max_width=max_width,
+                max_pixels=settings.opds_pse_max_pixels,
+            ),
+            timeout=settings.opds_pse_request_timeout_seconds,
+        )
+    except (asyncio.TimeoutError, TimeoutError) as exc:
+        logger.warning("opds render timed out (%s)", what)
+        raise ApiError(503, f"render of {what} timed out") from exc
+    except ImageRenderError as exc:
+        logger.warning("opds render refused (%s): %s", what, exc)
+        raise ApiError(502, f"{what} could not be rendered") from exc
 
 
 def _series_nav_entry(base_path: str, row: SeriesRow) -> Entry:
@@ -573,7 +777,16 @@ def _issue_file_entry(
     cover_url: str,
 ) -> Entry:
     """One acquisition entry for a downloadable issue-file, built from DB
-    fields only (FRG-OPDS-002)."""
+    fields only (FRG-OPDS-002, FRG-OPDS-008, FRG-OPDS-011).
+
+    Reads ``issue_file.page_count`` straight from the row (NO archive I/O at feed
+    render — the M1 zero-I/O invariant): a non-NULL count means the archive is
+    listable, so an OPDS-PSE stream link is emitted alongside the whole-file
+    acquisition link (PSE is strictly additive — a non-PSE reader ignores it); a
+    NULL count (unlistable/legacy) emits no PSE link. Image/thumbnail links point
+    at the local first-page cover endpoint ONLY when the series has no remote
+    ComicVine cover cached (``cover_cached_at is None``); when a remote cover
+    exists the existing series cover-cache URL is kept unchanged."""
     number = issue.issue_number or "?"
     title = issue.title or f"{series.title} #{number}"
     # updated: file-added timestamp, falling back to the issue's release date.
@@ -585,17 +798,38 @@ def _issue_file_entry(
             if release
             else utcnow()
         )
+
+    links: list[Link] = [
+        Link(
+            href=f"{base_path}/file/{issue_file.id}",
+            rel=REL_ACQUISITION,
+            type=media_type_for(issue_file.path),
+        ),
+    ]
+    if issue_file.page_count is not None:
+        # Literal ``{pageNumber}``/``{maxWidth}`` braces (doubled in the f-string)
+        # pass through the atom escaper unescaped — a PSE reader expands them.
+        links.append(
+            Link(
+                href=f"{base_path}/page/{issue_file.id}/{{pageNumber}}?width={{maxWidth}}",
+                rel=REL_PSE_STREAM,
+                type=_PSE_IMAGE_TYPE,
+                pse_count=issue_file.page_count,
+            )
+        )
+
+    if series.cover_cached_at is not None:
+        image_href = cover_url
+        thumb_href = cover_url
+    else:
+        image_href = f"{base_path}/cover/{issue_file.id}"
+        thumb_href = f"{base_path}/cover/{issue_file.id}?thumbnail"
+    links.append(Link(href=image_href, rel=REL_IMAGE, type=_PSE_IMAGE_TYPE))
+    links.append(Link(href=thumb_href, rel=REL_THUMBNAIL, type=_PSE_IMAGE_TYPE))
+
     return Entry(
         id=f"{base_path}/file/{issue_file.id}",
         title=title,
         updated=updated,
-        links=(
-            Link(
-                href=f"{base_path}/file/{issue_file.id}",
-                rel=REL_ACQUISITION,
-                type=media_type_for(issue_file.path),
-            ),
-            Link(href=cover_url, rel=REL_IMAGE, type="image/jpeg"),
-            Link(href=cover_url, rel=REL_THUMBNAIL, type="image/jpeg"),
-        ),
+        links=tuple(links),
     )
