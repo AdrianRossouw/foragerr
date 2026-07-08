@@ -8,6 +8,54 @@ foragerr is a private project — never released publicly. These entries record 
 tagged milestones on `main` for internal traceability and history. Each release is
 also published as a GitHub Release carrying the same notes.
 
+## [v0.3.0] — 2026-07-08
+
+M3 change 1: weekly-pull backbone. **Begins milestone M3 ("comics-native")** — the
+data, jobs, and read API beneath a weekly pull list (the screen itself is M3 change
+2). Backend only; the external pull source is opt-in and off by default.
+
+### Added
+- Metadata-derived weekly release view: for a store-date week, the issues of watched
+  series dated in that week, each with derived state (missing/wanted, downloading,
+  downloaded, unmonitored) computed from issue + queue records — works with no
+  external source configured (FRG-PULL-001).
+- `GET /api/v1/pull?week=` read endpoint backing the view: standard paging envelope,
+  per-entry match type and linked-issue state, prev/current/next week by parameter,
+  read-only, no secret exposed (FRG-API-019).
+- External weekly-pull source fetch (opt-in; `pull_enabled` off by default): the
+  walksoftly / League-of-Comic-Geeks JSON API fetched over the hardened external
+  egress profile (current + previous week, mandatory timeouts, auto-redirect
+  disabled), parsed as untrusted JSON under byte caps; documented source codes
+  handled (619 skips a week; 522/666/transport → a source-outage that leaves stored
+  data intact and marks the source **degraded** in health) (FRG-PULL-002).
+- Idempotent per-week storage: a `pull_entries` table with per-week
+  replace-on-refresh, so a re-fetch is idempotent and a mid-run failure leaves the
+  prior week intact; entries carry a link to a library issue and a match type, never
+  their own wanted/downloaded status (FRG-PULL-003, migration 0011).
+- Matching pull entries to the library: ComicVine-id match first (book-type guarded),
+  else a guarded name match (normalized name/alias equal, 0 ≤ sequence delta < 3, and
+  release date within the pull week ±2 days); ambiguous/unknown entries stay
+  unmatched; an unmatched new #1/#0 is tagged as a new-series candidate. Only watched
+  (monitored) series are matched (FRG-PULL-004).
+- Refresh trigger for missing pulled issues: a matched-but-missing issue enqueues the
+  existing `refresh-series` command (deduplicated on the queue), so metadata creates
+  the issue and the series' monitor policy decides whether it becomes wanted — the
+  pull side writes no issue status (FRG-PULL-005).
+- Scheduled + manual pull refresh: a built-in `pull-refresh` task (default 4 h,
+  clamped up to a 1 h floor) that fetches → stores → matches → triggers; a manual
+  force-run bypasses the interval gate; runs recorded in history and pushed over the
+  WebSocket (FRG-PULL-006).
+
+### Security
+- RISK-039 mitigation realised (timeouts, documented error-code handling,
+  degraded-health, untrusted-JSON) and the pull-source arm of RISK-025 closed via the
+  external egress profile (see the threat model and risk register).
+
+Upgrade notes: new admin settings `pull_enabled` (default off), `pull_source_url`,
+and `pull_refresh_interval_seconds` (see the admin manual "Weekly pull" section);
+database migration 0011 adds the `pull_entries` table. Test status at merge:
+backend 1513 passed / 10 skipped.
+
 ## [v0.2.8] — 2026-07-06
 
 M2 change 6: hardening and performance. **Completes milestone M2 ("own your
