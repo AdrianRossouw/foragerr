@@ -97,7 +97,15 @@
   padding: var(--spacing-sm);
 }
 
+.cardTitleRow {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
 .cardTitle {
+  flex: 1;
+  min-width: 0;
   font-weight: var(--font-weight-medium);
   white-space: nowrap;
   overflow: hidden;

@@ -27,6 +27,7 @@ beforeEach(() => {
     libraryViewMode: 'poster',
     librarySortKey: 'title',
     libraryGroupByFranchise: false,
+    libraryCollectedFilter: 'all',
     interactiveSearchIssueId: null,
   });
 });
@@ -459,5 +460,199 @@ describe('FRG-UI-021: grouped library view', () => {
       expect(putCall).toBeDefined();
       expect(putCall?.[1]?.body).toEqual({ group: { action: 'detach' } });
     });
+  });
+});
+
+/**
+ * FRG-UI-022 — Collected-edition (trade) surfacing in the library: the
+ * book-type badge on the poster card (flat grid AND inside a franchise group)
+ * and the display-only collected-editions filter. A null book-type carries no
+ * badge; the filter partitions the shown series without touching per-series
+ * identity, navigation, or monitoring.
+ */
+
+// A trade, a graphic novel and two ordinary single-issues runs.
+const TYPED_SERIES: SeriesResource[] = [
+  makeSeriesResource({
+    id: 1,
+    title: 'Saga',
+    sort_title: 'saga',
+    booktype: null,
+  }),
+  makeSeriesResource({
+    id: 2,
+    title: 'Watchmen',
+    sort_title: 'watchmen',
+    booktype: 'tpb',
+  }),
+  makeSeriesResource({
+    id: 3,
+    title: 'Black Hole',
+    sort_title: 'black hole',
+    booktype: 'gn',
+  }),
+  makeSeriesResource({
+    id: 4,
+    title: 'Bone',
+    sort_title: 'bone',
+    booktype: null,
+  }),
+];
+
+describe('FRG-UI-022: collected-edition surfacing', () => {
+  it('FRG-UI-022 — a typed series shows a book-type badge in the grid while a null-typed run shows none', async () => {
+    renderLibrary(TYPED_SERIES);
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId('series-card')).toHaveLength(4),
+    );
+
+    const cardFor = (title: string) =>
+      screen
+        .getAllByTestId('series-card')
+        .find((c) => within(c).queryByTitle(title)) as HTMLElement;
+
+    // The TPB series carries a badge reading "TPB"; the GN one reads "GN".
+    const tpbBadge = within(cardFor('Watchmen')).getByTestId('booktype-badge');
+    expect(tpbBadge).toHaveTextContent('TPB');
+    expect(within(cardFor('Black Hole')).getByTestId('booktype-badge')).toHaveTextContent(
+      'GN',
+    );
+
+    // The two single-issues runs carry no badge at all.
+    expect(within(cardFor('Saga')).queryByTestId('booktype-badge')).toBeNull();
+    expect(within(cardFor('Bone')).queryByTestId('booktype-badge')).toBeNull();
+  });
+
+  it('FRG-UI-022 — the badge also renders inside a franchise group (grouped view reuses the poster card)', async () => {
+    const groupedTyped: SeriesResource[] = [
+      makeSeriesResource({
+        id: 1,
+        title: 'Batman (2011)',
+        sort_title: 'batman (2011)',
+        series_group_id: 1,
+        booktype: 'hc',
+      }),
+      makeSeriesResource({
+        id: 2,
+        title: 'Batman (2016)',
+        sort_title: 'batman (2016)',
+        series_group_id: 1,
+        booktype: null,
+      }),
+    ];
+    const groups: SeriesGroupResource[] = [
+      makeSeriesGroup({
+        id: 1,
+        kind: 'group',
+        title: 'Batman',
+        series: [makeGroupMember({ id: 1 }), makeGroupMember({ id: 2 })],
+        series_count: 2,
+        issue_count: 50,
+        owned_count: 30,
+      }),
+    ];
+    renderGrouped(groupedTyped, groups);
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId('series-card')).toHaveLength(2),
+    );
+    await user.click(screen.getByTestId('group-by-toggle'));
+    await waitFor(() =>
+      expect(screen.getByTestId('franchise-group')).toBeInTheDocument(),
+    );
+
+    // Exactly one member run (the HC one) carries a badge inside the group.
+    const group = screen.getByTestId('franchise-group');
+    const badges = within(group).getAllByTestId('booktype-badge');
+    expect(badges).toHaveLength(1);
+    expect(badges[0]).toHaveTextContent('HC');
+  });
+
+  it('FRG-UI-022 — the collected-editions filter partitions the shown series without changing navigation', async () => {
+    renderLibrary(TYPED_SERIES);
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId('series-card')).toHaveLength(4),
+    );
+
+    // The badge also carries a `title` attribute, so pick the card-title
+    // element (the one whose title is NOT the badge's "Collected edition:" text).
+    const shownTitles = () =>
+      screen
+        .getAllByTestId('series-card')
+        .map(
+          (c) =>
+            within(c)
+              .getAllByTitle(/.+/)
+              .find((el) => !el.getAttribute('title')?.startsWith('Collected edition'))
+              ?.textContent,
+        );
+
+    // Collected only → the two typed series (Watchmen tpb, Black Hole gn).
+    await user.selectOptions(screen.getByTestId('collected-filter'), 'collected');
+    expect(screen.getAllByTestId('series-card')).toHaveLength(2);
+    expect(shownTitles()).toEqual(['Black Hole', 'Watchmen']);
+
+    // Single issues only → the two null-typed runs (Bone, Saga).
+    await user.selectOptions(screen.getByTestId('collected-filter'), 'singles');
+    expect(screen.getAllByTestId('series-card')).toHaveLength(2);
+    expect(shownTitles()).toEqual(['Bone', 'Saga']);
+
+    // Navigation from a filtered card is unchanged (display-only).
+    await user.click(
+      screen
+        .getAllByTestId('series-card')
+        .find((c) => within(c).queryByTitle('Bone')) as HTMLElement,
+    );
+    expect(screen.getByTestId('detail-stub')).toBeInTheDocument();
+  });
+
+  it('FRG-UI-022 — the collected-editions filter partitions inside the grouped view too', async () => {
+    const groupedTyped: SeriesResource[] = [
+      makeSeriesResource({
+        id: 1,
+        title: 'Batman (2011)',
+        sort_title: 'batman (2011)',
+        series_group_id: 1,
+        booktype: 'tpb',
+      }),
+      makeSeriesResource({
+        id: 2,
+        title: 'Batman (2016)',
+        sort_title: 'batman (2016)',
+        series_group_id: 1,
+        booktype: null,
+      }),
+    ];
+    const groups: SeriesGroupResource[] = [
+      makeSeriesGroup({
+        id: 1,
+        kind: 'group',
+        title: 'Batman',
+        series: [makeGroupMember({ id: 1 }), makeGroupMember({ id: 2 })],
+        series_count: 2,
+        issue_count: 50,
+        owned_count: 30,
+      }),
+    ];
+    renderGrouped(groupedTyped, groups);
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId('series-card')).toHaveLength(2),
+    );
+    await user.click(screen.getByTestId('group-by-toggle'));
+    await waitFor(() =>
+      expect(screen.getByTestId('franchise-group')).toBeInTheDocument(),
+    );
+    expect(screen.getAllByTestId('series-card')).toHaveLength(2);
+
+    // Collected only → only the TPB run survives inside the franchise.
+    await user.selectOptions(screen.getByTestId('collected-filter'), 'collected');
+    expect(screen.getAllByTestId('series-card')).toHaveLength(1);
+    expect(screen.getByTitle('Batman (2011)')).toBeInTheDocument();
   });
 });

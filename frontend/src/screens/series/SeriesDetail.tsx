@@ -6,6 +6,7 @@ import { ToolbarButton, ToolbarSeparator } from '../../components/ToolbarButton'
 import { MonitorToggle } from '../../components/MonitorToggle';
 import { ProgressPill } from '../../components/ProgressPill';
 import { Poster } from '../../components/Poster';
+import { BookTypeBadge } from '../../components/BookTypeBadge';
 import {
   BookmarkIcon,
   CloseIcon,
@@ -452,6 +453,7 @@ export function SeriesDetail() {
               )}
             </div>
             <div className={styles.chipRow}>
+              <BookTypeBadge booktype={series.booktype} />
               <span className={styles.chip}>{series.path}</span>
               <span className={styles.chip}>{formatBytes(stats.size_on_disk)}</span>
               {series.publisher && <span className={styles.chip}>{series.publisher}</span>}

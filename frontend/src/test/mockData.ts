@@ -193,6 +193,7 @@ export function makeSeriesResource(
     description_sanitized: 'A mock series.',
     aliases: [],
     series_group_id: null,
+    booktype: null,
     statistics: makeStats(),
     ...overrides,
   };
