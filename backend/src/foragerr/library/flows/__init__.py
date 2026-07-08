@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from foragerr.library.flows._common import (
     AddOptions,
+    GROUP_EDIT_ACTIONS,
+    GroupEdit,
     MAX_ALIAS_LENGTH,
     MONITOR_STRATEGIES,
     RefreshSeriesCommand,
@@ -72,6 +74,8 @@ from foragerr.library.flows import search as _search  # noqa: F401
 __all__ = [
     "AddOptions",
     "AddSeriesResult",
+    "GROUP_EDIT_ACTIONS",
+    "GroupEdit",
     "DeleteSeriesFilesCommand",
     "IssueFileNotFoundError",
     "LIBRARY_IMPORT_PROPOSAL_CAP",

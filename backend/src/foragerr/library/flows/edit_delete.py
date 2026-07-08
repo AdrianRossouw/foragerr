@@ -26,11 +26,18 @@ from foragerr.config import Settings
 from foragerr.db import Database, utcnow
 from foragerr.importer import IMPORT_FILE_MUTATION_GROUP, fileops, history
 from foragerr.library import paths, repo
-from foragerr.library.models import IssueFileRow, IssueRow, RootFolderRow, SeriesRow
+from foragerr.library.models import (
+    IssueFileRow,
+    IssueRow,
+    RootFolderRow,
+    SeriesGroupRow,
+    SeriesRow,
+)
 from foragerr.library.paths import PathNotUnderRootError, validate_under_root
 from foragerr.quality.models import FormatProfileRow
 
 from foragerr.library.flows._common import (
+    GroupEdit,
     SeriesNotFoundError,
     SeriesValidationError,
     cover_paths,
@@ -75,6 +82,7 @@ async def edit_series(
     root_folder_id: int | None = None,
     path: str | None = None,
     aliases: list[str] | None = None,
+    group_op: GroupEdit | None = None,
 ) -> SeriesRow:
     """Update only the supplied fields of a series (FRG-SER-014).
 
@@ -84,6 +92,12 @@ async def edit_series(
     (when supplied) REPLACES the stored alternate search names wholesale — the
     user-editable alias list the search engine maps releases through
     (FRG-SRCH-003); pass ``[]`` to clear them.
+
+    ``group_op`` (when supplied) applies one franchise-grouping correction
+    (FRG-SER-017): reassign/detach (both LOCK the series so a later refresh
+    never re-derives over the choice), rename the series' group, or unlock
+    (returns it to auto-derivation on the next refresh). An emptied group is
+    pruned.
     """
     if monitor_new_items is not None:
         validate_monitor_new_items(monitor_new_items)
@@ -94,6 +108,16 @@ async def edit_series(
         series = await repo.get_series(session, series_id)
         if series is None:
             raise SeriesNotFoundError(f"no series {series_id}")
+
+        # Apply (and thereby validate) the group op FIRST — BEFORE the
+        # irreversible on-disk path rename below. A bad op (e.g. reassign to a
+        # nonexistent group) must raise while the transaction can still roll
+        # back cleanly with nothing moved on disk; ordering it after the rename
+        # would move the directory and only then discover the op is invalid,
+        # rolling back the row while leaving the directory moved (disk/DB
+        # divergence). Grouping touches only group columns, never the path.
+        if group_op is not None:
+            await _apply_group_edit(session, series, group_op)
 
         if format_profile_id is not None:
             await _require_profile(session, format_profile_id)
@@ -155,6 +179,50 @@ async def edit_series(
     return series
 
 
+async def _apply_group_edit(session, series: SeriesRow, op: GroupEdit) -> None:
+    """Apply one franchise-grouping correction inside the edit transaction
+    (FRG-SER-017). Touches only ``series.series_group_id`` / ``group_locked``
+    (and the group's title on rename) — never any issue/file/wanted state."""
+    if op.action == "reassign":
+        if op.series_group_id is None:
+            raise SeriesValidationError("reassign requires a series_group_id")
+        target = await session.get(SeriesGroupRow, op.series_group_id)
+        if target is None:
+            raise SeriesValidationError(
+                f"series group {op.series_group_id} does not exist"
+            )
+        previous = series.series_group_id
+        series.series_group_id = op.series_group_id
+        series.group_locked = True
+        await session.flush()
+        if previous is not None and previous != op.series_group_id:
+            await repo.prune_group_if_empty(session, previous)
+    elif op.action == "detach":
+        previous = series.series_group_id
+        series.series_group_id = None
+        series.group_locked = True
+        await session.flush()
+        if previous is not None:
+            await repo.prune_group_if_empty(session, previous)
+    elif op.action == "rename":
+        if op.title is None or not op.title.strip():
+            raise SeriesValidationError("rename requires a non-empty title")
+        if series.series_group_id is None:
+            raise SeriesValidationError(
+                "series is not in a group; nothing to rename"
+            )
+        group = await session.get(SeriesGroupRow, series.series_group_id)
+        if group is not None:
+            group.title = op.title.strip()
+            group.manual_title = True
+    elif op.action == "unlock":
+        # Clear the lock only — re-derivation happens on the NEXT refresh
+        # (FRG-SER-017), never inline here.
+        series.group_locked = False
+    else:  # pragma: no cover - vocabulary validated at the API boundary
+        raise SeriesValidationError(f"unknown group action {op.action!r}")
+
+
 async def delete_series(
     db: Database,
     series_id: int,
@@ -208,7 +276,14 @@ async def delete_series(
             series = await repo.get_series(session, series_id)
             if series is None:
                 raise SeriesNotFoundError(f"no series {series_id}")
+            previous_group_id = series.series_group_id
             await session.delete(series)
+            await session.flush()
+            if previous_group_id is not None:
+                # Deleting the last member of a franchise group must not leave a
+                # phantom zero-member group behind (it would otherwise surface
+                # in GET /series/groups).
+                await repo.prune_group_if_empty(session, previous_group_id)
         summary = f"series {series_id} deleted; files=0 binned=0 (rows only)"
 
     if settings is not None:
@@ -376,6 +451,7 @@ async def _commit_series_deletion(
             # Raced away between the read and this transaction; the caller's
             # compensation restores any files already moved to the bin.
             raise SeriesNotFoundError(f"no series {series_id}")
+        previous_group_id = series.series_group_id
         await session.delete(series)
         for file_id, path, issue_id in files:
             recycle_path = recycled.get(file_id)
@@ -389,6 +465,11 @@ async def _commit_series_deletion(
                 quarantine_path=recycle_path,
                 now=now,
             )
+        if previous_group_id is not None:
+            # Deleting the last member of a franchise group must not orphan a
+            # phantom zero-member group (mirrors the rows-only delete path).
+            await session.flush()
+            await repo.prune_group_if_empty(session, previous_group_id)
 
 
 async def delete_issue_file(

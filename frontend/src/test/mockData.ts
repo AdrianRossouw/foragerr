@@ -18,6 +18,8 @@ import type {
   Series,
   SeriesCreatedResource,
   SeriesDetail,
+  SeriesGroupMember,
+  SeriesGroupResource,
   SeriesResource,
   SeriesStatisticsResource,
   SuggestCandidate,
@@ -190,6 +192,7 @@ export function makeSeriesResource(
     refreshed_at: '2026-07-01T00:00:00Z',
     description_sanitized: 'A mock series.',
     aliases: [],
+    series_group_id: null,
     statistics: makeStats(),
     ...overrides,
   };
@@ -213,6 +216,42 @@ export function makeMockLibrary(count = 55): SeriesResource[] {
       }),
     });
   });
+}
+
+/** A franchise-group member (the lean subset GET /series/groups serializes). */
+export function makeGroupMember(
+  overrides: Partial<SeriesGroupMember> & Pick<SeriesGroupMember, 'id'>,
+): SeriesGroupMember {
+  const id = overrides.id;
+  return {
+    cv_volume_id: 4050_0000 + id,
+    title: `Series ${id}`,
+    sort_title: `series ${id}`,
+    status: 'continuing',
+    start_year: 2010,
+    monitored: true,
+    series_group_id: null,
+    ...overrides,
+  };
+}
+
+/**
+ * One GET /api/v1/series/groups record. Roll-up counts default to sensible
+ * sums but are override-able so a test can pin an exact header stat.
+ */
+export function makeSeriesGroup(
+  overrides: Partial<SeriesGroupResource> &
+    Pick<SeriesGroupResource, 'title' | 'series'>,
+): SeriesGroupResource {
+  const members = overrides.series;
+  return {
+    id: overrides.kind === 'series' ? null : 1,
+    kind: members.length > 1 ? 'group' : 'series',
+    series_count: members.length,
+    issue_count: members.length * 20,
+    owned_count: members.length * 12,
+    ...overrides,
+  };
 }
 
 export function pageOf<T>(records: T[], overrides: Partial<ApiPage<T>> = {}): ApiPage<T> {

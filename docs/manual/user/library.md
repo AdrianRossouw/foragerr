@@ -96,6 +96,32 @@ routes any newly-found, unmatched files through the shared import pipeline (see
 `import.md` for how that pipeline works). Rescan runs automatically after
 a metadata refresh and is also available on demand.
 
+## Grouping series by franchise
+
+A comic "series" in foragerr is one ComicVine **volume** — a single run. But a
+franchise usually spans several runs over the years ("Batman (2011)", "Batman (2016)",
+"Batman (2025)" are three volumes of one title). foragerr groups those runs into a
+**franchise group** so you can see all of a title together.
+
+Grouping is automatic and **display-only** — it never changes what a series is, how it
+is monitored, or which issues are wanted. The group is derived from the series title:
+foragerr strips a trailing volume year (`(2016)`) and `Vol N` designator and folds the
+rest, so successive runs of the same title land in one group. A title with only one run
+simply shows as itself.
+
+On the **Comics** screen, the **Group** toggle switches between the flat series list and
+the grouped view. In the grouped view each franchise is a collapsible header showing the
+title and a roll-up of owned/total issues across its runs; the runs nest beneath and
+behave exactly as they do in the flat view (same monitoring, same actions).
+
+If the automatic grouping gets something wrong, you can correct it from a group's menu:
+
+- **Rename** a group to give the franchise a different display name — the name sticks
+  across future metadata refreshes.
+- **Detach** a run from its group when it doesn't belong — the run is then left on its
+  own, and a later refresh will not re-group it (your choice is locked). Clearing that
+  choice later lets automatic grouping take over again.
+
 ## Editing and deleting a series
 
 `PUT /api/v1/series/{id}` updates a series' monitored flag, monitor-new-items policy,

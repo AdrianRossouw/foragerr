@@ -172,7 +172,60 @@ export interface SeriesResource {
   refreshed_at: string | null;
   description_sanitized: string | null;
   aliases: string[];
+  /**
+   * Franchise group this series belongs to (FRG-SER-016), or null when
+   * ungrouped. Carried on the flat list so the grouped view can reconcile
+   * members to full resources without a second per-series call (FRG-API-020).
+   */
+  series_group_id: number | null;
   statistics: SeriesStatisticsResource;
+}
+
+/**
+ * One member series inside a franchise-group projection (FRG-API-020). A lean
+ * subset of `SeriesResource` — the aggregate `GET /series/groups` endpoint
+ * omits per-series `statistics`/cover; the flat `GET /series` list carries the
+ * full resource, so the grouped view joins members back by `id`.
+ */
+export interface SeriesGroupMember {
+  id: number;
+  cv_volume_id: number;
+  title: string;
+  sort_title: string;
+  status: string;
+  start_year: number | null;
+  monitored: boolean;
+  series_group_id: number | null;
+}
+
+/**
+ * One `GET /api/v1/series/groups` record (FRG-API-020). A `group` is an
+ * operator-visible franchise (successive runs of one title folded together);
+ * an ungrouped series comes back as a singleton franchise (`kind:"series"`,
+ * `id:null`, one member). The roll-up counts (`series_count`, `issue_count`,
+ * `owned_count`) come straight from the bounded aggregate query — never the
+ * per-series statistics path.
+ */
+export interface SeriesGroupResource {
+  id: number | null;
+  kind: 'group' | 'series';
+  title: string;
+  series_count: number;
+  issue_count: number;
+  owned_count: number;
+  series: SeriesGroupMember[];
+}
+
+/**
+ * Grouping override op on `PUT /api/v1/series/{id}` (FRG-SER-017). `reassign`
+ * needs `series_group_id`; `rename` needs `title`; `detach`/`unlock` need
+ * neither. Reassign/detach lock the series against auto-derivation; unlock
+ * clears the lock so the next refresh re-derives.
+ */
+export interface SeriesGroupEditOp {
+  action: 'reassign' | 'detach' | 'rename' | 'unlock';
+  series_group_id?: number | null;
+  title?: string;
 }
 
 export interface IssueFileResource {
@@ -320,6 +373,8 @@ export interface SeriesEditPayload {
   root_folder_id?: number;
   path?: string;
   aliases?: string[];
+  /** Franchise-grouping override op (FRG-SER-017); omitted = don't touch grouping. */
+  group?: SeriesGroupEditOp;
 }
 
 /** Valid monitor strategies for the add flow (backend MONITOR_STRATEGIES). */

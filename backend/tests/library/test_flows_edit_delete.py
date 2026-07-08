@@ -11,12 +11,13 @@ from sqlalchemy import func, select
 from foragerr.importer import history
 from foragerr.library import paths, repo
 from foragerr.library.flows import (
+    GroupEdit,
     SeriesNotFoundError,
     SeriesValidationError,
     delete_series,
     edit_series,
 )
-from foragerr.library.models import IssueFileRow, IssueRow, SeriesRow
+from foragerr.library.models import IssueFileRow, IssueRow, SeriesGroupRow, SeriesRow
 
 from http_support import make_settings
 
@@ -151,6 +152,68 @@ async def test_edit_path_rejects_collision_with_another_series(
         series = await repo.get_series(session, series_id)
     assert Path(series.path) == old_dir  # unchanged
     assert old_dir.exists()  # never renamed away
+
+
+@pytest.mark.req("FRG-SER-017")
+async def test_invalid_group_op_rejected_before_path_rename(
+    db, root_folder_id, root_folder_path, format_profile_id
+):
+    """A PUT carrying BOTH a valid path change and an invalid group op (reassign
+    to a nonexistent group) must raise BEFORE the irreversible on-disk rename —
+    otherwise the directory moves and only then does the group op fail, rolling
+    back the row while leaving the directory moved (disk/DB divergence)."""
+    old_dir = root_folder_path / "Saga (2012)"
+    old_dir.mkdir(parents=True)
+    (old_dir / "marker.txt").write_text("here")
+    series_id = await _make(db, root_folder_id, format_profile_id, old_dir)
+
+    new_dir = root_folder_path / "Saga Renamed"
+    with pytest.raises(SeriesValidationError):
+        await edit_series(
+            db,
+            series_id,
+            path=str(new_dir),
+            group_op=GroupEdit(action="reassign", series_group_id=999999),
+        )
+
+    # The directory was never moved and the row is unchanged.
+    assert old_dir.exists()
+    assert (old_dir / "marker.txt").read_text() == "here"
+    assert not new_dir.exists()
+    async with db.read_session() as session:
+        series = await repo.get_series(session, series_id)
+    assert Path(series.path) == old_dir
+    assert series.series_group_id is None
+
+
+@pytest.mark.req("FRG-SER-016")
+async def test_deleting_last_member_prunes_its_empty_group(
+    db, root_folder_id, root_folder_path, format_profile_id
+):
+    """Deleting a franchise group's LAST member must not leave a phantom
+    zero-member group: the group row is pruned and never surfaces in the
+    grouped-library roll-up."""
+    series_dir = root_folder_path / "Batman (2011)"
+    series_dir.mkdir(parents=True)
+    async with db.write_session() as session:
+        series = await repo.create_series(
+            session, cv_volume_id=1, title="Batman (2011)",
+            format_profile_id=format_profile_id, root_folder_id=root_folder_id,
+            path=str(series_dir),
+        )
+        await repo.apply_autogrouping(session, series)
+        series_id = series.id
+        group_id = series.series_group_id
+    assert group_id is not None  # the sole member of a fresh franchise group
+
+    await delete_series(db, series_id, delete_files=False)
+
+    async with db.read_session() as session:
+        assert await session.get(SeriesGroupRow, group_id) is None  # pruned
+        rollups = await repo.series_group_rollup(session)
+    # No zero-member group leaks into the projection.
+    assert all(r.series_count > 0 for r in rollups)
+    assert group_id not in {r.group_id for r in rollups}
 
 
 @pytest.mark.req("FRG-SER-014")

@@ -19,6 +19,13 @@ export const queryKeys = {
   series: {
     all: () => ['series'] as const,
     detail: (id: number) => ['series', id] as const,
+    // Franchise grouping projection (FRG-API-020), mirroring GET
+    // /api/v1/series/groups. Nested under the ['series'] prefix so a broad,
+    // id-less series push (WebSocketBridge) sweeps it too — groups are derived
+    // from series, and (unlike ComicVine lookup) refetching them is cheap. The
+    // exact-match ['series'] invalidations that back the flat index never touch
+    // it; a group edit invalidates this key explicitly.
+    groups: () => ['series', 'groups'] as const,
   },
   queue: {
     all: () => ['queue'] as const,

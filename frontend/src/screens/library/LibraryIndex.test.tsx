@@ -4,9 +4,16 @@ import userEvent from '@testing-library/user-event';
 import { Routes, Route } from 'react-router-dom';
 import { renderWithProviders } from '../../test/renderWithProviders';
 import { fakeFetcher } from '../../test/fakeFetcher';
-import { makeMockLibrary, makeSeriesResource, pageOf } from '../../test/mockData';
+import {
+  makeGroupMember,
+  makeMockLibrary,
+  makeSeriesGroup,
+  makeSeriesResource,
+  pageOf,
+} from '../../test/mockData';
 import { useUiStore } from '../../store/uiStore';
-import type { SeriesResource } from '../../api/types';
+import type { FetcherInit } from '../../api/fetcher';
+import type { SeriesGroupResource, SeriesResource } from '../../api/types';
 import { LibraryIndex } from './LibraryIndex';
 
 /**
@@ -19,6 +26,7 @@ beforeEach(() => {
   useUiStore.setState({
     libraryViewMode: 'poster',
     librarySortKey: 'title',
+    libraryGroupByFranchise: false,
     interactiveSearchIssueId: null,
   });
 });
@@ -149,5 +157,307 @@ describe('FRG-UI-003: library index', () => {
     await waitFor(() => expect(screen.getByTestId('series-card')).toBeInTheDocument());
     await user.click(screen.getByTestId('series-card'));
     expect(screen.getByTestId('detail-stub')).toBeInTheDocument();
+  });
+});
+
+/**
+ * FRG-UI-021 — Grouped (franchise) library view: multi-run franchises nest
+ * under collapsible headers with a roll-up stat; single-run franchises render
+ * as ordinary rows; per-series navigation/actions are unchanged; and the group
+ * rename/reassign affordance fires the group-edit mutation (FRG-SER-017). All
+ * data rides the fake fetcher.
+ */
+
+// Two runs of one title (grouped) + one ungrouped singleton franchise.
+const GROUPED_SERIES: SeriesResource[] = [
+  makeSeriesResource({
+    id: 1,
+    title: 'Batman (2011)',
+    sort_title: 'batman (2011)',
+    series_group_id: 1,
+  }),
+  makeSeriesResource({
+    id: 2,
+    title: 'Batman (2016)',
+    sort_title: 'batman (2016)',
+    series_group_id: 1,
+  }),
+  makeSeriesResource({
+    id: 3,
+    title: 'Saga',
+    sort_title: 'saga',
+    series_group_id: null,
+  }),
+];
+
+const GROUPED_GROUPS: SeriesGroupResource[] = [
+  makeSeriesGroup({
+    id: 1,
+    kind: 'group',
+    title: 'Batman',
+    series: [makeGroupMember({ id: 1 }), makeGroupMember({ id: 2 })],
+    series_count: 2,
+    issue_count: 50,
+    owned_count: 30,
+  }),
+  makeSeriesGroup({
+    id: null,
+    kind: 'series',
+    title: 'Saga',
+    series: [makeGroupMember({ id: 3 })],
+  }),
+];
+
+function groupedFetcher(records: SeriesResource[], groups: SeriesGroupResource[]) {
+  return fakeFetcher((path: string, init?: FetcherInit) => {
+    if (path.startsWith('/api/v1/series/groups?')) {
+      return pageOf(groups, { sortKey: 'title' });
+    }
+    if (path.startsWith('/api/v1/series?')) return pageOf(records);
+    const put = path.match(/^\/api\/v1\/series\/(\d+)$/);
+    if (put && init?.method === 'PUT') {
+      // Echo a plausible updated resource so the mutation resolves.
+      return makeSeriesResource({ id: Number(put[1]) });
+    }
+    throw new Error(`unexpected request: ${path}`);
+  });
+}
+
+function renderGrouped(
+  records: SeriesResource[] = GROUPED_SERIES,
+  groups: SeriesGroupResource[] = GROUPED_GROUPS,
+) {
+  const { spy, fetcher } = groupedFetcher(records, groups);
+  const utils = renderWithProviders(
+    <Routes>
+      <Route path="/" element={<LibraryIndex />} />
+      <Route path="/series/:id" element={<div data-testid="detail-stub" />} />
+    </Routes>,
+    { fetcher },
+  );
+  return { spy, ...utils };
+}
+
+describe('FRG-UI-021: grouped library view', () => {
+  it('FRG-UI-021 — grouped mode nests multiple runs under one collapsible franchise header; single-run franchises stay ordinary rows', async () => {
+    renderGrouped();
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId('series-card')).toHaveLength(3),
+    );
+
+    // Turn grouping on.
+    await user.click(screen.getByTestId('group-by-toggle'));
+
+    // Exactly one franchise group (Batman is the only multi-run title); Saga is
+    // a single-run franchise rendered as an ordinary card with no group chrome.
+    await waitFor(() =>
+      expect(screen.getAllByTestId('franchise-group')).toHaveLength(1),
+    );
+    const group = screen.getByTestId('franchise-group');
+    const header = within(group).getByTestId('franchise-group-header');
+    expect(within(header).getByText('Batman')).toBeInTheDocument();
+    // Roll-up stat comes straight from the projection: owned/issue + run count.
+    expect(within(header).getByText('30/50')).toBeInTheDocument();
+    expect(within(header).getByText('2 runs')).toBeInTheDocument();
+
+    // The two runs are nested inside the franchise; Saga is not.
+    expect(within(group).getAllByTestId('series-card')).toHaveLength(2);
+    expect(within(group).queryByText('Saga')).not.toBeInTheDocument();
+    expect(screen.getByText('Saga')).toBeInTheDocument();
+    expect(screen.getAllByTestId('series-card')).toHaveLength(3);
+
+    // Collapsible: collapsing the header hides the member runs.
+    await user.click(within(header).getByTestId('franchise-collapse'));
+    expect(screen.queryByTestId('franchise-members')).not.toBeInTheDocument();
+    // Saga (single-run) stays visible regardless of the group's collapse state.
+    expect(screen.getByText('Saga')).toBeInTheDocument();
+  });
+
+  it('FRG-UI-021 — toggling grouping OFF restores the flat list with the same series rows', async () => {
+    renderGrouped();
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId('series-card')).toHaveLength(3),
+    );
+
+    await user.click(screen.getByTestId('group-by-toggle'));
+    await waitFor(() =>
+      expect(screen.getByTestId('franchise-group')).toBeInTheDocument(),
+    );
+
+    // Toggle back off: flat poster grid, same three series, no group chrome.
+    await user.click(screen.getByTestId('group-by-toggle'));
+    expect(screen.getByTestId('library-poster-grid')).toBeInTheDocument();
+    expect(screen.queryByTestId('franchise-group')).not.toBeInTheDocument();
+    expect(screen.getAllByTestId('series-card')).toHaveLength(3);
+    expect(screen.getByText('Batman (2011)')).toBeInTheDocument();
+    expect(screen.getByText('Saga')).toBeInTheDocument();
+  });
+
+  it('FRG-UI-021 — per-series navigation still works from a member run in grouped mode', async () => {
+    renderGrouped();
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId('series-card')).toHaveLength(3),
+    );
+    await user.click(screen.getByTestId('group-by-toggle'));
+    await waitFor(() =>
+      expect(screen.getByTestId('franchise-group')).toBeInTheDocument(),
+    );
+
+    const group = screen.getByTestId('franchise-group');
+    // Click the first nested run; it navigates to its detail route unchanged.
+    await user.click(within(group).getAllByTestId('series-card')[0]);
+    expect(screen.getByTestId('detail-stub')).toBeInTheDocument();
+  });
+
+  it('FRG-UI-021 — group rename affordance fires the group-edit mutation with the rename op (FRG-SER-017)', async () => {
+    const { spy } = renderGrouped();
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId('series-card')).toHaveLength(3),
+    );
+    await user.click(screen.getByTestId('group-by-toggle'));
+    await waitFor(() =>
+      expect(screen.getByTestId('franchise-group')).toBeInTheDocument(),
+    );
+
+    // Open the header menu, rename the franchise, submit.
+    await user.click(screen.getByTestId('franchise-group-menu'));
+    const input = screen.getByTestId('franchise-rename-input');
+    await user.clear(input);
+    await user.type(input, 'The Dark Knight');
+    await user.click(screen.getByTestId('franchise-rename-submit'));
+
+    // PUT /api/v1/series/{firstMemberId} carrying only the rename op — the
+    // group is renamed via any member series (id 1, the first sorted run).
+    await waitFor(() => {
+      const putCall = spy.mock.calls.find(
+        ([path, init]) => init?.method === 'PUT' && path === '/api/v1/series/1',
+      );
+      expect(putCall).toBeDefined();
+      expect(putCall?.[1]?.body).toEqual({
+        group: { action: 'rename', title: 'The Dark Knight' },
+      });
+    });
+  });
+
+  it('FRG-UI-021 — a group with series_count 2 renders as a franchise header even if only one member is cached in the flat index', async () => {
+    // The flat index holds only run id 1; the projection still reports a 2-run
+    // Batman franchise. It must render as a header + roll-up (not degrade to a
+    // bare single card), with the not-yet-cached run simply omitted.
+    const partialSeries: SeriesResource[] = [
+      makeSeriesResource({
+        id: 1,
+        title: 'Batman (2011)',
+        sort_title: 'batman (2011)',
+        series_group_id: 1,
+      }),
+    ];
+    const groups: SeriesGroupResource[] = [
+      makeSeriesGroup({
+        id: 1,
+        kind: 'group',
+        title: 'Batman',
+        series: [makeGroupMember({ id: 1 }), makeGroupMember({ id: 2 })],
+        series_count: 2,
+        issue_count: 50,
+        owned_count: 30,
+      }),
+    ];
+    renderGrouped(partialSeries, groups);
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId('series-card')).toHaveLength(1),
+    );
+    await user.click(screen.getByTestId('group-by-toggle'));
+
+    // Still a franchise header (from the projection), with the roll-up counts.
+    await waitFor(() =>
+      expect(screen.getByTestId('franchise-group')).toBeInTheDocument(),
+    );
+    const header = screen.getByTestId('franchise-group-header');
+    expect(within(header).getByText('Batman')).toBeInTheDocument();
+    expect(within(header).getByText('30/50')).toBeInTheDocument();
+    expect(within(header).getByText('2 runs')).toBeInTheDocument();
+    // Only the one cached run is shown as a card; the group did NOT collapse.
+    expect(screen.getAllByTestId('series-card')).toHaveLength(1);
+  });
+
+  it('FRG-UI-021 — the Sort control is hidden while grouping is on', async () => {
+    renderGrouped();
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId('series-card')).toHaveLength(3),
+    );
+    // Sort control is present in flat mode.
+    expect(screen.getByLabelText('Sort')).toBeInTheDocument();
+
+    await user.click(screen.getByTestId('group-by-toggle'));
+    await waitFor(() =>
+      expect(screen.getByTestId('franchise-group')).toBeInTheDocument(),
+    );
+    // Grouped order is title-only, so the (inert) Sort control is hidden.
+    expect(screen.queryByLabelText('Sort')).not.toBeInTheDocument();
+
+    // Toggling back restores it.
+    await user.click(screen.getByTestId('group-by-toggle'));
+    expect(screen.getByLabelText('Sort')).toBeInTheDocument();
+  });
+
+  it('FRG-UI-021 — the franchise actions menu closes on Escape and on an outside click', async () => {
+    renderGrouped();
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId('series-card')).toHaveLength(3),
+    );
+    await user.click(screen.getByTestId('group-by-toggle'));
+    await waitFor(() =>
+      expect(screen.getByTestId('franchise-group')).toBeInTheDocument(),
+    );
+
+    // Open → Escape closes.
+    await user.click(screen.getByTestId('franchise-group-menu'));
+    expect(screen.getByTestId('franchise-menu')).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByTestId('franchise-menu')).not.toBeInTheDocument();
+
+    // Open again → an outside click (on the stats footer) closes.
+    await user.click(screen.getByTestId('franchise-group-menu'));
+    expect(screen.getByTestId('franchise-menu')).toBeInTheDocument();
+    await user.click(document.body);
+    expect(screen.queryByTestId('franchise-menu')).not.toBeInTheDocument();
+  });
+
+  it('FRG-UI-021 — detach affordance reassigns a run out of the group (FRG-SER-017)', async () => {
+    const { spy } = renderGrouped();
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId('series-card')).toHaveLength(3),
+    );
+    await user.click(screen.getByTestId('group-by-toggle'));
+    await waitFor(() =>
+      expect(screen.getByTestId('franchise-group')).toBeInTheDocument(),
+    );
+
+    await user.click(screen.getByTestId('franchise-group-menu'));
+    await user.click(screen.getByTestId('franchise-detach-2'));
+
+    await waitFor(() => {
+      const putCall = spy.mock.calls.find(
+        ([path, init]) => init?.method === 'PUT' && path === '/api/v1/series/2',
+      );
+      expect(putCall).toBeDefined();
+      expect(putCall?.[1]?.body).toEqual({ group: { action: 'detach' } });
+    });
   });
 });

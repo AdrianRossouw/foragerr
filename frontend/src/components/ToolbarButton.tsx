@@ -12,6 +12,7 @@ export function ToolbarButton({
   disabled = false,
   active = false,
   title,
+  testId,
 }: {
   icon: ReactNode;
   label: string;
@@ -20,6 +21,8 @@ export function ToolbarButton({
   /** Toggled state (e.g. current view mode) renders the icon in accent. */
   active?: boolean;
   title?: string;
+  /** Optional data-testid for tests that drive a specific toolbar control. */
+  testId?: string;
 }) {
   return (
     <button
@@ -29,6 +32,7 @@ export function ToolbarButton({
       disabled={disabled}
       aria-pressed={active || undefined}
       title={title ?? label}
+      data-testid={testId}
     >
       <span className={styles.icon}>{icon}</span>
       <span className={styles.label}>{label}</span>

@@ -1,15 +1,24 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { Toolbar } from '../../components/Toolbar';
 import { ToolbarButton, ToolbarSeparator } from '../../components/ToolbarButton';
 import { ProgressPill } from '../../components/ProgressPill';
 import { Poster } from '../../components/Poster';
-import { BookmarkIcon, GridIcon, TableIcon } from '../../components/icons';
-import { useSeriesIndex } from '../../api/hooks';
+import {
+  BookmarkIcon,
+  FolderScanIcon,
+  GridIcon,
+  TableIcon,
+} from '../../components/icons';
+import {
+  useSeriesGroups,
+  useSeriesIndex,
+  useUpdateSeriesGroup,
+} from '../../api/hooks';
 import { coverUrl } from '../../api/urls';
 import { useUiStore, type LibrarySortKey } from '../../store/uiStore';
 import { formatBytes } from '../../lib/format';
-import type { SeriesResource } from '../../api/types';
+import type { SeriesGroupResource, SeriesResource } from '../../api/types';
 import styles from './LibraryIndex.module.css';
 
 /**
@@ -160,13 +169,254 @@ function SeriesTable({ series }: { series: SeriesResource[] }) {
   );
 }
 
+/**
+ * Rename / reassign affordance (FRG-SER-017) anchored on a franchise header.
+ * Rename targets the group any member belongs to (so it PUTs against a member
+ * series id); detach reassigns one run out of the group. Both go through the
+ * shared group-edit mutation, which refreshes the flat index + the grouping
+ * projection on success.
+ */
+function FranchiseMenu({
+  group,
+  members,
+  onDone,
+}: {
+  group: SeriesGroupResource;
+  members: SeriesResource[];
+  onDone: () => void;
+}) {
+  const [title, setTitle] = useState(group.title);
+  const mutation = useUpdateSeriesGroup();
+  const anchor = members[0];
+
+  const submitRename = (e: FormEvent) => {
+    e.preventDefault();
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    mutation.mutate(
+      { seriesId: anchor.id, group: { action: 'rename', title: trimmed } },
+      { onSuccess: onDone },
+    );
+  };
+
+  return (
+    <div className={styles.franchiseMenu} role="menu" data-testid="franchise-menu">
+      <form className={styles.renameRow} onSubmit={submitRename}>
+        <input
+          className={styles.renameInput}
+          aria-label="Rename franchise"
+          data-testid="franchise-rename-input"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+        />
+        <button
+          type="submit"
+          className={styles.menuAction}
+          data-testid="franchise-rename-submit"
+          disabled={mutation.isPending}
+        >
+          Rename
+        </button>
+      </form>
+      <ul className={styles.detachList}>
+        {members.map((s) => (
+          <li key={s.id}>
+            <button
+              type="button"
+              className={styles.menuAction}
+              data-testid={`franchise-detach-${s.id}`}
+              disabled={mutation.isPending}
+              onClick={() =>
+                mutation.mutate(
+                  { seriesId: s.id, group: { action: 'detach' } },
+                  { onSuccess: onDone },
+                )
+              }
+            >
+              Detach {s.title}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** One multi-run franchise: a collapsible header + its member poster cards. */
+function FranchiseGroup({
+  group,
+  members,
+}: {
+  group: SeriesGroupResource;
+  members: SeriesResource[];
+}) {
+  const [expanded, setExpanded] = useState(true);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuWrapRef = useRef<HTMLDivElement>(null);
+
+  // Dismiss the actions menu on an outside click or Escape (matching the shared
+  // Popover pattern), not only after a successful mutation — an opened menu the
+  // user decides against must close without forcing an edit.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDocMouseDown = (e: MouseEvent) => {
+      if (menuWrapRef.current && !menuWrapRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDocMouseDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onDocMouseDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [menuOpen]);
+
+  return (
+    <section className={styles.franchise} data-testid="franchise-group">
+      <div className={styles.franchiseHeader} data-testid="franchise-group-header">
+        <button
+          type="button"
+          className={styles.collapseButton}
+          aria-expanded={expanded}
+          aria-label={expanded ? 'Collapse franchise' : 'Expand franchise'}
+          data-testid="franchise-collapse"
+          onClick={() => setExpanded((v) => !v)}
+        >
+          <span className={styles.chevron} data-collapsed={!expanded} aria-hidden>
+            ▸
+          </span>
+          <span className={styles.franchiseTitle}>{group.title}</span>
+        </button>
+        <span className={styles.franchiseStats}>
+          <ProgressPill have={group.owned_count} total={group.issue_count} monitored />
+          <span className={styles.runCount}>{group.series_count} runs</span>
+        </span>
+        <div className={styles.franchiseMenuWrap} ref={menuWrapRef}>
+          <button
+            type="button"
+            className={styles.menuButton}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            aria-label="Franchise actions"
+            data-testid="franchise-group-menu"
+            onClick={() => setMenuOpen((v) => !v)}
+          >
+            ⋯
+          </button>
+          {menuOpen && (
+            <FranchiseMenu
+              group={group}
+              members={members}
+              onDone={() => setMenuOpen(false)}
+            />
+          )}
+        </div>
+      </div>
+      {expanded && (
+        <div className={styles.franchiseMembers} data-testid="franchise-members">
+          {members.map((s) => (
+            <PosterCard key={s.id} series={s} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Grouped library body (FRG-UI-021). Franchise metadata + roll-up stats come
+ * from the groups projection; member runs are joined back to the full flat
+ * `SeriesResource` (by id) so the existing `PosterCard` renders them with cover
+ * + statistics unchanged. A single-run franchise renders as an ordinary card
+ * with NO group chrome; a multi-run franchise nests its runs under a
+ * collapsible header. The title filter is applied to members; a franchise with
+ * no matching member drops out.
+ */
+function FranchiseGroupedView({
+  groups,
+  seriesById,
+  filter,
+}: {
+  groups: SeriesGroupResource[];
+  seriesById: Map<number, SeriesResource>;
+  filter: string;
+}) {
+  const franchises = useMemo(() => {
+    const needle = filter.trim().toLowerCase();
+    const filtering = needle.length > 0;
+    return groups
+      .map((group) => {
+        const resolved = group.series
+          .map((m) => seriesById.get(m.id))
+          .filter((s): s is SeriesResource => s !== undefined);
+        const members = resolved
+          .filter((s) => (filtering ? s.title.toLowerCase().includes(needle) : true))
+          .sort((a, b) => a.sort_title.localeCompare(b.sort_title));
+        // Multi-run is an AUTHORITATIVE property of the projection, not of how
+        // many members happen to be cached in the flat index right now: a real
+        // 2-run franchise must render as a header + roll-up even if only one of
+        // its runs has resolved in the flat cache yet (otherwise it silently
+        // degrades to a bare single card whose header counts disagree with the
+        // cards shown). The header stats below come straight from the group.
+        const multiRun = group.kind === 'group' || group.series_count > 1;
+        return { group, members, multiRun };
+      })
+      // Drop a franchise only when it genuinely has nothing to show: an active
+      // filter no member matches, or a single-run franchise whose sole run has
+      // not resolved in the flat cache (there is no resource to render a card
+      // from). A multi-run franchise with a not-yet-cached member is KEPT — its
+      // header + roll-up stand on the projection, and the missing run is simply
+      // omitted from the card row rather than collapsing the whole group.
+      .filter((f) => (f.multiRun && !filtering ? true : f.members.length > 0))
+      .sort((a, b) => a.group.title.localeCompare(b.group.title));
+  }, [groups, seriesById, filter]);
+
+  if (franchises.length === 0) {
+    return <p className={styles.stateNote}>No series match the current filter.</p>;
+  }
+
+  return (
+    <div className={styles.groupList} data-testid="library-grouped">
+      {franchises.map(({ group, members, multiRun }) =>
+        multiRun ? (
+          <FranchiseGroup
+            key={group.id ?? `run-${members[0].id}`}
+            group={group}
+            members={members}
+          />
+        ) : (
+          // Single-run franchise: an ordinary card, no franchise header chrome.
+          <div key={`single-${members[0].id}`} className={styles.singleRun}>
+            <PosterCard series={members[0]} />
+          </div>
+        ),
+      )}
+    </div>
+  );
+}
+
 export function LibraryIndex() {
   const { data, isLoading, isError } = useSeriesIndex();
   const viewMode = useUiStore((s) => s.libraryViewMode);
   const setViewMode = useUiStore((s) => s.setLibraryViewMode);
   const sortKey = useUiStore((s) => s.librarySortKey);
   const setSortKey = useUiStore((s) => s.setLibrarySortKey);
+  const groupByFranchise = useUiStore((s) => s.libraryGroupByFranchise);
+  const toggleGroupByFranchise = useUiStore((s) => s.toggleLibraryGroupByFranchise);
   const [filter, setFilter] = useState('');
+
+  // Grouping projection is fetched only while the toggle is on; the flat index
+  // (already loaded) supplies each member's full resource for rendering.
+  const groupsQuery = useSeriesGroups(groupByFranchise);
+  const seriesById = useMemo(() => {
+    const map = new Map<number, SeriesResource>();
+    for (const s of data ?? []) map.set(s.id, s);
+    return map;
+  }, [data]);
 
   const visible = useMemo(() => {
     const records = data ?? [];
@@ -202,15 +452,30 @@ export function LibraryIndex() {
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
             />
-            <select
-              className={styles.sortSelect}
-              aria-label="Sort"
-              value={sortKey}
-              onChange={(e) => setSortKey(e.target.value as LibrarySortKey)}
-            >
-              <option value="title">Sort: Title</option>
-              <option value="added">Sort: Date Added</option>
-            </select>
+            {/* Grouped mode orders franchises by title only (the group
+                projection is fetched sortKey=title), so a Sort control would be
+                inert — hide it while grouping is on rather than present a
+                dropdown that does nothing. */}
+            {!groupByFranchise && (
+              <select
+                className={styles.sortSelect}
+                aria-label="Sort"
+                value={sortKey}
+                onChange={(e) => setSortKey(e.target.value as LibrarySortKey)}
+              >
+                <option value="title">Sort: Title</option>
+                <option value="added">Sort: Date Added</option>
+              </select>
+            )}
+            <ToolbarSeparator />
+            <ToolbarButton
+              icon={<FolderScanIcon />}
+              label="Group"
+              title="Group by franchise"
+              active={groupByFranchise}
+              onClick={toggleGroupByFranchise}
+              testId="group-by-toggle"
+            />
             <ToolbarSeparator />
             <ToolbarButton
               icon={<GridIcon />}
@@ -237,7 +502,19 @@ export function LibraryIndex() {
         )}
         {data && data.length > 0 && (
           <>
-            {viewMode === 'poster' ? (
+            {groupByFranchise ? (
+              groupsQuery.isLoading ? (
+                <p className={styles.stateNote}>Loading franchises…</p>
+              ) : groupsQuery.isError ? (
+                <p className={styles.stateNote}>Could not load franchise groups.</p>
+              ) : (
+                <FranchiseGroupedView
+                  groups={groupsQuery.data ?? []}
+                  seriesById={seriesById}
+                  filter={filter}
+                />
+              )
+            ) : viewMode === 'poster' ? (
               <PosterGrid series={visible} />
             ) : (
               <SeriesTable series={visible} />

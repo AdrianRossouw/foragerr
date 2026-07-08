@@ -43,6 +43,30 @@ class SeriesNotFoundError(LookupError):
     """No series exists for the given id (maps to HTTP 404)."""
 
 
+# --- franchise grouping override (FRG-SER-017) ------------------------------
+
+#: The four operator corrections to the auto-derived grouping, applied through
+#: the series edit flow (mirroring the ``aliases`` user-override precedent):
+#: ``reassign`` a series to a group (locks it), ``detach`` it (locks it,
+#: ungrouped), ``rename`` its group's display title, or ``unlock`` it (returns
+#: it to auto-derivation on the next refresh).
+GROUP_EDIT_ACTIONS = ("reassign", "detach", "rename", "unlock")
+
+
+@dataclass(frozen=True)
+class GroupEdit:
+    """One franchise-grouping correction on a series (FRG-SER-017).
+
+    ``action`` is one of :data:`GROUP_EDIT_ACTIONS`. ``series_group_id`` is the
+    target group for ``reassign``; ``title`` the new display title for
+    ``rename``. The edit flow validates the action-specific requirements.
+    """
+
+    action: str
+    series_group_id: int | None = None
+    title: str | None = None
+
+
 # --- domain event -----------------------------------------------------------
 
 
