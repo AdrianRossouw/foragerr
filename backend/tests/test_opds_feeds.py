@@ -154,6 +154,20 @@ def test_entries_render_from_db_fields(client, tmp_path):
 def test_cover_and_thumbnail_links_point_at_local_cache(client, tmp_path):
     data = _seed(client, tmp_path, [simple_series(n_issues=1)])
     series_id = data["series"][0]["id"]
+
+    # A series WITH a cached ComicVine cover uses the local series cover-cache
+    # URL for both image links (FRG-OPDS-002); the cover-less local-first-page
+    # fallback (FRG-OPDS-011) is covered separately in the stream suite.
+    async def _mark_cover_cached(app):
+        from foragerr.db.base import utcnow
+        from foragerr.library.models import SeriesRow
+
+        async with app.state.db.write_session() as session:
+            row = await session.get(SeriesRow, series_id)
+            row.cover_cached_at = utcnow()
+
+    client.portal.call(_mark_cover_cached, client.app)
+
     body = client.get(f"/opds/series/{series_id}").text
     feed = ET.fromstring(body)
     (entry,) = feed.findall(f"{ATOM}entry")

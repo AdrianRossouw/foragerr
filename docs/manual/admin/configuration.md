@@ -69,6 +69,11 @@ under the top level of `config.yaml`.
 | `opds_base_path` | `FORAGERR_OPDS_BASE_PATH` | `/opds` | Base URL path the OPDS catalog is mounted at. Must start with `/`; trailing slash stripped; in-feed links are built relative to it. |
 | `opds_page_size` | `FORAGERR_OPDS_PAGE_SIZE` | `50` | Default entries per OPDS feed page when the client doesn't ask. |
 | `opds_page_size_cap` | `FORAGERR_OPDS_PAGE_SIZE_CAP` | `100` | Hard upper bound on OPDS page size; larger client requests are clamped. |
+| `opds_pse_max_members` | `FORAGERR_OPDS_PSE_MAX_MEMBERS` | `5000` | OPDS page streaming: max members an archive may declare before it is refused for page/cover extraction (a member-count cap checked before any decompression). |
+| `opds_pse_max_page_bytes` | `FORAGERR_OPDS_PSE_MAX_PAGE_BYTES` | `67108864` (64 MiB) | OPDS page streaming: max declared decompressed size of a single page member; a larger member is refused **before** it is read (zip-bomb defense). |
+| `opds_pse_max_pixels` | `FORAGERR_OPDS_PSE_MAX_PIXELS` | `64000000` (64 MP) | OPDS page streaming: max decoded pixel count (width×height) accepted **before** an image is decoded (decompression-bomb guard). |
+| `opds_pse_max_width` | `FORAGERR_OPDS_PSE_MAX_WIDTH` | `2048` | OPDS page streaming: hard ceiling on the page `width` a reader may request; larger requests are clamped. Pages are never upscaled. |
+| `opds_pse_request_timeout_seconds` | `FORAGERR_OPDS_PSE_REQUEST_TIMEOUT_SECONDS` | `20` | OPDS page streaming: per-request wall-clock budget for decoding/resizing one page or cover; an over-budget request returns 503 rather than pinning CPU. |
 | `rename_enabled` | `FORAGERR_RENAME_ENABLED` | `true` | Rename files on import per the naming template. Off = keep source filenames. |
 | `file_naming_template` | `FORAGERR_FILE_NAMING_TEMPLATE` | `{Series Title} {Issue Number:000} ({Year}) [__{IssueId}__]` | Token template for imported file names. Must render a name that re-parses to the same issue (validated at startup/save). |
 | `folder_naming_template` | `FORAGERR_FOLDER_NAMING_TEMPLATE` | `{Series Title} ({Year})` | Token template for series folders. |

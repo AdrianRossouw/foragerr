@@ -240,11 +240,11 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-OPDS-005 | Whole-file download with correct comic MIME types | opds | implemented | M1 |
 | FRG-OPDS-006 | Feed pagination with totals | opds | implemented | M1 |
 | FRG-OPDS-007 | Working OpenSearch (or none) | opds | implemented | M2 |
-| FRG-OPDS-008 | OPDS-PSE page streaming | opds | approved | M3 |
-| FRG-OPDS-009 | Cached page counts and page index | opds | approved | M3 |
-| FRG-OPDS-010 | Natural page ordering within archives | opds | approved | M3 |
-| FRG-OPDS-011 | Cover and thumbnail links with local fallback | opds | approved | M3 |
-| FRG-OPDS-012 | Resource limits on archive and image handling | opds | approved | M3 |
+| FRG-OPDS-008 | OPDS-PSE page streaming | opds | implemented | M3 |
+| FRG-OPDS-009 | Cached page counts and page index | opds | implemented | M3 |
+| FRG-OPDS-010 | Natural page ordering within archives | opds | implemented | M3 |
+| FRG-OPDS-011 | Cover and thumbnail links with local fallback | opds | implemented | M3 |
+| FRG-OPDS-012 | Resource limits on archive and image handling | opds | implemented | M3 |
 | FRG-OPDS-013 | Recent Additions shelf | opds | implemented | M2 |
 | FRG-OPDS-014 | Publisher browse shelf | opds | approved | B |
 | FRG-OPDS-015 | Single OPDS version; no OPDS 2.0 | opds | approved | B |

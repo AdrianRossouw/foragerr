@@ -46,6 +46,9 @@ def _quoteattr(value: str) -> str:
 ATOM_NS = "http://www.w3.org/2005/Atom"
 OPENSEARCH_NS = "http://a9.com/-/spec/opensearch/1.1/"
 OPDS_NS = "http://opds-spec.org/2010/catalog"
+#: OPDS Page-Streaming Extension namespace (FRG-OPDS-008) — carries the
+#: ``pse:count`` page-total attribute on a stream link.
+PSE_NS = "http://vaemendis.net/opds-pse/ns"
 
 #: OPDS catalog feed kinds — the ``type`` attribute distinguishes a browse
 #: (navigation) feed from a feed of downloadable issues (acquisition).
@@ -60,6 +63,10 @@ REL_SEARCH = "search"
 REL_ACQUISITION = "http://opds-spec.org/acquisition"
 REL_IMAGE = "http://opds-spec.org/image"
 REL_THUMBNAIL = "http://opds-spec.org/image/thumbnail"
+#: OPDS Page-Streaming Extension stream relation (FRG-OPDS-008): a link whose
+#: href is a per-page template (``{pageNumber}``/``{maxWidth}``) a PSE reader
+#: expands to fetch one decoded page at a time.
+REL_PSE_STREAM = "http://vaemendis.net/opds-pse/stream"
 
 #: Media type of an OpenSearch description document (FRG-OPDS-007).
 OPENSEARCH_DESC_KIND = "application/opensearchdescription+xml"
@@ -70,6 +77,10 @@ class Link:
     href: str
     rel: str | None = None
     type: str | None = None
+    #: OPDS-PSE page total (FRG-OPDS-008). When set, ``_link_el`` emits a
+    #: ``pse:count="N"`` attribute — only meaningful on a ``REL_PSE_STREAM``
+    #: link whose href carries the ``{pageNumber}`` template.
+    pse_count: int | None = None
 
 
 @dataclass(frozen=True)
@@ -112,6 +123,10 @@ def _link_el(link: Link) -> str:
     if link.type is not None:
         parts.append(f" type={_quoteattr(link.type)}")
     parts.append(f" href={_quoteattr(link.href)}")
+    if link.pse_count is not None:
+        # ``pse:count`` is an integer counter; render it through the same
+        # quoting discipline as every other attribute value.
+        parts.append(f" pse:count={_quoteattr(str(int(link.pse_count)))}")
     parts.append("/>")
     return "".join(parts)
 
@@ -138,7 +153,8 @@ def render_feed(feed: Feed) -> str:
     parts.append(
         f"<feed xmlns={_quoteattr(ATOM_NS)} "
         f"xmlns:opensearch={_quoteattr(OPENSEARCH_NS)} "
-        f"xmlns:opds={_quoteattr(OPDS_NS)}>"
+        f"xmlns:opds={_quoteattr(OPDS_NS)} "
+        f"xmlns:pse={_quoteattr(PSE_NS)}>"
     )
     parts.append(f"<id>{_escape(feed.id)}</id>")
     parts.append(f"<title>{_escape(feed.title)}</title>")

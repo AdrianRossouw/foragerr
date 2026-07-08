@@ -37,6 +37,7 @@ from foragerr.config_migrations import (
 )
 from foragerr.logging import register_secret
 from foragerr.naming import DEFAULT_FILE_TEMPLATE, DEFAULT_FOLDER_TEMPLATE
+from foragerr.security.archives import DEFAULT_ARCHIVE_LIMITS, ArchiveLimits
 
 logger = _stdlog.getLogger("foragerr.config")
 
@@ -484,6 +485,53 @@ class Settings(BaseSettings):
             "served an unbounded page."
         ),
     )
+    opds_pse_max_members: int = Field(
+        default=5000,
+        ge=1,
+        description=(
+            "OPDS Page-Streaming (FRG-OPDS-012): maximum number of members an "
+            "archive may declare before it is refused for page/cover extraction "
+            "— a member-count cap on the central directory, checked before any "
+            "decompression. Folded into a per-request ArchiveLimits override."
+        ),
+    )
+    opds_pse_max_page_bytes: int = Field(
+        default=64 * 1024 * 1024,
+        ge=1,
+        description=(
+            "OPDS Page-Streaming (FRG-OPDS-012): maximum DECLARED decompressed "
+            "size (bytes) of a single archive page; a member declaring more is "
+            "refused before it is read (zip-bomb defense). Default 64 MiB."
+        ),
+    )
+    opds_pse_max_pixels: int = Field(
+        default=64_000_000,
+        ge=1,
+        description=(
+            "OPDS Page-Streaming (FRG-OPDS-012): maximum decoded pixel count "
+            "(width*height) of a page image; an image whose header declares more "
+            "is refused before its pixels are loaded (decompression-bomb guard). "
+            "Default 64 megapixels."
+        ),
+    )
+    opds_pse_request_timeout_seconds: float = Field(
+        default=20.0,
+        gt=0,
+        description=(
+            "OPDS Page-Streaming (FRG-OPDS-012): per-request wall-clock budget "
+            "(seconds) for a page/cover decode+resize; an over-budget decode is "
+            "abandoned with a bounded 5xx rather than spinning unbounded."
+        ),
+    )
+    opds_pse_max_width: int = Field(
+        default=2048,
+        ge=1,
+        description=(
+            "OPDS Page-Streaming (FRG-OPDS-008): hard ceiling (pixels) on the "
+            "client-requested page ``width``; a larger request is clamped to "
+            "this value. Pages are never upscaled."
+        ),
+    )
 
     rename_enabled: bool = Field(
         default=True,
@@ -865,6 +913,30 @@ class Settings(BaseSettings):
                 )
                 setattr(self, name, clamped)
         return self
+
+    def opds_pse_archive_limits(self) -> ArchiveLimits:
+        """Per-request archive-safety limits for the OPDS-PSE *listing* surface.
+
+        Folds ``opds_pse_max_members`` into an :class:`ArchiveLimits` override the
+        stream and cover endpoints pass to ``list_image_members`` (FRG-OPDS-012),
+        tightening only the member-count cap for the untrusted OPDS listing path.
+
+        Crucially, ``max_member_bytes`` stays at the shared DEFAULT import cap —
+        NOT the tight ``opds_pse_max_page_bytes``. Listability must match what the
+        import producer decided (which counts under the default import limits): if
+        this used the tight per-page cap, a CBZ with one page larger than
+        ``opds_pse_max_page_bytes`` would be listed (and counted) at import yet
+        return ``None`` from ``list_image_members`` at stream time, 404-ing the
+        WHOLE archive. The tight per-page byte cap is instead enforced ONLY at
+        read time, in ``read_image_member(..., max_bytes=opds_pse_max_page_bytes)``,
+        so a single over-64-MiB page returns a bounded per-page 502 while every
+        other page still streams. Net: an archive is streamable iff it passed
+        import. Total-size and nesting stay at the shared defaults.
+        """
+        return ArchiveLimits(
+            max_members=self.opds_pse_max_members,
+            max_member_bytes=DEFAULT_ARCHIVE_LIMITS.max_member_bytes,
+        )
 
     def secret_fields(self) -> dict[str, SecretStr]:
         """All secret-typed settings by field name."""
