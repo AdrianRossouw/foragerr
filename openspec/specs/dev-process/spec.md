@@ -269,6 +269,29 @@ point into — SHALL be pushed to `origin` when created, so every tag is a resto
 point that survives loss of the working environment. Tags SHALL never be moved or
 deleted once pushed; a bad release is corrected by a new PATCH tag.
 
+Every such release SHALL additionally be recorded as **first-class, auditable release
+notes**, so the release history is self-documenting rather than reconstructable only
+from tag messages:
+
+- a `CHANGELOG.md` entry at the repository root for the release version, in a
+  Keep-a-Changelog-style format, listing the user- and administrator-facing changes
+  grouped as Added / Changed / Fixed / Security, the FRG requirement ids the release
+  delivers, and any upgrade or migration notes;
+- the backend `pyproject.toml` `version` set to the release version, so the running
+  application reports its true version rather than a stale placeholder;
+- a published GitHub Release (`gh release create`) for the tag, carrying that
+  CHANGELOG entry as its body.
+
+The `CHANGELOG.md` entry and the `pyproject.toml` version bump SHALL land in the
+**same merged change** as the code they describe, before it merges to `main`; the
+annotated tag and the GitHub Release SHALL be created immediately after the merge
+commit exists, in the same merge gate, from that same CHANGELOG entry. A release is
+not complete until its CHANGELOG entry, tag, pushed `main`, and GitHub Release all
+exist. This requirement applies **retroactively** to every tag created before it was
+adopted: `CHANGELOG.md` and a GitHub Release SHALL exist for each existing tag
+(v0.1.0 through v0.2.8), reconstructed from their tag messages and archived change
+proposals.
+
 #### Scenario: Change merge creates a tag
 
 - **WHEN** a change merges to `main` at or after change 7
@@ -283,4 +306,19 @@ deleted once pushed; a bad release is corrected by a new PATCH tag.
 
 - **WHEN** a defect is found in a tagged release
 - **THEN** the fix lands as a new merged change with a new PATCH tag; the existing tag is never moved or deleted
+
+#### Scenario: Release carries a CHANGELOG entry and a matching version
+
+- **WHEN** a change that will be tagged as a release merges to `main`
+- **THEN** the same change has added its version's `CHANGELOG.md` entry (Added/Changed/Fixed/Security + FRG refs + upgrade notes) and set `backend/pyproject.toml` `version` to the release version, before the merge
+
+#### Scenario: Release is published as a GitHub Release
+
+- **WHEN** a release tag is created and pushed
+- **THEN** a GitHub Release is published for that tag in the same gate, carrying the CHANGELOG entry as its body
+
+#### Scenario: The release record is complete for existing tags
+
+- **WHEN** the release-notes requirement is adopted
+- **THEN** `CHANGELOG.md` and a published GitHub Release exist for every prior tag (v0.1.0..v0.2.8), reconstructed from tag messages and archived proposals
 
