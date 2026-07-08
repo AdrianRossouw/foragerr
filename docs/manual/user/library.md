@@ -122,6 +122,26 @@ If the automatic grouping gets something wrong, you can correct it from a group'
   own, and a later refresh will not re-group it (your choice is locked). Clearing that
   choice later lets automatic grouping take over again.
 
+## Collected editions (trades)
+
+ComicVine models a collected edition — a trade paperback (TPB), graphic novel (GN), or
+hardcover (HC) — as its own volume, so in foragerr a trade line is an ordinary series
+of its own. foragerr **types** such a series from its title (it recognises "TPB",
+"Graphic Novel", "Hardcover" and the like) and shows a small **TPB / GN / HC badge** on
+the series card and its detail page, so collected editions are easy to tell apart from
+single-issue runs. A library **filter** lets you show only collected editions, only
+single-issue runs, or everything. If foragerr types a series wrong, you can set its
+book-type explicitly when editing the series; your choice is kept across metadata
+refreshes.
+
+**Owning a trade never affects your single issues.** This is deliberate and guaranteed:
+single issues and collected editions are independent tracks. Owning the "Saga" deluxe
+hardcover does **not** mark any single "Saga" issue as owned, and does not remove a
+missing single issue from your wanted/searchable list — a trade line's files belong to
+the trade series, never to the single-issue series. Type a series as a collected
+edition freely; it changes only how the series is labelled and named, never what is
+wanted.
+
 ## Editing and deleting a series
 
 `PUT /api/v1/series/{id}` updates a series' monitored flag, monitor-new-items policy,

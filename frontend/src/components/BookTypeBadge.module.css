@@ -1,0 +1,20 @@
+/*
+ * Book-type badge (FRG-UI-022): a subtle accent-tinted chip. Accent is used as
+ * a soft tint only (per the ant accent-only rule) — small, uppercase, letter-
+ * spaced so it reads as a type marker without competing with the title.
+ */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 5px;
+  height: 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-accent);
+  color: var(--color-accent);
+  background: transparent;
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  line-height: 1;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}

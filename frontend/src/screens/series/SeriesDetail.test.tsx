@@ -7,6 +7,7 @@ import { fakeFetcher } from '../../test/fakeFetcher';
 import {
   makeCommand,
   makeMediaManagementConfig,
+  makeSeriesResource,
   mockIssues,
   mockSeriesResource,
   pageOf,
@@ -426,5 +427,55 @@ describe('FRG-UI-004: series detail', () => {
         within(dialog).getByRole('button', { name: 'Delete File' }),
       ).toBeEnabled(),
     );
+  });
+});
+
+/**
+ * FRG-UI-022 — Collected-edition (trade) surfacing on the series-detail hero:
+ * a typed series shows a book-type badge; a null-typed single-issues run shows
+ * none. Display-only — nothing else about the hero changes.
+ */
+function renderDetailWithBooktype(booktype: SeriesResource['booktype']) {
+  const series = makeSeriesResource({
+    id: 7,
+    title: 'Invincible',
+    sort_title: 'invincible',
+    booktype,
+  });
+  const fetcher = fakeFetcher((path, options) => {
+    const method = options?.method ?? 'GET';
+    if (method === 'GET' && path === '/api/v1/series/7') return series;
+    if (method === 'GET' && path.startsWith('/api/v1/issues?seriesId=7')) {
+      return pageOf(mockIssues);
+    }
+    throw new Error(`unexpected request: ${method} ${path}`);
+  }).fetcher;
+  return renderWithProviders(
+    <Routes>
+      <Route path="/series/:id" element={<SeriesDetail />} />
+    </Routes>,
+    { fetcher, route: '/series/7' },
+  );
+}
+
+describe('FRG-UI-022: series-detail collected-edition badge', () => {
+  it('FRG-UI-022 — a typed series shows a book-type badge on the hero', async () => {
+    renderDetailWithBooktype('tpb');
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Invincible' })).toBeInTheDocument(),
+    );
+    const badge = screen.getByTestId('booktype-badge');
+    expect(badge).toHaveTextContent('TPB');
+    expect(badge).toHaveAttribute('aria-label', 'Collected edition: Trade paperback');
+  });
+
+  it('FRG-UI-022 — a null-typed single-issues run shows no badge on the hero', async () => {
+    renderDetailWithBooktype(null);
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Invincible' })).toBeInTheDocument(),
+    );
+    expect(screen.queryByTestId('booktype-badge')).toBeNull();
   });
 });

@@ -56,6 +56,8 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-SER-015 | Bulk series operations | ser | approved | B |
 | FRG-SER-016 | Volume grouping model and franchise derivation | ser | implemented | M3 |
 | FRG-SER-017 | Grouping manual override survives refresh | ser | implemented | M3 |
+| FRG-SER-018 | Series collected-edition (trade) typing | ser | implemented | M3 |
+| FRG-SER-019 | Trades never suppress single-issue wanted | ser | implemented | M3 |
 | FRG-META-001 | ComicVine client fundamentals | meta | implemented | M1 |
 | FRG-META-002 | API key handling | meta | implemented | M1 |
 | FRG-META-003 | Client-side rate limiting with 429 handling | meta | implemented | M1 |
@@ -237,6 +239,7 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-UI-019 | Global header quick-search over the local library | ui | implemented | M2 |
 | FRG-UI-020 | Settings: General with ComicVine metadata credential | ui | implemented | M2 |
 | FRG-UI-021 | Grouped library view | ui | implemented | M3 |
+| FRG-UI-022 | Collected-edition (trade) surfacing | ui | implemented | M3 |
 | FRG-OPDS-001 | OPDS 1.2 Atom catalog with navigation root | opds | implemented | M1 |
 | FRG-OPDS-002 | Acquisition feeds with per-entry metadata | opds | implemented | M1 |
 | FRG-OPDS-003 | Library-id-based file resolution only (no client-supplied paths) | opds | implemented | M1 |

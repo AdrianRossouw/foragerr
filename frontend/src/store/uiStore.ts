@@ -8,6 +8,13 @@ import { create } from 'zustand';
  */
 export type LibraryViewMode = 'poster' | 'table';
 export type LibrarySortKey = 'title' | 'added';
+/**
+ * Collected-editions filter (FRG-UI-022): a display-only partition of the
+ * library by book-type (FRG-SER-018). `all` shows everything; `collected`
+ * shows only typed (trade/GN/HC/one-shot) series; `singles` shows only
+ * null-typed single-issues runs. It never touches any per-series state.
+ */
+export type LibraryCollectedFilter = 'all' | 'collected' | 'singles';
 
 interface UiState {
   libraryViewMode: LibraryViewMode;
@@ -24,6 +31,9 @@ interface UiState {
   libraryGroupByFranchise: boolean;
   toggleLibraryGroupByFranchise: () => void;
   setLibraryGroupByFranchise: (on: boolean) => void;
+  /** Collected-editions filter (FRG-UI-022) — display-only library partition. */
+  libraryCollectedFilter: LibraryCollectedFilter;
+  setLibraryCollectedFilter: (filter: LibraryCollectedFilter) => void;
   sidebarCollapsed: boolean;
   toggleSidebar: () => void;
   /**
@@ -46,6 +56,9 @@ export const useUiStore = create<UiState>((set) => ({
     set((s) => ({ libraryGroupByFranchise: !s.libraryGroupByFranchise })),
   setLibraryGroupByFranchise: (libraryGroupByFranchise) =>
     set({ libraryGroupByFranchise }),
+  libraryCollectedFilter: 'all',
+  setLibraryCollectedFilter: (libraryCollectedFilter) =>
+    set({ libraryCollectedFilter }),
   sidebarCollapsed: false,
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   interactiveSearchIssueId: null,

@@ -24,6 +24,7 @@ from foragerr.db import Database, queue_event
 from foragerr.db.base import utcnow
 from foragerr.http import HttpClientFactory
 from foragerr.library import repo
+from foragerr.library.booktype import detect_series_booktype
 from foragerr.library.models import IssueFileRow, IssueRow, SeriesRow
 from foragerr.library.ordering import ordering_key_for
 from foragerr.commands.registry import register_handler
@@ -108,6 +109,13 @@ async def refresh_series(
         series.start_year = record.start_year
         series.description_sanitized = record.description
         series.refreshed_at = utcnow()
+
+        # Re-derive the collected-edition book-type unless the operator locked
+        # it (FRG-SER-018) — refresh never changes ``series.title``, so this is
+        # stable across refreshes (same reasoning as grouping); display/naming
+        # only, never touches wanted state (FRG-SER-019).
+        if not series.booktype_locked:
+            series.booktype = detect_series_booktype(series.title)
 
         # Re-derive the franchise group unless the operator locked it
         # (FRG-SER-016/017) — display-only; never touches issues/wanted.

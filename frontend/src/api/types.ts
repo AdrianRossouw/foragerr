@@ -178,6 +178,13 @@ export interface SeriesResource {
    * members to full resources without a second per-series call (FRG-API-020).
    */
   series_group_id: number | null;
+  /**
+   * Collected-edition type (FRG-SER-018): `tpb`/`gn`/`hc`/`one_shot` marks a
+   * collected edition; `null` is an ordinary single-issues run. Display-only
+   * (FRG-UI-022) — it drives the book-type badge and the collected filter and
+   * NEVER changes monitoring, actions, or the wanted machinery (FRG-SER-019).
+   */
+  booktype: 'tpb' | 'gn' | 'hc' | 'one_shot' | null;
   statistics: SeriesStatisticsResource;
 }
 

@@ -4,6 +4,7 @@ import { Toolbar } from '../../components/Toolbar';
 import { ToolbarButton, ToolbarSeparator } from '../../components/ToolbarButton';
 import { ProgressPill } from '../../components/ProgressPill';
 import { Poster } from '../../components/Poster';
+import { BookTypeBadge } from '../../components/BookTypeBadge';
 import {
   BookmarkIcon,
   FolderScanIcon,
@@ -16,7 +17,11 @@ import {
   useUpdateSeriesGroup,
 } from '../../api/hooks';
 import { coverUrl } from '../../api/urls';
-import { useUiStore, type LibrarySortKey } from '../../store/uiStore';
+import {
+  useUiStore,
+  type LibraryCollectedFilter,
+  type LibrarySortKey,
+} from '../../store/uiStore';
 import { formatBytes } from '../../lib/format';
 import type { SeriesGroupResource, SeriesResource } from '../../api/types';
 import styles from './LibraryIndex.module.css';
@@ -42,6 +47,21 @@ function sortSeries(
   return sorted;
 }
 
+/**
+ * Collected-editions partition (FRG-UI-022): `collected` keeps only typed
+ * series (any non-null book-type), `singles` keeps only null-typed
+ * single-issues runs, `all` keeps everything. Display-only — it never touches
+ * any per-series state.
+ */
+function matchesCollected(
+  series: SeriesResource,
+  filter: LibraryCollectedFilter,
+): boolean {
+  if (filter === 'collected') return series.booktype !== null;
+  if (filter === 'singles') return series.booktype === null;
+  return true;
+}
+
 function jumpLetter(series: SeriesResource): string {
   const first = series.sort_title.charAt(0).toUpperCase();
   return first >= 'A' && first <= 'Z' ? first : '#';
@@ -65,8 +85,11 @@ function PosterCard({ series }: { series: SeriesResource }) {
         lazy
       />
       <div className={styles.cardFooter}>
-        <span className={styles.cardTitle} title={series.title}>
-          {series.title}
+        <span className={styles.cardTitleRow}>
+          <span className={styles.cardTitle} title={series.title}>
+            {series.title}
+          </span>
+          <BookTypeBadge booktype={series.booktype} />
         </span>
         <span className={styles.cardMeta}>
           <span
@@ -148,9 +171,12 @@ function SeriesTable({ series }: { series: SeriesResource[] }) {
               </span>
             </td>
             <td>
-              <Link className={styles.titleLink} to={`/series/${s.id}`}>
-                {s.title}
-              </Link>
+              <span className={styles.tableTitleCell}>
+                <Link className={styles.titleLink} to={`/series/${s.id}`}>
+                  {s.title}
+                </Link>
+                <BookTypeBadge booktype={s.booktype} />
+              </span>
             </td>
             <td>{s.publisher ?? '—'}</td>
             <td>{s.start_year ?? '—'}</td>
@@ -340,21 +366,27 @@ function FranchiseGroupedView({
   groups,
   seriesById,
   filter,
+  collectedFilter,
 }: {
   groups: SeriesGroupResource[];
   seriesById: Map<number, SeriesResource>;
   filter: string;
+  collectedFilter: LibraryCollectedFilter;
 }) {
   const franchises = useMemo(() => {
     const needle = filter.trim().toLowerCase();
-    const filtering = needle.length > 0;
+    const filtering = needle.length > 0 || collectedFilter !== 'all';
     return groups
       .map((group) => {
         const resolved = group.series
           .map((m) => seriesById.get(m.id))
           .filter((s): s is SeriesResource => s !== undefined);
         const members = resolved
-          .filter((s) => (filtering ? s.title.toLowerCase().includes(needle) : true))
+          .filter(
+            (s) =>
+              (needle ? s.title.toLowerCase().includes(needle) : true) &&
+              matchesCollected(s, collectedFilter),
+          )
           .sort((a, b) => a.sort_title.localeCompare(b.sort_title));
         // Multi-run is an AUTHORITATIVE property of the projection, not of how
         // many members happen to be cached in the flat index right now: a real
@@ -373,7 +405,7 @@ function FranchiseGroupedView({
       // omitted from the card row rather than collapsing the whole group.
       .filter((f) => (f.multiRun && !filtering ? true : f.members.length > 0))
       .sort((a, b) => a.group.title.localeCompare(b.group.title));
-  }, [groups, seriesById, filter]);
+  }, [groups, seriesById, filter, collectedFilter]);
 
   if (franchises.length === 0) {
     return <p className={styles.stateNote}>No series match the current filter.</p>;
@@ -407,6 +439,8 @@ export function LibraryIndex() {
   const setSortKey = useUiStore((s) => s.setLibrarySortKey);
   const groupByFranchise = useUiStore((s) => s.libraryGroupByFranchise);
   const toggleGroupByFranchise = useUiStore((s) => s.toggleLibraryGroupByFranchise);
+  const collectedFilter = useUiStore((s) => s.libraryCollectedFilter);
+  const setCollectedFilter = useUiStore((s) => s.setLibraryCollectedFilter);
   const [filter, setFilter] = useState('');
 
   // Grouping projection is fetched only while the toggle is on; the flat index
@@ -421,11 +455,13 @@ export function LibraryIndex() {
   const visible = useMemo(() => {
     const records = data ?? [];
     const needle = filter.trim().toLowerCase();
-    const filtered = needle
-      ? records.filter((s) => s.title.toLowerCase().includes(needle))
-      : records;
+    const filtered = records.filter(
+      (s) =>
+        (needle ? s.title.toLowerCase().includes(needle) : true) &&
+        matchesCollected(s, collectedFilter),
+    );
     return sortSeries(filtered, sortKey);
-  }, [data, filter, sortKey]);
+  }, [data, filter, sortKey, collectedFilter]);
 
   const totals = useMemo(() => {
     const records = data ?? [];
@@ -467,6 +503,22 @@ export function LibraryIndex() {
                 <option value="added">Sort: Date Added</option>
               </select>
             )}
+            {/* Collected-editions partition (FRG-UI-022): display-only — it
+                narrows which series are shown by book-type and touches no
+                per-series state. */}
+            <select
+              className={styles.sortSelect}
+              aria-label="Collected editions filter"
+              data-testid="collected-filter"
+              value={collectedFilter}
+              onChange={(e) =>
+                setCollectedFilter(e.target.value as LibraryCollectedFilter)
+              }
+            >
+              <option value="all">All editions</option>
+              <option value="collected">Collected only</option>
+              <option value="singles">Single issues only</option>
+            </select>
             <ToolbarSeparator />
             <ToolbarButton
               icon={<FolderScanIcon />}
@@ -512,6 +564,7 @@ export function LibraryIndex() {
                   groups={groupsQuery.data ?? []}
                   seriesById={seriesById}
                   filter={filter}
+                  collectedFilter={collectedFilter}
                 />
               )
             ) : viewMode === 'poster' ? (
