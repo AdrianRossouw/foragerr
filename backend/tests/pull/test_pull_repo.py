@@ -86,10 +86,12 @@ async def test_stored_entries_carry_source_cv_ids(db):
 
 @pytest.mark.req("FRG-PULL-003")
 async def test_a_failed_replace_does_not_half_replace_the_week(db):
-    """Simulates a mid-run failure (a malformed fetched batch that collides
-    on entry_key) inside the SAME write transaction as the replace: the
+    """A mid-run failure inside the SAME write transaction as the replace: the
     delete already issued against the session must roll back along with the
-    failed insert, leaving the prior week's rows byte-for-byte intact."""
+    rest, leaving the prior week's rows byte-for-byte intact. The failure is
+    injected as a caller-side exception after ``replace_week`` has run (its
+    delete+insert are already on the transaction), exercising the rollback
+    contract independently of what could trip it."""
     original = _entries(issue_numbers=["1", "2", "3"])
     async with db.write_session() as session:
         await repo.replace_week(session, WEEK_A, original)
@@ -99,20 +101,10 @@ async def test_a_failed_replace_does_not_half_replace_the_week(db):
         for r in await _week_rows(db, WEEK_A)
     )
 
-    # Two entries that collide on entry_key (same cv_issue_id) — this must
-    # blow up the insert with a unique-constraint violation partway through
-    # the batch, simulating a mid-fetch failure.
-    colliding = [
-        ParsedPullEntry(
-            series_name="Saga", issue_number="1", release_date=dt.date(2026, 7, 8), cv_issue_id=9,
-        ),
-        ParsedPullEntry(
-            series_name="Saga", issue_number="1", release_date=dt.date(2026, 7, 8), cv_issue_id=9,
-        ),
-    ]
-    with pytest.raises(Exception):
+    with pytest.raises(RuntimeError):
         async with db.write_session() as session:
-            await repo.replace_week(session, WEEK_A, colliding)
+            await repo.replace_week(session, WEEK_A, _entries(issue_numbers=["9", "10"]))
+            raise RuntimeError("simulated mid-run failure after the replace")
 
     after = sorted(
         (r.entry_key, r.issue_number, r.cv_issue_id, r.publisher)
@@ -120,6 +112,35 @@ async def test_a_failed_replace_does_not_half_replace_the_week(db):
     )
     assert before == after  # the prior week survived the failed replace intact
     assert len(after) == 3
+
+
+@pytest.mark.req("FRG-PULL-003")
+async def test_duplicate_entry_keys_within_a_week_collapse_without_crashing(db):
+    """An untrusted payload may list the same logical row twice (variant covers
+    sharing a cv_issue_id, or a duplicated name/issue/publisher tuple). Storing
+    it must collapse the duplicates on entry_key and NOT trip the (week,
+    entry_key) unique constraint — a single bad row can never fail the run."""
+    dupes = [
+        ParsedPullEntry(
+            series_name="Saga", issue_number="1", release_date=dt.date(2026, 7, 8), cv_issue_id=9,
+        ),
+        ParsedPullEntry(  # same cv_issue_id -> same entry_key (e.g. a variant cover)
+            series_name="Saga", issue_number="1", release_date=dt.date(2026, 7, 8), cv_issue_id=9,
+        ),
+        ParsedPullEntry(  # no cv id, but same normalized name/issue/publisher as itself twice
+            series_name="Nailbiter", issue_number="5", release_date=dt.date(2026, 7, 8), publisher="Image",
+        ),
+        ParsedPullEntry(
+            series_name="  nailbiter ", issue_number="5", release_date=dt.date(2026, 7, 8), publisher="IMAGE",
+        ),
+    ]
+    async with db.write_session() as session:
+        rows = await repo.replace_week(session, WEEK_A, dupes)
+
+    stored = await _week_rows(db, WEEK_A)
+    keys = [r.entry_key for r in stored]
+    assert len(rows) == 2  # one Saga (cv:9), one Nailbiter (name-folded) — no crash
+    assert len(keys) == len(set(keys)) == 2
 
 
 @pytest.mark.req("FRG-PULL-003")

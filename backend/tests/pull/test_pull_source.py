@@ -282,14 +282,32 @@ async def test_522_backend_down_is_outage_leaves_data_intact_and_marks_degraded(
     status = await backoff.status(PROVIDER_PULL, PULL_PROVIDER_ID)
     assert not status.healthy
 
-    # ...and it surfaces in the health warnings with a remediation hint.
+    # ...and it surfaces in the health warnings with a remediation hint. An
+    # outage only ever happens while the source is enabled, so health is asked
+    # with pull_enabled=True (a disabled source is suppressed — see below).
     warnings = await HealthService(
-        db, make_settings(tmp_path), scheduler=None
+        db, make_settings(tmp_path, pull_enabled=True), scheduler=None
     ).warnings()
     pull = [w for w in warnings if w.source == "pull-source"]
     assert len(pull) == 1
     assert pull[0].type == "warning"
     assert pull[0].remediation_hint
+
+
+@pytest.mark.req("FRG-PULL-002")
+async def test_disabled_source_suppresses_a_stale_degraded_item(tmp_path, db):
+    """Turning the feature off must clear its health item even if a back-off row
+    survives from when it was enabled: while disabled the fetch never runs, so
+    nothing can reset the ladder, and the item would otherwise read 'degraded'
+    forever for a feature the operator has deliberately turned off."""
+    backoff = ProviderBackoff(db)
+    await backoff.record_failure(PROVIDER_PULL, PULL_PROVIDER_ID, reason="backend-down")
+    assert not (await backoff.status(PROVIDER_PULL, PULL_PROVIDER_ID)).healthy
+
+    warnings = await HealthService(
+        db, make_settings(tmp_path, pull_enabled=False), scheduler=None
+    ).warnings()
+    assert not [w for w in warnings if w.source == "pull-source"]
 
 
 @pytest.mark.req("FRG-PULL-002")
@@ -345,9 +363,10 @@ async def test_successful_run_clears_a_prior_degraded_state(tmp_path, db):
         outcome = await client.fetch_weeks([(27, 2026)])
 
     assert outcome.degraded is False
-    # A single success resets the ladder -> health recovers, warning clears.
+    # A single success resets the ladder -> health recovers, warning clears
+    # (asked with the source enabled, so the clear is the success, not the gate).
     assert (await backoff.status(PROVIDER_PULL, PULL_PROVIDER_ID)).healthy
     warnings = await HealthService(
-        db, make_settings(tmp_path), scheduler=None
+        db, make_settings(tmp_path, pull_enabled=True), scheduler=None
     ).warnings()
     assert not [w for w in warnings if w.source == "pull-source"]

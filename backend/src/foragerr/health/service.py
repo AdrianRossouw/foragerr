@@ -350,6 +350,13 @@ class HealthService:
         back-off row and contributes nothing (no spurious "ok" item), while a
         522/666/egress/malformed outage shows here as degraded with a
         remediation hint (FRG-NFR-011 / FRG-API-014)."""
+        # A disabled source contributes nothing, even if a stale back-off row
+        # survives from when it was enabled: while disabled the fetch never runs,
+        # so nothing can clear the ladder (only a success resets it) and the item
+        # would otherwise show "degraded" forever for a feature the operator has
+        # turned off.
+        if not self._settings.pull_enabled:
+            return []
         status = await self._backoff.status(PROVIDER_PULL, PULL_PROVIDER_ID)
         if status.healthy:
             return []

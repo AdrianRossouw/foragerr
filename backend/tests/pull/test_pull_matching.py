@@ -49,7 +49,7 @@ async def _seed(db, root: Path, series_specs: list[dict]) -> dict[str, int]:
                 format_profile_id=profile_id,
                 root_folder_id=rf.id,
                 path=str(root / spec["title"]),
-                monitored=True,
+                monitored=spec.get("monitored", True),
             )
             await session.flush()
             if spec.get("aliases"):
@@ -101,6 +101,27 @@ async def test_id_match_links_on_verified_candidate(db, tmp_path):
     # Persisted onto the row, not just returned.
     [row] = await _rows(db)
     assert row.match_type == "id" and row.matched_issue_id == result.matched_issue_id
+
+
+@pytest.mark.req("FRG-PULL-004")
+async def test_unmonitored_series_is_not_matched(db, tmp_path):
+    """The matcher indexes only *watched* (monitored) series (FRG-PULL-005): a
+    pull entry for a paused series must not link to it, or the refresh trigger
+    would enqueue refresh-series work the monitored-scoped weekly view never
+    surfaces. Same fixture as the id-match case but the series is unmonitored."""
+    await _seed(
+        db,
+        tmp_path / "lib",
+        [{"title": "Spawn", "cv_volume_id": 10, "monitored": False,
+          "issues": [{"number": "350", "cv_issue_id": 5000}]}],
+    )
+    [result] = await _match(
+        db,
+        [ParsedPullEntry(series_name="Spawn", issue_number="350", release_date=RELEASE, cv_issue_id=5000)],
+    )
+    assert result.matched_series_id is None  # no trigger fires for a paused series
+    assert result.matched_issue_id is None
+    assert result.match_type in {"unmatched", "new_series"}
 
 
 @pytest.mark.req("FRG-PULL-004")

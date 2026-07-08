@@ -143,8 +143,23 @@ class LibraryMatchIndex:
 
 
 async def build_library_index(session: AsyncSession) -> LibraryMatchIndex:
-    """Load every watched series + issue into a :class:`LibraryMatchIndex`."""
-    series_rows = list((await session.execute(select(SeriesRow))).scalars().all())
+    """Load every watched series + issue into a :class:`LibraryMatchIndex`.
+
+    Only *monitored* series are indexed: the refresh trigger (FRG-PULL-005) acts
+    on a "matched watched series", and the weekly projection's library-primary
+    half is likewise monitored-scoped, so matching a pull entry to a paused
+    series here would enqueue spurious ``refresh-series`` work the rest of the
+    pull view never surfaces.
+    """
+    series_rows = list(
+        (
+            await session.execute(
+                select(SeriesRow).where(SeriesRow.monitored.is_(True))
+            )
+        )
+        .scalars()
+        .all()
+    )
     issue_rows = list((await session.execute(select(IssueRow))).scalars().all())
 
     issues_by_series: dict[int, list[_LibIssue]] = {}
@@ -169,9 +184,15 @@ async def build_library_index(session: AsyncSession) -> LibraryMatchIndex:
             if lib_issue.value is not None:
                 by_value.setdefault(lib_issue.value, lib_issue)
         keys = {series.matching_key}
+        # Guard empty keys: an alias (or a name) that folds to "" must not enter
+        # the index, or every entry whose name normalizes to empty would collide
+        # into a single bucket and false-match. Mirrors search_ops' alias folding.
         keys.update(
-            matching_key(a) for a in decode_aliases(series.aliases, series_id=series.id)
+            key
+            for a in decode_aliases(series.aliases, series_id=series.id)
+            if (key := matching_key(a))
         )
+        keys.discard("")
         lib_series = _LibSeries(
             series_id=series.id,
             keys=frozenset(keys),

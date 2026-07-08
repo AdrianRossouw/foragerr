@@ -53,10 +53,20 @@ async def replace_week(
     """
     stamp = fetched_at or utcnow()
     await session.execute(delete(PullEntryRow).where(PullEntryRow.week == week))
+    # Collapse on entry_key first (FRG-PULL-003): an untrusted source payload may
+    # list the same logical row twice — variant covers sharing a cv_issue_id, or a
+    # duplicated (series_name, issue_number, publisher) tuple. Without this, two
+    # such rows would both be inserted and trip the (week, entry_key) unique
+    # constraint at flush, failing the whole pull-refresh run rather than storing
+    # the week idempotently. First occurrence wins; order is otherwise irrelevant
+    # because entry_key, not insertion order, is what identifies a row.
+    deduped: dict[str, ParsedPullEntry] = {}
+    for entry in entries:
+        deduped.setdefault(entry_key(entry), entry)
     rows = [
         PullEntryRow(
             week=week,
-            entry_key=entry_key(entry),
+            entry_key=key,
             publisher=entry.publisher,
             series_name=entry.series_name,
             issue_number=entry.issue_number,
@@ -67,7 +77,7 @@ async def replace_week(
             match_type=UNMATCHED,
             fetched_at=stamp,
         )
-        for entry in entries
+        for key, entry in deduped.items()
     ]
     session.add_all(rows)
     await session.flush()
