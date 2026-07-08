@@ -68,6 +68,10 @@ software project would treat as controlled artifacts:
 - **Spec approval gate.** Every OpenSpec proposal is explicitly approved by the
   project owner (recorded in the proposal's `## Approval` section) before any
   implementation work starts.
+- **Every release is recorded.** Merges to `main` are tagged with SemVer, and each
+  release carries a [`CHANGELOG.md`](CHANGELOG.md) entry, a matching `pyproject.toml`
+  version, and a published GitHub Release (`docs/process/commit-standard.md`,
+  FRG-PROC-013).
 
 See `CLAUDE.md` and `docs/process/` for the full set of process rules and how they
 are enforced.
