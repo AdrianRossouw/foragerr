@@ -171,9 +171,12 @@ function SeriesTable({ series }: { series: SeriesResource[] }) {
               </span>
             </td>
             <td>
-              <Link className={styles.titleLink} to={`/series/${s.id}`}>
-                {s.title}
-              </Link>
+              <span className={styles.tableTitleCell}>
+                <Link className={styles.titleLink} to={`/series/${s.id}`}>
+                  {s.title}
+                </Link>
+                <BookTypeBadge booktype={s.booktype} />
+              </span>
             </td>
             <td>{s.publisher ?? '—'}</td>
             <td>{s.start_year ?? '—'}</td>

@@ -24,7 +24,7 @@ export function BookTypeBadge({
 }: {
   booktype: SeriesResource['booktype'];
 }) {
-  if (booktype === null) return null;
+  if (!booktype) return null; // null (single-issues run) or an unexpected undefined → no badge
   const { short, full } = LABELS[booktype];
   return (
     <span

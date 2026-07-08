@@ -103,6 +103,12 @@
   gap: var(--spacing-xs);
 }
 
+.tableTitleCell {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
 .cardTitle {
   flex: 1;
   min-width: 0;

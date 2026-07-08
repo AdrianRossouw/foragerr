@@ -13,9 +13,10 @@ no collected-edition cue is typed null. The operator SHALL be able to set the bo
 explicitly, in which case it is **locked** (`booktype_locked`) so a later
 `refresh-series` does not re-derive over the operator's choice (mirroring the
 grouping-override precedent, FRG-SER-017); clearing the lock returns it to
-auto-derivation. Typing is additive display/naming metadata: it SHALL NOT change series
-identity, monitoring, wanted state, or matching. Where naming templates use
-`{Booktype}`, a typed series' book-type is available for naming.
+auto-derivation. Typing is additive display metadata: it SHALL NOT change series
+identity, monitoring, wanted state, or matching. The filename-derived `{Booktype}`
+naming token is unaffected — series-level typing does not itself drive file naming (a
+series-typed naming default is out of scope; see the proposal's Non-goals).
 
 #### Scenario: Collected-edition title is auto-typed
 
