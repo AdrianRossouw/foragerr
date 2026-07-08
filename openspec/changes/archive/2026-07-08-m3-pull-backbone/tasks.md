@@ -129,6 +129,6 @@ process.* Owns: `docs/`, registry, matrix.
 - [x] F.3 Registry + matrix: FRG-API-019 row already allocated at proposal time flips
       `proposed → implemented`; FRG-PULL-001..006 flip `approved → implemented`;
       traceability matrix regenerated; `tools/trace.py` exit 0. [FRG-PROC-004, FRG-PROC-005]
-- [ ] F.4 Gate: backend suite green; pre-merge review cycle (`/code-review` +
+- [x] F.4 Gate: backend suite green; pre-merge review cycle (`/code-review` +
       `/simplify`) + gate angles on the branch diff; fixes; archive the change;
       `--no-ff` merge with full suite green; post-merge SemVer tag per FRG-PROC-013. [FRG-PROC-007]
