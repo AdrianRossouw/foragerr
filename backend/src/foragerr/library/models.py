@@ -215,6 +215,13 @@ class IssueFileRow(Base):
     #: from the on-disk name, which would otherwise evaporate the
     #: fixed-releases-always-win guarantee for future duplicate contests.
     fix_revision: Mapped[int | None] = mapped_column(StrictInteger, nullable=True)
+    #: Number of image "pages" in the archive, cached for OPDS-PSE ``pse:count``
+    #: (FRG-OPDS-009). Set at import from ``ArchiveReport.image_count`` for a
+    #: listable archive; ``None`` = not yet computed (legacy/scan row) or an
+    #: unlistable archive (CBR without ``rarfile``, corrupt/hostile container).
+    #: A ``None`` value is resolved lazily on first OPDS access and written back;
+    #: a size-mismatch against the on-disk file forces a recompute.
+    page_count: Mapped[int | None] = mapped_column(StrictInteger, nullable=True)
 
     issue: Mapped[IssueRow] = relationship(back_populates="files")
 

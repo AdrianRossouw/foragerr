@@ -869,6 +869,16 @@ async def execute(
     # on-disk name — is what future duplicate contests read. Legacy rows stay
     # NULL and fall back to the basename parse in build_evaluation.
     file_row.fix_revision = ev.new_fix_revision
+    # Cache the OPDS-PSE page count from the archive report the pipeline already
+    # produced (FRG-OPDS-009) — no extra archive open. ``image_count`` is exactly
+    # the page count for a fully-listed archive; an unlistable one (magic-only
+    # cbr/cb7, or none inspected) stays NULL and is resolved lazily on first OPDS
+    # access.
+    file_row.page_count = (
+        ev.archive.image_count
+        if ev.archive is not None and ev.archive.listed
+        else None
+    )
     await session.flush()
     return ExecuteResult(
         imported_path=str(placed),

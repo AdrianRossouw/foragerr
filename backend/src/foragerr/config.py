@@ -37,6 +37,7 @@ from foragerr.config_migrations import (
 )
 from foragerr.logging import register_secret
 from foragerr.naming import DEFAULT_FILE_TEMPLATE, DEFAULT_FOLDER_TEMPLATE
+from foragerr.security.archives import ArchiveLimits
 
 logger = _stdlog.getLogger("foragerr.config")
 
@@ -484,6 +485,53 @@ class Settings(BaseSettings):
             "served an unbounded page."
         ),
     )
+    opds_pse_max_members: int = Field(
+        default=5000,
+        ge=1,
+        description=(
+            "OPDS Page-Streaming (FRG-OPDS-012): maximum number of members an "
+            "archive may declare before it is refused for page/cover extraction "
+            "— a member-count cap on the central directory, checked before any "
+            "decompression. Folded into a per-request ArchiveLimits override."
+        ),
+    )
+    opds_pse_max_page_bytes: int = Field(
+        default=64 * 1024 * 1024,
+        ge=1,
+        description=(
+            "OPDS Page-Streaming (FRG-OPDS-012): maximum DECLARED decompressed "
+            "size (bytes) of a single archive page; a member declaring more is "
+            "refused before it is read (zip-bomb defense). Default 64 MiB."
+        ),
+    )
+    opds_pse_max_pixels: int = Field(
+        default=64_000_000,
+        ge=1,
+        description=(
+            "OPDS Page-Streaming (FRG-OPDS-012): maximum decoded pixel count "
+            "(width*height) of a page image; an image whose header declares more "
+            "is refused before its pixels are loaded (decompression-bomb guard). "
+            "Default 64 megapixels."
+        ),
+    )
+    opds_pse_request_timeout_seconds: float = Field(
+        default=20.0,
+        gt=0,
+        description=(
+            "OPDS Page-Streaming (FRG-OPDS-012): per-request wall-clock budget "
+            "(seconds) for a page/cover decode+resize; an over-budget decode is "
+            "abandoned with a bounded 5xx rather than spinning unbounded."
+        ),
+    )
+    opds_pse_max_width: int = Field(
+        default=2048,
+        ge=1,
+        description=(
+            "OPDS Page-Streaming (FRG-OPDS-008): hard ceiling (pixels) on the "
+            "client-requested page ``width``; a larger request is clamped to "
+            "this value. Pages are never upscaled."
+        ),
+    )
 
     rename_enabled: bool = Field(
         default=True,
@@ -865,6 +913,21 @@ class Settings(BaseSettings):
                 )
                 setattr(self, name, clamped)
         return self
+
+    def opds_pse_archive_limits(self) -> ArchiveLimits:
+        """Per-request archive-safety limits for the OPDS-PSE page/cover surface.
+
+        Folds the ``opds_pse_*`` member/byte caps into an :class:`ArchiveLimits`
+        override the stream and cover endpoints pass to ``list_image_members`` /
+        ``read_image_member`` (FRG-OPDS-012), tightening the shared import
+        defaults for the untrusted OPDS decode path. ``opds_pse_max_page_bytes``
+        maps to the per-member declared-size cap; ``opds_pse_max_members`` to the
+        member-count cap. Total-size and nesting stay at the shared defaults.
+        """
+        return ArchiveLimits(
+            max_members=self.opds_pse_max_members,
+            max_member_bytes=self.opds_pse_max_page_bytes,
+        )
 
     def secret_fields(self) -> dict[str, SecretStr]:
         """All secret-typed settings by field name."""
