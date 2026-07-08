@@ -8,6 +8,30 @@ foragerr is a private project — never released publicly. These entries record 
 tagged milestones on `main` for internal traceability and history. Each release is
 also published as a GitHub Release carrying the same notes.
 
+## [v0.3.3] — 2026-07-08
+
+M3 change 5: collected-edition (trade) typing.
+
+### Added
+- **Collected-edition typing**: foragerr now recognises a trade paperback / graphic
+  novel / hardcover series from its title and shows a **TPB / GN / HC badge** on the
+  series card (in the library grid, the table view, and inside a franchise group) and
+  on the series-detail page. A library **filter** shows only collected editions, only
+  single-issue runs, or everything. You can set a series' type explicitly when editing
+  it; your choice survives metadata refreshes (FRG-SER-018, FRG-UI-022).
+
+### Notes
+- **Owning a trade never affects your single issues** — this is a guaranteed,
+  dedicated invariant (FRG-SER-019): single issues and collected editions are
+  independent tracks, so typing a series or owning a full trade line never marks a
+  single issue owned and never removes a missing single issue from wanted/searchable.
+  It is enforced structurally (no book-type predicate in the wanted/statistics
+  computation; a trade's files belong to the trade series) and proven by tests.
+- No new dependency, no new attack surface. Database migration 0014 adds the series
+  `booktype` columns. "Collected in" containment linkage and book-type-aware search
+  filtering are deferred to the backlog. Gate: 8 review angles + Codex (invariant a
+  named angle) → fixes applied; backend 1626 passed, frontend 251 passed.
+
 ## [v0.3.2] — 2026-07-08
 
 M3 change 4: volume grouping.

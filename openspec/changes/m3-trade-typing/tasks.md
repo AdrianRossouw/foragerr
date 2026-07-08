@@ -51,7 +51,7 @@ test (FRG-PROC-004).
       single-issue wanted state. No security/SOUP change. [FRG-PROC-011]
 - [x] C.2 Registry + matrix: FRG-SER-018/019, FRG-UI-022 flip `proposed → implemented`;
       matrix regenerated; `tools/trace.py` exit 0. [FRG-PROC-004, FRG-PROC-005]
-- [ ] C.3 Gate: backend + frontend suites green; pre-merge review cycle (8 Claude angles
+- [x] C.3 Gate: backend + frontend suites green; pre-merge review cycle (8 Claude angles
       + Codex, with the non-suppression invariant a named angle); fixes; archive;
       `--no-ff` merge; CHANGELOG v0.3.3 + `pyproject` bump + tag v0.3.3 + GitHub Release
       per FRG-PROC-013. This completes the M3 backend/typing cluster (change 2, the pull
