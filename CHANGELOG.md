@@ -8,6 +8,44 @@ foragerr is a private project — never released publicly. These entries record 
 tagged milestones on `main` for internal traceability and history. Each release is
 also published as a GitHub Release carrying the same notes.
 
+## [v0.3.1] — 2026-07-08
+
+M3 change 3: OPDS page streaming (the reading upgrade).
+
+### Added
+- **OPDS-PSE page streaming**: PSE-capable readers (Panels, Chunky) can now open a
+  comic and stream it **one page at a time** instead of downloading the whole file
+  first. Every issue advertises page streaming **alongside** the existing whole-file
+  download, so a non-streaming reader is unaffected. Pages stream in natural reading
+  order and a reader can request a reduced width to save bandwidth (FRG-OPDS-008,
+  FRG-OPDS-010).
+- **Cached page counts**: an issue's page count is computed once at import (from the
+  archive scan the pipeline already does — no extra work) and cached, so browsing the
+  catalog stays fast and opens no archives at render time; a legacy issue's count is
+  filled in on first access (FRG-OPDS-009).
+- **Local covers with no external egress**: an issue with no ComicVine cover now shows
+  a cover generated from its own first page (extracted, resized, cached), and all
+  cover/thumbnail images are served by foragerr itself — your reader never reaches out
+  to a third-party image host to show a cover (FRG-OPDS-011).
+
+### Security
+- The new server-side archive-open and image-decode paths (the only untrusted-archive
+  decode surface on the OPDS listener) enforce configurable resource limits — archive
+  member count, per-page decompressed size (checked before read), image pixel count
+  (checked before decode; truncated-image loading disabled), a per-request time bound,
+  and a bounded number of concurrent decodes — so a crafted zip-bomb or pixel-bomb in
+  the library degrades to a bounded error instead of exhausting memory or CPU. RISK-005
+  is closed and RISK-010's cover-extraction arm is live (FRG-OPDS-012).
+
+### Notes
+- **CBR (`.rar`) comics** are downloaded whole as before but are **not** page-streamed
+  (foragerr does not bundle an unrar tool); keep a title as `.cbz` for streaming.
+- New admin settings `opds_pse_max_members`, `opds_pse_max_page_bytes`,
+  `opds_pse_max_pixels`, `opds_pse_max_width`, `opds_pse_request_timeout_seconds`
+  (see the admin manual). Adds the **Pillow** image library (used only on these OPDS
+  decode paths). Database migration 0012 adds `issue_files.page_count`. Gate: 8 review
+  angles + Codex → fixes applied; backend 1569 passed / 10 skipped.
+
 ## [v0.3.0] — 2026-07-08
 
 M3 change 1: weekly-pull backbone. **Begins milestone M3 ("comics-native")** — the

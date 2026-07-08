@@ -97,7 +97,7 @@ orchestrator merges), `config.py` (shared — orchestrator merges).
       labelling if it enumerates features. [FRG-PROC-011]
 - [x] D.4 Registry + matrix: FRG-OPDS-008..012 flip `approved → implemented`;
       traceability matrix regenerated; `tools/trace.py` exit 0. [FRG-PROC-004, FRG-PROC-005]
-- [ ] D.5 Gate: backend suite green; pre-merge review cycle (8 Claude angles + Codex) on
+- [x] D.5 Gate: backend suite green; pre-merge review cycle (8 Claude angles + Codex) on
       the branch diff; fixes; archive; `--no-ff` merge with full suite green; CHANGELOG
       v0.3.1 entry + `pyproject` bump + post-merge SemVer tag v0.3.1 + GitHub Release per
       FRG-PROC-013. [FRG-PROC-007, FRG-PROC-013]
