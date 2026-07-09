@@ -10,8 +10,8 @@ history-affecting operation is pushed to the public remote).
 - **Tool**: gitleaks v8.24.3 (`gitleaks git`, default ruleset, full history of
   all local refs)
 - **Date**: 2026-07-09
-- **Scanned HEAD**: `8a676db76cb337ce499b1e41f4ba5c93778351f8`
-  (branch `change/going-public`; 388 commits, ~7.45 MB scanned)
+- **Scanned HEAD**: `36d7273dc3ead13ee4b624fbdf4faf15a3b08163`
+  (branch `change/going-public`; 392 commits, ~7.48 MB scanned — see re-scan log)
 - **Raw result**: 11 findings, all rule `generic-api-key`
 - **Unresolved findings**: **0**
 
@@ -36,3 +36,4 @@ credential-bearing or otherwise unsuitable content.
 | Date | HEAD | Tool | Unresolved | Note |
 |------|------|------|-----------|------|
 | 2026-07-09 | `8a676db76cb337ce499b1e41f4ba5c93778351f8` | gitleaks 8.24.3 | 0 | Initial pre-flip scan (going-public change) |
+| 2026-07-09 | `36d7273dc3ead13ee4b624fbdf4faf15a3b08163` | gitleaks 8.24.3 | 0 | Gate re-scan, final pre-merge HEAD (392 commits); finding fingerprint set identical to the initial scan's 11 dispositioned fixtures |

@@ -64,7 +64,7 @@
 
 ## 6. Merge gate and flip
 
-- [ ] 6.1 Full merge-gate checklist (suite green, soup_check exit 0, traceability
+- [x] 6.1 Full merge-gate checklist (suite green, soup_check exit 0, traceability
       regenerated, CHANGELOG + version bump, release notes) per
       `docs/process/commit-standard.md` (FRG-PROC-007, FRG-PROC-013)
 - [x] 6.2 Pre-merge review cycle (/code-review + /simplify) on the branch
@@ -72,7 +72,7 @@
       registry rows FRG-PROC-014/015 → active and FRG-DEP-014 → implemented
       (legend: code + tagged tests merged); regenerate the matrix
       (FRG-PROC-002, FRG-PROC-005)
-- [ ] 6.2c Re-run the full-history scan against the final pre-merge HEAD and
+- [x] 6.2c Re-run the full-history scan against the final pre-merge HEAD and
       append to the evidence re-scan log (FRG-PROC-015)
 - [ ] 6.3 Merge `--no-ff` to main, tag, publish GitHub Release
 - [ ] 6.4 **Owner action**: flip repository visibility to public on GitHub;
