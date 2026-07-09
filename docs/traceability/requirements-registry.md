@@ -39,8 +39,8 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-PROC-011 | Manual kept in sync with the application | dev-process | active | — |
 | FRG-PROC-012 | SOUP register | dev-process | active | — |
 | FRG-PROC-013 | Release tagging | dev-process | active | — |
-| FRG-PROC-014 | Public repository labelling and posture | dev-process | proposed | — |
-| FRG-PROC-015 | Repository history hygiene | dev-process | proposed | — |
+| FRG-PROC-014 | Public repository labelling and posture | dev-process | active | — |
+| FRG-PROC-015 | Repository history hygiene | dev-process | active | — |
 | FRG-SER-001 | Series entity from ComicVine volume | ser | implemented | M1 |
 | FRG-SER-002 | Issue entity | ser | implemented | M1 |
 | FRG-SER-003 | Two-level monitored flags | ser | implemented | M1 |
@@ -301,7 +301,7 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-DEP-011 | Tailscale-scoped exposure | dep | implemented | M1 |
 | FRG-DEP-012 | secrets-stripped diagnostic bundle | dep | approved | B |
 | FRG-DEP-013 | First-run default DDL provider seeding | dep | implemented | M2 |
-| FRG-DEP-014 | Open-source license (GPL-3.0) | dep | proposed | — |
+| FRG-DEP-014 | Open-source license (GPL-3.0) | dep | implemented | — |
 | FRG-AUTH-001 | M1/M2 no-auth accepted risk | auth | implemented | M1 |
 | FRG-AUTH-002 | single-user web login | auth | approved | M5 |
 | FRG-AUTH-003 | password storage with modern KDF | auth | approved | M5 |
