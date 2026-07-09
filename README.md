@@ -8,7 +8,9 @@ which are missing, and serves the library to your reading device over OPDS — f
 example an iPad over Tailscale. Filling gaps integrates with your existing usenet
 tooling (Newznab indexers, SABnzbd). There is no built-in reader.
 
-It runs on one operator's home server, and it doubles as a working demonstration
+It runs on one operator's home server, ships with **no built-in
+authentication** — the only supported exposure model is tailnet-only (see
+Installation) — and it doubles as a working demonstration
 of regulated software development practice applied to a small, real project (see
 the formicary.ai context this project is developed under). That second purpose is
 why the tour below links every screen to the requirements that govern it.
@@ -189,8 +191,9 @@ Planned, not yet shipped — each will arrive as its own approved OpenSpec chang
 
 ## License & contributions
 
-foragerr is free software under the GNU General Public License v3.0 (GPL-3.0) —
-see [LICENSE](LICENSE). It is **source-available as a demonstration, not a
+foragerr is free software under the GNU General Public License, version 3 or
+(at your option) any later version (SPDX: GPL-3.0-or-later) — see
+[LICENSE](LICENSE). It is **source-available as a demonstration, not a
 community project**: a personal tool built for one operator's home server,
 published so the development practice can be inspected rather than to seek
 adoption. You are welcome to read, build, and fork it under the license. Issues

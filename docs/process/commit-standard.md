@@ -28,7 +28,12 @@ Governed by **FRG-PROC-001** and **FRG-PROC-002** (message format) and
    rationale) was carried out in `docs/manual/` / `README.md`.
 5. Security docs updated if the change added attack surface (FRG-PROC-006).
 6. Code review + simplify pass on the branch diff.
-7. Registry rows flipped, matrix regenerated, change archived, branch deleted
+7. History hygiene (FRG-PROC-015, public repository): the full-history secret
+   scan recorded in `docs/security/history-scan.md` must name an
+   ancestor-or-equal of the merge HEAD; re-run and append to its re-scan log
+   before any history-affecting operation (force-push, rewrite) is pushed to
+   the public remote.
+8. Registry rows flipped, matrix regenerated, change archived, branch deleted
    after merge.
 8. Release record per FRG-PROC-013 (`openspec/specs/dev-process/spec.md` owns the
    scheme), from change 7 / v0.1.0 onward:

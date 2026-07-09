@@ -11,10 +11,17 @@
  * note in the repo): at least one series with covers + issue files, and, for
  * the manual-import shot, a staged library-import group under a root folder.
  *
- * Run (from the e2e/ directory, Node >= 22.6 for native TS type-stripping):
+ * Run (from the e2e/ directory). On a Node build with TypeScript stripping
+ * compiled in (>= 22.6, not all distro packages):
  *
  *     BASE_URL=http://127.0.0.1:8790 \
  *       node --experimental-strip-types scripts/capture-readme-shots.ts
+ *
+ * On a Node build without it (ERR_NO_TYPESCRIPT), transpile first:
+ *
+ *     node_modules/.bin/tsc --module nodenext --target es2022 \
+ *       --outDir /tmp/capture scripts/capture-readme-shots.ts
+ *     BASE_URL=http://127.0.0.1:8790 node /tmp/capture/capture-readme-shots.js
  *
  * Env:
  *   BASE_URL  base URL of the running app        (default http://127.0.0.1:8790)
@@ -57,10 +64,14 @@ async function waitForImages(page: Page, timeout = 30_000): Promise<void> {
 
 /** Settle: network idle + fonts + images + a short paint delay. */
 async function settle(page: Page): Promise<void> {
+  // networkidle can throw on SPAs that keep sockets open (our WS) — that is
+  // expected, not a failure; fonts.ready is absent on older engines. Both
+  // catches tolerate exactly those cases; real page errors still surface via
+  // the shot-level selector waits.
   await page.waitForLoadState('networkidle').catch(() => {});
   await page.evaluate(() => (document as any).fonts?.ready).catch(() => {});
   await waitForImages(page);
-  await page.waitForTimeout(600);
+  await page.waitForTimeout(600); // cover fade-in transitions after load
 }
 
 async function discoverSeriesId(page: Page): Promise<number | null> {
@@ -88,9 +99,11 @@ const shots: Shot[] = [
     id: 'comics-grid',
     run: async (page) => {
       await page.goto(`${BASE_URL}/`, { waitUntil: 'domcontentloaded' });
-      await page
-        .waitForSelector('[data-testid="library-poster-grid"]', { timeout: 30_000 })
-        .catch(() => {});
+      // Fail loudly: a missing grid means an empty/broken library, and a
+      // silent fall-through would overwrite the committed asset with it.
+      await page.waitForSelector('[data-testid="library-poster-grid"]', {
+        timeout: 30_000,
+      });
       await settle(page);
       await shoot(page, 'comics-grid');
     },
@@ -104,9 +117,9 @@ const shots: Shot[] = [
         return;
       }
       await page.goto(`${BASE_URL}/series/${id}`, { waitUntil: 'domcontentloaded' });
-      await page
-        .waitForSelector('[data-testid^="issue-row-"]', { timeout: 30_000 })
-        .catch(() => {});
+      await page.waitForSelector('[data-testid^="issue-row-"]', {
+        timeout: 30_000,
+      });
       await settle(page);
       await shoot(page, 'series-detail');
     },
@@ -119,7 +132,6 @@ const shots: Shot[] = [
       // view (missing monitored issues) instead — the acquisition surface that
       // is meaningful without live indexers.
       await page.goto(`${BASE_URL}/wanted`, { waitUntil: 'domcontentloaded' });
-      await page.waitForLoadState('networkidle').catch(() => {});
       await settle(page);
       await shoot(page, 'wanted');
     },
@@ -128,7 +140,6 @@ const shots: Shot[] = [
     id: 'manual-import',
     run: async (page) => {
       await page.goto(`${BASE_URL}/library-import`, { waitUntil: 'domcontentloaded' });
-      await page.waitForLoadState('networkidle').catch(() => {});
       await settle(page);
       await shoot(page, 'manual-import');
     },
@@ -141,7 +152,6 @@ const shots: Shot[] = [
       await page.goto(`${BASE_URL}/settings/media-management`, {
         waitUntil: 'domcontentloaded',
       });
-      await page.waitForLoadState('networkidle').catch(() => {});
       await settle(page);
       await shoot(page, 'settings');
     },

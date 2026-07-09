@@ -68,6 +68,12 @@
       regenerated, CHANGELOG + version bump, release notes) per
       `docs/process/commit-standard.md` (FRG-PROC-007, FRG-PROC-013)
 - [ ] 6.2 Pre-merge review cycle (/code-review + /simplify) on the branch
+- [ ] 6.2b Sync delta specs to baseline, archive the change, and flip the
+      registry rows FRG-PROC-014/015 → active and FRG-DEP-014 → implemented
+      (legend: code + tagged tests merged); regenerate the matrix
+      (FRG-PROC-002, FRG-PROC-005)
+- [ ] 6.2c Re-run the full-history scan against the final pre-merge HEAD and
+      append to the evidence re-scan log (FRG-PROC-015)
 - [ ] 6.3 Merge `--no-ff` to main, tag, publish GitHub Release
 - [ ] 6.4 **Owner action**: flip repository visibility to public on GitHub;
       optionally update repo description/topics to match the new lead
