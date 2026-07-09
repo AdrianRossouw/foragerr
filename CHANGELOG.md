@@ -4,9 +4,39 @@ All notable changes to foragerr are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project follows
 Semantic Versioning per **FRG-PROC-013** (`openspec/specs/dev-process/spec.md`).
 
-foragerr is a private project — never released publicly. These entries record the
-tagged milestones on `main` for internal traceability and history. Each release is
-also published as a GitHub Release carrying the same notes.
+These entries record the tagged milestones on `main` for traceability and
+history. Each release is also published as a GitHub Release carrying the same
+notes. There is no published container image and no support expectation — see
+README `License & contributions`.
+
+## [v0.3.4] — 2026-07-09
+
+going-public: the repository is opened to the public. A docs/process/labelling
+change — no application behavior changes.
+
+### Added
+- **GPL-3.0 license**: verbatim GPL-3.0 text as `LICENSE`, declared in
+  `pyproject.toml` and the README labelling (FRG-DEP-014).
+- **README tour**: screenshots of the main screens (captured from a demo library
+  of public-domain golden-age comics), each captioned with links to the governing
+  requirement IDs, spec, and manual page (FRG-PROC-014).
+- **History hygiene evidence**: full-git-history secret scan (gitleaks) recorded
+  in `docs/security/history-scan.md` — 0 unresolved findings; the record is
+  re-affirmed before any history-affecting push (FRG-PROC-015).
+
+### Changed
+- README rewritten as public labelling: owned-library lead, content-neutral
+  acquisition description, explicit Roadmap for unshipped work, and the
+  source-available contribution posture (FRG-PROC-014).
+- Private/never-released framing removed from `CLAUDE.md`, the manual index, and
+  this changelog's preamble; RISK-015/RISK-020 rationales reworded to rest on the
+  deployment posture (repository visibility was never a compensating control) —
+  acceptances, owners, and review triggers unchanged.
+
+### Notes
+- No dependency changes (gitleaks is a development-time gate tool, not SOUP).
+- The GitHub visibility flip itself is the owner's manual action after this
+  release's merge gate passes.
 
 ## [v0.3.3] — 2026-07-08
 

@@ -1,10 +1,12 @@
 # foragerr
 
-A private, Sonarr-style comic management tool replacing Mylar: library import/renaming,
+A self-hosted, Sonarr-style comic library manager replacing Mylar: library import/renaming,
 ComicVine metadata, Newznab indexers (DogNZB, NZB.su), SABnzbd + built-in DDL
 downloading, and an OPDS server for iPad reading over Tailscale. No built-in reader.
-Never released publicly — it is also a working demonstration of regulated software
-development (see https://formicary.ai context).
+Public source, single-operator deployment — and a working demonstration of regulated
+software development (see https://formicary.ai context). Positioning guidance: committed
+docs describe foragerr around managing a library the user owns, with acquisition
+described content-neutrally.
 
 **Stack**: Python backend (FastAPI), React + TypeScript frontend, SQLite.
 **Deployment target**: Docker on a home server, linuxserver.io image conventions.

@@ -36,7 +36,7 @@ The system SHALL protect the web UI and API with a single-user username/password
 
 - **Milestone**: M5
 - **Source**: mylar-feature-surface.md §8 AUTH ("forms+session login with timeout"); sonarr- architecture.md §7.2 (auth).
-- **Notes**: Single-user by design (private tool) — no user table beyond one principal, no roles. Exempt endpoints: health (DEP) and OPDS (own realm, below).
+- **Notes**: Single-user by design (single-operator tool) — no user table beyond one principal, no roles. Exempt endpoints: health (DEP) and OPDS (own realm, below).
 
 #### Scenario: Baseline acceptance
 

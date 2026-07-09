@@ -326,3 +326,25 @@ On a first-run (fresh) installation the system SHALL seed exactly one **enabled*
 - **WHEN** first-run seeding runs
 - **THEN** no Newznab indexer row and no SABnzbd download-client row is created — only the keyless GetComics/built-in-DDL pair is seeded, and credentialed providers remain opt-in
 
+### Requirement: FRG-DEP-014 — Open-source license (GPL-3.0)
+
+The repository SHALL carry the GNU General Public License v3.0: the verbatim
+GPL-3.0 text in `LICENSE` at the repository root, a matching
+`license` declaration in `pyproject.toml`, and a license statement in the
+`README.md` labelling. The three SHALL agree.
+
+- **Milestone**: — (process/labelling, going-public change)
+- **Source**: going-public proposal (owner decision 2026-07-09: GPL-3.0, matching the Sonarr/Radarr/Mylar3 heritage the project studies).
+- **Notes**: Declared as the SPDX expression `GPL-3.0-or-later` (PEP 639 string form, hatchling-compatible); README states the same expression so the human-facing grant and package metadata agree. Applied repo-wide via the root LICENSE with no per-file headers — a deliberate omission recorded in the going-public design (out of proportion for this project size).
+
+#### Scenario: License file present and declared
+
+- **WHEN** the documentation-consistency checks run
+- **THEN** `LICENSE` exists at the repo root containing the GPL-3.0 text,
+  `pyproject.toml` declares the GPL-3.0 license expression, and `README.md`
+  names GPL-3.0 and links to `LICENSE`
+
+#### Scenario: License survives packaging metadata
+
+- **WHEN** the backend package metadata is built or inspected
+- **THEN** the license expression reported for the package is GPL-3.0
