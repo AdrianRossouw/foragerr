@@ -1,14 +1,17 @@
 # foragerr
 
-A private, Sonarr-style comic management tool replacing Mylar: library import and
-renaming, ComicVine metadata, Newznab indexers (DogNZB, NZB.su), SABnzbd and
-built-in direct-download (DDL) acquisition, and an OPDS server for iPad reading
-over Tailscale. There is no built-in reader.
+foragerr is a self-hosted, Sonarr-style manager for a comic library you own. It
+imports and renames an existing collection (DRM-free purchases such as Humble
+Bundle drops, public-domain scans from the Digital Comic Museum and the Internet
+Archive), matches it against ComicVine metadata, tracks which issues you have and
+which are missing, and serves the library to your reading device over OPDS — for
+example an iPad over Tailscale. Filling gaps integrates with your existing usenet
+tooling (Newznab indexers, SABnzbd). There is no built-in reader.
 
-foragerr is **not released publicly** — it runs on one owner's home server for
-personal use. It doubles as a working demonstration of regulated software
-development practice applied to a small, real project (see the formicary.ai
-context this project is developed under).
+It runs on one operator's home server, and it doubles as a working demonstration
+of regulated software development practice applied to a small, real project (see
+the formicary.ai context this project is developed under). That second purpose is
+why the tour below links every screen to the requirements that govern it.
 
 This file is foragerr's top-level labelling and technical documentation: what the
 project is, how it is developed and secured, and where to find more detail. For
@@ -20,6 +23,74 @@ day-to-day usage and configuration, see the [manual](docs/manual/index.md).
 - **Frontend**: React + TypeScript single-page app, served by the backend.
 - **Deployment**: a single Docker image built to linuxserver.io conventions
   (see Installation below).
+
+## A tour of the application
+
+Every foragerr feature is governed by registered requirements
+(`FRG-<AREA>-<NNN>`), each carried by at least one tagged test — the captions
+below link each screen to its requirements in the
+[registry](docs/traceability/requirements-registry.md), the governing spec, and
+the manual page that documents it. The demo library shown is public-domain
+golden-age comics (Fiction House and Fawcett titles) from the Internet Archive.
+
+### Library
+
+![The library index: a poster grid of series with cover art, monitored state, and owned/total issue counts](docs/readme-assets/comics-grid.png)
+
+*Library index screen — [FRG-UI-003](docs/traceability/requirements-registry.md),
+[FRG-SER-009](docs/traceability/requirements-registry.md) · spec:
+[ui](openspec/specs/ui/spec.md), [ser](openspec/specs/ser/spec.md) · manual:
+[library](docs/manual/user/library.md)*
+
+### Series detail
+
+![A series page: cover, publisher and path details, and the issue table showing owned files and missing issues](docs/readme-assets/series-detail.png)
+
+*Series detail screen — [FRG-UI-004](docs/traceability/requirements-registry.md),
+[FRG-SER-003](docs/traceability/requirements-registry.md) · spec:
+[ui](openspec/specs/ui/spec.md), [ser](openspec/specs/ser/spec.md) · manual:
+[library](docs/manual/user/library.md)*
+
+### Wanted issues
+
+![The Wanted screen: missing monitored issues across the library with per-issue and search-all actions](docs/readme-assets/wanted.png)
+
+*Wanted screen and backlog search —
+[FRG-UI-011](docs/traceability/requirements-registry.md),
+[FRG-SRCH-009](docs/traceability/requirements-registry.md) · spec:
+[ui](openspec/specs/ui/spec.md), [srch](openspec/specs/srch/spec.md) · manual:
+[search](docs/manual/user/search.md)*
+
+### Importing an existing collection
+
+![Library import review: scanned files staged into series groups with ComicVine matches, confidence, and confirm/change/skip actions](docs/readme-assets/manual-import.png)
+
+*Existing-library import with staged review —
+[FRG-UI-015](docs/traceability/requirements-registry.md),
+[FRG-IMP-023](docs/traceability/requirements-registry.md) · spec:
+[ui](openspec/specs/ui/spec.md), [imp](openspec/specs/imp/spec.md) · manual:
+[import](docs/manual/user/import.md)*
+
+### Media management
+
+![Settings, media management: root folders, naming templates, and import modes](docs/readme-assets/settings.png)
+
+*Media management and naming settings —
+[FRG-UI-012](docs/traceability/requirements-registry.md),
+[FRG-PP-009](docs/traceability/requirements-registry.md) · spec:
+[ui](openspec/specs/ui/spec.md), [pp](openspec/specs/pp/spec.md) · manual:
+[configuration](docs/manual/admin/configuration.md)*
+
+### Reading over OPDS
+
+The library is also served as an OPDS catalog (with page streaming) that any
+OPDS-capable reader app can browse — foragerr itself has no reader UI, so there
+is no screenshot to show; point your reader at `/opds`.
+
+*OPDS catalog and page streaming —
+[FRG-OPDS-001](docs/traceability/requirements-registry.md) · spec:
+[opds](openspec/specs/opds/spec.md) · manual:
+[reading-opds](docs/manual/user/reading-opds.md)*
 
 ## Security & regulatory posture
 
@@ -101,3 +172,27 @@ handling, and the network posture live in the admin manual:
 - `docs/manual/admin/configuration.md` — every setting and its env override
 - `docs/manual/admin/secrets.md` — API keys (ComicVine, indexers, SABnzbd)
 - `docs/manual/admin/network.md` — the Tailscale-only exposure model
+
+## Roadmap
+
+Planned, not yet shipped — each will arrive as its own approved OpenSpec change
+(statuses live in the [registry](docs/traceability/requirements-registry.md)):
+
+- **Weekly pull / calendar view** (FRG-UI-018, approved for M3) — a
+  comics-native new-releases screen.
+- **Humble Bundle importer** (M4) — unpack a purchased bundle straight into the
+  library with metadata matching.
+- **Loose archive import** — one-shot import of individual CBZ/CBR files (for
+  example public-domain issues) without setting up a monitored series first.
+- **Authentication** (M5) — the accepted no-auth posture (`RISK-020`) is
+  scheduled to be replaced, not kept forever.
+
+## License & contributions
+
+foragerr is free software under the GNU General Public License v3.0 (GPL-3.0) —
+see [LICENSE](LICENSE). It is **source-available as a demonstration, not a
+community project**: a personal tool built for one operator's home server,
+published so the development practice can be inspected rather than to seek
+adoption. You are welcome to read, build, and fork it under the license. Issues
+are open, but input is not solicited and may go unanswered; there is no support
+expectation.

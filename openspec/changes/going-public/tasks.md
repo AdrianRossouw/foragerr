@@ -15,28 +15,28 @@
 
 ## 2. Screenshots
 
-- [ ] 2.1 Seed a demo library of public-domain comics (owner's PD holdings or
+- [x] 2.1 Seed a demo library of public-domain comics (owner's PD holdings or
       Digital Comic Museum issues) and import it into a dev instance
       (FRG-PROC-014)
-- [ ] 2.2 Write a Playwright capture script in `e2e/` producing deterministic,
+- [x] 2.2 Write a Playwright capture script in `e2e/` producing deterministic,
       consistently-sized PNGs of the key screens (library grid, series detail,
       wanted/search, import, settings, OPDS-facing info) into
       `docs/readme-assets/` (≤ ~300 KB each) (FRG-PROC-014)
-- [ ] 2.3 Commit the captured images and the script (FRG-PROC-014)
+- [x] 2.3 Commit the captured images and the script (FRG-PROC-014)
 
 ## 3. README rewrite
 
-- [ ] 3.1 Rewrite README top matter: owned-library lead (import/rename, ComicVine
+- [x] 3.1 Rewrite README top matter: owned-library lead (import/rename, ComicVine
       metadata, OPDS reading), content-neutral acquisition description, no
       "not released publicly" paragraph (FRG-PROC-014)
-- [ ] 3.2 Add the screenshot walkthrough: each major feature section embeds its
+- [x] 3.2 Add the screenshot walkthrough: each major feature section embeds its
       image with a caption linking governing FRG ID(s) + spec section + manual
       page (design Decision 4 format) (FRG-PROC-014)
-- [ ] 3.3 Add Roadmap section (Humble Bundle importer; loose/public-domain archive
+- [x] 3.3 Add Roadmap section (Humble Bundle importer; loose/public-domain archive
       import — explicitly future work), license statement, and contribution
       posture (source-available personal tool and process demonstration; input
       not solicited) (FRG-PROC-014)
-- [ ] 3.4 Tagged doc-consistency test: README image paths / caption FRG IDs /
+- [x] 3.4 Tagged doc-consistency test: README image paths / caption FRG IDs /
       cited doc paths all resolve; no "not released publicly"/"private tool"
       self-description remains in README, CLAUDE.md, or docs/manual/index.md;
       Roadmap heading present (FRG-PROC-014)
@@ -54,12 +54,12 @@
 
 ## 5. History hygiene gate
 
-- [ ] 5.1 Run gitleaks across full history (all refs); record evidence below
+- [x] 5.1 Run gitleaks across full history (all refs); record evidence below
       (tool + version, scanned HEAD, refs, finding count, dispositions)
       (FRG-PROC-015)
-- [ ] 5.2 Review published release notes v0.1.0..v0.3.3 for anything unsuitable
+- [x] 5.2 Review published release notes v0.1.0..v0.3.3 for anything unsuitable
       for public view; record the outcome (FRG-PROC-015)
-- [ ] 5.3 Tagged test asserting the evidence record exists and names the scanned
+- [x] 5.3 Tagged test asserting the evidence record exists and names the scanned
       HEAD commit (FRG-PROC-015)
 
 ## 6. Merge gate and flip
@@ -75,4 +75,8 @@
 
 ## Evidence
 
-*(filled at gate time — gitleaks output summary and release-notes review outcome)*
+Recorded in [docs/security/history-scan.md](../../../docs/security/history-scan.md):
+gitleaks 8.24.3 full-history scan, 388 commits, 11 raw findings all dispositioned
+as synthetic test fixtures / regex false positives, **0 unresolved**; release notes
+v0.1.0–v0.3.3 reviewed, nothing credential-bearing or unsuitable. Scan re-run
+against the final pre-merge HEAD at gate time updates the evidence file's re-scan log.
