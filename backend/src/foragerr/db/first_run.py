@@ -1,9 +1,13 @@
 """First-run default DDL provider seeding (FRG-DEP-013).
 
-A fresh install should have a working keyless search->grab->download pipeline
-out of the box, so on the very first startup of an empty database the system
-seeds exactly one enabled GetComics DDL indexer row and one enabled built-in
-DDL download-client row. Both use the model defaults; no credential is needed.
+A fresh install should have the keyless search->grab->download pipeline
+pre-configured and discoverable in Settings, but must NOT begin any outbound
+acquisition on its own. So on the very first startup of an empty database the
+system seeds exactly one **disabled** GetComics DDL indexer row (with its
+automatic-search and RSS usage toggles off) and one **disabled** built-in DDL
+download-client row (ddl-optin-seeding, 2026-07-09). Both use the model
+defaults; no credential is needed. No search, scrape, grab, or download happens
+until the operator deliberately enables the pair in Settings.
 
 Once-per-database, never-resurrect semantics (mirroring the FRG-QUAL-002
 default-format-profile seed) are enforced by a **persisted marker** — a single
@@ -88,10 +92,13 @@ async def _set_seed_marker(db) -> None:
 async def seed_first_run_defaults(db) -> None:
     """Seed the default keyless DDL pipeline once per database (FRG-DEP-013).
 
-    No-op when the persisted marker is already set. Otherwise seeds one enabled
-    GetComics indexer and one enabled built-in DDL client through the ordinary
-    repo helpers, then sets the marker. Idempotent by the marker gate plus a
-    reserved-name existence check (see the module docstring for crash-safety).
+    No-op when the persisted marker is already set. Otherwise seeds one
+    **disabled** GetComics indexer (automatic-search/RSS usage toggles off) and
+    one **disabled** built-in DDL client through the ordinary repo helpers, then
+    sets the marker — the pipeline is discoverable but performs no acquisition
+    until the operator enables it (ddl-optin-seeding). Idempotent by the marker
+    gate plus a reserved-name existence check (see the module docstring for
+    crash-safety).
     """
     # Local imports: the getcomics/ddl registry is populated at
     # ``import foragerr.ddl`` time, and deferring these keeps this module cheap
@@ -115,7 +122,9 @@ async def seed_first_run_defaults(db) -> None:
             name=SEEDED_INDEXER_NAME,
             implementation=GETCOMICS_IMPLEMENTATION,
             settings=GetComicsSettings(),
-            enabled=True,
+            enabled=False,
+            enable_rss=False,
+            enable_auto=False,
         )
         seeded = True
 
@@ -126,7 +135,7 @@ async def seed_first_run_defaults(db) -> None:
             name=SEEDED_CLIENT_NAME,
             implementation=DDL_CLIENT_IMPLEMENTATION,
             settings=BuiltinDdlSettings(),
-            enabled=True,
+            enabled=False,
         )
         seeded = True
 
@@ -134,7 +143,7 @@ async def seed_first_run_defaults(db) -> None:
     if seeded:
         logger.info(
             "first-run seed: created default GetComics indexer + built-in DDL "
-            "client (keyless pipeline enabled)"
+            "client seeded disabled — enable in Settings to start acquiring"
         )
 
 
