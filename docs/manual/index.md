@@ -1,7 +1,7 @@
 # foragerr manual
 
-This is the user and administrator manual for foragerr, a private, Sonarr-style comic
-management tool. It is a controlled artifact under `FRG-PROC-011`: the manual is kept
+This is the user and administrator manual for foragerr, a self-hosted, Sonarr-style
+comic library management tool. It is a controlled artifact under `FRG-PROC-011`: the manual is kept
 in sync with the application, matching whatever is merged to `main` — a single rolling
 Markdown manual in-repo, not a versioned or published document.
 

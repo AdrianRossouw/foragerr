@@ -445,7 +445,7 @@ The system SHALL optionally apply configured file/directory modes and owner/grou
 
 - **Milestone**: B
 - **Source**: MFS §4 Moving/renaming (CHMOD_FILE/DIR, CHOWNER/CHGROUP); MFS §7 Perms section.
-- **Notes**: Largely superseded by linuxserver.io PUID/PGID container conventions (the stated deployment target) — backlogged; revisit only if bare-metal deployment appears. Mylar's pre/extra/on-snatch shell script hooks are deliberately omitted entirely (single-user private tool; new attack surface per FRG-PROC-006 with no payoff) — recorded here so the omission is a decision, not an oversight.
+- **Notes**: Largely superseded by linuxserver.io PUID/PGID container conventions (the stated deployment target) — backlogged; revisit only if bare-metal deployment appears. Mylar's pre/extra/on-snatch shell script hooks are deliberately omitted entirely (single-user, self-hosted tool; new attack surface per FRG-PROC-006 with no payoff) — recorded here so the omission is a decision, not an oversight.
 
 #### Scenario: Baseline acceptance
 

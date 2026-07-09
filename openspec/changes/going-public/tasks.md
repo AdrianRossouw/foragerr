@@ -43,10 +43,10 @@
 
 ## 4. Language sweep and risk rationales
 
-- [ ] 4.1 Update `CLAUDE.md` and `docs/manual/index.md`: drop private/never-
+- [x] 4.1 Update `CLAUDE.md` and `docs/manual/index.md`: drop private/never-
       released framing, align intro with the new README lead (FRG-PROC-014,
       FRG-PROC-011 — manual impact: index intro wording only)
-- [ ] 4.2 Reword RISK-015 and RISK-020 rationales in
+- [x] 4.2 Reword RISK-015 and RISK-020 rationales in
       `docs/security/risk-register.md` to rest on the deployment posture
       (single-user, self-hosted, tailnet-scoped), noting repository visibility is
       not a compensating control; status/owner/review-triggers unchanged; sweep
