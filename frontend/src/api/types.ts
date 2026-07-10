@@ -709,3 +709,27 @@ export interface ScheduledTaskResource {
   last_run: string | null;
   next_run: string | null;
 }
+
+/*
+ * Log ring buffer (FRG-API-021, FRG-UI-024, m4-logs-viewer). GET /api/v1/log
+ * rides the shared ApiPage envelope (newest-first: sortKey 'time',
+ * sortDirection 'desc'); `level`/`logger` are pinned contract fields coded
+ * directly from the change's design.md ahead of the parallel backend build.
+ */
+
+/** The backend's log-level vocabulary, low to high severity. */
+export const LOG_LEVELS = ['DEBUG', 'INFO', 'WARNING', 'ERROR'] as const;
+
+export type LogLevel = (typeof LOG_LEVELS)[number];
+
+/**
+ * One GET /api/v1/log record: a single buffered, already-redacted log line
+ * (design decision 3 — redaction happens before buffering, never at read
+ * time). `message` is the formatted record, capped server-side.
+ */
+export interface LogRecordResource {
+  time: string;
+  level: LogLevel;
+  logger: string;
+  message: string;
+}

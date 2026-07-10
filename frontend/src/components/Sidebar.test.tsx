@@ -125,6 +125,7 @@ describe('FRG-UI-023: sidebar nav lists only shipped screens', () => {
       '/system/status',
       '/system/health',
       '/system/tasks',
+      '/system/logs',
     ];
     const hrefs = screen
       .getAllByRole('link')

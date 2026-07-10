@@ -7,6 +7,7 @@ import type {
   HistoryRecord,
   IssueResource,
   LibraryImportGroup,
+  LogRecordResource,
   LookupCandidate,
   ManualImportEntry,
   MediaManagementConfig,
@@ -659,6 +660,19 @@ export function makeScheduledTask(
     interval_seconds: 86_400,
     last_run: '2026-07-05T03:00:00',
     next_run: '2026-07-06T03:00:00',
+    ...overrides,
+  };
+}
+
+/** One GET /api/v1/log record (FRG-UI-024); override per test. */
+export function makeLogRecord(
+  overrides: Partial<LogRecordResource> = {},
+): LogRecordResource {
+  return {
+    time: '2026-07-10T03:00:00Z',
+    level: 'INFO',
+    logger: 'foragerr.ddl',
+    message: 'Grabbed release "Saga 041 (2017)"',
     ...overrides,
   };
 }

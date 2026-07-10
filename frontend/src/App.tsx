@@ -15,6 +15,7 @@ import { General } from './screens/settings/General';
 import { StatusScreen } from './screens/system/StatusScreen';
 import { HealthScreen } from './screens/system/HealthScreen';
 import { TasksScreen } from './screens/system/TasksScreen';
+import { LogsScreen } from './screens/system/LogsScreen';
 
 /**
  * Routing (FRG-UI-001). All change-7 screens are real: library cluster
@@ -23,7 +24,8 @@ import { TasksScreen } from './screens/system/TasksScreen';
  * mounts from SeriesDetail/Wanted, not a route. m2-daily-surfaces adds the
  * daily review screens: wanted (FRG-UI-011), history (FRG-UI-010), and
  * blocklist (FRG-UI-017). m2-ops-health-backups adds the System area
- * (FRG-UI-016): status, health, and tasks.
+ * (FRG-UI-016): status, health, and tasks. m4-logs-viewer adds System — Logs
+ * (FRG-UI-024).
  */
 export function App() {
   return (
@@ -50,6 +52,7 @@ export function App() {
         <Route path="system/status" element={<StatusScreen />} />
         <Route path="system/health" element={<HealthScreen />} />
         <Route path="system/tasks" element={<TasksScreen />} />
+        <Route path="system/logs" element={<LogsScreen />} />
       </Route>
     </Routes>
   );

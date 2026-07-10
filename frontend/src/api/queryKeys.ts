@@ -54,6 +54,15 @@ export const queryKeys = {
     page: (page: number, filtersHash = '') =>
       ['blocklist', page, filtersHash] as const,
   },
+  // Log ring buffer (FRG-UI-024), mirroring GET /api/v1/log. Same
+  // family-page-filtersHash convention as history/wanted/blocklist; the
+  // filters hash includes the minimum-level and logger-prefix filters so
+  // each filtering is its own cache entry.
+  log: {
+    all: () => ['log'] as const,
+    page: (page: number, filtersHash = '') =>
+      ['log', page, filtersHash] as const,
+  },
   release: {
     forIssue: (issueId: number) => ['release', issueId] as const,
   },

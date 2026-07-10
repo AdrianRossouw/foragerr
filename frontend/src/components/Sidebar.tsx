@@ -83,6 +83,7 @@ const NAV_GROUPS: NavGroup[] = [
       { to: '/system/status', label: 'Status', icon: 'fa-circle-info' },
       { to: '/system/health', label: 'Health', icon: 'fa-heart-pulse' },
       { to: '/system/tasks', label: 'Tasks', icon: 'fa-list-check' },
+      { to: '/system/logs', label: 'Logs', icon: 'fa-file-lines' },
     ],
   },
 ];

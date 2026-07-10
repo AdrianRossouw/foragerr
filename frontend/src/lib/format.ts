@@ -74,6 +74,28 @@ export function formatDate(iso: string | null): string {
   });
 }
 
+/**
+ * ISO datetime -> "Jan 5, 2026, 14:32:07" (24h clock); null-safe. Used by the
+ * Logs screen (FRG-UI-024), which — unlike the other daily surfaces — needs
+ * time-of-day granularity, not just a date. Reuses the same offset-less-
+ * datetime UTC fix as formatDate/formatEta (FRG-API-014) so a log record's
+ * timestamp reads correctly for a viewer outside UTC.
+ */
+export function formatDateTime(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const date = new Date(asUtcIso(iso));
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+}
+
 /** Uppercase file-format label from a file path ("....cbz" -> "CBZ"). */
 export function fileFormat(path: string): string {
   const dot = path.lastIndexOf('.');
