@@ -30,6 +30,14 @@ design inside the v0.4.0 shell.
   franchise's volumes into one card with the design's layered-shadow offset
   and an `N vols` chip; summed owned/total on the progress strip. Behavior
   (grouping semantics, wanted non-regression) unchanged.
+- **Brand mark adopted (updated 2026-07-10 handoff)**: the handoff now ships
+  the logo as SVG assets with an exact lockup spec. The sidebar tile's
+  Font Awesome placeholder is replaced by the real ant-in-hexagon mark
+  (inline SVG in the icon set, colors via new `--color-logo-*` /
+  `--shadow-logo-tile` tokens per FRG-UI-002), the lockup styled to spec
+  (32px radius-8 155° gradient tile, Roboto 900 19px wordmark), and an SVG
+  favicon added. Implementation refinement within FRG-UI-023's existing
+  "logo lockup" text — no spec delta, no new IDs.
 - Tour regenerated (FRG-PROC-017) — the grid screenshot shows the new cards.
 
 ## Non-goals

@@ -108,6 +108,8 @@ describe('FRG-UI-002: the token layer is the single source of the palette', () =
     '#57b877', '#7fce9a', '#66c98a', '#31543f', '#0f1f0d',
     '#e5a54b', '#d99a5b', '#5d9cec', '#8ab6f0', '#2f5d40',
     '#4a2523', '#e6e6e6',
+    // logo lockup values (tile gradient, mark knockout, wordmark)
+    '#63c483', '#3a8455', '#123018', '#f0f0f0',
     // publisher/format map values (palettes.ts)
     '#3a2626', '#26303c', '#c0555a', '#5a86c0', '#6fb87a',
   ];

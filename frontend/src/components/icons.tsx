@@ -28,6 +28,52 @@ function Svg({ size = 18, children, ...rest }: IconProps) {
   );
 }
 
+/**
+ * The brand mark — an ant inside a hexagonal nest cell — traced from the
+ * design handoff's `assets/foragerr-mark.svg` (geometry preserved exactly).
+ * Draws in `currentColor` like every other icon so the lockup's knockout
+ * color comes from the token layer, not from here.
+ */
+export function LogoMarkIcon({ size = 20, ...rest }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={(size * 96) / 100}
+      viewBox="0 0 100 96"
+      fill="none"
+      overflow="visible"
+      aria-hidden
+      focusable="false"
+      {...rest}
+    >
+      <path
+        d="M50 6 L86 27 L86 69 L50 90 L14 69 L14 27 Z"
+        stroke="currentColor"
+        strokeWidth={5}
+        strokeLinejoin="round"
+        opacity={0.6}
+      />
+      <svg x={9} y={19.5} width={82} height={60.9} viewBox="0 0 140 104" overflow="visible">
+        <g stroke="currentColor" strokeWidth={5.5} strokeLinecap="round" strokeLinejoin="round">
+          <path d="M62 56 L54 76 L44 90" />
+          <path d="M78 57 L76 78 L70 92" />
+          <path d="M92 56 L100 78 L102 92" />
+        </g>
+        <g stroke="currentColor" strokeWidth={5} strokeLinecap="round">
+          <path d="M112 34 Q126 22 121 11" />
+          <path d="M116 39 Q131 31 130 19" />
+        </g>
+        <g fill="currentColor" stroke="none">
+          <ellipse cx={40} cy={46} rx={24} ry={17} />
+          <circle cx={68} cy={47} r={5} />
+          <ellipse cx={82} cy={46} rx={13} ry={10.5} />
+          <circle cx={106} cy={43} r={13} />
+        </g>
+      </svg>
+    </svg>
+  );
+}
+
 /** Sonarr-style monitor bookmark; filled when active. */
 export function BookmarkIcon({
   filled = false,

@@ -6,6 +6,7 @@ import {
   useHealthWarnings,
   useSystemStatus,
 } from '../api/hooks';
+import { LogoMarkIcon } from './icons';
 import styles from './AppShell.module.css';
 
 /**
@@ -157,7 +158,7 @@ export function Sidebar() {
     <aside className={styles.sidebar}>
       <div className={styles.brand}>
         <span className={styles.brandTile} aria-hidden>
-          <i className="fa-solid fa-bug" />
+          <LogoMarkIcon size={21} />
         </span>
         <span className={styles.brandWord}>
           Forage<span className={styles.brandWordAccent}>rr</span>

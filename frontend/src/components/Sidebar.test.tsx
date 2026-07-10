@@ -137,6 +137,23 @@ describe('FRG-UI-023: sidebar nav lists only shipped screens', () => {
   });
 });
 
+describe('FRG-UI-023: logo lockup', () => {
+  it('FRG-UI-023 — the header lockup renders the inline SVG brand mark, not a font glyph', () => {
+    const { container } = renderWithProviders(<Sidebar />, {
+      withRouter: true,
+      fetcher: sidebarFetcher({ series: [], queueTotal: 0 }),
+      client: createQueryClient(),
+    });
+
+    // The handoff's mark is pure SVG (ant + hexagon knocked out on the tile);
+    // a regression back to an icon-font placeholder would render an <i> here.
+    const brand = container.querySelector('aside > div');
+    expect(brand?.querySelector('svg')).not.toBeNull();
+    expect(brand?.querySelector('i[class*="fa-"]')).toBeNull();
+    expect(brand?.textContent).toBe('Foragerr');
+  });
+});
+
 describe('FRG-UI-023: sidebar count badges are live', () => {
   it('FRG-UI-023 — Comics/Queue/Wanted badges reflect the caches, Wanted uses warn style', async () => {
     renderWithProviders(<Sidebar />, {

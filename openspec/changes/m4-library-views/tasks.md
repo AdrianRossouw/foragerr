@@ -6,6 +6,9 @@
 
 ## 2. Views
 
+- [x] 2.0 Brand mark from the updated handoff: `LogoMarkIcon` + lockup CSS to
+      the exact spec via `--color-logo-*` tokens, Roboto 900 weight, SVG
+      favicon (FRG-UI-023/002; no spec delta)
 - [ ] 2.1 Shared primitives as needed (ProgressStrip, Chip, Menu/Dropdown,
       SegmentedControl) under components/, tokens-only styling (FRG-UI-002)
 - [ ] 2.2 Posters view: auto-fill grid, S/M/L sizes, card anatomy (bookmark,
