@@ -177,7 +177,7 @@ tailnet; foragerr performs no TLS termination of its own.
 
 **Do not** expose foragerr's port to the public internet, a shared/untrusted LAN, or a
 reverse proxy without its own access control. Widening exposure beyond the tailnet
-before authentication ships (targeted M3) puts you outside the accepted-risk boundary
+before authentication ships (targeted M8 (2026-07-10 reshape)) puts you outside the accepted-risk boundary
 in the risk register and is a decision that needs its own review — not an incidental
 config change. See `network.md` for the operational detail.
 

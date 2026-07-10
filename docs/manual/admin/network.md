@@ -12,7 +12,7 @@ boundary is up to you (see below).
 **foragerr currently ships with no authentication on the web UI, API, or OPDS
 surfaces.** This is a deliberate, owner-approved decision, not an oversight:
 
-- Requirement `FRG-AUTH-001` states that until authentication ships (targeted M3), the
+- Requirement `FRG-AUTH-001` states that until authentication ships (targeted M8 (2026-07-10 reshape)), the
   system operates without credentials on every surface. There is no partial or
   dormant auth code path to accidentally rely on — a route-inventory test asserts no
   auth middleware or dependency is registered on any route.
@@ -23,7 +23,7 @@ surfaces.** This is a deliberate, owner-approved decision, not an oversight:
 - The compensating control is **Tailscale-only network exposure**
   (`FRG-DEP-011`): foragerr is operated as reachable only via the home server's
   Tailscale network in M1/M2. There is no requirement for it to be safe to expose to
-  the public internet before authentication (M3) lands.
+  the public internet before authentication (M8) lands.
 
 ### What this means operationally
 

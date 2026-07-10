@@ -9,7 +9,7 @@ milestone change that implements each requirement (FRG-PROC-003, FRG-PROC-009).
 ## Requirements
 ### Requirement: FRG-AUTH-001 — M1/M2 no-auth accepted risk
 
-Until AUTH ships (M3), the system SHALL operate without authentication on the web UI, API, and OPDS surfaces, with this documented as an accepted risk in the risk register whose compensating control is Tailscale-only network exposure (see DEP).
+Until AUTH ships (M8, per the 2026-07-10 roadmap reshape), the system SHALL operate without authentication on the web UI, API, and OPDS surfaces, with this documented as an accepted risk in the risk register whose compensating control is Tailscale-only network exposure (see DEP).
 
 - **Milestone**: M1
 - **Source**: mylar-feature-surface.md §8 AUTH (auth modes incl. none); CLAUDE.md (Tailscale, FRG-PROC-006 security-is-spec'd).
@@ -25,10 +25,10 @@ Until AUTH ships (M3), the system SHALL operate without authentication on the we
 - **WHEN** the risk register and deployment docs are inspected as part of the M1 change
 - **THEN** `docs/security/risk-register.md` RISK-020 records the no-auth acceptance with owner approval, restated in this change with Tailscale-only exposure (FRG-DEP-011) cited as the compensating control (not a second independent acceptance), and deployment docs state the tailnet-only constraint
 
-#### Scenario: No half-built auth code paths exist before M3
+#### Scenario: No half-built auth code paths exist before the auth milestone
 
 - **WHEN** the M1 codebase and OpenAPI document are inspected
-- **THEN** no dormant login routes, password/credential fields, session machinery, or partially wired auth dependencies exist — auth mode "none" is the only mode present, with nothing latent for M3 to accidentally half-enable
+- **THEN** no dormant login routes, password/credential fields, session machinery, or partially wired auth dependencies exist — auth mode "none" is the only mode present, with nothing latent for the auth milestone to accidentally half-enable
 
 ### Requirement: FRG-AUTH-002 — single-user web login
 
