@@ -20,16 +20,16 @@
 
 ## 3. Frontend
 
-- [ ] 3.1 Detail hero rebuild: blurred local-cover backdrop, sharp cover,
+- [x] 3.1 Detail hero rebuild: blurred local-cover backdrop, sharp cover,
       meta row, action row, show-more overview (FRG-UI-004)
-- [ ] 3.2 Issues tab table to the design (status pills, collected-in chips,
+- [x] 3.2 Issues tab table to the design (status pills, collected-in chips,
       size, row actions; selectors contract kept) (FRG-UI-004)
-- [ ] 3.3 Bulk selection UX: shift-range, select/deselect all, labeled
+- [x] 3.3 Bulk selection UX: shift-range, select/deselect all, labeled
       action bar wired to bulk monitor + sequential search (FRG-UI-025)
-- [ ] 3.4 Collections tab + containment dialog (target series picker,
+- [x] 3.4 Collections tab + containment dialog (target series picker,
       range pickers, sub-ranges, delete; coverage pills; empty state)
       (FRG-UI-026)
-- [ ] 3.5 Franchise ⋯ popover a11y unification onto the shared Menu
+- [x] 3.5 Franchise ⋯ popover a11y unification onto the shared Menu
       behavior (ch2 deferral; FRG-UI-021, no spec change)
 - [ ] 3.6 Vitest per scenario (IDs in names); e2e spine green
 

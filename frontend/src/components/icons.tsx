@@ -267,6 +267,17 @@ export function CloseIcon(props: IconProps) {
   );
 }
 
+/** Overflow ("more actions") trigger — three filled dots, horizontal. */
+export function MoreIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" />
+      <circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
 export function SpinnerIcon(props: IconProps) {
   return (
     <Svg {...props}>

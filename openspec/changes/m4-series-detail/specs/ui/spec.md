@@ -10,8 +10,10 @@ the page background) behind the sharp 2:3 cover (~206×309) and metadata —
 title, book-type/volume badge where applicable, a meta row (monitored
 state, publisher, first-issue date, status, issue count, file formats), an
 icon-over-label action row (Search Monitored, Search All, Refresh, Edit,
-Delete with optional file removal — all dispatching the existing
-commands), and the overview paragraph, which SHALL collapse behind a
+Delete with optional file removal, plus a ⋯ overflow carrying the
+remaining series commands — Rescan and Rename Files — so no M1 action
+loses reachability; Search All runs the series search over all missing
+issues regardless of monitored state), and the overview paragraph, which SHALL collapse behind a
 "show more" toggle when it overflows its clamp. Below the hero a bordered
 panel SHALL carry an `Issues · N / Collections · N` segmented toggle and a
 compact owned/total progress bar; the Issues tab is a dense table —

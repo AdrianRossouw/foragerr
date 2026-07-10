@@ -318,14 +318,23 @@ class ScanSeriesCommand(BaseCommand):
 
 @register_command
 class SeriesSearchCommand(BaseCommand):
-    """Search every wanted issue of one series (FRG-SER-005 / FRG-SRCH-008).
+    """Search wanted (or all missing) issues of one series (FRG-SER-005 /
+    FRG-SRCH-008).
 
     Runs on the ``search`` workload pool. The handler (registered in
-    :mod:`foragerr.search_ops.commands`, change 4) fans each wanted issue
+    :mod:`foragerr.search_ops.commands`, change 4) fans each target issue
     through the shared search pipeline and records a grab hand-off for the best
     approved release per issue; the ``search`` pool size of 1 serializes indexer
-    politeness across the walk."""
+    politeness across the walk.
+
+    ``monitored_only`` (default ``True``, the "Search Monitored" hero action)
+    scopes the walk to exactly today's derived-wanted set
+    (``repo.wanted_issues()``): series/issue monitored AND released AND no
+    file. ``False`` (the "Search All" hero action) widens the walk to every
+    released issue with no file REGARDLESS of series/issue monitored flags —
+    it never touches ``repo.wanted_issues()`` itself."""
 
     name: Literal["series-search"] = "series-search"
     workload_class: ClassVar[str] = "search"
     series_id: int
+    monitored_only: bool = True

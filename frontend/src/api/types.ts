@@ -241,6 +241,29 @@ export interface IssueFileResource {
   size: number;
 }
 
+/**
+ * Book-type family a collected edition carries (FRG-SER-018/020). Reused by the
+ * containment surfaces where a membership is always a real collected edition
+ * (never a null single-issues run), so — unlike `SeriesResource['booktype']` —
+ * this alias is non-nullable.
+ */
+export type BookType = 'tpb' | 'gn' | 'hc' | 'one_shot';
+
+/**
+ * One collected-in membership on an issue listing record (FRG-SER-020): the
+ * trade issue (of some collected-edition series) whose declared range contains
+ * this single issue. `range_label` is the verbatim human label ("1-6") the chip
+ * renders; the ids let the chip link back to the collecting trade. The issues
+ * endpoint returns an empty array when an issue is collected nowhere.
+ */
+export interface CollectedInRef {
+  trade_series_id: number;
+  trade_series_title: string;
+  trade_issue_id: number;
+  booktype: BookType;
+  range_label: string;
+}
+
 export interface IssueResource {
   id: number;
   series_id: number;
@@ -255,6 +278,60 @@ export interface IssueResource {
   added_at: string;
   has_file: boolean;
   file: IssueFileResource | null;
+  /**
+   * Collected-edition memberships (FRG-SER-020), one per trade range that
+   * contains this issue; `[]` (or absent, on older/lean callers) when none.
+   * Display-only — a chip surface, never anything the wanted machinery reads.
+   */
+  collected_in?: CollectedInRef[];
+}
+
+/**
+ * One declared sub-range inside a collection record (FRG-API-022): the target
+ * single-issues series the range covers plus its verbatim label ("1-6"). The
+ * read resource carries the label, not the endpoint issue ids — the declare
+ * dialog re-picks endpoints against the target series' current issue list.
+ */
+export interface CollectionRange {
+  target_series_id: number;
+  label: string;
+}
+
+/**
+ * One `GET /api/v1/series/{seriesId}/collections` record (FRG-API-022): a trade
+ * issue and the ranges it collects, with a REQUEST-TIME coverage rollup over
+ * owned files in those ranges (never persisted — display-only, decision 2).
+ * `coverage` is `collected` (every issue in the ranges is owned), `partial`
+ * (some), or `none`; `issues_in_ranges`/`owned_in_ranges` back the "N issues ·
+ * owned M" line.
+ */
+export interface CollectionRecord {
+  trade_issue_id: number;
+  trade_series_id: number;
+  trade_series_title: string;
+  booktype: BookType;
+  release_date: string | null;
+  ranges: CollectionRange[];
+  coverage: 'collected' | 'partial' | 'none';
+  issues_in_ranges: number;
+  owned_in_ranges: number;
+}
+
+/** `GET /api/v1/series/{seriesId}/collections` envelope (FRG-API-022). */
+export interface CollectionsResponse {
+  records: CollectionRecord[];
+}
+
+/**
+ * One sub-range in a containment declaration write (FRG-API-022): the target
+ * series and the endpoint issue ids the operator picked. `PUT
+ * /api/v1/issues/{issueId}/collections` takes `{ranges}` and REPLACES all of a
+ * trade issue's declared ranges (400 ApiError on an invalid range).
+ */
+export interface ContainmentRangeInput {
+  target_series_id: number;
+  start_issue_id: number;
+  end_issue_id: number;
 }
 
 /**
