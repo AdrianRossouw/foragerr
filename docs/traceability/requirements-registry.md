@@ -11,18 +11,29 @@ Status: `proposed` (in an open change) → `approved` (baseline approved by owne
 `implemented` (code + tagged tests merged) → `verified` (tests green in CI).
 Also: `deferred` (approved, explicitly parked), `withdrawn` (kept for history).
 
-Milestones: `M1` vertical slice · `M2` own your library (existing-collection
-import, manual import, naming preview, daily-use screens, backups, NFR
-hardening; quality trio parked to B 2026-07-06) · `M3` comics-native (weekly pull list + discovery,
-volume grouping, trade typing, OPDS page streaming — grouping/trade ids
-allocated at proposal time) · `M4` sources (Humble Bundle importer — ids
-allocated at proposal time) · `M5` authentication · `B` backlog · `—` process
+Milestones: `M1` vertical slice · `M2` own your library · `M3` comics-native
+(closed 2026-07-10 by rescoping the pull experience to M4; shipped: pull
+backbone, volume grouping, trade typing, OPDS page streaming) · `M4` design
+refresh (new app shell/tokens, library views, series detail + trade
+containment, add-new, the pull experience [FRG-UI-018, FRG-PULL-007..009],
+screenshot-refresh tooling) · `M5` creators & follows (CRTR ids allocated at
+proposal time) · `M6` sources (FRG-AUTH-008 credential store first, then
+Humble Bundle importer, then archive.org importer) · `M7` torrents
+(Transmission, Torznab-only indexing, seeding etiquette) · `M8`
+authentication (**implementation requires fresh owner approval — the
+2026-07-10 grant ends after M7 merges**) · `B` backlog · `—` process
 (not milestone-bound).
 
 Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 `M3` authentication). Torrents (FRG-TOR-*, FRG-IDX-012) and notifications
 (FRG-NOTIF-*, FRG-UI-013) parked to `B`; PULL area and FRG-UI-018 promoted from
 `B` to `M3`; auth cluster (FRG-AUTH-002..010, FRG-SEC-005) moved to `M5`.
+
+Reshaped again 2026-07-10 with owner approval (roadmap-reshape): FRG-UI-018 +
+FRG-PULL-007..009 moved `M3`→`M4`; FRG-AUTH-008 moved `M5`→`M6` (sources
+store real account credentials); FRG-TOR-001..006 + FRG-IDX-012 promoted
+`B`→`M7`; remaining auth cluster (FRG-AUTH-002..007/009/010, FRG-SEC-005)
+moved `M5`→`M8`.
 
 | ID | Title | Spec | Status | Milestone |
 |----|-------|------|--------|-----------|
@@ -81,9 +92,9 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-PULL-004 | Matching pull entries to the library | pull | implemented | M3 |
 | FRG-PULL-005 | Refresh trigger for missing pulled issues | pull | implemented | M3 |
 | FRG-PULL-006 | Scheduled and manual pull refresh | pull | implemented | M3 |
-| FRG-PULL-007 | Pull view actions | pull | approved | M3 |
-| FRG-PULL-008 | New-series surfacing (no auto-add) | pull | approved | M3 |
-| FRG-PULL-009 | Future/solicited releases | pull | approved | M3 |
+| FRG-PULL-007 | Pull view actions | pull | approved | M4 |
+| FRG-PULL-008 | New-series surfacing (no auto-add) | pull | approved | M4 |
+| FRG-PULL-009 | Future/solicited releases | pull | approved | M4 |
 | FRG-ARC-001 | Arc entity import by ComicVine arc ID | arc | approved | B |
 | FRG-ARC-002 | Arc-to-library linking by ComicVine ID | arc | approved | B |
 | FRG-ARC-003 | Arc progress | arc | approved | B |
@@ -105,7 +116,7 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-IDX-009 | Usenet retention parameter | idx | implemented | M1 |
 | FRG-IDX-010 | Indexer failure back-off and recovery | idx | implemented | M1 |
 | FRG-IDX-011 | RSS gap detection | idx | approved | B |
-| FRG-IDX-012 | Torznab indexer support | idx | approved | B |
+| FRG-IDX-012 | Torznab indexer support | idx | approved | M7 |
 | FRG-SRCH-001 | Unified decision engine with explainable rejections | srch | implemented | M1 |
 | FRG-SRCH-002 | Release title parsing | srch | implemented | M1 |
 | FRG-SRCH-003 | Release-to-library mapping | srch | implemented | M1 |
@@ -151,12 +162,12 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-DDL-015 | Safe archive extraction | ddl | approved | B |
 | FRG-DDL-016 | Cloudflare session handling | ddl | approved | B |
 | FRG-DDL-017 | Mirror host adapters | ddl | approved | B |
-| FRG-TOR-001 | Torrent as a second protocol | tor | approved | B |
-| FRG-TOR-002 | qBittorrent client | tor | approved | B |
-| FRG-TOR-003 | Magnet and .torrent handling | tor | approved | B |
-| FRG-TOR-004 | Seeding-aware import and removal | tor | approved | B |
-| FRG-TOR-005 | Seeder-based decision and prioritization | tor | approved | B |
-| FRG-TOR-006 | Blocklist by info-hash | tor | approved | B |
+| FRG-TOR-001 | Torrent as a second protocol | tor | approved | M7 |
+| FRG-TOR-002 | qBittorrent client | tor | approved | M7 |
+| FRG-TOR-003 | Magnet and .torrent handling | tor | approved | M7 |
+| FRG-TOR-004 | Seeding-aware import and removal | tor | approved | M7 |
+| FRG-TOR-005 | Seeder-based decision and prioritization | tor | approved | M7 |
+| FRG-TOR-006 | Blocklist by info-hash | tor | approved | M7 |
 | FRG-IMP-001 | Single parser implementation for all consumers | imp | implemented | M1 |
 | FRG-IMP-002 | Pure, deterministic parse function | imp | implemented | M1 |
 | FRG-IMP-003 | Structured parse result with confidence, no sentinels, no crashes | imp | implemented | M1 |
@@ -238,7 +249,7 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-UI-015 | Library import (existing files) flow | ui | implemented | M2 |
 | FRG-UI-016 | System status and tasks screens | ui | implemented | M2 |
 | FRG-UI-017 | Blocklist screen | ui | implemented | M2 |
-| FRG-UI-018 | Weekly pull / calendar view | ui | approved | M3 |
+| FRG-UI-018 | Weekly pull / calendar view | ui | approved | M4 |
 | FRG-UI-019 | Global header quick-search over the local library | ui | implemented | M2 |
 | FRG-UI-020 | Settings: General with ComicVine metadata credential | ui | implemented | M2 |
 | FRG-UI-021 | Grouped library view | ui | implemented | M3 |
@@ -304,15 +315,15 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-DEP-013 | First-run default DDL provider seeding | dep | implemented | M2 |
 | FRG-DEP-014 | Open-source license (GPL-3.0) | dep | implemented | — |
 | FRG-AUTH-001 | M1/M2 no-auth accepted risk | auth | implemented | M1 |
-| FRG-AUTH-002 | single-user web login | auth | approved | M5 |
-| FRG-AUTH-003 | password storage with modern KDF | auth | approved | M5 |
-| FRG-AUTH-004 | session management | auth | approved | M5 |
-| FRG-AUTH-005 | HTTP Basic for OPDS realm | auth | approved | M5 |
-| FRG-AUTH-006 | API keys separate from session auth | auth | approved | M5 |
-| FRG-AUTH-007 | API key lifecycle | auth | approved | M5 |
-| FRG-AUTH-008 | at-rest secret encryption | auth | approved | M5 |
-| FRG-AUTH-009 | login rate limiting and audit | auth | approved | M5 |
-| FRG-AUTH-010 | uniform coverage of all surfaces | auth | approved | M5 |
+| FRG-AUTH-002 | single-user web login | auth | approved | M8 |
+| FRG-AUTH-003 | password storage with modern KDF | auth | approved | M8 |
+| FRG-AUTH-004 | session management | auth | approved | M8 |
+| FRG-AUTH-005 | HTTP Basic for OPDS realm | auth | approved | M8 |
+| FRG-AUTH-006 | API keys separate from session auth | auth | approved | M8 |
+| FRG-AUTH-007 | API key lifecycle | auth | approved | M8 |
+| FRG-AUTH-008 | at-rest secret encryption | auth | approved | M6 |
+| FRG-AUTH-009 | login rate limiting and audit | auth | approved | M8 |
+| FRG-AUTH-010 | uniform coverage of all surfaces | auth | approved | M8 |
 | FRG-NFR-001 | startup time | nfr | implemented | M2 |
 | FRG-NFR-002 | library scan throughput | nfr | implemented | M2 |
 | FRG-NFR-003 | UI responsiveness at library scale | nfr | implemented | M2 |
@@ -330,7 +341,7 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-SEC-002 | Hardened XML parsing (XXE / entity-expansion) | sec | implemented | M1 |
 | FRG-SEC-003 | Archive-processing safety (bomb / zip-slip limits) | sec | implemented | M1 |
 | FRG-SEC-004 | Filesystem path confinement (safe-join) | sec | implemented | M1 |
-| FRG-SEC-005 | CSRF stance and WebSocket Origin validation | sec | approved | M5 |
+| FRG-SEC-005 | CSRF stance and WebSocket Origin validation | sec | approved | M8 |
 | FRG-NFR-014 | Listener request resource limits | nfr | implemented | M2 |
 | FRG-QUAL-001 | Format profile entity | qual | implemented | M1 |
 | FRG-QUAL-002 | Default profile seeded on first run | qual | implemented | M1 |

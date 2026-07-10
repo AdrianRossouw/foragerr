@@ -27,7 +27,9 @@ Governed by **FRG-PROC-001** and **FRG-PROC-002** (message format) and
    (a required section of every proposal — sections touched, or "none" with
    rationale) was carried out in `docs/manual/` / `README.md`.
 5. Security docs updated if the change added attack surface (FRG-PROC-006).
-6. Code review + simplify pass on the branch diff.
+6. Code review + simplify pass on the branch diff, including an
+   independent-model (Codex) full-diff review as a required ninth
+   perspective (owner instruction 2026-07-10).
 7. History hygiene (FRG-PROC-015, public repository): the full-history secret
    scan recorded in `docs/security/history-scan.md` must name an
    ancestor-or-equal of the merge HEAD; re-run and append to its re-scan log
@@ -86,6 +88,7 @@ written into an OpenSpec change proposal.
 | PP   | Post-processing (import execution, tagging, dupes) |
 | PULL | Weekly pull / release calendar |
 | ARC  | Story arcs |
+| CRTR | Creators & follows (M5) |
 | TOR  | Torrents (deferred) |
 | NOTIF| Notifications |
 | SCHED| Scheduling & queues |
