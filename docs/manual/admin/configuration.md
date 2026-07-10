@@ -143,7 +143,7 @@ the enable steps and RISK-015/RISK-016 in `docs/security/risk-register.md`.
 
 The `listener_*` and `ws_*` settings above are availability safety valves on the
 inbound HTTP/WebSocket listener, not access control (foragerr has no
-authentication in M1/M2 — see `network.md`). Their defaults are deliberately
+authentication before M8 — see `network.md`). Their defaults are deliberately
 generous so nothing in normal single-admin use is ever refused; they exist to
 bound memory/CPU if something on the tailnet misbehaves or a client floods the
 listener. If you ever see one of these responses, it means a limit was hit —

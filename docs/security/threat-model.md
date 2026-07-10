@@ -10,7 +10,7 @@ and the scratchpad drafts `baseline/{library-domain,acquisition,files-domain,int
   Python/FastAPI + SQLite + React. All persistent state under `/config`.
 - **Network posture**: reachable only over Tailscale. **M1 ships with NO application auth** — a
   deliberate, owner-accepted risk whose sole compensating control is the tailnet boundary
-  (RISK-020). Auth (session/API-key/OPDS-Basic) lands M3.
+  (RISK-020). Auth (session/API-key/OPDS-Basic) lands M8 (2026-07-10 reshape; at-rest secret encryption decouples to M6).
 - **Users**: single trusted operator + iPad OPDS reader apps (also on the tailnet).
 - **Untrusted inputs crossing a trust boundary**:
   1. Comic archives (CBZ/CBR/CB7/PDF) from the internet (usenet, DDL, existing library).
@@ -35,12 +35,12 @@ allocated yet).
 
 - **Assets**: entire library/config/queue state; the operator's browser session; all control
   operations.
-- **Trust boundary**: tailnet client → listener. No auth in M1/M2.
+- **Trust boundary**: tailnet client → listener. No auth before M8.
 - **Threats**
-  - **T-API-1 (Spoofing/Elevation)**: unauthenticated access to all control endpoints in M1/M2.
+  - **T-API-1 (Spoofing/Elevation)**: unauthenticated access to all control endpoints before M8.
     Coverage: PF `AUTH — M1/M2 no-auth accepted risk` (canonical owner of the accept), PF
     `DEP — Tailscale-scoped exposure` (compensating control), PF `AUTH — single-user web login`
-    + `AUTH — uniform coverage of all surfaces` (M3 fix). RISK-020.
+    + `AUTH — uniform coverage of all surfaces` (M8 fix, 2026-07-10 reshape). RISK-020.
   - **T-API-2 (Tampering/SQLi)**: injection through client-influenced query values into DB.
     Coverage: IF `OPDS — Parameterized queries throughout` (stated app-wide in spirit); PF
     `DB — typed, sentinel-free schema`; IF `API — Paging envelope` (whitelisted sort keys as
@@ -48,9 +48,9 @@ allocated yet).
   - **T-API-3 (Tampering/XSS)**: attacker-influenced strings (CV wiki fields, scraped DDL text,
     release titles) rendered in the React UI. Coverage: LD `META — ComicVine content is untrusted
     input`, PF `NFR — untrusted external content handling`. RISK-011, RISK-014.
-  - **T-API-4 (Repudiation)**: no auth audit trail before M3; state changes unattributable.
+  - **T-API-4 (Repudiation)**: no auth audit trail before M8; state changes unattributable.
     Coverage: PF `AUTH — login rate limiting and audit`, PF `SCHED — persisted job history`
-    (command audit). Gap: no security-event audit before M3 (accepted with RISK-020).
+    (command audit). Gap: no security-event audit before M8 (accepted with RISK-020).
   - **T-API-5 (DoS)**: unbounded request bodies / expensive endpoints; no request-size or
     rate limit on the listener. Coverage: PF `NFR — UI responsiveness at library scale`
     (pagination, no unbounded arrays). **Gap G-1**: no explicit request-body-size cap / listener
@@ -69,7 +69,7 @@ allocated yet).
 - **Trust boundary**: browser → WS endpoint (same listener).
 - **Threats**
   - **T-WS-1 (Information disclosure)**: unauthenticated subscription leaks all resource changes.
-    Coverage: IF `API — WebSocket resource-change push` (Notes: WS auth is AUTH/M3); PF
+    Coverage: IF `API — WebSocket resource-change push` (Notes: WS auth is AUTH/M8); PF
     `AUTH — uniform coverage of all surfaces` (explicitly names WebSocket). RISK-020.
   - **T-WS-2 (Spoofing/CSWSH)**: cross-site WebSocket hijacking — a malicious page in the
     operator's browser opens a WS to the tailnet host and reads pushed data, bypassing cookie
@@ -92,7 +92,7 @@ allocated yet).
     IF `OPDS — Parameterized queries throughout`. RISK-002.
   - **T-OPDS-3 (Spoofing/Elevation)**: OPDS world-readable, exempt from site auth (Mylar S2).
     Coverage: PF `AUTH — HTTP Basic for OPDS realm`, PF `AUTH — uniform coverage of all surfaces`
-    (fixed exempt list); until M3, RISK-020. RISK-003.
+    (fixed exempt list); until M8, RISK-020. RISK-003.
   - **T-OPDS-4 (Spoofing/MITM — weak auth primitives, Mylar S4)**: plaintext Basic, no TLS
     enforced, no lockout. Coverage: PF `AUTH — password storage with modern KDF` (Basic verifies
     against KDF hash), PF `AUTH — login rate limiting and audit`; TLS via Tailscale (PF

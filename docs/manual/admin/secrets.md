@@ -53,7 +53,7 @@ loaded, its value self-registers with foragerr's log-redaction filter
 ## What is not yet covered
 
 At-rest encryption of secrets stored in the database (as opposed to environment/config
-file) is a later milestone (`FRG-AUTH-008`, targeted M5 per the milestone reshape).
+file) is a later milestone (`FRG-AUTH-008`, targeted M6 — landing at the start of the sources milestone, before any store-account credential is persisted; 2026-07-10 reshape).
 This gap is **live today**:
 provider secrets entered through the UI — an indexer API key or download-client
 credential saved in Settings → Indexers / Download Clients — are stored unencrypted

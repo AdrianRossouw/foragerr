@@ -522,7 +522,7 @@ The UI SHALL provide a paged blocklist screen showing blocklisted releases (sour
 
 The UI SHALL provide a release-calendar or weekly-pull view of upcoming/recent issues for watched series with want/skip actions per entry.
 
-- **Milestone**: M3
+- **Milestone**: M4
 - **Source**: mylar-feature-surface.md §1 weekly pull + §PULL capability map; sonarr-architecture.md §7.1 Calendar (+iCal).
 - **Notes**: Backend is PULL area (not in this baseline) — this UI requirement is deliberately B and blocked on PULL; recorded here so the screen inventory is complete. Choose Mylar pull-list shape vs Sonarr calendar shape at PULL design time.
 

@@ -9,6 +9,34 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.3.7] — 2026-07-10
+
+roadmap-reshape: M4 design refresh · M5 creators · M6 sources · M7 torrents · M8 auth.
+
+### Changed
+- **Roadmap reshaped** (owner-approved): M3 closes by rescoping the pull
+  experience to M4; M4 = design refresh (new app shell and tokens, library
+  views, series detail with trade containment, add-new, the pull experience,
+  screenshot-refresh tooling); M5 = creators & follows; M6 = sources — an
+  encrypted credential store lands first (key from environment only, never a
+  file — FRG-AUTH-008), then the Humble Bundle importer, then archive.org;
+  M7 = torrents (Transmission-first, Torznab-only indexing via
+  Prowlarr/Jackett, per-torrent ratio/seed-time limits); M8 = authentication,
+  which requires fresh owner approval to begin.
+- **README is a controlled document** (FRG-PROC-011 modified): any change that
+  alters a fact the README states updates it in the same change, and a
+  doc-consistency test pins roadmap milestone labels to the registry.
+- **Codex made the official ninth review perspective** at every merge gate
+  (checklist item 6).
+- Stale pre-reshape milestone claims swept repo-wide: the manual, threat
+  model, risk register, decisions index, and the FRG-AUTH-001 requirement
+  text now state the M6/M8 boundaries; RISK-020 records the owner's conscious
+  re-acceptance of the no-auth posture through M7.
+
+### Notes
+- Planning/process/labelling docs only — no application behavior changes.
+- Design handoffs are gitignored as a class (including `.dc.html` exports).
+
 ## [v0.3.6] — 2026-07-10
 
 known-anomalies: a known-anomalies register (FRG-PROC-016), seeded with KA-001.

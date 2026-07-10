@@ -225,3 +225,23 @@ def test_no_private_framing_in_controlled_documents():
                 f"{path.relative_to(REPO_ROOT)} still carries stale private "
                 f"framing: {phrase!r}"
             )
+
+
+@pytest.mark.req("FRG-PROC-011")
+def test_roadmap_milestone_labels_match_the_registry():
+    """README roadmap items citing an FRG ID must carry the registry's
+    milestone — a roadmap reshape that forgets the README (or vice versa)
+    fails here instead of shipping a stale public claim."""
+    text = _readme()
+    roadmap = re.search(r"^## Roadmap.*?(?=^## )", text, re.M | re.S)
+    assert roadmap, "README must keep the Roadmap section"
+    for item in re.finditer(
+        r"^- \*\*.*?\*\*\s*\((M\d+)[^)]*\)(?:[^\n]|\n(?!-))*", roadmap.group(0), re.M
+    ):
+        milestone = item.group(1)
+        for rid in re.findall(r"FRG-[A-Z]+-\d{3}", item.group(0)):
+            row = REGISTRY.get(rid)
+            assert row and row["milestone"] == milestone, (
+                f"README roadmap labels {rid} as {milestone} but the registry "
+                f"says {row['milestone'] if row else 'UNREGISTERED'}"
+            )

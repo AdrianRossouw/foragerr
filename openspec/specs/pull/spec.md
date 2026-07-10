@@ -298,7 +298,7 @@ recent, but SHALL NOT suppress a manual force-run.
 
 The pull/weekly view SHALL expose per-entry actions for entries linked to library issues — toggle monitored (want/skip) and trigger an immediate search — each delegating to the canonical issue-level operations.
 
-- **Milestone**: M3
+- **Milestone**: M4
 - **Source**: mylar-feature-surface.md capability map PULL (manual want/skip/search from the pull view); sonarr-architecture.md §8 (derived state).
 - **Notes**: D4. Entry display state (skipped/wanted/downloading/downloaded) is a projection of issue + queue state.
 
@@ -311,7 +311,7 @@ The pull/weekly view SHALL expose per-entry actions for entries linked to librar
 
 The system SHALL surface pull entries for new series debuts (issue #1/#0) that are not in the library as a distinct "new this week" list with a one-click add action (invoking the standard add flow), and SHALL NOT add series automatically.
 
-- **Milestone**: M3
+- **Milestone**: M4
 - **Source**: mylar-feature-surface.md §1 (future_check auto-add) and capability map PULL (auto-add of new #1s).
 - **Notes**: Deliberate divergence: Mylar auto-adds via fuzzy CV search — wrong-match risk and unbounded library growth for a single-user tool. Surfacing keeps the discovery value.
 
@@ -324,7 +324,7 @@ The system SHALL surface pull entries for new series debuts (issue #1/#0) that a
 
 The system SHALL retain pull-source entries for future-dated weeks when the source provides them and include watched-series matches in the weekly view's forward navigation.
 
-- **Milestone**: M3
+- **Milestone**: M4
 - **Source**: mylar-feature-surface.md §1 (futureupcoming) and capability map PULL (future-release watching).
 - **Notes**: Thin requirement by design: with derived wanted, "watching" a future issue is just monitoring it once refresh creates it — no `add2futurewatchlist` machinery.
 
