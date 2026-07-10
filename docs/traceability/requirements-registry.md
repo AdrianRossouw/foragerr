@@ -73,6 +73,7 @@ moved `M5`→`M8`.
 | FRG-SER-017 | Grouping manual override survives refresh | ser | implemented | M3 |
 | FRG-SER-018 | Series collected-edition (trade) typing | ser | implemented | M3 |
 | FRG-SER-019 | Trades never suppress single-issue wanted | ser | implemented | M3 |
+| FRG-SER-020 | Trade containment model (declared, display-only) | ser | approved | M4 |
 | FRG-META-001 | ComicVine client fundamentals | meta | implemented | M1 |
 | FRG-META-002 | API key handling | meta | implemented | M1 |
 | FRG-META-003 | Client-side rate limiting with 429 handling | meta | implemented | M1 |
@@ -234,6 +235,7 @@ moved `M5`→`M8`.
 | FRG-API-019 | Pull/weekly resource endpoint | api | implemented | M3 |
 | FRG-API-020 | Series grouping projection | api | implemented | M3 |
 | FRG-API-021 | Log records resource | api | implemented | M4 |
+| FRG-API-022 | Containment resources | api | approved | M4 |
 | FRG-UI-001 | SPA architecture: server state via React Query + WS invalidation | ui | implemented | M1 |
 | FRG-UI-002 | Design token layer with ant/foraging theme | ui | implemented | M1 |
 | FRG-UI-003 | Library index screen | ui | implemented | M1 |
@@ -258,6 +260,8 @@ moved `M5`→`M8`.
 | FRG-UI-022 | Collected-edition (trade) surfacing | ui | implemented | M3 |
 | FRG-UI-023 | Application shell | ui | implemented | M4 |
 | FRG-UI-024 | System → Logs screen | ui | implemented | M4 |
+| FRG-UI-025 | Issue bulk selection and actions | ui | approved | M4 |
+| FRG-UI-026 | Collections tab | ui | approved | M4 |
 | FRG-OPDS-001 | OPDS 1.2 Atom catalog with navigation root | opds | implemented | M1 |
 | FRG-OPDS-002 | Acquisition feeds with per-entry metadata | opds | implemented | M1 |
 | FRG-OPDS-003 | Library-id-based file resolution only (no client-supplied paths) | opds | implemented | M1 |
