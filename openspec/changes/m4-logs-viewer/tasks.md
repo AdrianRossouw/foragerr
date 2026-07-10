@@ -26,10 +26,10 @@
 
 ## 4. Docs & security
 
-- [ ] 4.1 `docs/security/` STRIDE + risk register row for the log read
+- [x] 4.1 `docs/security/` STRIDE + risk register row for the log read
       endpoint (info disclosure; redaction-before-buffer mitigation)
       (FRG-PROC-006)
-- [ ] 4.2 Manual: web-ui.md System section + admin troubleshooting note
+- [x] 4.2 Manual: web-ui.md System section + admin troubleshooting note
       (FRG-PROC-011); no SOUP changes (`tools/soup_check.py` still 0)
 
 ## 5. Merge gate (SMALL + security-touching tier)

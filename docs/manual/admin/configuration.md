@@ -33,6 +33,7 @@ under the top level of `config.yaml`.
 | `log_level` | `FORAGERR_LOG_LEVEL` | `INFO` | One of DEBUG/INFO/WARNING/ERROR/CRITICAL. |
 | `log_max_bytes` | `FORAGERR_LOG_MAX_BYTES` | `10000000` | Log file size before rotation. |
 | `log_backup_count` | `FORAGERR_LOG_BACKUP_COUNT` | `5` | Rotated log files retained. |
+| `log_buffer_records` | `FORAGERR_LOG_BUFFER_RECORDS` | `2000` | Records kept in the in-memory ring buffer behind the System → Logs screen and `GET /api/v1/log`. Memory-only — a restart clears it. See "Logs and diagnostics" below. |
 | `scheduler_tick_seconds` | `FORAGERR_SCHEDULER_TICK_SECONDS` | `60` | Clamped to 5-60. |
 | `http_connect_timeout_seconds` | `FORAGERR_HTTP_CONNECT_TIMEOUT_SECONDS` | `10.0` | Outbound HTTP connect timeout, all clients. |
 | `http_read_timeout_seconds` | `FORAGERR_HTTP_READ_TIMEOUT_SECONDS` | `30.0` | Outbound HTTP read timeout. |
@@ -277,3 +278,34 @@ The pull side never writes issue status itself.
   is marked **degraded** on the health surface (System → Health) with a remediation
   hint, rather than failing silently or discarding good data. A bad-date `619`
   response skips only the affected week; the other week is still fetched.
+
+## Logs and diagnostics
+
+`log_level` (above) controls what foragerr logs in the first place — everything
+below only concerns where those log records go once they're emitted.
+
+For day-to-day questions like "why didn't this download" or "did the scheduled
+scan actually run", start with the in-app **System → Logs** screen
+(`user/web-ui.md` → "Logs") before reaching for the container's stdout: it needs
+no shell access, filters by level and logger, and can follow activity live while
+you reproduce a problem — exactly the gap that prompted its addition (a demo
+review where GetComics wasn't downloading and the only explanation was in the
+container log).
+
+The Logs screen reads a bounded **in-memory ring buffer**, not a file: the
+`log_buffer_records` setting (default 2000) caps how many of the most recent
+records it holds, and the buffer is populated *after* the same secret-redaction
+filter that scrubs the file and stdout logs, so a registered API key can never
+appear there either. Two things follow from "in-memory":
+
+- **A restart empties it.** There is nothing to inspect after a crash or a
+  container restart via the Logs screen — only records emitted since the
+  process came back up.
+- **It is not a durable or audit log.** For anything you need to keep, search,
+  or correlate with events from before a restart, the durable path is still the
+  container's stdout (`docker logs`) and the rotated log file under
+  `logs/foragerr.log` in the config directory (`log_max_bytes` /
+  `log_backup_count`, above). Raise `log_buffer_records` if you want more
+  in-app scrollback at the cost of a little memory (each record's already-
+  formatted message is what's retained, so memory scales with the record
+  count, not with log volume over time).
