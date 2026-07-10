@@ -41,5 +41,6 @@
 - [x] 5.1 Full checklist; CHANGELOG v0.4.2 + bump (FRG-PROC-007/013/015)
       (backend 1626 + frontend 279 green; trace 0; soup 0; gitleaks re-scan
       appended; manual synced; no new attack surface)
-- [ ] 5.2 Review cycle (angles + Codex ninth) DONE — fixes landed a9b379d;
-      remaining: sync delta; archive; merge; tag; push; release
+- [x] 5.2 Review cycle (angles + Codex ninth) DONE — fixes landed a9b379d;
+      delta synced to main specs; archived + merged + tagged v0.4.2 +
+      pushed + released at the merge step
