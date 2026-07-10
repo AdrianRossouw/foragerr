@@ -86,13 +86,24 @@ secret_scan() {
     #    chosen to catch real credential material while ignoring the field NAMES
     #    and ${PLACEHOLDER}/{template} forms the repo legitimately contains.
     #    (ERE; -I skips binaries.)
-    local patterns='-----BEGIN [A-Z ]*PRIVATE KEY-----'
-    patterns+='|AKIA[0-9A-Z]{16}'
-    patterns+='|xox[baprs]-[0-9A-Za-z-]{10,}'
-    patterns+='|gh[pousr]_[0-9A-Za-z]{30,}'
+    # Shared keyword-assignment prefix — used by the generic detection AND the
+    # digit-bearing keep stage below; keeps the two from drifting apart.
+    local kv_prefix='(api[_-]?key|secret|password|token)[[:space:]]*[:=][[:space:]]*["'"'"']?'
+    local specific='-----BEGIN [A-Z ]*PRIVATE KEY-----'
+    specific+='|AKIA[0-9A-Z]{16}'
+    specific+='|xox[baprs]-[0-9A-Za-z-]{10,}'
+    specific+='|gh[pousr]_[0-9A-Za-z]{30,}'
     # api_key/secret/password/token = <16+ chars of real-looking secret>, but not
     # ${VAR}, {template}, empty, or "changeme"-style placeholders.
-    patterns+='|(api[_-]?key|secret|password|token)[[:space:]]*[:=][[:space:]]*["'"'"']?[A-Za-z0-9/+=_-]{16,}'
+    local patterns="${specific}|${kv_prefix}[A-Za-z0-9/+=_-]{16,}"
+    # Keep stage: a flagged line survives only if it hits a specific
+    # high-signal rule OR some keyword assignment on it carries a DIGIT in
+    # its value — a 16+ char digit-free "value" is a code identifier (e.g.
+    # the type annotation `comicvine_api_key: ComicVineKeyStatus`), not key
+    # material. Keeping (rather than excluding digit-free lines wholesale)
+    # means a line carrying BOTH a benign identifier and a real digit-bearing
+    # secret is still reported. Heuristic, documented here on purpose.
+    local keep="${specific}|${kv_prefix}[A-Za-z/+=_-]*[0-9]"
 
     while IFS= read -r -d '' f; do
         # Skip this scanner itself (it necessarily contains the patterns).
@@ -103,6 +114,7 @@ secret_scan() {
         # passed as an explicit -e argument, not positionally).
         hits="$(grep -InE -e "$patterns" "$f" 2>/dev/null \
                     | grep -viE -e '\$\{|\{[a-zA-Z_]+\}|[:=][[:space:]]*["'"'"']?(changeme|example|placeholder|your[_-]|xxx|<)' \
+                    | grep -iE -e "$keep" \
                     || true)"
         if [ -n "$hits" ]; then
             echo "SECRET-SCAN: key-shaped material in ${f#"$ctx"/}:" >&2
