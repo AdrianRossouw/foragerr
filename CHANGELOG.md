@@ -9,6 +9,55 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.4.2] — 2026-07-10
+
+m4-library-views: the library index rebuilt to the M4 design — three views,
+raised menus, and a live-demo feedback round.
+
+### Added
+- **Three library view modes** (FRG-UI-003): Posters — a responsive grid with
+  S/M/L sizes and full card anatomy (monitored bookmark, publisher chip,
+  publisher-tinted cover fallback, owned/total progress strip, status/year
+  subline); Overview — rows with a cover thumb, status pill, wide progress bar
+  and percent complete; Table — dense monitor/Title/Publisher/Issues/Status/
+  Year columns. A count line reads `N comics · N monitored · N with missing
+  issues` in semantic colors.
+- **Toolbar menus** (FRG-UI-003): a view switcher plus Options (poster size,
+  group-volumes toggle), Sort (Title/Publisher/Issues owned/Year, check on
+  active — disabled while grouping, which it cannot order), and Filter
+  (All/Monitored/Missing issues/Continuing with live counts, plus an EDITIONS
+  section carrying the collected-editions filter, FRG-UI-022). A content click
+  closes an open menu without activating what's beneath it. View mode, poster
+  size, sort, and both filters persist across sessions.
+- **Stacked franchise cards** (FRG-UI-021): in grouped poster mode a
+  multi-volume franchise is one layered-shadow card with an `N vols` chip and
+  summed owned/total; Overview/Table keep collapsible franchise headers. The
+  rename/detach affordance (FRG-SER-017) remains reachable everywhere.
+- **The brand mark** (FRG-UI-023): the sidebar lockup now renders the real
+  ant-in-hexagon SVG mark to the handoff's exact spec, links back to the
+  library, and the app ships an SVG favicon.
+
+### Fixed
+- After adding a series, its issues now appear as the background refresh
+  lands them — the WebSocket bridge invalidates the issues cache alongside
+  the series caches (FRG-UI-001; owner-reported from the live demo).
+- Cover art cached or replaced by a refresh now appears without a hard
+  reload — cover URLs are versioned by the cache timestamp, and a series
+  without a cached cover renders its tint fallback instead of a broken
+  image (FRG-UI-003/004; owner-reported).
+- Review-gate round (8 angles + Codex): the stacked card's menu is now
+  keyboard-reachable (its cover/title became a real link, the menu a
+  focusable sibling); Sort/Filter options announce their active state to
+  assistive tech; the Options panel no longer claims menu semantics for its
+  controls and focuses on open; result changes are announced politely; and
+  large-library typing cost dropped (memoized sort/join, gated filter
+  counts, memoized cards).
+
+### Notes
+- Frontend-only; no API, schema, or SOUP changes. The old alphabet jump bar
+  and stats footer are superseded by the count line and menus. The manual's
+  library page documents the new controls.
+
 ## [v0.4.1] — 2026-07-10
 
 m4-shell-hotfix: tour rendering defects found post-v0.4.0.

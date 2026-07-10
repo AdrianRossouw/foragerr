@@ -32,12 +32,14 @@
 
 - [x] 4.1 Vitest per scenario set (FRG-UI-003/021 in test names); keep
       `library-poster-grid` and SELECTORS.md stable; e2e spine green
-      (271 vitest green; spine 14/14 GREEN 2026-07-10)
+      (279 vitest green; spine 14/14 GREEN re-run post-review-fixes)
 - [x] 4.2 `docs/manual/user/library.md` view modes + menus (FRG-PROC-011)
-- [ ] 4.3 Regenerate the tour (FRG-PROC-017)
+- [x] 4.3 Regenerate the tour (FRG-PROC-017)
 
 ## 5. Merge gate
 
-- [ ] 5.1 Full checklist; CHANGELOG v0.4.2 + bump (FRG-PROC-007/013/015)
-- [ ] 5.2 Review cycle (angles + Codex ninth); sync delta; archive; merge;
-      tag; push; release
+- [x] 5.1 Full checklist; CHANGELOG v0.4.2 + bump (FRG-PROC-007/013/015)
+      (backend 1626 + frontend 279 green; trace 0; soup 0; gitleaks re-scan
+      appended; manual synced; no new attack surface)
+- [ ] 5.2 Review cycle (angles + Codex ninth) DONE — fixes landed a9b379d;
+      remaining: sync delta; archive; merge; tag; push; release
