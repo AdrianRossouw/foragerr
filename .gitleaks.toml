@@ -1,0 +1,35 @@
+# foragerr gitleaks configuration (FRG-PROC-015)
+#
+# Extends the default gitleaks ruleset with a custom rule closing the
+# detection gap identified as KA-001 (docs/security/known-anomalies.md): a
+# real ComicVine API key sat in git history as a *bare* `KEY = '<40 hex>'`
+# assignment, which the default ruleset (and the repo keyword sweep and
+# tools/build-image.sh) missed because a bare `KEY` identifier assigned a
+# pure-hex literal is indistinguishable from a commit SHA. This config is the
+# authoritative one for the merge-gate history re-scan.
+
+title = "foragerr gitleaks config"
+
+[extend]
+useDefault = true
+
+# --- KA-001 class: bare KEY/TOKEN/SECRET assigned a long hex or base64 literal ---
+[[rules]]
+id = "bare-key-hex"
+description = "Bare KEY/TOKEN/SECRET/APIKEY identifier assigned a long hex or base64 literal (the KA-001 class that SHA-shaped generic rules miss, e.g. `KEY = '<40 hex>'`)"
+# Identifier: KEY, ANY_KEY/API_KEY (underscore-separated prefix), APIKEY,
+# TOKEN, SECRET — case-insensitive, incl. a bare `KEY`, but NOT words merely
+# ending in "key" (monkey, donkey): a prefix must be underscore-separated. Value: 32+ lowercase-hex OR 24+ base64-looking chars,
+# in single or double quotes. Hex branch is tried first so a pure-hex value
+# yields exactly one finding, not two.
+regex = '''(?i)\b(?:(?:[A-Z0-9_]+_)?KEY|TOKEN|SECRET|APIKEY)\s*[:=]\s*["'](?:[a-f0-9]{32,}|[A-Za-z0-9+/]{24,}={0,2})["']'''
+keywords = ["key", "token", "secret", "apikey"]
+
+  # Synthetic fixtures live only under backend/tests/** (including this
+  # change's KA test fixture in tests/test_known_anomalies.py). Scoped to this
+  # rule so the default ruleset still reports the dispositioned test fixtures.
+  [[rules.allowlists]]
+  description = "backend test tree — synthetic fixtures for this rule only"
+  paths = [
+    '''backend/tests/.*''',
+  ]

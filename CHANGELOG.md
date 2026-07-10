@@ -9,6 +9,35 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.3.6] — 2026-07-10
+
+known-anomalies: a known-anomalies register (FRG-PROC-016), seeded with KA-001.
+
+### Added
+- **Known-anomalies register** (`docs/security/known-anomalies.md`): every
+  anomaly the owner accepts rather than fixes gets a stable, never-deleted
+  `KA-NNN` entry — description, impact evaluation, owner decision with
+  rationale, mitigations, review trigger — consistency enforced by tagged
+  tests (FRG-PROC-016).
+- **KA-001** (this release accepts it): an un-revocable ComicVine API key sits
+  in public git history inside a design-exploration export (all tags
+  v0.1.0–v0.3.5). Accepted 2026-07-09 after evaluation — free rate-limited
+  key, no billing/PII/account surface, provider offers no rotation, history
+  rewrite rejected as disproportionate. Full record and review triggers in
+  the register.
+- **`.gitleaks.toml`** with a `bare-key-hex` rule closing the detection gap
+  that let the KA-001 class through three scanners; the merge-gate history
+  scan now runs with this config and demonstrably surfaces the KA-001 blob.
+
+### Changed
+- `docs/security/history-scan.md` corrected (its blanket no-credential claim
+  was falsified by KA-001) and RISK-042 records the residual; RISK-041 now
+  carries the owner's direction that the future at-rest encryption key
+  (FRG-AUTH-008) is supplied via the environment only, never a file.
+- The key-bearing design export is removed from the working tree (the
+  historical blob remains, accepted); design handoffs stay out of the
+  repository and `.gitignore` guards the class.
+
 ## [v0.3.5] — 2026-07-10
 
 ddl-optin-seeding: the first-run DDL provider pair now ships disabled.

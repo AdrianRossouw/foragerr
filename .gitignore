@@ -40,3 +40,8 @@ sample-comics/
 .idea/
 .vscode/
 .claude/worktrees/
+
+# Design handoffs stay out of the repository (owner direction 2026-07-10;
+# see KA-001 — a design export introduced the exposed-credential class)
+docs/research/*.zip
+docs/research/design_handoff_*/
