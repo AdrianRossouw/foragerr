@@ -4,7 +4,7 @@
 
 A real, un-revocable ComicVine API key sits in public git history
 (`docs/research/Foragerr.dc.html`, blob `495f29e`, in every tag
-v0.1.0–v0.3.4). Owner decision 2026-07-09: accept and document; no history
+v0.1.0–v0.3.5 (17 tags)). Owner decision 2026-07-09: accept and document; no history
 rewrite (disproportionate for a free rate-limited key with a replaceable
 account), no rotation (provider offers none). The project lacks a controlled
 artifact for accepted shipped anomalies — the risk register covers threats

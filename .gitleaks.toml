@@ -17,11 +17,12 @@ useDefault = true
 [[rules]]
 id = "bare-key-hex"
 description = "Bare KEY/TOKEN/SECRET/APIKEY identifier assigned a long hex or base64 literal (the KA-001 class that SHA-shaped generic rules miss, e.g. `KEY = '<40 hex>'`)"
-# Identifier: KEY, ANY_KEY, APIKEY, API_KEY, TOKEN, SECRET (case-insensitive,
-# incl. a bare `KEY`). Value: 32+ lowercase-hex OR 24+ base64-looking chars,
+# Identifier: KEY, ANY_KEY/API_KEY (underscore-separated prefix), APIKEY,
+# TOKEN, SECRET — case-insensitive, incl. a bare `KEY`, but NOT words merely
+# ending in "key" (monkey, donkey): a prefix must be underscore-separated. Value: 32+ lowercase-hex OR 24+ base64-looking chars,
 # in single or double quotes. Hex branch is tried first so a pure-hex value
 # yields exactly one finding, not two.
-regex = '''(?i)\b(?:[A-Z_]*KEY|TOKEN|SECRET|APIKEY|API_KEY)\s*[:=]\s*["'](?:[a-f0-9]{32,}|[A-Za-z0-9+/]{24,}={0,2})["']'''
+regex = '''(?i)\b(?:(?:[A-Z0-9_]+_)?KEY|TOKEN|SECRET|APIKEY)\s*[:=]\s*["'](?:[a-f0-9]{32,}|[A-Za-z0-9+/]{24,}={0,2})["']'''
 keywords = ["key", "token", "secret", "apikey"]
 
   # Synthetic fixtures live only under backend/tests/** (including this

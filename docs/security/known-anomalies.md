@@ -70,7 +70,9 @@ Rules:
     bare `KEY = '<hex>'`-shaped credential is flagged at the merge-gate re-scan.
   - The working-tree copy of `docs/research/Foragerr.dc.html` is removed in this
     change, so the current tree no longer republishes the key (the historical
-    blob remains, accepted here).
+    blob remains, accepted here). Diffs and patches of that removal necessarily
+    display the historical value; this adds no exposure beyond the accepted
+    public blob itself.
   - Design handoffs are kept **out of the repository** going forward (owner
     direction 2026-07-10), removing the class of file that introduced this
     exposure.
