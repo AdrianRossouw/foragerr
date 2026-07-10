@@ -135,12 +135,14 @@ it back. Every provider has a Test button that performs a live connectivity
 check before you save.
 
 On a fresh install, Indexers and Download Clients are not empty: foragerr seeds
-one enabled **GetComics** DDL indexer and one enabled **built-in DDL** download
-client automatically, so search and download work out of the box with no
-credentials at all. Both are ordinary provider rows — delete either (or both) if
-you don't want them, and they are never re-created; only a genuinely first-run
-database gets seeded. See `downloads.md` for what the DDL pipeline does and the
-security note on it being enabled by default.
+one **GetComics** DDL indexer and one **built-in DDL** download client — but
+both ship **disabled**, so nothing is searched or downloaded until you opt in
+by enabling the pair (Settings → Indexers → GetComics, and Settings →
+Download Clients → GetComics). No credentials are needed once enabled. Both
+are ordinary provider rows — delete either (or both) if you don't want them,
+and they are never re-created; only a genuinely first-run database gets
+seeded. See `downloads.md` for what the DDL pipeline does and the security
+rationale for the opt-in default.
 
 ### General
 

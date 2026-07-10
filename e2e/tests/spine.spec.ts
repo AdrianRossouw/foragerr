@@ -57,7 +57,7 @@ test('FRG-PROC-010 FRG-DEP-007 FRG-DEP-001: first run is healthy and the SPA loa
   await expect(page.getByRole('link', { name: /add/i }).first()).toBeVisible();
 });
 
-test('FRG-PROC-010 FRG-DEP-013: the seeded DDL pair ships disabled and is enabled as an explicit opt-in', async () => {
+test('FRG-PROC-010 FRG-DEP-013: the seeded DDL pair ships disabled and is enabled as an explicit opt-in', async ({}, testInfo) => {
   // ddl-optin-seeding: a fresh container seeds the "GetComics" indexer + built-in
   // DDL client DISABLED, so nothing is acquired until the operator opts in. The
   // spine makes that opt-in a visible setup step (one API PUT per row) before it
@@ -70,11 +70,17 @@ test('FRG-PROC-010 FRG-DEP-013: the seeded DDL pair ships disabled and is enable
   expect(seededIndexer, 'seeded GetComics indexer present').toBeTruthy();
   expect(seededClient, 'seeded GetComics DDL client present').toBeTruthy();
 
-  // The fresh container starts with the seeded pair disabled.
-  expect(seededIndexer.enabled, 'seeded indexer ships disabled').toBe(false);
-  expect(seededIndexer.enable_rss, 'seeded indexer RSS toggle off').toBe(false);
-  expect(seededIndexer.enable_auto, 'seeded indexer auto-search toggle off').toBe(false);
-  expect(seededClient.enabled, 'seeded DDL client ships disabled').toBe(false);
+  // The fresh container starts with the seeded pair disabled. Only assert
+  // this on the first attempt — a serial-group retry re-enters this step
+  // AFTER the opt-in below has already enabled the pair, and failing here
+  // would mask whichever later step actually flaked (same pattern as the
+  // add-series retry guard below).
+  if (testInfo.retry === 0) {
+    expect(seededIndexer.enabled, 'seeded indexer ships disabled').toBe(false);
+    expect(seededIndexer.enable_rss, 'seeded indexer RSS toggle off').toBe(false);
+    expect(seededIndexer.enable_auto, 'seeded indexer auto-search toggle off').toBe(false);
+    expect(seededClient.enabled, 'seeded DDL client ships disabled').toBe(false);
+  }
 
   // Explicit opt-in: enable both seeded rows via the API before any acquisition.
   const idxRes = await api.put(`/api/v1/indexer/${seededIndexer.id}`, {

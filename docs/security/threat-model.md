@@ -977,6 +977,15 @@ primitive. Disposition:
   exposure of the instance beyond the tailnet, a GetComics ToS change, or a
   malware incident — same triggers RISK-015/016 already carried, now explicitly
   covering the default-enabled state. See `docs/security/risk-register.md`
+  **ddl-optin-seeding (2026-07-09): posture reversed to opt-in.** A fresh
+  install now seeds the same GetComics indexer + built-in DDL client rows
+  **disabled** (automatic-search/RSS toggles off): no scrape, search, grab, or
+  download occurs until the operator enables the pair in Settings. Triggering
+  event: a 2026-07-09 fresh demo install auto-grabbed live downloads within
+  ~1 minute of a library import creating wanted issues. RISK-015/RISK-016
+  return to opt-in; installs seeded enabled under the old posture are not
+  retroactively disabled. This note supersedes the default-enabled
+  description above.
   RISK-015/RISK-016 for the amended wording.
 - **Dead credential fields removed (COMP 11)**: `dognzb_api_key`, `nzbsu_api_key`,
   `sabnzbd_api_key` are deleted from the `Settings` model (FRG-DEP-003 modified) —

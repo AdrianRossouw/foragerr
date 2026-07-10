@@ -46,9 +46,9 @@ from foragerr.indexers.repo import (
     create_indexer,
     delete_indexer,
     list_indexers,
+    select_for_path,
 )
 from foragerr.ddl.settings import GetComicsSettings
-from foragerr.search_ops.pipeline import select_fleet
 
 
 # --------------------------------------------------------------------------- #
@@ -376,9 +376,20 @@ async def test_startup_hook_skips_established_database(tmp_path):
 
 
 async def _fleet_getcomics(db, path: str) -> list:
-    """The seeded-getcomics rows a given fetch path would actually search."""
-    fleet = await select_fleet(db, settings=None, path=path)
-    return [r for r in fleet.rows if r.implementation == GETCOMICS_IMPLEMENTATION]
+    """The seeded-getcomics rows a given fetch path would actually search.
+
+    Uses ``select_for_path`` directly — the same enabled/usage-toggle boundary
+    every disabled indexer is filtered at (and the same pattern as
+    test_indexer_repo_toggles) — rather than the full ``select_fleet``
+    pipeline, which adds health-splitting and engine config this check does
+    not depend on.
+    """
+    rows = await list_indexers(db)
+    return [
+        r
+        for r in select_for_path(rows, path)
+        if r.implementation == GETCOMICS_IMPLEMENTATION
+    ]
 
 
 @pytest.mark.req("FRG-DEP-013")
