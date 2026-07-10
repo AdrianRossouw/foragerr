@@ -1,75 +1,237 @@
 .content {
   flex: 1;
   overflow-y: auto;
-  padding: var(--spacing-lg);
+  padding: var(--spacing-lg) var(--spacing-lg) var(--spacing-xl);
 }
+
+/* --- toolbar ------------------------------------------------------------- */
 
 .toolbarControls {
   display: flex;
+  flex: 1;
   align-items: center;
+  gap: var(--spacing-md);
+}
+
+.leftActions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.rightActions {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: flex-end;
   gap: var(--spacing-sm);
 }
 
-.filterInput,
-.sortSelect {
+.filterInput {
   height: 30px;
   padding: 0 var(--spacing-sm);
-  background: var(--surface-card);
+  background: var(--surface-input);
   border: 1px solid var(--surface-border);
   border-radius: var(--radius-sm);
   color: var(--text-primary);
   font-size: var(--font-size-base);
 }
 
-.filterInput:focus,
-.sortSelect:focus {
+.filterInput:focus {
   outline: none;
   border-color: var(--color-accent);
 }
 
-/* --- poster grid + jump bar ------------------------------------------- */
-
-.gridWrap {
+/* Joined 3-button view switcher. */
+.viewSwitcher {
   display: flex;
-  gap: var(--spacing-sm);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
 }
 
-.grid {
-  flex: 1;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: var(--spacing-md);
-}
-
-.jumpBar {
-  position: sticky;
-  top: 0;
-  align-self: flex-start;
+.viewButton {
+  width: 40px;
+  height: 34px;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.jumpLetter {
-  width: 24px;
-  padding: 2px 0;
+  align-items: center;
+  justify-content: center;
   background: none;
   border: none;
-  border-radius: var(--radius-sm);
-  color: var(--text-muted);
-  font-size: var(--font-size-sm);
+  border-left: 1px solid var(--surface-border);
+  color: var(--text-secondary);
   cursor: pointer;
 }
 
-.jumpLetter:hover {
-  color: var(--color-accent);
+.viewButton:first-child {
+  border-left: none;
+}
+
+.viewButton:hover:not([data-active='true']) {
+  color: var(--text-primary);
   background: var(--surface-card);
+}
+
+.viewButton[data-active='true'] {
+  background: var(--color-accent-selected-bg);
+  color: var(--color-accent-light);
+}
+
+/* --- toolbar menus ------------------------------------------------------- */
+
+.sectionLabel {
+  padding: var(--spacing-xs) var(--spacing-sm) 6px;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  letter-spacing: var(--letter-spacing-label);
+}
+
+.menuDivider {
+  height: 1px;
+  margin: var(--spacing-sm) 0;
+  background: var(--surface-border-soft);
+}
+
+.optionRow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: var(--spacing-sm) var(--spacing-sm);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--font-size-base);
+  text-align: left;
+  cursor: pointer;
+}
+
+.optionRow:hover,
+.optionRow:focus-visible {
+  outline: none;
+  color: var(--text-primary);
+  background: var(--surface-hover);
+}
+
+.optionRow[data-active='true'] {
+  color: var(--text-primary);
+}
+
+.optionCheck {
+  display: inline-flex;
+  width: 12px;
+  color: var(--color-accent);
+  opacity: 0;
+}
+
+.optionCheck[data-active='true'] {
+  opacity: 1;
+}
+
+.optionLabel {
+  flex: 1;
+}
+
+.optionCount {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+/* Options menu: poster size + group-volumes toggle. */
+.groupToggleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  padding: 0 var(--spacing-sm) var(--spacing-xs);
+}
+
+.groupToggleTitle {
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+}
+
+.groupToggleHint {
+  margin-top: 2px;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  line-height: 1.3;
+}
+
+.switch {
+  position: relative;
+  flex: none;
+  width: 40px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--surface-input);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.switch[data-on='true'] {
+  background: var(--color-accent);
+}
+
+.switchKnob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--color-switch-knob);
+  transition: transform 0.15s;
+}
+
+.switch[data-on='true'] .switchKnob {
+  transform: translateX(18px);
+}
+
+/* --- count line ---------------------------------------------------------- */
+
+.countLine {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: var(--spacing-md);
+  font-size: var(--font-size-base);
+}
+
+.countTotal {
+  color: var(--text-secondary);
+}
+
+.countMonitored {
+  color: var(--color-accent);
+  font-size: var(--font-size-sm);
+}
+
+.countMissing {
+  color: var(--color-warning);
+  font-size: var(--font-size-sm);
+}
+
+.countDot {
+  color: var(--text-faint);
+  font-size: var(--font-size-sm);
+}
+
+/* --- poster grid + card -------------------------------------------------- */
+
+.grid {
+  display: grid;
+  gap: 20px;
 }
 
 .card {
   display: flex;
   flex-direction: column;
   background: var(--surface-card);
+  border: 1px solid var(--surface-border);
   border-radius: var(--radius-md);
   overflow: hidden;
   box-shadow: var(--shadow-card);
@@ -77,11 +239,45 @@
   text-decoration: none;
 }
 
-.card:hover {
-  background: var(--surface-card-hover);
+/* Grid cell wrapping a stacked franchise: it is the positioning context for the
+ * corner ⋯ affordance (a sibling of the card link, never nested inside it) and
+ * carries the margin that keeps the offset "spine" layers from being clipped by
+ * the grid gap. */
+.stackCardOuter {
+  position: relative;
+  margin: 12px 12px 0 0;
 }
 
-/* Context overrides for the shared Poster frame (structure lives in Poster.module.css). */
+/* Stacked franchise card link: layered offset "spine" shadow reads as a pile of
+ * volumes. The whole link opens the newest run's detail. */
+.stackCard {
+  box-shadow: var(--shadow-card-stacked);
+}
+
+.stackCard:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Reserve room at the footer's right edge for the overlaid ⋯ affordance so the
+ * group title / subline never run beneath it. */
+.stackFooter {
+  padding-right: 30px;
+}
+
+/* The ⋯ affordance, positioned over the card's bottom-right corner as a SIBLING
+ * of the link (so no interactive control nests inside the link). */
+.stackMenu {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 4;
+}
+
+.coverRegion {
+  position: relative;
+}
+
 .posterFrame {
   background: var(--surface-chrome);
 }
@@ -90,83 +286,239 @@
   font-size: 48px;
 }
 
+.monitorChip {
+  position: absolute;
+  top: var(--spacing-sm);
+  left: var(--spacing-sm);
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-overlay-icon);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.monitorChip[data-monitored='true'] {
+  color: var(--color-accent);
+}
+
+.topRightChips {
+  position: absolute;
+  top: var(--spacing-sm);
+  right: var(--spacing-sm);
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+  pointer-events: none;
+}
+
 .cardFooter {
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-xs);
-  padding: var(--spacing-sm);
+  gap: 3px;
+  padding: 9px 11px 10px;
 }
 
-.cardTitleRow {
+.cardTitle {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card:hover .cardTitle,
+.stackCard:hover .cardTitle {
+  color: var(--color-accent);
+}
+
+.cardSubline {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Corner ⋯ affordance re-enables pointer events over the (inert) chip layer. */
+.franchiseMenuWrap {
+  position: relative;
+  pointer-events: auto;
+}
+
+.menuButton {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: var(--font-size-lg);
+  line-height: 1;
+  padding: 0 var(--spacing-xs);
+  cursor: pointer;
+}
+
+.menuButton:hover {
+  color: var(--color-accent);
+}
+
+/* --- overview rows ------------------------------------------------------- */
+
+.overviewList {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.overviewRow {
+  display: flex;
+  gap: var(--spacing-md);
+  padding: 14px;
+  background: var(--surface-card);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.overviewRow:hover {
+  border-color: var(--surface-border-soft);
+}
+
+.overviewThumb {
+  width: 74px;
+  height: 111px;
+  flex: none;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--surface-chrome);
+}
+
+.overviewThumbFallback {
+  font-size: 28px;
+}
+
+.overviewBody {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.overviewTitleRow {
   display: flex;
   align-items: center;
-  gap: var(--spacing-xs);
+  gap: 10px;
+}
+
+.overviewTitle {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.overviewRow:hover .overviewTitle {
+  color: var(--color-accent);
+}
+
+.overviewMeta {
+  margin-top: 5px;
+  font-size: var(--font-size-base);
+  color: var(--text-secondary);
+}
+
+.overviewProgress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: auto;
+  padding-top: 10px;
+}
+
+.overviewBar {
+  flex: 1;
+  max-width: 340px;
+}
+
+.pctText {
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}
+
+.rowMonitor {
+  display: inline-flex;
+  flex: none;
+  color: var(--text-muted);
+}
+
+.rowMonitor[data-monitored='true'] {
+  color: var(--color-accent);
+}
+
+/* --- table --------------------------------------------------------------- */
+
+.tableWrap {
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-base);
+}
+
+.table thead tr {
+  background: var(--surface-chrome);
+}
+
+.table th {
+  padding: 11px 8px;
+  text-align: left;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-secondary);
+}
+
+.table th:first-child {
+  padding-left: 14px;
+}
+
+.table td {
+  padding: 9px 8px;
+  border-top: 1px solid var(--surface-row-border);
+}
+
+.table td:first-child {
+  padding-left: 14px;
+}
+
+.table tbody tr:hover {
+  background: var(--surface-card-hover);
+}
+
+.iconCol {
+  width: 36px;
+}
+
+.yearCol {
+  width: 70px;
 }
 
 .tableTitleCell {
   display: inline-flex;
   align-items: center;
   gap: var(--spacing-xs);
-}
-
-.cardTitle {
-  flex: 1;
-  min-width: 0;
-  font-weight: var(--font-weight-medium);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.cardMeta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--spacing-xs);
-  font-size: var(--font-size-sm);
-}
-
-.monitoredMark,
-.unmonitoredMark {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-}
-
-.monitoredMark {
-  color: var(--color-accent);
-}
-
-.unmonitoredMark {
-  color: var(--text-muted);
-}
-
-/* --- table view -------------------------------------------------------- */
-
-.table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.table th {
-  padding: var(--spacing-sm);
-  text-align: left;
-  font-weight: var(--font-weight-bold);
-  border-bottom: 1px solid var(--surface-border);
-  color: var(--text-secondary);
-}
-
-.table td {
-  padding: var(--spacing-sm);
-  border-bottom: 1px solid var(--surface-border);
-}
-
-.table tbody tr:hover {
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.iconCol {
-  width: 32px;
 }
 
 .titleLink {
@@ -179,7 +531,15 @@
   color: var(--color-accent);
 }
 
-/* --- grouped (franchise) view ------------------------------------------ */
+.statusContinuing {
+  color: var(--color-success-text);
+}
+
+.statusEnded {
+  color: var(--text-secondary);
+}
+
+/* --- grouped (franchise) view -------------------------------------------- */
 
 .groupList {
   display: flex;
@@ -241,40 +601,84 @@
   color: var(--text-secondary);
 }
 
+.franchiseRollup {
+  width: 120px;
+}
+
 .runCount {
   color: var(--text-muted);
 }
 
-.franchiseMenuWrap {
-  position: relative;
+.franchiseMembers {
+  display: flex;
+  flex-direction: column;
 }
 
-.menuButton {
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  font-size: var(--font-size-lg);
-  line-height: 1;
-  padding: 0 var(--spacing-xs);
-  cursor: pointer;
+/* --- member row (nested under a franchise header, or a single-run group) -- */
+
+.memberRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px var(--spacing-sm);
+  border-top: 1px solid var(--surface-row-border);
+  color: var(--text-primary);
+  text-decoration: none;
 }
 
-.menuButton:hover {
+.memberRow:first-child {
+  border-top: none;
+}
+
+.memberRow:hover {
+  background: var(--surface-card-hover);
+}
+
+.memberTitle {
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.memberRow:hover .memberTitle {
   color: var(--color-accent);
 }
+
+.memberPublisher {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.memberBar {
+  width: 130px;
+  flex: none;
+}
+
+.memberYear {
+  width: 48px;
+  text-align: right;
+  color: var(--text-secondary);
+}
+
+/* --- franchise menu (rename / detach) ------------------------------------ */
 
 .franchiseMenu {
   position: absolute;
   right: 0;
   top: 100%;
-  z-index: 10;
+  z-index: 30;
   min-width: 220px;
   margin-top: var(--spacing-xs);
   padding: var(--spacing-sm);
-  background: var(--surface-card);
-  border: 1px solid var(--surface-border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-card);
+  background: var(--surface-menu);
+  border: 1px solid var(--surface-border-soft);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-menu);
 }
 
 .renameRow {
@@ -287,7 +691,7 @@
   min-width: 0;
   height: 28px;
   padding: 0 var(--spacing-xs);
-  background: var(--surface-chrome);
+  background: var(--surface-input);
   border: 1px solid var(--surface-border);
   border-radius: var(--radius-sm);
   color: var(--text-primary);
@@ -321,7 +725,7 @@
 
 .menuAction:hover:not(:disabled) {
   color: var(--text-primary);
-  background: var(--surface-card-hover);
+  background: var(--surface-hover);
 }
 
 .menuAction:disabled {
@@ -329,14 +733,7 @@
   cursor: default;
 }
 
-.franchiseMembers,
-.singleRun {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: var(--spacing-md);
-}
-
-/* --- states + footer ---------------------------------------------------- */
+/* --- states -------------------------------------------------------------- */
 
 .stateNote {
   color: var(--text-secondary);
@@ -346,18 +743,17 @@
   color: var(--color-accent);
 }
 
-.statsFooter {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--spacing-lg);
-  margin-top: var(--spacing-xl);
-  padding-top: var(--spacing-md);
-  border-top: 1px solid var(--surface-border);
-  color: var(--text-secondary);
-  font-size: var(--font-size-sm);
+.noMatch {
+  padding: 80px 0;
+  text-align: center;
+  color: var(--text-muted);
 }
 
-.statsFooter strong {
-  color: var(--text-primary);
-  margin-right: var(--spacing-xs);
+.noMatch svg {
+  color: var(--surface-border-soft);
+}
+
+.noMatchText {
+  margin-top: 14px;
+  font-size: var(--font-size-lg);
 }

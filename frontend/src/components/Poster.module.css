@@ -20,6 +20,20 @@
   color: var(--text-muted);
 }
 
+/* Diagonal-stripe texture over the publisher tint (poster cards, FRG-UI-003).
+ * Sits above the fallback initial but below the cover image, so it shows only
+ * until real art loads. */
+.stripe {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    135deg,
+    var(--surface-poster-stripe) 0 7px,
+    transparent 7px 15px
+  );
+}
+
 .poster {
   position: absolute;
   inset: 0;

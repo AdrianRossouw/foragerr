@@ -1,0 +1,32 @@
+/*
+ * Segmented control (FRG-UI-003). Adjacent buttons inside a bordered track; the
+ * selected segment uses the accent-selected tint. Colors from tokens only.
+ */
+.group {
+  display: inline-flex;
+  padding: 2px;
+  background: var(--surface-input);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+}
+
+.segment {
+  min-width: 30px;
+  padding: 3px var(--spacing-sm);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+}
+
+.segment:hover:not(.active) {
+  color: var(--text-primary);
+}
+
+.active {
+  background: var(--color-accent-selected-bg);
+  color: var(--color-accent-light);
+}

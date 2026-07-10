@@ -20,6 +20,14 @@ export interface PosterProps {
   fallbackClassName?: string;
   /** Lazy-load the cover image (grids/lists). */
   lazy?: boolean;
+  /**
+   * Publisher tint (FRG-UI-003): a per-publisher background color painted on the
+   * frame BEFORE the cover art loads. The value flows from `theme/palettes.ts`
+   * (the palette data source) — never a hex literal in a component.
+   */
+  tint?: string;
+  /** Draw the subtle diagonal-stripe texture over the tint (poster cards). */
+  overlay?: boolean;
 }
 
 export function Poster({
@@ -29,10 +37,13 @@ export function Poster({
   frameClassName,
   fallbackClassName,
   lazy = false,
+  tint,
+  overlay = false,
 }: PosterProps) {
   return (
     <span
       className={frameClassName ? `${styles.frame} ${frameClassName}` : styles.frame}
+      style={tint ? { background: tint } : undefined}
     >
       <span
         className={
@@ -44,6 +55,7 @@ export function Poster({
       >
         {initial}
       </span>
+      {overlay && <span className={styles.stripe} aria-hidden />}
       {src != null && (
         <img
           className={styles.poster}

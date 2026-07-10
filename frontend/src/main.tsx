@@ -15,6 +15,9 @@ import '@fontsource/roboto/latin-300.css';
 import '@fontsource/roboto/latin-400.css';
 import '@fontsource/roboto/latin-500.css';
 import '@fontsource/roboto/latin-700.css';
+// 900 exists solely for the logo wordmark (handoff: Roboto 900) — without it
+// the browser would synthesize the weight from 700.
+import '@fontsource/roboto/latin-900.css';
 import '@fortawesome/fontawesome-free/css/fontawesome.min.css';
 import '@fortawesome/fontawesome-free/css/solid.min.css';
 import './theme/global.css';

@@ -28,7 +28,11 @@ beforeEach(() => {
 });
 
 /** A stateful fake backend for series 7 covering all detail-screen routes. */
-function detailFetcher(mmConfig = makeMediaManagementConfig(), deleteCmdStatus = 'completed') {
+function detailFetcher(
+  mmConfig = makeMediaManagementConfig(),
+  deleteCmdStatus = 'completed',
+  series: SeriesResource = mockSeriesResource,
+) {
   return fakeFetcher((path, options) => {
     const method = options?.method ?? 'GET';
     if (method === 'GET' && path === '/api/v1/config/mediamanagement') {
@@ -37,7 +41,7 @@ function detailFetcher(mmConfig = makeMediaManagementConfig(), deleteCmdStatus =
     if (method === 'DELETE' && path === '/api/v1/issuefile/501') {
       return { recycled: mmConfig.recycle_bin_path || null };
     }
-    if (method === 'GET' && path === '/api/v1/series/7') return mockSeriesResource;
+    if (method === 'GET' && path === '/api/v1/series/7') return series;
     if (method === 'GET' && path.startsWith('/api/v1/issues?seriesId=7')) {
       return pageOf(mockIssues);
     }
@@ -74,8 +78,12 @@ function detailFetcher(mmConfig = makeMediaManagementConfig(), deleteCmdStatus =
   });
 }
 
-function renderDetail(mmConfig = makeMediaManagementConfig(), deleteCmdStatus = 'completed') {
-  const { spy, fetcher } = detailFetcher(mmConfig, deleteCmdStatus);
+function renderDetail(
+  mmConfig = makeMediaManagementConfig(),
+  deleteCmdStatus = 'completed',
+  series: SeriesResource = mockSeriesResource,
+) {
+  const { spy, fetcher } = detailFetcher(mmConfig, deleteCmdStatus, series);
   const utils = renderWithProviders(
     <Routes>
       <Route path="/" element={<div data-testid="library-stub" />} />
@@ -94,9 +102,12 @@ describe('FRG-UI-004: series detail', () => {
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'Invincible' })).toBeInTheDocument(),
     );
+    // The cover src is versioned by cover_cached_at (FRG-UI-003) so a later
+    // refresh — which changes cover_cached_at but not the series id — busts
+    // both a failed-load state and any HTTP cache.
     expect(screen.getByAltText('Invincible cover')).toHaveAttribute(
       'src',
-      '/api/v1/series/7/cover',
+      `/api/v1/series/7/cover?v=${encodeURIComponent('2026-07-01T00:00:00Z')}`,
     );
     expect(screen.getByText('/comics/Invincible (2003)')).toBeInTheDocument();
     expect(screen.getByText(/4 issues · 2 files · 2 missing/)).toBeInTheDocument();
@@ -115,6 +126,18 @@ describe('FRG-UI-004: series detail', () => {
       ).toBe(false),
     );
     expect(screen.getByRole('button', { name: 'Monitor series' })).toBeInTheDocument();
+  });
+
+  it('FRG-UI-004 — a series with no cached cover renders no <img> in the hero banner', async () => {
+    renderDetail(undefined, undefined, {
+      ...mockSeriesResource,
+      cover_cached_at: null,
+    });
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Invincible' })).toBeInTheDocument(),
+    );
+    expect(screen.queryByAltText('Invincible cover')).not.toBeInTheDocument();
   });
 
   it('FRG-UI-004 — toolbar Refresh dispatches POST /command and the button area reflects command status', async () => {

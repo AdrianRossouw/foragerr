@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { UserEvent } from '@testing-library/user-event';
 import { Routes, Route } from 'react-router-dom';
 import { renderWithProviders } from '../../test/renderWithProviders';
 import { fakeFetcher } from '../../test/fakeFetcher';
@@ -9,23 +10,31 @@ import {
   makeMockLibrary,
   makeSeriesGroup,
   makeSeriesResource,
+  makeStats,
   pageOf,
 } from '../../test/mockData';
 import { useUiStore } from '../../store/uiStore';
 import type { FetcherInit } from '../../api/fetcher';
 import type { SeriesGroupResource, SeriesResource } from '../../api/types';
 import { LibraryIndex } from './LibraryIndex';
+import styles from './LibraryIndex.module.css';
 
 /**
- * FRG-UI-003 — Library index screen: poster grid / table toggle, toolbar sort
- * + text filter, local covers, navigation to detail. All data rides the fake
- * fetcher; no live backend.
+ * FRG-UI-003 — Library index screen (M4 redesign): three view modes
+ * (Posters / Overview / Table), poster-size control, count line, and the
+ * Options / Sort / Filter raised menus with persisted selections. FRG-UI-021 —
+ * the grouped overlay (stacked poster cards + collapsible row/table headers).
+ * FRG-UI-022 — collected-edition badge + editions filter. All data rides the
+ * fake fetcher; no live backend.
  */
 
 beforeEach(() => {
+  localStorage.clear();
   useUiStore.setState({
     libraryViewMode: 'poster',
+    libraryPosterSize: 'm',
     librarySortKey: 'title',
+    libraryStatusFilter: 'all',
     libraryGroupByFranchise: false,
     libraryCollectedFilter: 'all',
     interactiveSearchIssueId: null,
@@ -46,10 +55,45 @@ function renderLibrary(records: SeriesResource[]) {
       <Route path="/" element={<LibraryIndex />} />
       <Route path="/series/:id" element={<div data-testid="detail-stub" />} />
       <Route path="/add" element={<div data-testid="add-stub" />} />
+      <Route path="/library-import" element={<div data-testid="import-stub" />} />
     </Routes>,
     { fetcher },
   );
   return { spy, ...utils };
+}
+
+/** Open a raised menu only if its panel is not already showing. */
+async function ensureMenuOpen(user: UserEvent, trigger: string, panel: string) {
+  if (!screen.queryByTestId(panel)) await user.click(screen.getByTestId(trigger));
+}
+
+/** Open the Sort menu (if needed) and pick an option by testid. */
+async function pickSort(user: UserEvent, testId: string) {
+  await ensureMenuOpen(user, 'sort-menu-trigger', 'sort-menu');
+  await user.click(screen.getByTestId(testId));
+}
+
+/** Open the Filter menu (if needed) and pick an option by testid. */
+async function pickFilter(user: UserEvent, testId: string) {
+  await ensureMenuOpen(user, 'filter-menu-trigger', 'filter-menu');
+  await user.click(screen.getByTestId(testId));
+}
+
+/** Toggle group-volumes (lives inside the Options menu). */
+async function toggleGrouping(user: UserEvent) {
+  await ensureMenuOpen(user, 'options-menu-trigger', 'options-menu');
+  await user.click(screen.getByTestId('group-by-toggle'));
+  // Close the Options menu so a following content click is a fresh interaction,
+  // not a menu-dismissing click (the content region now swallows the click that
+  // closes an open menu, so it never also activates the content beneath it).
+  await user.keyboard('{Escape}');
+}
+
+/** Titles rendered in the poster grid (cards must carry no book-type badge). */
+function posterTitles(): (string | null)[] {
+  return screen
+    .getAllByTestId('series-card')
+    .map((card) => within(card).getByTitle(/.+/).textContent);
 }
 
 describe('FRG-UI-003: library index', () => {
@@ -64,19 +108,44 @@ describe('FRG-UI-003: library index', () => {
     const grid = screen.getByTestId('library-poster-grid');
     const firstCard = screen.getAllByTestId('series-card')[0];
     expect(within(firstCard).getByText(/Chronicles/)).toBeInTheDocument();
-    expect(within(firstCard).getByText(/Monitored|Unmonitored/)).toBeInTheDocument();
+    // Monitored bookmark + owned/total progress strip are present.
+    expect(within(firstCard).getByLabelText(/Monitored|Unmonitored/)).toBeInTheDocument();
     expect(within(firstCard).getByRole('status')).toBeInTheDocument();
 
-    // Every poster img points at the local cover endpoint — never an
-    // external ComicVine image host.
+    // Every poster img points at the local cover endpoint, versioned by
+    // cover_cached_at — never an external ComicVine image host.
     const images = grid.querySelectorAll('img');
     expect(images.length).toBe(55);
     for (const img of images) {
-      expect(img.getAttribute('src')).toMatch(/^\/api\/v1\/series\/\d+\/cover$/);
+      expect(img.getAttribute('src')).toMatch(/^\/api\/v1\/series\/\d+\/cover\?v=.+$/);
     }
   });
 
-  it('FRG-UI-003 — view toggle switches poster grid to table rows and back', async () => {
+  it('FRG-UI-003 — a series with no cached cover renders no <img> (avoids a known 404); a cached one carries a versioned src', async () => {
+    const library = makeMockLibrary(3).map((s, i) =>
+      i === 0 ? { ...s, cover_cached_at: null } : s,
+    );
+    renderLibrary(library);
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId('series-card')).toHaveLength(3),
+    );
+
+    const cards = screen.getAllByTestId('series-card');
+    const uncachedCard = cards.find((c) => c.id === 'series-card-1');
+    expect(uncachedCard).toBeDefined();
+    expect(within(uncachedCard as HTMLElement).queryByRole('img')).not.toBeInTheDocument();
+
+    // The other series DO have a cached cover and render a versioned img
+    // pointing at the LOCAL cover endpoint.
+    const cachedCard = cards.find((c) => c.id === 'series-card-2');
+    const img = within(cachedCard as HTMLElement).getByRole('img');
+    expect(img.getAttribute('src')).toBe(
+      `/api/v1/series/2/cover?v=${encodeURIComponent('2026-07-01T00:00:00Z')}`,
+    );
+  });
+
+  it('FRG-UI-003 — the view switcher covers Posters, Overview and Table and restores each layout', async () => {
     renderLibrary(makeMockLibrary(5));
     const user = userEvent.setup();
 
@@ -84,23 +153,72 @@ describe('FRG-UI-003: library index', () => {
       expect(screen.getByTestId('library-poster-grid')).toBeInTheDocument(),
     );
 
+    await user.click(screen.getByRole('button', { name: 'Overview' }));
+    expect(screen.getByTestId('library-overview')).toBeInTheDocument();
+    expect(screen.getAllByTestId('series-row')).toHaveLength(5);
+    expect(screen.queryByTestId('library-poster-grid')).not.toBeInTheDocument();
+
     await user.click(screen.getByRole('button', { name: 'Table' }));
     const table = screen.getByTestId('library-table');
     expect(screen.getAllByTestId('series-row')).toHaveLength(5);
     expect(within(table).getByText('Title')).toBeInTheDocument();
     expect(within(table).getByText('Issues')).toBeInTheDocument();
-    expect(screen.queryByTestId('library-poster-grid')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Posters' }));
     expect(screen.getByTestId('library-poster-grid')).toBeInTheDocument();
     expect(screen.queryByTestId('library-table')).not.toBeInTheDocument();
   });
 
-  it('FRG-UI-003 — toolbar sorts by title and filters by title substring', async () => {
+  it('FRG-UI-003 — the poster-size control re-lays the grid and the choice persists', async () => {
+    renderLibrary(makeMockLibrary(4));
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('library-poster-grid')).toBeInTheDocument(),
+    );
+    // Default M ≈ 162px min column.
+    expect(screen.getByTestId('library-poster-grid').getAttribute('style')).toContain(
+      '162px',
+    );
+
+    await user.click(screen.getByTestId('options-menu-trigger'));
+    await user.click(screen.getByTestId('poster-size-l'));
+
+    expect(screen.getByTestId('library-poster-grid').getAttribute('style')).toContain(
+      '196px',
+    );
+    expect(useUiStore.getState().libraryPosterSize).toBe('l');
+    // Persisted to localStorage so it survives a reload.
+    const persisted = JSON.parse(localStorage.getItem('foragerr-library-view')!);
+    expect(persisted.state.libraryPosterSize).toBe('l');
+  });
+
+  it('FRG-UI-003 — Sort and Filter menus and the text filter drive the list', async () => {
     const records = [
-      makeSeriesResource({ id: 1, title: 'Saga', sort_title: 'saga' }),
-      makeSeriesResource({ id: 2, title: 'Bone', sort_title: 'bone' }),
-      makeSeriesResource({ id: 3, title: 'Alpha Flight', sort_title: 'alpha flight' }),
+      makeSeriesResource({
+        id: 1,
+        title: 'Saga',
+        sort_title: 'saga',
+        start_year: 2012,
+        monitored: true,
+        statistics: makeStats({ issue_count: 20, file_count: 20 }),
+      }),
+      makeSeriesResource({
+        id: 2,
+        title: 'Bone',
+        sort_title: 'bone',
+        start_year: 1991,
+        monitored: false,
+        statistics: makeStats({ issue_count: 55, file_count: 40, missing_count: 15 }),
+      }),
+      makeSeriesResource({
+        id: 3,
+        title: 'Alpha Flight',
+        sort_title: 'alpha flight',
+        start_year: 1983,
+        monitored: true,
+        statistics: makeStats({ issue_count: 30, file_count: 10, missing_count: 20 }),
+      }),
     ];
     renderLibrary(records);
     const user = userEvent.setup();
@@ -108,79 +226,234 @@ describe('FRG-UI-003: library index', () => {
     await waitFor(() => expect(screen.getAllByTestId('series-card')).toHaveLength(3));
 
     // Default title sort: alphabetic by sort_title.
-    const titles = () =>
-      screen
-        .getAllByTestId('series-card')
-        .map((card) => within(card).getByTitle(/.+/).textContent);
-    expect(titles()).toEqual(['Alpha Flight', 'Bone', 'Saga']);
+    expect(posterTitles()).toEqual(['Alpha Flight', 'Bone', 'Saga']);
 
-    await user.type(screen.getByLabelText('Filter series'), 'sa');
-    expect(titles()).toEqual(['Saga']);
+    // Sort by Year → newest start year first; the active option shows its check.
+    await pickSort(user, 'sort-year');
+    expect(posterTitles()).toEqual(['Saga', 'Bone', 'Alpha Flight']);
+    expect(screen.getByTestId('sort-year').getAttribute('data-active')).toBe('true');
+    expect(screen.getByTestId('sort-title').getAttribute('data-active')).toBe('false');
+
+    // Each Filter option shows its live count; picking Monitored narrows the list.
+    await user.click(screen.getByTestId('filter-menu-trigger'));
+    expect(within(screen.getByTestId('status-filter-all')).getByText('3')).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId('status-filter-monitored')).getByText('2'),
+    ).toBeInTheDocument();
+    await user.click(screen.getByTestId('status-filter-monitored'));
+    expect(posterTitles()).toEqual(['Saga', 'Alpha Flight']);
+
+    // Text filter narrows further (applied on top of the status filter).
+    await user.type(screen.getByLabelText('Filter series'), 'saga');
+    expect(posterTitles()).toEqual(['Saga']);
   });
 
-  it('FRG-UI-003 — toolbar sort by date added orders newest first', async () => {
+  it('FRG-UI-003 — the count line reports total, monitored (accent) and with-missing counts', async () => {
     const records = [
-      makeSeriesResource({
-        id: 1,
-        title: 'Saga',
-        sort_title: 'saga',
-        added_at: '2026-03-01T00:00:00Z',
-      }),
-      makeSeriesResource({
-        id: 2,
-        title: 'Bone',
-        sort_title: 'bone',
-        added_at: '2026-05-01T00:00:00Z',
-      }),
-      makeSeriesResource({
-        id: 3,
-        title: 'Alpha Flight',
-        sort_title: 'alpha flight',
-        added_at: '2026-04-01T00:00:00Z',
-      }),
+      makeSeriesResource({ id: 1, monitored: true, statistics: makeStats({ missing_count: 3 }) }),
+      makeSeriesResource({ id: 2, monitored: true, statistics: makeStats({ missing_count: 0 }) }),
+      makeSeriesResource({ id: 3, monitored: false, statistics: makeStats({ missing_count: 5 }) }),
     ];
     renderLibrary(records);
-    const user = userEvent.setup();
 
-    await waitFor(() => expect(screen.getAllByTestId('series-card')).toHaveLength(3));
-    await user.selectOptions(screen.getByLabelText('Sort'), 'added');
-
-    const titles = screen
-      .getAllByTestId('series-card')
-      .map((card) => within(card).getByTitle(/.+/).textContent);
-    expect(titles).toEqual(['Bone', 'Alpha Flight', 'Saga']);
+    const line = await screen.findByTestId('library-count-line');
+    expect(within(line).getByText('3 comics')).toBeInTheDocument();
+    expect(within(line).getByText('2 monitored')).toBeInTheDocument();
+    expect(within(line).getByText('2 with missing issues')).toBeInTheDocument();
   });
 
-  it('FRG-UI-003 — clicking a series card navigates to its detail route', async () => {
+  it('FRG-UI-003 — a click in the content region closes an open toolbar menu', async () => {
+    renderLibrary(makeMockLibrary(3));
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('library-poster-grid')).toBeInTheDocument(),
+    );
+
+    await user.click(screen.getByTestId('sort-menu-trigger'));
+    expect(screen.getByTestId('sort-menu')).toBeInTheDocument();
+
+    // Clicking the count line (content region) dismisses the menu.
+    await user.click(screen.getByTestId('library-count-line'));
+    expect(screen.queryByTestId('sort-menu')).not.toBeInTheDocument();
+  });
+
+  it('FRG-UI-003 — a "no match" note replaces the grid when nothing matches the text filter', async () => {
+    renderLibrary([makeSeriesResource({ id: 1, title: 'Saga', sort_title: 'saga' })]);
+    const user = userEvent.setup();
+
+    await waitFor(() => expect(screen.getByTestId('series-card')).toBeInTheDocument());
+    await user.type(screen.getByLabelText('Filter series'), 'zzz-nothing');
+
+    expect(screen.getByText('No comics match your search.')).toBeInTheDocument();
+    expect(screen.queryByTestId('library-poster-grid')).not.toBeInTheDocument();
+  });
+
+  it('FRG-UI-003 — a series card / overview row / table row opens its detail route', async () => {
     renderLibrary([makeSeriesResource({ id: 9, title: 'Saga', sort_title: 'saga' })]);
     const user = userEvent.setup();
 
     await waitFor(() => expect(screen.getByTestId('series-card')).toBeInTheDocument());
+
+    // Overview + table rows link to the detail route (checked before navigating,
+    // since navigation unmounts the index).
+    await user.click(screen.getByRole('button', { name: 'Overview' }));
+    expect(screen.getByTestId('series-row')).toHaveAttribute('href', '/series/9');
+    await user.click(screen.getByRole('button', { name: 'Table' }));
+    expect(screen.getByRole('link', { name: 'Saga' })).toHaveAttribute(
+      'href',
+      '/series/9',
+    );
+
+    // Clicking a poster card actually navigates.
+    await user.click(screen.getByRole('button', { name: 'Posters' }));
+    await user.click(screen.getByTestId('series-card'));
+    expect(screen.getByTestId('detail-stub')).toBeInTheDocument();
+  });
+
+  it('FRG-UI-003 — Add New / Import toolbar actions navigate to their screens', async () => {
+    renderLibrary([makeSeriesResource({ id: 1 })]);
+    const user = userEvent.setup();
+
+    await waitFor(() => expect(screen.getByTestId('series-card')).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Add New' }));
+    expect(screen.getByTestId('add-stub')).toBeInTheDocument();
+  });
+
+  it('FRG-UI-003 — view/size/sort/filter selections persist (localStorage round-trip) and stale values sanitize', () => {
+    // Round-trip: setting the preferences writes exactly the persisted partition.
+    const s = useUiStore.getState();
+    s.setLibraryViewMode('table');
+    s.setLibraryPosterSize('l');
+    s.setLibrarySortKey('year');
+    s.setLibraryStatusFilter('monitored');
+    s.setLibraryCollectedFilter('collected');
+
+    const persisted = JSON.parse(localStorage.getItem('foragerr-library-view')!);
+    expect(persisted.state).toEqual({
+      libraryViewMode: 'table',
+      libraryPosterSize: 'l',
+      librarySortKey: 'year',
+      libraryStatusFilter: 'monitored',
+      libraryCollectedFilter: 'collected',
+    });
+
+    // A stale session (an old 'added' sort, a bogus mode/size) sanitizes back to
+    // defaults on rehydration rather than crashing a render.
+    localStorage.setItem(
+      'foragerr-library-view',
+      JSON.stringify({
+        version: 0,
+        state: {
+          libraryViewMode: 'mosaic',
+          libraryPosterSize: 'xl',
+          librarySortKey: 'added',
+          libraryStatusFilter: 'weird',
+          libraryCollectedFilter: 'nope',
+        },
+      }),
+    );
+    useUiStore.persist.rehydrate();
+    const after = useUiStore.getState();
+    expect(after.libraryViewMode).toBe('poster');
+    expect(after.libraryPosterSize).toBe('m');
+    expect(after.librarySortKey).toBe('title');
+    expect(after.libraryStatusFilter).toBe('all');
+    expect(after.libraryCollectedFilter).toBe('all');
+  });
+
+  it('FRG-UI-003 — a poster card surfaces the publisher as an overlay chip', async () => {
+    renderLibrary([
+      makeSeriesResource({
+        id: 1,
+        title: 'Hellboy',
+        sort_title: 'hellboy',
+        publisher: 'Dark Horse',
+      }),
+    ]);
+
+    const card = await screen.findByTestId('series-card');
+    expect(within(card).getByText('Dark Horse')).toBeInTheDocument();
+  });
+
+  it('FRG-UI-003 — the count line spans carry their semantic (monitored/missing) classes', async () => {
+    renderLibrary([
+      makeSeriesResource({ id: 1, monitored: true, statistics: makeStats({ missing_count: 3 }) }),
+      makeSeriesResource({ id: 2, monitored: false, statistics: makeStats({ missing_count: 0 }) }),
+    ]);
+
+    const line = await screen.findByTestId('library-count-line');
+    expect(within(line).getByText('1 monitored')).toHaveClass(styles.countMonitored);
+    expect(within(line).getByText('1 with missing issues')).toHaveClass(styles.countMissing);
+  });
+
+  it('FRG-UI-003 — the table view renders every header column', async () => {
+    renderLibrary(makeMockLibrary(3));
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('library-poster-grid')).toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole('button', { name: 'Table' }));
+
+    const table = screen.getByTestId('library-table');
+    const headers = within(table).getAllByRole('columnheader');
+    expect(headers).toHaveLength(6);
+    // Icon-only monitor column, labelled for assistive tech, plus the five named
+    // columns.
+    expect(within(table).getByLabelText('Monitored')).toBeInTheDocument();
+    expect(within(table).getByRole('columnheader', { name: 'Title' })).toBeInTheDocument();
+    expect(
+      within(table).getByRole('columnheader', { name: 'Publisher' }),
+    ).toBeInTheDocument();
+    expect(within(table).getByRole('columnheader', { name: 'Issues' })).toBeInTheDocument();
+    expect(within(table).getByRole('columnheader', { name: 'Status' })).toBeInTheDocument();
+    expect(within(table).getByRole('columnheader', { name: 'Year' })).toBeInTheDocument();
+  });
+
+  it('FRG-UI-003 — a content click that closes an open menu does NOT activate the card beneath it', async () => {
+    renderLibrary([makeSeriesResource({ id: 9, title: 'Saga', sort_title: 'saga' })]);
+    const user = userEvent.setup();
+
+    await waitFor(() => expect(screen.getByTestId('series-card')).toBeInTheDocument());
+
+    // Open a menu, then click a series card: the menu dismisses, but navigation is
+    // suppressed (the click only closes the menu).
+    await user.click(screen.getByTestId('sort-menu-trigger'));
+    expect(screen.getByTestId('sort-menu')).toBeInTheDocument();
+    await user.click(screen.getByTestId('series-card'));
+    expect(screen.queryByTestId('sort-menu')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('detail-stub')).not.toBeInTheDocument();
+    expect(screen.getByTestId('library-poster-grid')).toBeInTheDocument();
+
+    // A second click, with no menu open, navigates normally.
     await user.click(screen.getByTestId('series-card'));
     expect(screen.getByTestId('detail-stub')).toBeInTheDocument();
   });
 });
 
 /**
- * FRG-UI-021 — Grouped (franchise) library view: multi-run franchises nest
- * under collapsible headers with a roll-up stat; single-run franchises render
- * as ordinary rows; per-series navigation/actions are unchanged; and the group
- * rename/reassign affordance fires the group-edit mutation (FRG-SER-017). All
- * data rides the fake fetcher.
+ * FRG-UI-021 — Grouped (franchise) library overlay: poster mode stacks a
+ * multi-run franchise into ONE card (layered shadow, `N vols` chip, summed
+ * owned/total); row/table modes nest runs under a collapsible franchise header
+ * with a roll-up stat; single-run franchises render as ordinary cards/rows;
+ * grouping is display-only; and the group rename/reassign affordance fires the
+ * group-edit mutation (FRG-SER-017).
  */
 
-// Two runs of one title (grouped) + one ungrouped singleton franchise.
 const GROUPED_SERIES: SeriesResource[] = [
   makeSeriesResource({
     id: 1,
     title: 'Batman (2011)',
     sort_title: 'batman (2011)',
+    start_year: 2011,
     series_group_id: 1,
   }),
   makeSeriesResource({
     id: 2,
     title: 'Batman (2016)',
     sort_title: 'batman (2016)',
+    start_year: 2016,
     series_group_id: 1,
   }),
   makeSeriesResource({
@@ -196,7 +469,10 @@ const GROUPED_GROUPS: SeriesGroupResource[] = [
     id: 1,
     kind: 'group',
     title: 'Batman',
-    series: [makeGroupMember({ id: 1 }), makeGroupMember({ id: 2 })],
+    series: [
+      makeGroupMember({ id: 1, start_year: 2011 }),
+      makeGroupMember({ id: 2, start_year: 2016 }),
+    ],
     series_count: 2,
     issue_count: 50,
     owned_count: 30,
@@ -217,7 +493,6 @@ function groupedFetcher(records: SeriesResource[], groups: SeriesGroupResource[]
     if (path.startsWith('/api/v1/series?')) return pageOf(records);
     const put = path.match(/^\/api\/v1\/series\/(\d+)$/);
     if (put && init?.method === 'PUT') {
-      // Echo a plausible updated resource so the mutation resolves.
       return makeSeriesResource({ id: Number(put[1]) });
     }
     throw new Error(`unexpected request: ${path}`);
@@ -240,57 +515,90 @@ function renderGrouped(
 }
 
 describe('FRG-UI-021: grouped library view', () => {
-  it('FRG-UI-021 — grouped mode nests multiple runs under one collapsible franchise header; single-run franchises stay ordinary rows', async () => {
+  it('FRG-UI-021 — grouped posters stack a multi-run franchise into ONE card; single-run stays an ordinary card', async () => {
     renderGrouped();
     const user = userEvent.setup();
 
     await waitFor(() =>
       expect(screen.getAllByTestId('series-card')).toHaveLength(3),
     );
+    await toggleGrouping(user);
 
-    // Turn grouping on.
-    await user.click(screen.getByTestId('group-by-toggle'));
+    // Batman becomes a single stacked franchise card (not two nested cards);
+    // Saga stays an ordinary poster card.
+    await waitFor(() =>
+      expect(screen.getAllByTestId('franchise-group')).toHaveLength(1),
+    );
+    const stack = screen.getByTestId('franchise-group');
+    expect(within(stack).getByText('Batman')).toBeInTheDocument();
+    // Summed owned/total across the franchise + an `N vols` chip.
+    expect(within(stack).getByText('30 / 50')).toBeInTheDocument();
+    expect(within(stack).getByText(/2 vols/)).toBeInTheDocument();
+    // Saga is the only ordinary card.
+    expect(screen.getAllByTestId('series-card')).toHaveLength(1);
+    expect(screen.getByText('Saga')).toBeInTheDocument();
+  });
 
-    // Exactly one franchise group (Batman is the only multi-run title); Saga is
-    // a single-run franchise rendered as an ordinary card with no group chrome.
+  it('FRG-UI-021 — a stacked franchise card opens the newest run detail', async () => {
+    renderGrouped();
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId('series-card')).toHaveLength(3),
+    );
+    await toggleGrouping(user);
+    await waitFor(() =>
+      expect(screen.getByTestId('franchise-group')).toBeInTheDocument(),
+    );
+
+    await user.click(screen.getByTestId('franchise-group'));
+    expect(screen.getByTestId('detail-stub')).toBeInTheDocument();
+  });
+
+  it('FRG-UI-021 — in a row/table context grouped runs nest under one collapsible franchise header', async () => {
+    renderGrouped();
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId('series-card')).toHaveLength(3),
+    );
+    await user.click(screen.getByRole('button', { name: 'Table' }));
+    await toggleGrouping(user);
+
     await waitFor(() =>
       expect(screen.getAllByTestId('franchise-group')).toHaveLength(1),
     );
     const group = screen.getByTestId('franchise-group');
     const header = within(group).getByTestId('franchise-group-header');
     expect(within(header).getByText('Batman')).toBeInTheDocument();
-    // Roll-up stat comes straight from the projection: owned/issue + run count.
-    expect(within(header).getByText('30/50')).toBeInTheDocument();
+    // Roll-up straight from the projection: owned/total + run count.
+    expect(within(header).getByText('30 / 50')).toBeInTheDocument();
     expect(within(header).getByText('2 runs')).toBeInTheDocument();
 
-    // The two runs are nested inside the franchise; Saga is not.
-    expect(within(group).getAllByTestId('series-card')).toHaveLength(2);
+    // The two runs nest inside the franchise; Saga is a single-run row outside.
+    expect(within(group).getAllByTestId('series-row')).toHaveLength(2);
     expect(within(group).queryByText('Saga')).not.toBeInTheDocument();
     expect(screen.getByText('Saga')).toBeInTheDocument();
-    expect(screen.getAllByTestId('series-card')).toHaveLength(3);
 
-    // Collapsible: collapsing the header hides the member runs.
+    // Collapsing the header hides the member runs; Saga stays visible.
     await user.click(within(header).getByTestId('franchise-collapse'));
     expect(screen.queryByTestId('franchise-members')).not.toBeInTheDocument();
-    // Saga (single-run) stays visible regardless of the group's collapse state.
     expect(screen.getByText('Saga')).toBeInTheDocument();
   });
 
-  it('FRG-UI-021 — toggling grouping OFF restores the flat list with the same series rows', async () => {
+  it('FRG-UI-021 — toggling grouping OFF restores the flat poster grid with the same series', async () => {
     renderGrouped();
     const user = userEvent.setup();
 
     await waitFor(() =>
       expect(screen.getAllByTestId('series-card')).toHaveLength(3),
     );
-
-    await user.click(screen.getByTestId('group-by-toggle'));
+    await toggleGrouping(user);
     await waitFor(() =>
       expect(screen.getByTestId('franchise-group')).toBeInTheDocument(),
     );
 
-    // Toggle back off: flat poster grid, same three series, no group chrome.
-    await user.click(screen.getByTestId('group-by-toggle'));
+    await toggleGrouping(user);
     expect(screen.getByTestId('library-poster-grid')).toBeInTheDocument();
     expect(screen.queryByTestId('franchise-group')).not.toBeInTheDocument();
     expect(screen.getAllByTestId('series-card')).toHaveLength(3);
@@ -298,45 +606,73 @@ describe('FRG-UI-021: grouped library view', () => {
     expect(screen.getByText('Saga')).toBeInTheDocument();
   });
 
-  it('FRG-UI-021 — per-series navigation still works from a member run in grouped mode', async () => {
+  it('FRG-UI-021 — a projection-multi-run franchise stays a stacked card even if only one run is cached', async () => {
+    const partialSeries: SeriesResource[] = [
+      makeSeriesResource({
+        id: 1,
+        title: 'Batman (2011)',
+        sort_title: 'batman (2011)',
+        start_year: 2011,
+        series_group_id: 1,
+      }),
+    ];
+    renderGrouped(partialSeries, [GROUPED_GROUPS[0]]);
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId('series-card')).toHaveLength(1),
+    );
+    await toggleGrouping(user);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('franchise-group')).toBeInTheDocument(),
+    );
+    const stack = screen.getByTestId('franchise-group');
+    expect(within(stack).getByText('Batman')).toBeInTheDocument();
+    expect(within(stack).getByText('30 / 50')).toBeInTheDocument();
+    expect(within(stack).getByText(/2 vols/)).toBeInTheDocument();
+    // No ordinary single card is rendered — the franchise did NOT collapse to one.
+    expect(screen.queryAllByTestId('series-card')).toHaveLength(0);
+  });
+
+  it('FRG-UI-021 — grouping is display-only: per-series navigation still works from a nested run', async () => {
     renderGrouped();
     const user = userEvent.setup();
 
     await waitFor(() =>
       expect(screen.getAllByTestId('series-card')).toHaveLength(3),
     );
-    await user.click(screen.getByTestId('group-by-toggle'));
+    await user.click(screen.getByRole('button', { name: 'Table' }));
+    await toggleGrouping(user);
     await waitFor(() =>
       expect(screen.getByTestId('franchise-group')).toBeInTheDocument(),
     );
 
     const group = screen.getByTestId('franchise-group');
-    // Click the first nested run; it navigates to its detail route unchanged.
-    await user.click(within(group).getAllByTestId('series-card')[0]);
+    await user.click(within(group).getAllByTestId('series-row')[0]);
     expect(screen.getByTestId('detail-stub')).toBeInTheDocument();
   });
 
-  it('FRG-UI-021 — group rename affordance fires the group-edit mutation with the rename op (FRG-SER-017)', async () => {
+  it('FRG-UI-021 — the group rename affordance fires the group-edit mutation with the rename op (FRG-SER-017)', async () => {
     const { spy } = renderGrouped();
     const user = userEvent.setup();
 
     await waitFor(() =>
       expect(screen.getAllByTestId('series-card')).toHaveLength(3),
     );
-    await user.click(screen.getByTestId('group-by-toggle'));
+    await user.click(screen.getByRole('button', { name: 'Table' }));
+    await toggleGrouping(user);
     await waitFor(() =>
       expect(screen.getByTestId('franchise-group')).toBeInTheDocument(),
     );
 
-    // Open the header menu, rename the franchise, submit.
     await user.click(screen.getByTestId('franchise-group-menu'));
     const input = screen.getByTestId('franchise-rename-input');
     await user.clear(input);
     await user.type(input, 'The Dark Knight');
     await user.click(screen.getByTestId('franchise-rename-submit'));
 
-    // PUT /api/v1/series/{firstMemberId} carrying only the rename op — the
-    // group is renamed via any member series (id 1, the first sorted run).
+    // PUT /api/v1/series/1 (the first sorted run) carrying only the rename op.
     await waitFor(() => {
       const putCall = spy.mock.calls.find(
         ([path, init]) => init?.method === 'PUT' && path === '/api/v1/series/1',
@@ -348,104 +684,15 @@ describe('FRG-UI-021: grouped library view', () => {
     });
   });
 
-  it('FRG-UI-021 — a group with series_count 2 renders as a franchise header even if only one member is cached in the flat index', async () => {
-    // The flat index holds only run id 1; the projection still reports a 2-run
-    // Batman franchise. It must render as a header + roll-up (not degrade to a
-    // bare single card), with the not-yet-cached run simply omitted.
-    const partialSeries: SeriesResource[] = [
-      makeSeriesResource({
-        id: 1,
-        title: 'Batman (2011)',
-        sort_title: 'batman (2011)',
-        series_group_id: 1,
-      }),
-    ];
-    const groups: SeriesGroupResource[] = [
-      makeSeriesGroup({
-        id: 1,
-        kind: 'group',
-        title: 'Batman',
-        series: [makeGroupMember({ id: 1 }), makeGroupMember({ id: 2 })],
-        series_count: 2,
-        issue_count: 50,
-        owned_count: 30,
-      }),
-    ];
-    renderGrouped(partialSeries, groups);
-    const user = userEvent.setup();
-
-    await waitFor(() =>
-      expect(screen.getAllByTestId('series-card')).toHaveLength(1),
-    );
-    await user.click(screen.getByTestId('group-by-toggle'));
-
-    // Still a franchise header (from the projection), with the roll-up counts.
-    await waitFor(() =>
-      expect(screen.getByTestId('franchise-group')).toBeInTheDocument(),
-    );
-    const header = screen.getByTestId('franchise-group-header');
-    expect(within(header).getByText('Batman')).toBeInTheDocument();
-    expect(within(header).getByText('30/50')).toBeInTheDocument();
-    expect(within(header).getByText('2 runs')).toBeInTheDocument();
-    // Only the one cached run is shown as a card; the group did NOT collapse.
-    expect(screen.getAllByTestId('series-card')).toHaveLength(1);
-  });
-
-  it('FRG-UI-021 — the Sort control is hidden while grouping is on', async () => {
-    renderGrouped();
-    const user = userEvent.setup();
-
-    await waitFor(() =>
-      expect(screen.getAllByTestId('series-card')).toHaveLength(3),
-    );
-    // Sort control is present in flat mode.
-    expect(screen.getByLabelText('Sort')).toBeInTheDocument();
-
-    await user.click(screen.getByTestId('group-by-toggle'));
-    await waitFor(() =>
-      expect(screen.getByTestId('franchise-group')).toBeInTheDocument(),
-    );
-    // Grouped order is title-only, so the (inert) Sort control is hidden.
-    expect(screen.queryByLabelText('Sort')).not.toBeInTheDocument();
-
-    // Toggling back restores it.
-    await user.click(screen.getByTestId('group-by-toggle'));
-    expect(screen.getByLabelText('Sort')).toBeInTheDocument();
-  });
-
-  it('FRG-UI-021 — the franchise actions menu closes on Escape and on an outside click', async () => {
-    renderGrouped();
-    const user = userEvent.setup();
-
-    await waitFor(() =>
-      expect(screen.getAllByTestId('series-card')).toHaveLength(3),
-    );
-    await user.click(screen.getByTestId('group-by-toggle'));
-    await waitFor(() =>
-      expect(screen.getByTestId('franchise-group')).toBeInTheDocument(),
-    );
-
-    // Open → Escape closes.
-    await user.click(screen.getByTestId('franchise-group-menu'));
-    expect(screen.getByTestId('franchise-menu')).toBeInTheDocument();
-    await user.keyboard('{Escape}');
-    expect(screen.queryByTestId('franchise-menu')).not.toBeInTheDocument();
-
-    // Open again → an outside click (on the stats footer) closes.
-    await user.click(screen.getByTestId('franchise-group-menu'));
-    expect(screen.getByTestId('franchise-menu')).toBeInTheDocument();
-    await user.click(document.body);
-    expect(screen.queryByTestId('franchise-menu')).not.toBeInTheDocument();
-  });
-
-  it('FRG-UI-021 — detach affordance reassigns a run out of the group (FRG-SER-017)', async () => {
+  it('FRG-UI-021 — the detach affordance reassigns a run out of the group (FRG-SER-017)', async () => {
     const { spy } = renderGrouped();
     const user = userEvent.setup();
 
     await waitFor(() =>
       expect(screen.getAllByTestId('series-card')).toHaveLength(3),
     );
-    await user.click(screen.getByTestId('group-by-toggle'));
+    await user.click(screen.getByRole('button', { name: 'Table' }));
+    await toggleGrouping(user);
     await waitFor(() =>
       expect(screen.getByTestId('franchise-group')).toBeInTheDocument(),
     );
@@ -461,42 +708,108 @@ describe('FRG-UI-021: grouped library view', () => {
       expect(putCall?.[1]?.body).toEqual({ group: { action: 'detach' } });
     });
   });
+
+  it('FRG-UI-021 — the franchise actions menu closes on Escape and on an outside click', async () => {
+    renderGrouped();
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId('series-card')).toHaveLength(3),
+    );
+    await toggleGrouping(user);
+    await waitFor(() =>
+      expect(screen.getByTestId('franchise-group')).toBeInTheDocument(),
+    );
+
+    await user.click(screen.getByTestId('franchise-group-menu'));
+    expect(screen.getByTestId('franchise-menu')).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByTestId('franchise-menu')).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId('franchise-group-menu'));
+    expect(screen.getByTestId('franchise-menu')).toBeInTheDocument();
+    await user.click(screen.getByTestId('library-count-line'));
+    expect(screen.queryByTestId('franchise-menu')).not.toBeInTheDocument();
+  });
+
+  it('FRG-UI-021 — the Sort menu is disabled while grouping is on and re-enabled when flat', async () => {
+    renderGrouped();
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId('series-card')).toHaveLength(3),
+    );
+
+    // Flat library: sorting is meaningful, so the trigger is enabled.
+    expect(screen.getByTestId('sort-menu-trigger')).toBeEnabled();
+
+    // Grouped: the group projection owns the order, so sorting is inert and the
+    // trigger is disabled (with an explanatory tooltip).
+    await toggleGrouping(user);
+    const trigger = screen.getByTestId('sort-menu-trigger');
+    expect(trigger).toBeDisabled();
+    expect(trigger).toHaveAttribute(
+      'title',
+      'Sorting applies to the flat library views',
+    );
+
+    // Toggling grouping back off restores the enabled Sort trigger.
+    await toggleGrouping(user);
+    expect(screen.getByTestId('sort-menu-trigger')).toBeEnabled();
+  });
+
+  it('FRG-UI-021 — grouping is display-only: a series keeps its monitored bookmark across a toggle on/off', async () => {
+    const records = [
+      makeSeriesResource({
+        id: 1,
+        title: 'Saga',
+        sort_title: 'saga',
+        monitored: false,
+        series_group_id: null,
+      }),
+    ];
+    const groups = [
+      makeSeriesGroup({
+        id: null,
+        kind: 'series',
+        title: 'Saga',
+        series: [makeGroupMember({ id: 1, monitored: false })],
+      }),
+    ];
+    renderGrouped(records, groups);
+    const user = userEvent.setup();
+
+    const bookmark = () =>
+      within(screen.getByTestId('series-card')).getByLabelText(/Monitored|Unmonitored/);
+
+    await waitFor(() => expect(screen.getByTestId('series-card')).toBeInTheDocument());
+    expect(bookmark()).toHaveAttribute('aria-label', 'Unmonitored');
+
+    // Grouping ON — the single-run franchise renders as an ordinary card whose
+    // bookmark reflects the same (unmonitored) state.
+    await toggleGrouping(user);
+    await waitFor(() => expect(screen.getByTestId('series-card')).toBeInTheDocument());
+    expect(bookmark()).toHaveAttribute('aria-label', 'Unmonitored');
+
+    // Grouping OFF — still unmonitored; the toggle never mutates monitoring.
+    await toggleGrouping(user);
+    expect(bookmark()).toHaveAttribute('aria-label', 'Unmonitored');
+  });
 });
 
 /**
- * FRG-UI-022 — Collected-edition (trade) surfacing in the library: the
- * book-type badge on the poster card (flat grid AND inside a franchise group)
- * and the display-only collected-editions filter. A null book-type carries no
- * badge; the filter partitions the shown series without touching per-series
- * identity, navigation, or monitoring.
+ * FRG-UI-022 — Collected-edition (trade) surfacing: the book-type badge on the
+ * poster card and the nested franchise run, plus the display-only editions
+ * filter (now in the Filter menu). A null book-type carries no badge; the filter
+ * partitions the shown series without touching identity, navigation, or
+ * monitoring.
  */
 
-// A trade, a graphic novel and two ordinary single-issues runs.
 const TYPED_SERIES: SeriesResource[] = [
-  makeSeriesResource({
-    id: 1,
-    title: 'Saga',
-    sort_title: 'saga',
-    booktype: null,
-  }),
-  makeSeriesResource({
-    id: 2,
-    title: 'Watchmen',
-    sort_title: 'watchmen',
-    booktype: 'tpb',
-  }),
-  makeSeriesResource({
-    id: 3,
-    title: 'Black Hole',
-    sort_title: 'black hole',
-    booktype: 'gn',
-  }),
-  makeSeriesResource({
-    id: 4,
-    title: 'Bone',
-    sort_title: 'bone',
-    booktype: null,
-  }),
+  makeSeriesResource({ id: 1, title: 'Saga', sort_title: 'saga', booktype: null }),
+  makeSeriesResource({ id: 2, title: 'Watchmen', sort_title: 'watchmen', booktype: 'tpb' }),
+  makeSeriesResource({ id: 3, title: 'Black Hole', sort_title: 'black hole', booktype: 'gn' }),
+  makeSeriesResource({ id: 4, title: 'Bone', sort_title: 'bone', booktype: null }),
 ];
 
 describe('FRG-UI-022: collected-edition surfacing', () => {
@@ -512,24 +825,23 @@ describe('FRG-UI-022: collected-edition surfacing', () => {
         .getAllByTestId('series-card')
         .find((c) => within(c).queryByTitle(title)) as HTMLElement;
 
-    // The TPB series carries a badge reading "TPB"; the GN one reads "GN".
-    const tpbBadge = within(cardFor('Watchmen')).getByTestId('booktype-badge');
-    expect(tpbBadge).toHaveTextContent('TPB');
+    expect(within(cardFor('Watchmen')).getByTestId('booktype-badge')).toHaveTextContent(
+      'TPB',
+    );
     expect(within(cardFor('Black Hole')).getByTestId('booktype-badge')).toHaveTextContent(
       'GN',
     );
-
-    // The two single-issues runs carry no badge at all.
     expect(within(cardFor('Saga')).queryByTestId('booktype-badge')).toBeNull();
     expect(within(cardFor('Bone')).queryByTestId('booktype-badge')).toBeNull();
   });
 
-  it('FRG-UI-022 — the badge also renders inside a franchise group (grouped view reuses the poster card)', async () => {
+  it('FRG-UI-022 — the badge also renders on a nested franchise run (grouped row context)', async () => {
     const groupedTyped: SeriesResource[] = [
       makeSeriesResource({
         id: 1,
         title: 'Batman (2011)',
         sort_title: 'batman (2011)',
+        start_year: 2011,
         series_group_id: 1,
         booktype: 'hc',
       }),
@@ -537,28 +849,19 @@ describe('FRG-UI-022: collected-edition surfacing', () => {
         id: 2,
         title: 'Batman (2016)',
         sort_title: 'batman (2016)',
+        start_year: 2016,
         series_group_id: 1,
         booktype: null,
       }),
     ];
-    const groups: SeriesGroupResource[] = [
-      makeSeriesGroup({
-        id: 1,
-        kind: 'group',
-        title: 'Batman',
-        series: [makeGroupMember({ id: 1 }), makeGroupMember({ id: 2 })],
-        series_count: 2,
-        issue_count: 50,
-        owned_count: 30,
-      }),
-    ];
-    renderGrouped(groupedTyped, groups);
+    renderGrouped(groupedTyped, [GROUPED_GROUPS[0]]);
     const user = userEvent.setup();
 
     await waitFor(() =>
       expect(screen.getAllByTestId('series-card')).toHaveLength(2),
     );
-    await user.click(screen.getByTestId('group-by-toggle'));
+    await user.click(screen.getByRole('button', { name: 'Table' }));
+    await toggleGrouping(user);
     await waitFor(() =>
       expect(screen.getByTestId('franchise-group')).toBeInTheDocument(),
     );
@@ -570,7 +873,7 @@ describe('FRG-UI-022: collected-edition surfacing', () => {
     expect(badges[0]).toHaveTextContent('HC');
   });
 
-  it('FRG-UI-022 — the collected-editions filter partitions the shown series without changing navigation', async () => {
+  it('FRG-UI-022 — the editions filter partitions the shown series without changing navigation', async () => {
     renderLibrary(TYPED_SERIES);
     const user = userEvent.setup();
 
@@ -578,8 +881,7 @@ describe('FRG-UI-022: collected-edition surfacing', () => {
       expect(screen.getAllByTestId('series-card')).toHaveLength(4),
     );
 
-    // The badge also carries a `title` attribute, so pick the card-title
-    // element (the one whose title is NOT the badge's "Collected edition:" text).
+    // Pick the card-title element (not the badge's "Collected edition:" title).
     const shownTitles = () =>
       screen
         .getAllByTestId('series-card')
@@ -591,17 +893,18 @@ describe('FRG-UI-022: collected-edition surfacing', () => {
               ?.textContent,
         );
 
-    // Collected only → the two typed series (Watchmen tpb, Black Hole gn).
-    await user.selectOptions(screen.getByTestId('collected-filter'), 'collected');
+    await pickFilter(user, 'edition-filter-collected');
     expect(screen.getAllByTestId('series-card')).toHaveLength(2);
     expect(shownTitles()).toEqual(['Black Hole', 'Watchmen']);
 
-    // Single issues only → the two null-typed runs (Bone, Saga).
-    await user.selectOptions(screen.getByTestId('collected-filter'), 'singles');
+    await pickFilter(user, 'edition-filter-singles');
     expect(screen.getAllByTestId('series-card')).toHaveLength(2);
     expect(shownTitles()).toEqual(['Bone', 'Saga']);
 
-    // Navigation from a filtered card is unchanged (display-only).
+    // Navigation from a filtered card is unchanged (display-only). Close the
+    // Filter menu first: a content click that only dismisses an open menu no
+    // longer also activates the card beneath it.
+    await user.keyboard('{Escape}');
     await user.click(
       screen
         .getAllByTestId('series-card')
@@ -610,12 +913,13 @@ describe('FRG-UI-022: collected-edition surfacing', () => {
     expect(screen.getByTestId('detail-stub')).toBeInTheDocument();
   });
 
-  it('FRG-UI-022 — the collected-editions filter partitions inside the grouped view too', async () => {
+  it('FRG-UI-022 — the editions filter partitions nested runs inside the grouped view too', async () => {
     const groupedTyped: SeriesResource[] = [
       makeSeriesResource({
         id: 1,
         title: 'Batman (2011)',
         sort_title: 'batman (2011)',
+        start_year: 2011,
         series_group_id: 1,
         booktype: 'tpb',
       }),
@@ -623,36 +927,27 @@ describe('FRG-UI-022: collected-edition surfacing', () => {
         id: 2,
         title: 'Batman (2016)',
         sort_title: 'batman (2016)',
+        start_year: 2016,
         series_group_id: 1,
         booktype: null,
       }),
     ];
-    const groups: SeriesGroupResource[] = [
-      makeSeriesGroup({
-        id: 1,
-        kind: 'group',
-        title: 'Batman',
-        series: [makeGroupMember({ id: 1 }), makeGroupMember({ id: 2 })],
-        series_count: 2,
-        issue_count: 50,
-        owned_count: 30,
-      }),
-    ];
-    renderGrouped(groupedTyped, groups);
+    renderGrouped(groupedTyped, [GROUPED_GROUPS[0]]);
     const user = userEvent.setup();
 
     await waitFor(() =>
       expect(screen.getAllByTestId('series-card')).toHaveLength(2),
     );
-    await user.click(screen.getByTestId('group-by-toggle'));
+    await user.click(screen.getByRole('button', { name: 'Table' }));
+    await toggleGrouping(user);
     await waitFor(() =>
       expect(screen.getByTestId('franchise-group')).toBeInTheDocument(),
     );
-    expect(screen.getAllByTestId('series-card')).toHaveLength(2);
+    expect(screen.getAllByTestId('series-row')).toHaveLength(2);
 
     // Collected only → only the TPB run survives inside the franchise.
-    await user.selectOptions(screen.getByTestId('collected-filter'), 'collected');
-    expect(screen.getAllByTestId('series-card')).toHaveLength(1);
-    expect(screen.getByTitle('Batman (2011)')).toBeInTheDocument();
+    await pickFilter(user, 'edition-filter-collected');
+    expect(screen.getAllByTestId('series-row')).toHaveLength(1);
+    expect(screen.getByText('Batman (2011)')).toBeInTheDocument();
   });
 });

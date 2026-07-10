@@ -48,25 +48,30 @@
   padding: 0 var(--spacing-md);
   border-bottom: 1px solid var(--surface-border-hard);
   flex: none;
+  /* The lockup is a home link; the wordmark spans own their colors. */
+  text-decoration: none;
 }
 
+/* The lockup reproduces the design handoff's logo spec exactly (README §Logo
+ * & in-app branding): 32px radius-8 gradient tile with an inset highlight,
+ * the mark knocked out in dark green, 19px/900/-0.3px wordmark. */
 .brandTile {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
-  border-radius: var(--radius-md);
-  background: linear-gradient(135deg, var(--color-accent), var(--color-accent-light));
-  color: var(--color-accent-contrast);
-  font-size: var(--icon-size-md);
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(155deg, var(--color-logo-tile-from), var(--color-logo-tile-to));
+  box-shadow: var(--shadow-logo-tile);
+  color: var(--color-logo-mark);
 }
 
 .brandWord {
-  font-size: var(--font-size-lg);
+  font-size: 19px;
   font-weight: 900;
-  letter-spacing: -0.01em;
-  color: var(--text-primary);
+  letter-spacing: -0.3px;
+  color: var(--color-logo-word);
 }
 
 .brandWordAccent {

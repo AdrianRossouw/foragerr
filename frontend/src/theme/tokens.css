@@ -32,6 +32,14 @@
    * be near-invisible on the green on-track. */
   --color-switch-knob: #ffffff;
 
+  /* --- Logo lockup (2026-07-10 updated handoff, assets/: 32px gradient tile,
+   *     mark knocked out in dark green, wordmark near-white + accent "rr") --- */
+  --color-logo-tile-from: #63c483;
+  --color-logo-tile-to: #3a8455;
+  --color-logo-mark: #123018;
+  --color-logo-word: #f0f0f0;
+  --shadow-logo-tile: 0 2px 6px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+
   /* --- Surfaces (warm-neutral dark shell) --- */
   --surface-page: #202020;
   --surface-chrome: #262626;
@@ -47,6 +55,17 @@
   --surface-border-soft: #3a3a3a;
   --surface-border-hard: #161616;
   --surface-row-border: #2b2b2b;
+  /* Translucent chrome that sits ON TOP of cover art (poster overlay chips +
+   * the monitor bookmark square) — dark enough to stay legible over any tint. */
+  --surface-overlay-chip: rgba(0, 0, 0, 0.6);
+  --surface-overlay-icon: rgba(0, 0, 0, 0.55);
+  /* Subtle diagonal-stripe texture drawn over a poster's publisher tint before
+   * the cover art loads (design: 135deg 3.5%-white hatch). */
+  --surface-poster-stripe: rgba(255, 255, 255, 0.035);
+  /* The two offset greys behind a stacked franchise card (FRG-UI-021); consumed
+   * only through --shadow-card-stacked so no component references the literals. */
+  --surface-card-stack-1: #313131;
+  --surface-card-stack-2: #292929;
 
   /* --- Text --- */
   --text-primary: #e6e6e6;
@@ -54,6 +73,8 @@
   --text-muted: #7a7a7a;
   --text-faint: #5f5f5f;
   --text-on-accent: var(--color-accent-contrast);
+  /* Legible near-white for a chip sitting on cover art (poster overlay chips). */
+  --text-overlay-chip: #cfcfcf;
 
   /* --- Status (semantic hues; owned/complete green, missing/importing amber,
    *     downloading blue, queued/neutral grey) --- */
@@ -65,6 +86,10 @@
   --color-info-text: #8ab6f0;
   --color-danger: #f05050;
   --color-neutral: #9a9a9a;
+  /* Per-tone tint backgrounds for a toned chip: each hue's own low-alpha wash so
+   * amber/blue chip text no longer rides the green accent tint (semantic match). */
+  --color-warning-tint: rgba(229, 165, 75, 0.15);
+  --color-info-tint: rgba(93, 156, 236, 0.15);
 
   /* --- Progress track (design: complete #2f5d40, incomplete #4a2523, fill
    *     always the accent green) --- */
@@ -108,6 +133,10 @@
   --radius-lg: 8px;
   --radius-pill: 999px;
   --shadow-card: 0 1px 4px rgba(0, 0, 0, 0.4);
+  /* Stacked franchise card (FRG-UI-021): the base card shadow plus two offset
+   * grey "spine" layers that read as a pile of volumes. */
+  --shadow-card-stacked: 0 1px 4px rgba(0, 0, 0, 0.4),
+    6px -6px 0 -1px var(--surface-card-stack-1), 12px -12px 0 -2px var(--surface-card-stack-2);
   --shadow-menu: 0 8px 24px rgba(0, 0, 0, 0.5);
   --shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.5);
   --icon-size-sm: 14px;

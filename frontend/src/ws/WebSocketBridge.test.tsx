@@ -203,6 +203,60 @@ describe('FRG-UI-001: WebSocketBridge maps messages to cache operations', () => 
     );
   });
 
+  it('FRG-UI-001 — an id-carrying series push also invalidates ["issues", id]', async () => {
+    const client = createQueryClient();
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    const { fetcher } = fakeFetcher(() => mockSeriesList);
+    const { factory, last } = makeFakeSocketFactory();
+
+    render(
+      <QueryClientProvider client={client}>
+        <FetcherProvider fetcher={fetcher}>
+          <WebSocketBridge socketFactory={factory} />
+        </FetcherProvider>
+      </QueryClientProvider>,
+    );
+
+    act(() => last().emitOpen());
+    act(() =>
+      last().emitMessage({ name: 'series', action: 'updated', resource: { id: 5 } }),
+    );
+
+    // Issues live under the sibling ['issues', 5] key — never reached by the
+    // series-prefix invalidation — so the detail page's issues table refetches
+    // after the post-add chained refresh lands issues, with no manual reload.
+    await waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith({
+        queryKey: queryKeys.issues.forSeries(5),
+      }),
+    );
+  });
+
+  it('FRG-UI-001 — an id-less series push invalidates the ["issues"] prefix too', async () => {
+    const client = createQueryClient();
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    const { fetcher } = fakeFetcher(() => mockSeriesList);
+    const { factory, last } = makeFakeSocketFactory();
+
+    render(
+      <QueryClientProvider client={client}>
+        <FetcherProvider fetcher={fetcher}>
+          <WebSocketBridge socketFactory={factory} />
+        </FetcherProvider>
+      </QueryClientProvider>,
+    );
+
+    act(() => last().emitOpen());
+    act(() => last().emitMessage({ name: 'series', action: 'updated', resource: {} }));
+
+    // ['issues', …] is a sibling family, not nested under ['series'], so a
+    // broad id-less push must sweep it explicitly or every open issues table
+    // could be stranded.
+    await waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.issues.all() }),
+    );
+  });
+
   it('FRG-UI-001 — a queue updated message invalidates ["queue"] and the queue query refetches', async () => {
     const client = createQueryClient();
     const { spy, fetcher } = fakeFetcher(() => mockQueuePage1);
