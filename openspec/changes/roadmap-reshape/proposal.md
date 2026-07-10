@@ -62,10 +62,15 @@ same owner-approved reshaping mechanism as 2026-07-05.
 
 ### Modified Capabilities
 
-(none — milestone metadata and process-document amendments only; no
-requirement behavior changes, so no delta specs. Spec files' `Milestone:`
-bullets are updated in place to match the registry, keeping `tools/trace.py`
-drift-free.)
+- `auth`: FRG-AUTH-008 — milestone M5→M6 with the env-only-key requirement
+  sharpened (key never persisted to a file; migration and rotation notes).
+- `dev-process`: FRG-PROC-011 — the README is explicitly a controlled document
+  on the same footing as the manual: any change altering a fact the README
+  states updates it in the same change (owner instruction 2026-07-10), with a
+  doc-consistency test pinning roadmap milestone labels to the registry.
+
+(Other milestone moves are metadata only — spec `Milestone:` bullets updated
+in place to match the registry, keeping `tools/trace.py` drift-free.)
 
 ## Impact
 
@@ -78,7 +83,9 @@ drift-free.)
 - `docs/process/commit-standard.md` — `CRTR` AREA row; checklist item 6 names
   the independent-model ninth angle.
 - `docs/security/risk-register.md` — RISK-020 re-acceptance note.
-- Manual impact (FRG-PROC-011): none — no user/admin-facing behavior changes.
+- Manual impact (FRG-PROC-011): README Roadmap section updated to the new
+  milestone shape (the requirement this change itself sharpens); no
+  `docs/manual/` sections affected.
 - SOUP (FRG-PROC-012): none.
 
 ## Approval
