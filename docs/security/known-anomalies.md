@@ -84,4 +84,6 @@ Rules:
   introducing key rotation. On a ban, create a replacement account. If key
   rotation becomes available, rotate the key and mark this entry **resolved**
   with a reference to the resolving change.
+- **Risk register**: RISK-042 carries the corresponding threat treatment
+  (`docs/security/risk-register.md`).
 - **Status**: Accepted.

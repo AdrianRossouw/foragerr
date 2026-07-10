@@ -82,8 +82,10 @@ def test_ka_ids_are_wellformed_and_unique():
 def test_every_entry_has_all_required_fields():
     for kid, body in _entries().items():
         for field in REQUIRED_FIELDS:
-            assert re.search(rf"\*\*{re.escape(field)}\*\*", body), (
-                f"{kid} is missing required bold field label **{field}**"
+            # Anchored as a top-level bullet line — a bolded mention of the
+            # field name in unrelated prose must not satisfy the requirement.
+            assert re.search(rf"^- \*\*{re.escape(field)}\*\*", body, re.M), (
+                f"{kid} is missing the required `- **{field}**` field line"
             )
 
 
@@ -143,3 +145,40 @@ def test_gitleaks_bare_key_hex_rule_flags_ka001_shape():
             f"bare-key-hex rule did not flag the synthetic KA-001 line shape; "
             f"rules fired: {sorted(rule_ids)}"
         )
+
+
+@pytest.mark.req("FRG-PROC-015")
+def test_bare_key_hex_regex_case_table():
+    """Binary-independent pin of the bare-key-hex rule's regex.
+
+    The gitleaks-binary test above skips on machines without the tool, so
+    this test parses the actual pattern out of .gitleaks.toml and exercises
+    it with Python's re (the pattern uses no engine-specific syntax) — a
+    regex regression is caught even in a hermetic environment where the
+    authoritative merge-gate scan cannot run.
+    """
+    import tomllib
+
+    with open(REPO_ROOT / ".gitleaks.toml", "rb") as f:
+        rules = tomllib.load(f)["rules"]
+    (rule,) = [r for r in rules if r["id"] == "bare-key-hex"]
+    pattern = re.compile(rule["regex"])
+
+    hex40 = "ab12" * 10
+    must_match = [
+        f"KEY = '{hex40}';",
+        f"MY_API_KEY = '{hex40}'",
+        f'apikey: "{hex40}"',
+        f"SECRET='{hex40}'",
+    ]
+    must_not_match = [
+        f"monkey = '{hex40}'",
+        f"donkey='{hex40}'",
+        f"cacheKey = '{hex40}'",
+        f"some_hash = '{hex40}'",
+        "KEY = 'short'",
+    ]
+    for line in must_match:
+        assert pattern.search(line), f"rule must flag: {line[:30]}..."
+    for line in must_not_match:
+        assert not pattern.search(line), f"rule must not flag: {line[:30]}..."
