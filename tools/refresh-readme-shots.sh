@@ -91,17 +91,25 @@ if [ "$(series_count)" -eq 0 ]; then
     -H 'content-type: application/json' -d "{\"rootFolderId\":${ROOT_ID}}" >/dev/null
 
   # Wait for the scan to stage groups with a ComicVine proposal.
+  # Wait until the staged-with-proposal set is non-empty AND stable across
+  # two consecutive polls — breaking on the first staged group races the
+  # scan and imports a partial library.
   GROUP_IDS=""
+  PREV=""
   for _ in $(seq 1 60); do
     GROUP_IDS="$(curl -fsS "${BASE_URL}/api/v1/library-import?rootFolderId=${ROOT_ID}" \
       | python3 -c 'import json,sys
 d=json.load(sys.stdin)
-ids=[g["id"] for g in d.get("records",[]) if g.get("proposedCvVolumeId")]
+ids=sorted(g["id"] for g in d.get("records",[]) if g.get("proposedCvVolumeId"))
 print(",".join(str(i) for i in ids))')"
-    [ -n "${GROUP_IDS}" ] && break
-    sleep 2
+    if [ -n "${GROUP_IDS}" ] && [ "${GROUP_IDS}" = "${PREV}" ]; then
+      break
+    fi
+    PREV="${GROUP_IDS}"
+    sleep 3
   done
-  [ -n "${GROUP_IDS}" ] || fail "no importable library-import groups were staged"
+  [ -n "${GROUP_IDS}" ] && [ "${GROUP_IDS}" = "${PREV}" ] \
+    || fail "library-import staging did not stabilize"
 
   IDS_JSON="[$(echo "${GROUP_IDS}" | sed 's/,/, /g')]"
   curl -fsS -X POST "${BASE_URL}/api/v1/library-import/execute" \
@@ -110,13 +118,27 @@ print(",".join(str(i) for i in ids))')"
     >/dev/null || fail "library-import execute failed"
 
   # Give the chained refresh/scan a moment to land covers + issues.
-  for _ in $(seq 1 60); do
-    [ "$(series_count)" -gt 0 ] && break
+  EXPECTED="$(echo "${GROUP_IDS}" | awk -F, '{print NF}')"
+  for _ in $(seq 1 90); do
+    [ "$(series_count)" -ge "${EXPECTED}" ] && break
     sleep 2
   done
-  [ "$(series_count)" -gt 0 ] || fail "import completed but the library is still empty"
+  [ "$(series_count)" -ge "${EXPECTED}" ] \
+    || fail "import finished with $(series_count)/${EXPECTED} series"
 fi
 log "library has $(series_count) series"
+
+# Let the post-import churn settle: cover downloads and metadata jobs run
+# right after an import and have crashed the capture renderer when raced.
+log "waiting for command queue to drain…"
+for _ in $(seq 1 60); do
+  BUSY="$(curl -fsS "${BASE_URL}/api/v1/command?state=running" 2>/dev/null \
+    | python3 -c 'import json,sys
+try: print(len(json.load(sys.stdin).get("records",[])))
+except Exception: print(0)')"
+  [ "${BUSY}" = "0" ] && break
+  sleep 2
+done
 
 # --- Capture -----------------------------------------------------------------
 # This sandbox's node lacks TypeScript type-stripping, so transpile then run
@@ -124,15 +146,31 @@ log "library has $(series_count) series"
 log "capturing screenshots…"
 CAP_OUT="$(mktemp -d "${TMPDIR:-/tmp}/foragerr-capture.XXXXXX")"
 ( cd "${REPO}/e2e" \
-  && node_modules/.bin/tsc --module nodenext --target es2022 --moduleResolution nodenext \
+  && node_modules/.bin/tsc --ignoreConfig --noCheck --module nodenext --target es2022 \
+       --moduleResolution nodenext \
        --outDir "${CAP_OUT}" scripts/capture-readme-shots.ts \
-  && BASE_URL="${BASE_URL}" OUT_DIR="${ASSET_DIR}" node "${CAP_OUT}/capture-readme-shots.js" ) \
-  || fail "capture script failed"
+  && ln -sfn "${REPO}/e2e/node_modules" "${CAP_OUT}/node_modules" ) \
+  || fail "capture transpile failed"
+# One retry: headless renderer crashes are environmental (tight /dev/shm,
+# concurrent load) — a second attempt distinguishes flake from real failure.
+CAPTURED=0
+for attempt in 1 2; do
+  if BASE_URL="${BASE_URL}" OUT_DIR="${ASSET_DIR}" node "${CAP_OUT}/capture-readme-shots.js"; then
+    CAPTURED=1; break
+  fi
+  log "capture attempt ${attempt} failed$( [ "${attempt}" = 1 ] && echo '; retrying' )"
+  sleep 5
+done
+[ "${CAPTURED}" = 1 ] || fail "capture script failed twice"
 rm -rf "${CAP_OUT}"
 
 # --- Optimize: quantize each PNG down to the budget --------------------------
 log "optimizing PNGs to <=${BUDGET} bytes…"
-python3 - "${ASSET_DIR}" "${BUDGET}" "${SHOTS[@]}" <<'PY'
+# Pillow lives in the backend venv (it is a runtime dependency there);
+# ambient python3 may not have it.
+PYBIN="${REPO}/backend/.venv/bin/python"
+[ -x "${PYBIN}" ] || PYBIN=python3
+"${PYBIN}" - "${ASSET_DIR}" "${BUDGET}" "${SHOTS[@]}" <<'PY'
 import sys
 from pathlib import Path
 from PIL import Image

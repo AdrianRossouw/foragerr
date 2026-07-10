@@ -32,7 +32,7 @@
       non-zero on missing/over-budget shots) (FRG-PROC-017)
 - [x] 4.2 Tagged structural tests (tool exists/executable; README assets ==
       capture shot set) (FRG-PROC-017)
-- [ ] 4.3 Run the tool against the demo library; commit refreshed README
+- [x] 4.3 Run the tool against the demo library; commit refreshed README
       assets showing the new shell (FRG-PROC-017, FRG-PROC-014)
 
 ## 5. Merge gate
