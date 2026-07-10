@@ -54,9 +54,63 @@ export function GridIcon(props: IconProps) {
 export function TableIcon(props: IconProps) {
   return (
     <Svg {...props}>
-      <line x1="4" y1="6" x2="20" y2="6" />
-      <line x1="4" y1="12" x2="20" y2="12" />
-      <line x1="4" y1="18" x2="20" y2="18" />
+      <rect x="3" y="4" width="18" height="16" rx="1" />
+      <line x1="3" y1="9" x2="21" y2="9" />
+      <line x1="3" y1="14" x2="21" y2="14" />
+      <line x1="10" y1="9" x2="10" y2="20" />
+    </Svg>
+  );
+}
+
+/** Horizontal rows = the Overview (list) view. */
+export function RowsIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <rect x="3" y="4" width="18" height="5" rx="1" />
+      <rect x="3" y="13" width="18" height="5" rx="1" />
+    </Svg>
+  );
+}
+
+/** Sliders = the Options menu. */
+export function SlidersIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <line x1="4" y1="8" x2="20" y2="8" />
+      <circle cx="9" cy="8" r="2" fill="currentColor" />
+      <line x1="4" y1="16" x2="20" y2="16" />
+      <circle cx="15" cy="16" r="2" fill="currentColor" />
+    </Svg>
+  );
+}
+
+/** Descending sort bars = the Sort menu. */
+export function SortIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <line x1="4" y1="6" x2="13" y2="6" />
+      <line x1="4" y1="12" x2="10" y2="12" />
+      <line x1="4" y1="18" x2="7" y2="18" />
+      <path d="M17 4v14" />
+      <path d="M14 15l3 3 3-3" />
+    </Svg>
+  );
+}
+
+/** Funnel = the Filter menu. */
+export function FilterIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M4 5h16l-6 8v6l-4-2v-4z" />
+    </Svg>
+  );
+}
+
+/** Check mark = the active option in a Sort/Filter menu. */
+export function CheckIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M5 12l5 5L20 7" />
     </Svg>
   );
 }

@@ -1,0 +1,74 @@
+/*
+ * Progress strip (FRG-UI-003). Track color encodes completeness; the fill is
+ * always the accent green. Colors come only from the progress-track tokens.
+ */
+.root {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  overflow: hidden;
+  background: var(--color-progress-incomplete);
+  color: var(--text-primary);
+  font-weight: var(--font-weight-medium);
+}
+
+.root[data-complete='true'] {
+  background: var(--color-progress-complete);
+}
+
+.fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--color-progress-fill);
+  opacity: 0.92;
+}
+
+/* An unmonitored, incomplete series reads as intentionally-parked, not urgent:
+ * dim the accent fill so it does not shout the same as a monitored gap. */
+.root[data-monitored='false']:not([data-complete='true']) .fill {
+  opacity: 0.5;
+}
+
+.count,
+.pct {
+  position: relative;
+  z-index: 1;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+/* --- variants ------------------------------------------------------------- */
+
+/* Poster-card footer bar. */
+.root.strip {
+  height: 20px;
+  border-radius: 0;
+  font-size: var(--font-size-sm);
+  gap: var(--spacing-xs);
+}
+
+/* Overview row: taller, rounded, count + percent flank the bar ends. */
+.root.bar {
+  height: 22px;
+  border-radius: var(--radius-pill);
+  justify-content: space-between;
+  padding: 0 var(--spacing-sm);
+  font-size: var(--font-size-sm);
+}
+
+.root.bar .count {
+  color: var(--text-primary);
+}
+
+.root.bar .pct {
+  color: var(--text-secondary);
+}
+
+/* Dense table cell. */
+.root.mini {
+  height: 16px;
+  min-width: 84px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+}

@@ -1,0 +1,45 @@
+/*
+ * Chip / pill (FRG-UI-003). Neutral dark by default; toned variants borrow the
+ * semantic status tokens. Colors come only from the token layer.
+ */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 100%;
+  padding: 1px var(--spacing-sm);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.neutral {
+  background: var(--surface-menu);
+  color: var(--text-primary);
+  border: 1px solid var(--surface-border);
+}
+
+.muted {
+  background: var(--surface-card);
+  color: var(--text-secondary);
+  border: 1px solid var(--surface-border);
+}
+
+.success {
+  background: var(--color-accent-tint);
+  color: var(--color-success-text);
+}
+
+.warning {
+  background: var(--color-accent-tint);
+  color: var(--color-warning-text);
+}
+
+.info {
+  background: var(--color-accent-tint);
+  color: var(--color-info-text);
+}

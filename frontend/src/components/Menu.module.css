@@ -1,0 +1,67 @@
+/*
+ * Raised dropdown menu (FRG-UI-003). The trigger mirrors the toolbar-button
+ * look; the panel is the design's raised menu (surface-menu bg, 1px border,
+ * menu shadow). Colors and elevation come only from tokens.
+ */
+.wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.trigger {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 60px;
+  height: calc(var(--layout-toolbar-height) - var(--spacing-sm));
+  padding: 0 var(--spacing-xs);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.trigger:hover:not(:disabled),
+.open {
+  color: var(--text-primary);
+  background: var(--surface-card);
+}
+
+.trigger:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.icon {
+  display: inline-flex;
+}
+
+.label {
+  font-size: 11px;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.panel {
+  position: absolute;
+  top: 100%;
+  z-index: 30;
+  min-width: 220px;
+  margin-top: var(--spacing-xs);
+  padding: var(--spacing-xs);
+  background: var(--surface-menu);
+  border: 1px solid var(--surface-border-soft);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-menu);
+}
+
+.panel[data-align='end'] {
+  right: 0;
+}
+
+.panel[data-align='start'] {
+  left: 0;
+}
