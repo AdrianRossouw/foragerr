@@ -23,9 +23,12 @@ torrents-before-auth preference with tracker-etiquette seeding controls.
    a data-protection control, not a login feature; it moves to M6 as the
    sources milestone's first change (env-only key per the recorded owner
    direction; existing provider keys migrate so there is one store).
-4. **Milestone metadata moves in place, no delta specs.** Only `Milestone:`
-   bullets and registry cells change; requirement text is untouched.
-   `tools/trace.py`'s milestone-drift check enforces registry↔spec agreement.
+4. **Milestone metadata moves in place; two carried deltas.** Most moves
+   change only `Milestone:` bullets and registry cells (`tools/trace.py`
+   enforces registry↔spec agreement); requirement text changes ride proper
+   MODIFIED deltas — FRG-AUTH-008 (env-only key) and FRG-AUTH-001 (auth
+   boundary M3→M8 in its normative sentence), plus FRG-PROC-011 (README
+   sync footing).
 5. **Grant boundary is explicit everywhere it matters**: the registry legend
    and the proposal both state that M8 auth needs fresh approval.
 

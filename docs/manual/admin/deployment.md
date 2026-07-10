@@ -6,7 +6,7 @@ an unauthenticated `/health` endpoint for the container health check, and a grac
 SIGTERM shutdown. The image serves everything on one port (`8789`): the web UI at `/`,
 the API at `/api`, the OPDS catalog at `/opds`, and the health probe at `/health`.
 
-> **Read `network.md` first.** foragerr has **no authentication** in M1/M2
+> **Read `network.md` first.** foragerr has **no authentication** until the auth milestone (M8)
 > (`FRG-AUTH-001`, an owner-accepted risk — `RISK-020`). Its only supported exposure
 > model is **Tailscale-only**. The compose example below binds the listener to the
 > host's tailnet address for that reason. Do **not** port-forward foragerr to the
@@ -166,8 +166,8 @@ Status screen (see `../user/web-ui.md`) lists the managed paths, including
 ### Tailscale-only is the compensating control
 
 foragerr operates with **no authentication** on the UI, API, and OPDS surfaces in
-M1/M2. This is a deliberate, owner-approved decision recorded as **`RISK-020`** in
-`docs/security/risk-register.md` ("no auth before M3, network-scoped exposure",
+all pre-auth milestones (re-accepted through M7, 2026-07-10). This is a deliberate, owner-approved decision recorded as **`RISK-020`** in
+`docs/security/risk-register.md` ("no auth before the auth milestone (M8), network-scoped exposure",
 accepted). The **compensating control** is that foragerr is reachable **only over the
 home server's Tailscale network** (`FRG-DEP-011`) — that is what keeps the no-auth
 posture inside its accepted-risk boundary. Transport security is provided by the

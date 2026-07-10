@@ -7,7 +7,7 @@ defaults `0.0.0.0` and `8789`). Inside a container, the default all-interfaces b
 means the port is reachable however you choose to publish it — the actual exposure
 boundary is up to you (see below).
 
-## No authentication in M1/M2 — an accepted risk
+## No authentication before the auth milestone (M8) — an accepted risk
 
 **foragerr currently ships with no authentication on the web UI, API, or OPDS
 surfaces.** This is a deliberate, owner-approved decision, not an oversight:
@@ -18,18 +18,18 @@ surfaces.** This is a deliberate, owner-approved decision, not an oversight:
   auth middleware or dependency is registered on any route.
 - This is recorded in `docs/security/risk-register.md` as **RISK-020**
   (Spoofing/Elevation, impact H, likelihood H), explicitly **accepted** by the project
-  owner, with a stated review trigger: *any exposure beyond the tailnet, or before M3
+  owner, with a stated review trigger: *any exposure beyond the tailnet, or before auth-milestone (M8)
   sign-off*.
 - The compensating control is **Tailscale-only network exposure**
   (`FRG-DEP-011`): foragerr is operated as reachable only via the home server's
-  Tailscale network in M1/M2. There is no requirement for it to be safe to expose to
+  Tailscale network until authentication ships (M8; re-accepted through M7 by the owner, 2026-07-10). There is no requirement for it to be safe to expose to
   the public internet before authentication (M8) lands.
 
 ### What this means operationally
 
 **Do not** publish foragerr's port to the public internet, a shared LAN you don't
 fully trust, or any reverse proxy without its own access control. The only supported
-M1/M2 exposure model is:
+pre-auth exposure model is:
 
 1. Run foragerr on your home server.
 2. Join that server to your Tailscale network (tailnet).
@@ -41,7 +41,7 @@ If you widen exposure beyond the tailnet before authentication exists, you are
 operating outside the accepted-risk boundary recorded in the risk register, and should
 treat that as a decision requiring its own review, not an incidental config change.
 
-### What is exempt from auth even after M3
+### What is exempt from auth even after it ships (M8)
 
 The `/health` endpoint (`FRG-DEP-007`) is designed to remain unauthenticated even once
 login is added — it exists for container health checks (Docker `HEALTHCHECK`) and

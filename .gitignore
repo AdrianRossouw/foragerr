@@ -42,6 +42,9 @@ sample-comics/
 .claude/worktrees/
 
 # Design handoffs stay out of the repository (owner direction 2026-07-10;
-# see KA-001 — a design export introduced the exposed-credential class)
+# see KA-001 — a design export introduced the exposed-credential class).
+# Guarded anywhere in the tree, and the .dc.html export type itself.
 docs/research/*.zip
-docs/research/design_handoff_*/
+design_handoff_*/
+design_handoff_*.zip
+*.dc.html
