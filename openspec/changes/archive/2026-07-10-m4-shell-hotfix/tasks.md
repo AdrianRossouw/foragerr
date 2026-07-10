@@ -5,4 +5,4 @@
       (FRG-PROC-017)
 - [x] 1.3 Regenerate the tour; verify cover and volume correctness
       (FRG-PROC-017, FRG-PROC-014)
-- [ ] 1.4 Gate: suites, Codex pass, CHANGELOG v0.4.1, merge, tag, release
+- [x] 1.4 Gate: suites, Codex pass, CHANGELOG v0.4.1, merge, tag, release

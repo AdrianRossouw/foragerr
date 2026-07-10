@@ -9,6 +9,19 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.4.1] — 2026-07-10
+
+m4-shell-hotfix: tour rendering defects found post-v0.4.0.
+
+### Fixed
+- Series-detail cover art renders whole again: the hero row's flex-stretch was
+  defeating the poster frame's 2:3 aspect once a series description got long
+  (latent since change 7), cropping the cover to a zoomed slice.
+- The README tour is now deterministic: the refresh tool applies known
+  demo-library match overrides (Planet Comics → the 1940 Fiction House volume)
+  and fails loudly if an override target is missing — a fresh tour database
+  had silently matched the 1988 Blackthorne reprint. Tour regenerated.
+
 ## [v0.4.0] — 2026-07-10
 
 m4-design-shell: the M4 design refresh begins — new design language and app shell.
