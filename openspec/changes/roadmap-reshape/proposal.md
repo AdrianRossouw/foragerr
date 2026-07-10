@@ -50,8 +50,10 @@ same owner-approved reshaping mechanism as 2026-07-05.
 ## Non-goals
 
 - No feature implementation — planning/process/labelling docs only.
-- No requirement text changes (milestone metadata moves only; the
-  Transmission/qBittorrent adjustment is the M7 proposal's delta).
+- No requirement changes beyond the two carried deltas (FRG-AUTH-008
+  env-only-key sharpening; FRG-PROC-011 README-sync footing) — all other
+  moves are milestone metadata only, and the Transmission/qBittorrent
+  adjustment is the M7 proposal's delta.
 - No change to the M8 auth scope itself.
 
 ## Capabilities
