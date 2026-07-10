@@ -13,13 +13,19 @@ from __future__ import annotations
 import datetime as dt
 
 from fastapi import APIRouter, Query, Request
+from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from foragerr.api.errors import ApiError
 from foragerr.api.paging import paginate
-from foragerr.library import repo
+from foragerr.library import containment, repo
+from foragerr.library.containment import (
+    ContainmentNotFoundError,
+    ContainmentValidationError,
+    RangeInput,
+)
 from foragerr.library.models import IssueRow
 
 router = APIRouter(prefix="/issues", tags=["issues"])
@@ -41,6 +47,32 @@ class IssueFileResource(BaseModel):
     size: int
 
 
+class CollectedInResource(BaseModel):
+    """One "collected in" chip on an issue (FRG-API-022): a trade-typed series
+    that collects this issue, and the range label it falls under. Lets the
+    detail table render chips without an N+1 lookup per issue."""
+
+    trade_series_id: int
+    trade_series_title: str
+    trade_issue_id: int
+    #: The collecting trade's book-type (``tpb``/``gn``/``hc``/``one_shot``);
+    #: a trade always has one, but typed nullable for defensiveness.
+    booktype: str | None
+    range_label: str
+
+    @classmethod
+    def from_membership(
+        cls, m: "containment.CollectedInMembership"
+    ) -> "CollectedInResource":
+        return cls(
+            trade_series_id=m.trade_series_id,
+            trade_series_title=m.trade_series_title,
+            trade_issue_id=m.trade_issue_id,
+            booktype=m.booktype,
+            range_label=m.range_label,
+        )
+
+
 class IssueResource(BaseModel):
     id: int
     series_id: int
@@ -56,9 +88,17 @@ class IssueResource(BaseModel):
     added_at: dt.datetime
     has_file: bool
     file: IssueFileResource | None
+    #: Trade-containment memberships (FRG-API-022) — the collecting trades this
+    #: issue falls under. Empty list when none (additive; the single-issue
+    #: toggle endpoints never populate it).
+    collected_in: list[CollectedInResource] = []
 
     @classmethod
-    def from_row(cls, row: IssueRow) -> "IssueResource":
+    def from_row(
+        cls,
+        row: IssueRow,
+        collected_in: list["containment.CollectedInMembership"] | None = None,
+    ) -> "IssueResource":
         # M1 simplification: an issue may in principle have more than one
         # issue_files row; only the lowest-id one is surfaced as the nested
         # `file`. `has_file` still reflects presence of ANY file row.
@@ -80,6 +120,9 @@ class IssueResource(BaseModel):
                 if first is not None
                 else None
             ),
+            collected_in=[
+                CollectedInResource.from_membership(m) for m in (collected_in or [])
+            ],
         )
 
 
@@ -112,6 +155,39 @@ class IssueBulkMonitorResult(BaseModel):
     monitored: bool
 
 
+class CollectionRangeInput(BaseModel):
+    """One requested contiguous sub-range in a containment declaration
+    (FRG-API-022): a target series and the two endpoint issues (inclusive)
+    chosen from that series' issue list."""
+
+    target_series_id: int
+    start_issue_id: int
+    end_issue_id: int
+
+
+class IssueCollectionsUpdate(BaseModel):
+    """Request body for ``PUT /api/v1/issues/{id}/collections`` — replace-all
+    semantics: the supplied ranges become the trade issue's complete
+    containment set. ``[]`` clears it (equivalent to DELETE)."""
+
+    ranges: list[CollectionRangeInput]
+
+
+class StoredRangeResource(BaseModel):
+    """One stored containment range in the write-back response."""
+
+    target_series_id: int
+    range_label: str
+
+
+class IssueCollectionsResource(BaseModel):
+    """The trade issue's containment set after a declare/replace write
+    (FRG-API-022)."""
+
+    trade_issue_id: int
+    ranges: list[StoredRangeResource]
+
+
 # --- routes -------------------------------------------------------------------
 
 
@@ -142,7 +218,11 @@ async def list_issues(
             sort_direction=sortDirection,
             whitelist=_SORT_WHITELIST,
         )
-    result["records"] = [IssueResource.from_row(row) for row in result["records"]]
+        # One bounded query for the whole page's collected-in chips (no N+1).
+        chips = await containment.collected_in_for_series(session, seriesId)
+    result["records"] = [
+        IssueResource.from_row(row, chips.get(row.id)) for row in result["records"]
+    ]
     return IssuePage(**result)
 
 
@@ -193,3 +273,54 @@ async def update_monitored(
     except LookupError as exc:
         raise ApiError(404, str(exc)) from exc
     return IssueResource.from_row(row)
+
+
+@router.put("/{issue_id}/collections", response_model=IssueCollectionsResource)
+async def replace_issue_collections(
+    issue_id: int, body: IssueCollectionsUpdate, request: Request
+) -> IssueCollectionsResource:
+    """Declare/replace a trade issue's containment records (FRG-API-022).
+
+    Replace-all: the supplied ranges become the trade issue's complete
+    containment set (``ranges: []`` clears it). Validated by the repo layer —
+    the issue must belong to a trade-typed series, each target series must
+    exist, both endpoint issues must belong to it, and the bounds must be
+    ordered — with any failure mapped to the standard 400 error shape naming
+    the offending field. Writes touch ONLY containment rows."""
+    db = request.app.state.db
+    try:
+        async with db.write_session() as session:
+            rows = await containment.replace_issue_collections(
+                session,
+                issue_id,
+                [
+                    RangeInput(
+                        target_series_id=r.target_series_id,
+                        start_issue_id=r.start_issue_id,
+                        end_issue_id=r.end_issue_id,
+                    )
+                    for r in body.ranges
+                ],
+            )
+            ranges = [
+                StoredRangeResource(
+                    target_series_id=row.target_series_id, range_label=row.range_label
+                )
+                for row in rows
+            ]
+    except ContainmentNotFoundError as exc:
+        raise ApiError(404, str(exc)) from exc
+    except ContainmentValidationError as exc:
+        raise ApiError(400, str(exc), field=exc.field) from exc
+    return IssueCollectionsResource(trade_issue_id=issue_id, ranges=ranges)
+
+
+@router.delete("/{issue_id}/collections", status_code=204)
+async def delete_issue_collections(issue_id: int, request: Request) -> Response:
+    """Clear a trade issue's containment records (FRG-API-022). Idempotent —
+    a trade issue with no records still returns 204. Touches only containment
+    rows."""
+    db = request.app.state.db
+    async with db.write_session() as session:
+        await containment.delete_issue_collections(session, issue_id)
+    return Response(status_code=204)

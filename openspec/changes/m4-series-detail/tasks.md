@@ -7,14 +7,14 @@
 
 ## 2. Backend (containment)
 
-- [ ] 2.1 Migration `0015_issue_collections` per the 0013 FK pattern +
+- [x] 2.1 Migration `0015_issue_collections` per the 0013 FK pattern +
       model + migration test (FRG-SER-020)
-- [ ] 2.2 Repo layer: declare/replace/delete writes with validation;
+- [x] 2.2 Repo layer: declare/replace/delete writes with validation;
       collected-in lookup for a series' issues; collections rollup with
       request-time coverage (display-only pattern) (FRG-SER-020/API-022)
-- [ ] 2.3 Extend the FRG-SER-019 compiled-SQL absence test to
+- [x] 2.3 Extend the FRG-SER-019 compiled-SQL absence test to
       `issue_collections` (FRG-SER-020)
-- [ ] 2.4 API endpoints + resources (issues listing chips data, collections
+- [x] 2.4 API endpoints + resources (issues listing chips data, collections
       resource, declare/replace/delete) with standard error shapes
       (FRG-API-022); pytest per scenario, tagged
 

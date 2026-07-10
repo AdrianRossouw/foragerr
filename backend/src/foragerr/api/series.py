@@ -33,7 +33,7 @@ from foragerr.api.command import CommandResource
 from foragerr.api.errors import ApiError
 from foragerr.api.paging import paginate
 from foragerr.commands import CommandValidationError
-from foragerr.library import repo
+from foragerr.library import containment, repo
 from foragerr.library.flows import (
     BOOKTYPE_EDIT_ACTIONS,
     GROUP_EDIT_ACTIONS,
@@ -364,6 +364,60 @@ class SeriesGroupPage(BaseModel):
     sortDirection: str
     totalRecords: int
     records: list[SeriesGroupResource]
+
+
+class CollectionRangeResource(BaseModel):
+    """One declared sub-range within a collections rollup entry (FRG-API-022)."""
+
+    target_series_id: int
+    label: str
+
+
+class CollectionRecordResource(BaseModel):
+    """One collected book that declares a range targeting this series
+    (FRG-API-022), with request-time singles-coverage.
+
+    ``coverage`` is ``collected`` when every issue in every declared range has
+    a file, ``partial`` when some do, ``none`` when none do (or the ranges
+    cover no issues) — computed read-only, never persisted."""
+
+    trade_issue_id: int
+    trade_series_id: int
+    trade_series_title: str
+    booktype: str | None
+    release_date: dt.date | None
+    ranges: list[CollectionRangeResource]
+    coverage: str
+    issues_in_ranges: int
+    owned_in_ranges: int
+
+    @classmethod
+    def from_rollup(
+        cls, rollup: "containment.CollectionRollup"
+    ) -> "CollectionRecordResource":
+        return cls(
+            trade_issue_id=rollup.trade_issue_id,
+            trade_series_id=rollup.trade_series_id,
+            trade_series_title=rollup.trade_series_title,
+            booktype=rollup.booktype,
+            release_date=rollup.release_date,
+            ranges=[
+                CollectionRangeResource(
+                    target_series_id=r.target_series_id, label=r.label
+                )
+                for r in rollup.ranges
+            ],
+            coverage=rollup.coverage,
+            issues_in_ranges=rollup.issues_in_ranges,
+            owned_in_ranges=rollup.owned_in_ranges,
+        )
+
+
+class CollectionsResponse(BaseModel):
+    """The collections resource for a series (FRG-API-022): every collected
+    book that declares a range targeting it."""
+
+    records: list[CollectionRecordResource]
 
 
 #: Whitelisted sort keys for the grouped projection (FRG-API-006). The
@@ -808,3 +862,22 @@ async def get_series_cover(series_id: int, request: Request) -> FileResponse:
     if not cover_path.is_file():
         raise ApiError(404, f"no cached cover for series {series_id}")
     return FileResponse(cover_path, media_type="image/jpeg")
+
+
+@router.get("/{series_id}/collections", response_model=CollectionsResponse)
+async def list_series_collections(
+    series_id: int, request: Request
+) -> CollectionsResponse:
+    """Every collected book that declares a range targeting this series
+    (FRG-API-022), each with its range labels, release date, and a request-time
+    singles-coverage status (``collected``/``partial``/``none``). Read-only —
+    the rollup is computed from bounded queries and touches no wanted/stats
+    state (FRG-SER-020). A missing series yields a 404."""
+    db = request.app.state.db
+    async with db.read_session() as session:
+        if await repo.get_series(session, series_id) is None:
+            raise ApiError(404, f"series {series_id} not found")
+        rollups = await containment.collections_for_series(session, series_id)
+    return CollectionsResponse(
+        records=[CollectionRecordResource.from_rollup(r) for r in rollups]
+    )
