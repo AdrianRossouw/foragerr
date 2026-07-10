@@ -177,7 +177,7 @@ function PosterCard({ series }: { series: SeriesResource }) {
       <div className={styles.coverRegion}>
         <Poster
           initial={series.title.charAt(0)}
-          src={coverUrl(series.id)}
+          src={coverUrl(series)}
           alt={`${series.title} cover`}
           tint={publisherTint(series.publisher)}
           overlay
@@ -226,7 +226,7 @@ function OverviewRow({ series }: { series: SeriesResource }) {
     >
       <Poster
         initial={series.title.charAt(0)}
-        src={coverUrl(series.id)}
+        src={coverUrl(series)}
         alt={`${series.title} cover`}
         tint={publisherTint(series.publisher)}
         frameClassName={styles.overviewThumb}
@@ -524,7 +524,7 @@ function StackedGroupCard({
       <div className={styles.coverRegion}>
         <Poster
           initial={group.title.charAt(0)}
-          src={newest ? coverUrl(newest.id) : null}
+          src={resolvedNewest ? coverUrl(resolvedNewest) : null}
           alt={`${title} cover`}
           tint={publisherTint(publisher)}
           overlay

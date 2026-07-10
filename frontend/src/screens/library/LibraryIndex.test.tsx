@@ -107,13 +107,37 @@ describe('FRG-UI-003: library index', () => {
     expect(within(firstCard).getByLabelText(/Monitored|Unmonitored/)).toBeInTheDocument();
     expect(within(firstCard).getByRole('status')).toBeInTheDocument();
 
-    // Every poster img points at the local cover endpoint — never an external
-    // ComicVine image host.
+    // Every poster img points at the local cover endpoint, versioned by
+    // cover_cached_at — never an external ComicVine image host.
     const images = grid.querySelectorAll('img');
     expect(images.length).toBe(55);
     for (const img of images) {
-      expect(img.getAttribute('src')).toMatch(/^\/api\/v1\/series\/\d+\/cover$/);
+      expect(img.getAttribute('src')).toMatch(/^\/api\/v1\/series\/\d+\/cover\?v=.+$/);
     }
+  });
+
+  it('FRG-UI-003 — a series with no cached cover renders no <img> (avoids a known 404); a cached one carries a versioned src', async () => {
+    const library = makeMockLibrary(3).map((s, i) =>
+      i === 0 ? { ...s, cover_cached_at: null } : s,
+    );
+    renderLibrary(library);
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId('series-card')).toHaveLength(3),
+    );
+
+    const cards = screen.getAllByTestId('series-card');
+    const uncachedCard = cards.find((c) => c.id === 'series-card-1');
+    expect(uncachedCard).toBeDefined();
+    expect(within(uncachedCard as HTMLElement).queryByRole('img')).not.toBeInTheDocument();
+
+    // The other series DO have a cached cover and render a versioned img
+    // pointing at the LOCAL cover endpoint.
+    const cachedCard = cards.find((c) => c.id === 'series-card-2');
+    const img = within(cachedCard as HTMLElement).getByRole('img');
+    expect(img.getAttribute('src')).toBe(
+      `/api/v1/series/2/cover?v=${encodeURIComponent('2026-07-01T00:00:00Z')}`,
+    );
   });
 
   it('FRG-UI-003 — the view switcher covers Posters, Overview and Table and restores each layout', async () => {

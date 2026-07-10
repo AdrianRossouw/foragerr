@@ -433,7 +433,7 @@ export function SeriesDetail() {
         <section className={styles.hero}>
           <Poster
             initial={series.title.charAt(0)}
-            src={coverUrl(series.id)}
+            src={coverUrl(series)}
             alt={`${series.title} cover`}
             frameClassName={styles.posterFrame}
             fallbackClassName={styles.posterFallback}
