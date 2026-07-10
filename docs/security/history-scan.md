@@ -53,3 +53,4 @@ credential-bearing or otherwise unsuitable content.
 | 2026-07-10 | `a98c1739aecdb8a00a007ccca42e26e0b5f4b895` | gitleaks 8.24.3 + .gitleaks.toml | 0 | m4-shell-hotfix gate re-scan: 12 findings = 11 fixtures + KA-001 (accepted) |
 | 2026-07-10 | `a9b379d0b1ba5f613545bb4a097e8e47ac2534cf` | gitleaks 8.24.3 + .gitleaks.toml | 0 | m4-library-views gate re-scan (435 commits): 12 findings = 11 dispositioned fixtures + KA-001 (accepted) — no new findings |
 | 2026-07-10 | `ad6056d4bbc7a343c34ca4a2b3c22337c1ac8411` | gitleaks 8.24.3 + .gitleaks.toml | 0 | m4-logs-viewer gate re-scan: 12 findings = 11 dispositioned fixtures + KA-001 (accepted) — no new findings |
+| 2026-07-10 | `ceb18cd5661e5e1d4e0dc4b8749c7839227d83f1` | gitleaks 8.24.3 + .gitleaks.toml | 0 | m4-series-detail gate re-scan: 12 findings = 11 dispositioned fixtures + KA-001 (accepted) — no new findings |
