@@ -155,13 +155,12 @@ folder=sys.argv[1]
 for g in json.load(sys.stdin).get("records",[]):
     if folder in g.get("folder",""):
         print(g["id"]); break' "${folder}")"
-    if [ -n "${GID}" ]; then
-      log "overriding ${folder} -> CV volume ${CV_OVERRIDES[$folder]}"
-      curl -fsS -X PATCH "${BASE_URL}/api/v1/library-import/groups/${GID}" \
-        -H 'content-type: application/json' \
-        -d "{\"cvVolumeId\":${CV_OVERRIDES[$folder]}}" >/dev/null \
-        || fail "override for ${folder} failed"
-    fi
+    [ -n "${GID}" ] || fail "override target '${folder}' not found among staged groups — a silent miss would reproduce the wrong-volume bug"
+    log "overriding ${folder} -> CV volume ${CV_OVERRIDES[$folder]}"
+    curl -fsS -X PATCH "${BASE_URL}/api/v1/library-import/groups/${GID}" \
+      -H 'content-type: application/json' \
+      -d "{\"cvVolumeId\":${CV_OVERRIDES[$folder]}}" >/dev/null \
+      || fail "override for ${folder} failed"
   done
 
   IDS_JSON="[$(echo "${GROUP_IDS}" | sed 's/,/, /g')]"
