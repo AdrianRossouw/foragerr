@@ -40,6 +40,7 @@ from foragerr.commands.service import OFFLOAD_THREAD_PREFIX
 from foragerr.config import ConfigError, Settings, load_settings
 from foragerr.db import register_database
 from foragerr.logging import setup_logging
+from foragerr.logging_buffer import install_log_buffer
 
 logger = logging.getLogger("foragerr.app")
 
@@ -99,6 +100,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         max_bytes=settings.log_max_bytes,
         backup_count=settings.log_backup_count,
     )
+    # Ring-buffer log capture (m4-logs-viewer, FRG-API-021/FRG-NFR-015):
+    # installed AFTER setup_logging above so the handler's own redaction
+    # filter is guaranteed to run before a record is ever buffered (see
+    # foragerr.logging_buffer module docstring for the ordering proof). The
+    # SAME configured level as setup_logging above, so a child logger
+    # explicitly lowered below that threshold cannot leak into the buffer.
+    log_buffer_handler = install_log_buffer(
+        settings.log_buffer_records, level=settings.log_level
+    )
 
     app = FastAPI(
         title="foragerr",
@@ -113,6 +123,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         swagger_ui_oauth2_redirect_url=None,
     )
     app.state.settings = settings
+    app.state.log_buffer = log_buffer_handler  # FRG-API-021 GET /api/v1/log
     app.state.process_started_at = time.monotonic()  # FRG-API-014 uptime_seconds
     app.state.startup_hooks = []  # async (app) -> None, run in order at startup
     app.state.shutdown_hooks = []  # async (app) -> None, run reversed at shutdown
@@ -277,6 +288,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(history_router, prefix="/api/v1")
     app.include_router(wanted_router, prefix="/api/v1")
     app.include_router(blocklist_router, prefix="/api/v1")
+
+    # --- log viewer (m4-logs-viewer): the paged, newest-first read over the
+    #     in-memory ring buffer installed above (FRG-API-021). Read-only, no
+    #     new commands/tasks — mirrors the daily-surfaces pattern. ---
+    from foragerr.api.log import router as log_router
+
+    app.include_router(log_router, prefix="/api/v1")
 
     # --- pull area (m3-pull-backbone, area E): the read-only weekly pull
     #     resource, GET /api/v1/pull (FRG-API-019) — the metadata-derived

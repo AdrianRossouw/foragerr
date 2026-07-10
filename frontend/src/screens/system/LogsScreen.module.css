@@ -1,0 +1,113 @@
+/*
+ * Logs (FRG-UI-024). Table/page/state/muted chrome comes from the shared
+ * System.module.css (the Status/Health/Tasks convention); this module holds
+ * only what's specific to Logs: the toolbar filters, the Follow switch, the
+ * level pill, and the monospace message column.
+ */
+
+.toolbarActions {
+  composes: toolbarActions from '../../components/dataTable.module.css';
+}
+
+.filterSelect {
+  font: inherit;
+  font-size: var(--font-size-sm);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--surface-border);
+  background: var(--surface-input);
+  color: var(--text-primary);
+}
+
+.filterInput {
+  composes: filterSelect;
+  min-width: 12rem;
+}
+
+/* --- Follow toggle (same switch shape as the library's Group-volumes toggle) --- */
+
+.followRow {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.followLabel {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.switch {
+  position: relative;
+  flex: none;
+  width: 40px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--surface-input);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.switch[data-on='true'] {
+  background: var(--color-accent);
+}
+
+.switchKnob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--color-switch-knob);
+  transition: transform 0.15s;
+}
+
+.switch[data-on='true'] .switchKnob {
+  transform: translateX(18px);
+}
+
+/* --- level pill: ERROR danger, WARNING warn, INFO neutral, DEBUG muted --- */
+
+.pill {
+  display: inline-block;
+  padding: 2px var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+  text-transform: uppercase;
+}
+
+.pillDanger {
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+}
+
+.pillWarn {
+  color: var(--color-warning);
+  border-color: var(--color-warning);
+}
+
+.pillNeutral {
+  color: var(--text-primary);
+  border-color: var(--surface-border);
+}
+
+.pillMuted {
+  color: var(--text-muted);
+  border-color: var(--surface-border);
+}
+
+/* --- message column: monospace, single line, ellipsis (title carries the full text) --- */
+
+.message {
+  font-family: var(--font-family-mono);
+  max-width: 40rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

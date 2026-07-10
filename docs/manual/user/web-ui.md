@@ -216,7 +216,7 @@ event.
 ## System
 
 The System nav group is the operator's view of the running application:
-Status, Health, and Tasks.
+Status, Health, Tasks, and Logs.
 
 ### Status
 
@@ -261,3 +261,25 @@ live status inline, and the last/next-run columns update once it finishes.
 See `../admin/configuration.md` → "Scheduled backups" for what the backup
 task actually does, and `../admin/deployment.md` → "Restoring from a backup"
 for how to use what it writes.
+
+### Logs
+
+The Logs screen is the in-app answer to "what is the backend actually doing" —
+useful when, say, a series isn't downloading and the reason isn't obvious from
+the Queue or Health screens. It renders a dense table (time, a color-coded
+level pill — ERROR red, WARNING amber, INFO neutral, DEBUG muted — logger
+name, and message), newest first, with a minimum-level filter and a
+logger-name-prefix filter above the table.
+
+**Follow** (on by default) keeps the table pinned to the newest records,
+polling the server every couple of seconds; turn it off to page back through
+older records with the standard page controls, which also pauses polling. An
+empty table says so explicitly ("No log records buffered yet…") rather than
+rendering blank, and a failed request says loading failed rather than showing
+nothing.
+
+The table only ever shows what's currently in the backend's in-memory log
+buffer — it is **not a persisted log**. Restarting the container clears it, and
+it only holds a bounded number of the most recent records (configurable; see
+`../admin/configuration.md` → "Logs and diagnostics"). For anything you need
+to keep past a restart, use the container's stdout/log file instead.

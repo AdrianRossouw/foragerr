@@ -60,6 +60,16 @@ allocated yet).
     HttpOnly). **Gap G-5**: CSRF posture not consolidated; API-key header requests are
     CSRF-immune but the session UI needs an explicit stance → SEC-new `CSRF & WebSocket-origin`.
     RISK-022.
+  - **T-API-7 (Information disclosure — log content)**: `GET /api/v1/log` (FRG-API-021, M4
+    `m4-logs-viewer`) serves recent backend log records — including acquisition/indexer
+    activity, the operator's own debugging trail, and any file paths or hostnames that appear
+    in message text — to any tailnet-position reader before M8 auth. Named separately from
+    T-API-1 because its mitigation is content-specific, not just the shared no-auth posture:
+    the ring-buffer handler that backs it is attached downstream of the secret-redaction
+    filter with its own `RedactionFilter` instance (`foragerr.logging_buffer`), so a
+    registered secret can never enter the buffer and the endpoint can never serve one,
+    independent of auth. Coverage: PF `AUTH — M1/M2 no-auth accepted risk` (same Tailscale-only
+    compensating control as every other read endpoint). RISK-043.
 
 ---
 
@@ -1168,6 +1178,55 @@ bytes from library files. No new STRIDE category, no new COMP, and **no new risk
 
 RISK-005 and the cover-extraction arm of RISK-010 are updated to implemented-status in
 the risk register; COMP 3 above remains accurate with the streaming subset now live.
+
+### 2026-07-10 — m4-logs-viewer (M4, owner-requested)
+
+New attack surface on **COMP 1 — Web API/UI**: one new read endpoint, `GET
+/api/v1/log` (FRG-API-021) — the first surface that serves backend LOG CONTENT
+itself (as opposed to log-derived application state) to a client. No new STRIDE
+category, no new COMP; one new risk id (RISK-043), because the mitigation this
+row records is specific to log content, not just the shared no-auth acceptance.
+Disposition:
+
+- **T-API-7 (Information disclosure) — mitigated by construction, not by auth**:
+  the in-memory ring-buffer handler (`foragerr.logging_buffer.install_log_buffer`,
+  design decision 3) is attached to the root logger AFTER
+  `foragerr.logging.setup_logging` has configured the stdout/file handlers, and
+  it carries its OWN `RedactionFilter` instance. Python's
+  `logging.Handler.handle()` always runs a handler's own filter immediately
+  before that same handler's `emit()`, so every record is redacted before it can
+  reach the deque — independent of how many other handlers exist on the root
+  logger or in what order they run. A registered secret (ComicVine, indexer, or
+  SABnzbd key) can therefore never enter the buffer, and `GET /api/v1/log` can
+  never serve one, regardless of the no-auth posture. Proven by a tagged test:
+  a log call carrying a registered secret value produces a buffered/served
+  record with the secret masked.
+- **Same accepted posture, no new auth surface (RISK-020 lineage)**: the
+  endpoint is read-only, unauthenticated, and reachable only over the tailnet —
+  identical posture to every other read endpoint accepted under RISK-020. It
+  adds no new listener, no new credential, and no new outbound integration.
+  Because raw backend log text (file paths, third-party hostnames, internal
+  error detail) reads as more sensitive than a typical structured API response,
+  this gets its own risk row (RISK-043) rather than silently folding into
+  RISK-020 — the compensating control (Tailscale-only exposure) is unchanged.
+- **Bounded, not durable (FRG-NFR-015)**: the buffer is capacity-bounded
+  (`log_buffer_records` / `FORAGERR_LOG_BUFFER_RECORDS`, default 2000,
+  fail-fast-validated at startup) and memory-only — a restart clears it, so
+  this is not a durable exposure surface, and capture is O(1) per record so it
+  cannot be used to exhaust memory.
+- **No new WS surface (design decision 2)**: the Logs screen polls the resource
+  rather than subscribing to a push — a log→push→error→log feedback loop (a WS
+  error is itself logged) is designed out rather than mitigated at runtime, so
+  COMP 2 (WebSocket channel) gains no new attack surface from this change.
+- **Audit-trail position recorded, not implemented (FRG-NFR-015 Notes)**: this
+  is an operator observability surface, not an audit log — durable,
+  attributable access/audit logging (who did what, tamper-evident, retention
+  policy) is deferred to the auth milestone (M8), when there are distinct
+  principals to attribute actions to.
+
+RISK-043 is added (new) for this row; it cites RISK-020 for the no-auth
+acceptance rather than restating it. No new SOUP (stdlib `logging` +
+`collections.deque` only; `tools/soup_check.py` unaffected).
 
 ## Coverage summary
 

@@ -180,6 +180,17 @@ class Settings(BaseSettings):
         ge=0,
         description="Number of rotated log files to retain.",
     )
+    log_buffer_records: int = Field(
+        default=2000,
+        ge=1,
+        description=(
+            "Maximum number of most-recent log records kept in the in-memory "
+            "ring buffer served by GET /api/v1/log (FRG-API-021). Bounded by "
+            "construction: the oldest record is evicted on overflow "
+            "(FRG-NFR-015). Memory-only — a restart clears it; container "
+            "stdout/the log file remain the durable log."
+        ),
+    )
     scheduler_tick_seconds: int = Field(
         default=60,
         description=(

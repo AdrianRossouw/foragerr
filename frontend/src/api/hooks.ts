@@ -21,6 +21,8 @@ import type {
   HistoryRecord,
   IssueFileDeleteResult,
   IssueResource,
+  LogLevel,
+  LogRecordResource,
   LookupResponse,
   QueueItem,
   QueuePageResponse,
@@ -519,6 +521,56 @@ export function useBulkRemoveBlocklist(): UseMutationResult<
       }),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: queryKeys.blocklist.all() }),
+  });
+}
+
+/** Page size the Logs screen requests (FRG-UI-024) — the pinned backend contract's default, well under the FRG-API-006 cap. */
+export const LOG_PAGE_SIZE = 100;
+
+/** Follow polling interval (FRG-UI-024 / design decision 2 — must be >= 2s). */
+export const LOG_FOLLOW_INTERVAL_MS = 2_000;
+
+/**
+ * GET /api/v1/log (FRG-API-021 / FRG-UI-024) — the buffered, already-redacted
+ * log ring, newest first. `level` is a MINIMUM-level filter and `logger` a
+ * dotted-prefix filter; either is omitted from the request entirely when
+ * empty (matching the pinned contract, not sent as `level=`/`logger=`).
+ *
+ * While `follow` is true the screen stays pinned to page 1 (design decision:
+ * "Follow ON = stay on page 1 newest-first") regardless of what `page` the
+ * caller passes, and the query polls every LOG_FOLLOW_INTERVAL_MS via
+ * `refetchInterval`; `refetchIntervalInBackground: false` keeps a backgrounded
+ * tab from polling. With `follow` false there is no `refetchInterval` at all,
+ * and React Query stops any in-flight interval itself the moment `follow`
+ * flips or the screen unmounts — no manual clearInterval bookkeeping needed.
+ */
+export function useLogPage({
+  page,
+  level,
+  logger,
+  follow,
+}: {
+  page: number;
+  level?: LogLevel | '';
+  logger?: string;
+  follow: boolean;
+}): UseQueryResult<ApiPage<LogRecordResource>> {
+  const fetcher = useFetcher();
+  const effectivePage = follow ? 1 : page;
+  const params = new URLSearchParams([
+    ['page', String(effectivePage)],
+    ['pageSize', String(LOG_PAGE_SIZE)],
+    ...(level ? [['level', level]] : []),
+    ...(logger ? [['logger', logger]] : []),
+  ]);
+  const filtersHash = `level=${level ?? ''}&logger=${logger ?? ''}`;
+  return useQuery({
+    queryKey: queryKeys.log.page(effectivePage, filtersHash),
+    queryFn: () =>
+      fetcher<ApiPage<LogRecordResource>>(`/api/v1/log?${params.toString()}`),
+    placeholderData: keepPreviousData,
+    refetchInterval: follow ? LOG_FOLLOW_INTERVAL_MS : false,
+    refetchIntervalInBackground: false,
   });
 }
 

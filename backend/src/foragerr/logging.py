@@ -4,8 +4,9 @@ Design (m1-foundation, decision 8): stdlib logging, key-value structured
 formatter (no extra dependency), a stdout handler plus a size-rotated file
 handler at ``<config_dir>/logs/foragerr.log``. A redaction ``logging.Filter``
 masks (a) every registered secret value and (b) api_key/apikey-shaped query
-parameter values in messages, args, and formatted exception text. The filter
-is installed on BOTH handlers so no record reaches an output unmasked.
+parameter values in messages, args, logger names, and formatted exception
+text. The filter is installed on BOTH handlers so no record reaches an
+output unmasked.
 
 Secret values self-register at config-load time via :func:`register_secret`,
 so later changes inherit redaction for free.
@@ -55,13 +56,17 @@ def redact(text: str) -> str:
 
 
 class RedactionFilter(logging.Filter):
-    """Masks secrets in the record message, args, and exception text.
+    """Masks secrets in the record message, logger name, and exception text.
 
     The record is mutated before formatting: the final message (with args
-    already interpolated) and the formatted traceback are both redacted, so
-    a secret can never reach the handler's output regardless of whether it
-    arrived inline, as a ``%s`` argument, or inside an exception. Idempotent,
-    so installing it on multiple handlers is safe.
+    already interpolated), the logger name, and the formatted traceback are
+    all redacted, so a secret can never reach the handler's output regardless
+    of whether it arrived inline, as a ``%s`` argument, inside an exception,
+    or (contrived, but possible) as part of a logger name. Idempotent, so
+    installing it on multiple handlers is safe. ``record.name`` is only used
+    for formatting/lookup after ``Handler.handle()`` runs the filter chain,
+    so rewriting it here is safe — no logging internals key off the original
+    value past this point.
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
@@ -71,6 +76,7 @@ class RedactionFilter(logging.Filter):
             message = str(record.msg)
         record.msg = redact(message)
         record.args = None
+        record.name = redact(record.name)
         if record.exc_info and not record.exc_text:
             record.exc_text = logging.Formatter().formatException(record.exc_info)
         if record.exc_text:
