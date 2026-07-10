@@ -12,6 +12,27 @@ a WebSocket connection pushes resource-change notifications (series, queue,
 commands), so grabs, imports, and refreshes appear without reloading the page. If
 the connection drops, the UI reconnects automatically with backoff.
 
+## The shell
+
+Every screen renders inside a fixed three-part frame — the sidebar never moves,
+and only the content region scrolls:
+
+- **Sidebar** (left): the logo lockup, then the navigation list, then a status
+  footer. Nav entries carry live count badges where they help — **Comics** shows
+  your library's series count, **Queue** shows the number of tracked downloads,
+  and **Wanted** shows how many series have missing issues (in an amber warn
+  style). The active screen's entry is highlighted with a green accent bar. The
+  nav lists only screens that exist today; entries for planned screens appear in
+  the release that ships them. The footer shows a health pulse and the running
+  version (e.g. "Foragerr 0.4.0 — all healthy"); it turns amber when the Health
+  screen has active warnings. Fonts (Roboto) and icons (Font Awesome) are served
+  from foragerr itself — nothing is fetched from an external CDN, so the UI works
+  fully offline on your tailnet.
+- **Global header** (top): the library quick-search on the left (see below) and
+  quick-access buttons to the Health and System screens on the right.
+- **Page toolbar** (below the header): each screen's own primary actions and view
+  controls.
+
 ## Library
 
 The Library index lists every series as a poster grid or a table (toggle in the

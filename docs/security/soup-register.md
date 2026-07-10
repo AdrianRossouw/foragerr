@@ -69,6 +69,8 @@ When live tooling becomes available, anomaly review is introduced in its own cha
 | react-router-dom | `^6.26.2` | npm | Client-side routing between the library, series detail, add-series, queue, and settings screens | FRG-UI-001 (SPA architecture), FRG-UI-003..009 (per-screen routes) | MIT | Deferred — see methodology |
 | @tanstack/react-query | `^5.59.0` | npm | Server-state fetching, caching, and invalidation layer for all REST API calls, paired with WebSocket-triggered cache invalidation | FRG-UI-001 (SPA architecture: server state via React Query + WS invalidation) | MIT | Deferred — see methodology |
 | zustand | `^4.5.5` | npm | Local (non-server) UI state store — library view mode/sort, sidebar collapse, interactive-search overlay target | FRG-UI-001 (local UI state kept out of React Query), FRG-UI-004, FRG-UI-007 | MIT | Deferred — see methodology |
+| @fontsource/roboto | `^5.2.10` | npm | Self-hosted Roboto webfont (latin subset, weights 300/400/500/700); its woff2 files are bundled by Vite into the SPA's own assets so no Google Fonts CDN is fetched at runtime | FRG-UI-002 (design-token typography; no external font CDN) | OFL-1.1 (Roboto font); package tooling MIT | Deferred — see methodology |
+| @fortawesome/fontawesome-free | `^6.7.2` | npm | Self-hosted Font Awesome 6 Free icon set (solid family); its CSS + woff2 are bundled into the SPA's own assets so no Font Awesome CDN is fetched at runtime | FRG-UI-002 (design-token iconography; no external icon CDN), FRG-UI-023 (app-shell nav/header icons) | CC-BY-4.0 (icons) AND OFL-1.1 (fonts) AND MIT (code) | Deferred — see methodology |
 
 ## Development/test tooling (frontend)
 

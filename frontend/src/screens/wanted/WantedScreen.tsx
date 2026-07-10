@@ -82,7 +82,7 @@ export function WantedScreen() {
           </span>
         }
       />
-      <div>
+      <div className={styles.content}>
         {isLoading && <p className={styles.state}>Loading wanted issues…</p>}
         {isError && <p className={styles.state}>Could not load wanted issues.</p>}
         {!isLoading && !isError && records.length === 0 && (

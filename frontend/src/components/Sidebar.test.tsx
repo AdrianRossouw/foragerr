@@ -1,7 +1,52 @@
 import { describe, it, expect } from 'vitest';
-import { screen, within } from '@testing-library/react';
+import { screen, within, waitFor, act } from '@testing-library/react';
 import { renderWithProviders } from '../test/renderWithProviders';
+import { createQueryClient } from '../queryClient';
+import { queryKeys } from '../api/queryKeys';
+import {
+  makeSeriesResource,
+  makeSystemStatus,
+  mockQueueEnvelope,
+} from '../test/mockData';
+import type { SeriesResource } from '../api/types';
+import type { Fetcher } from '../api/fetcher';
 import { Sidebar } from './Sidebar';
+
+/** A fetcher answering exactly the sidebar's four read paths. */
+function sidebarFetcher(opts: {
+  series: SeriesResource[];
+  queueTotal: number;
+  version?: string;
+  warnings?: unknown[];
+}): Fetcher {
+  const resolve = async (path: string): Promise<unknown> => {
+    if (path.includes('/api/v1/series?')) {
+      return {
+        page: 1,
+        pageSize: 200,
+        sortKey: 'sort_title',
+        sortDirection: 'asc',
+        totalRecords: opts.series.length,
+        records: opts.series,
+      };
+    }
+    if (path.includes('/api/v1/queue')) {
+      const env = mockQueueEnvelope([]);
+      return { ...env, totalRecords: opts.queueTotal };
+    }
+    if (path === '/api/v1/health') return opts.warnings ?? [];
+    if (path.includes('/api/v1/system/status')) {
+      return makeSystemStatus({ version: opts.version ?? '9.9.9' });
+    }
+    throw new Error(`unexpected path ${path}`);
+  };
+  return resolve as unknown as Fetcher;
+}
+
+function withMissing(id: number, missing: number): SeriesResource {
+  const s = makeSeriesResource({ id });
+  return { ...s, statistics: { ...s.statistics, missing_count: missing } };
+}
 
 /**
  * FRG-UI-016 — nav reachability: the System area (Status / Health / Tasks)
@@ -42,5 +87,100 @@ describe('FRG-UI-020: Settings nav group', () => {
     expect(
       within(group as HTMLElement).getByRole('link', { name: 'General' }),
     ).toHaveAttribute('href', '/settings/general');
+  });
+});
+
+/**
+ * FRG-UI-023 — the application shell's sidebar: shipped-screens-only nav and
+ * live count badges (Comics = library series count, Queue = tracked-download
+ * count, Wanted = series-with-missing-issues in warn style).
+ */
+describe('FRG-UI-023: sidebar nav lists only shipped screens', () => {
+  it('FRG-UI-023 — every nav entry routes to an implemented route; no Calendar/Creators', () => {
+    renderWithProviders(<Sidebar />, {
+      withRouter: true,
+      fetcher: sidebarFetcher({ series: [], queueTotal: 0 }),
+      client: createQueryClient(),
+    });
+
+    const shipped = [
+      '/',
+      '/add',
+      '/library-import',
+      '/wanted',
+      '/queue',
+      '/history',
+      '/blocklist',
+      '/settings/general',
+      '/settings/media-management',
+      '/settings/indexers',
+      '/settings/download-clients',
+      '/system/status',
+      '/system/health',
+      '/system/tasks',
+    ];
+    const hrefs = screen
+      .getAllByRole('link')
+      .map((a) => a.getAttribute('href'));
+    for (const href of hrefs) expect(shipped).toContain(href);
+
+    // Future screens are absent until their change ships them.
+    expect(screen.queryByRole('link', { name: /calendar/i })).toBeNull();
+    expect(screen.queryByRole('link', { name: /creators?/i })).toBeNull();
+  });
+});
+
+describe('FRG-UI-023: sidebar count badges are live', () => {
+  it('FRG-UI-023 — Comics/Queue/Wanted badges reflect the caches, Wanted uses warn style', async () => {
+    renderWithProviders(<Sidebar />, {
+      withRouter: true,
+      client: createQueryClient(),
+      fetcher: sidebarFetcher({
+        series: [withMissing(1, 3), withMissing(2, 0), withMissing(3, 5)],
+        queueTotal: 4,
+        version: '1.4.2',
+      }),
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId('nav-badge-series')).toHaveTextContent('3'),
+    );
+    expect(screen.getByTestId('nav-badge-queue')).toHaveTextContent('4');
+    // Two of three series carry missing issues.
+    const wanted = screen.getByTestId('nav-badge-wanted');
+    expect(wanted).toHaveTextContent('2');
+    expect(wanted.className).toMatch(/navBadgeWarn/);
+
+    // Footer surfaces the running version + health state.
+    await waitFor(() =>
+      expect(screen.getByTestId('sidebar-status')).toHaveTextContent(
+        'Foragerr 1.4.2 — all healthy',
+      ),
+    );
+  });
+
+  it('FRG-UI-023 — a badge updates without reload when its cache changes', async () => {
+    const client = createQueryClient();
+    renderWithProviders(<Sidebar />, {
+      withRouter: true,
+      client,
+      fetcher: sidebarFetcher({ series: [withMissing(1, 1)], queueTotal: 0 }),
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId('nav-badge-series')).toHaveTextContent('1'),
+    );
+
+    // A WS-driven cache write (the same mechanism the WebSocketBridge uses)
+    // grows the library; the badge re-renders with no page reload.
+    act(() => {
+      client.setQueryData(queryKeys.series.all(), [
+        withMissing(1, 1),
+        withMissing(2, 0),
+      ]);
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId('nav-badge-series')).toHaveTextContent('2'),
+    );
   });
 });

@@ -550,6 +550,25 @@ export function useDeleteIssueFile(
   });
 }
 
+/**
+ * Total tracked-download count for the sidebar Activity badge (FRG-UI-023).
+ * Reads the EXISTING queue endpoint's paging envelope (`totalRecords`) with a
+ * minimal page — no new API surface. Keyed under the ['queue'] prefix so the
+ * WebSocketBridge's queue push (`queryKeys.queue.all()` invalidation) refreshes
+ * it live; add/remove are the only events that change the count, and they emit
+ * exactly that push. No polling timer.
+ */
+export function useQueueCount(): UseQueryResult<number> {
+  const fetcher = useFetcher();
+  return useQuery({
+    queryKey: queryKeys.queue.count(),
+    queryFn: async () => {
+      const body = await fetcher<QueuePageResponse>('/api/v1/queue?page=1&pageSize=1');
+      return body.totalRecords;
+    },
+  });
+}
+
 export function useQueuePage(page: number): UseQueryResult<QueueItem[]> {
   const fetcher = useFetcher();
   return useQuery({

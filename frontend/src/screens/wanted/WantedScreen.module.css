@@ -67,3 +67,11 @@
   padding: 2px var(--spacing-sm);
   white-space: nowrap;
 }
+
+/* Self-scrolling content region so the fixed shell frame (FRG-UI-023) confines
+ * scrolling to the content, not the page. Structural only — no restyle. */
+.content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}

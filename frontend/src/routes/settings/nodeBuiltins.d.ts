@@ -11,11 +11,21 @@ declare module 'node:fs' {
     encoding: 'utf8',
   ): string;
   export function existsSync(path: string): boolean;
+  export interface Dirent {
+    name: string;
+    isDirectory(): boolean;
+    isFile(): boolean;
+  }
+  export function readdirSync(
+    path: string,
+    options: { withFileTypes: true },
+  ): Dirent[];
 }
 
 declare module 'node:path' {
   export function dirname(path: string): string;
   export function resolve(...segments: string[]): string;
+  export function join(...segments: string[]): string;
   export const sep: string;
 }
 

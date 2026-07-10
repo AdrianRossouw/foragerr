@@ -209,7 +209,7 @@ export function HistoryScreen() {
           </span>
         }
       />
-      <div>
+      <div className={styles.content}>
         {isLoading && <p className={styles.state}>Loading history…</p>}
         {isError && <p className={styles.state}>Could not load history.</p>}
         {!isLoading && !isError && records.length === 0 && (

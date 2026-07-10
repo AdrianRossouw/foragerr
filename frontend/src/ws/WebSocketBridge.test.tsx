@@ -347,13 +347,15 @@ describe('FRG-UI-001: WebSocketBridge maps messages to cache operations', () => 
 
     const footer = () => screen.getByTestId('connection-status');
 
-    // First socket opens -> connected.
+    // First socket opens -> connected. The status footer's connection dot
+    // reflects state via its accessible label (FRG-UI-023 redesigned the footer
+    // to show health + version; connection state moved onto the dot's label).
     act(() => sockets[0].emitOpen());
-    expect(footer()).toHaveTextContent('Connected');
+    expect(footer()).toHaveAttribute('aria-label', 'Connected');
 
     // Drops -> disconnected + backoff attempt #1 (1000ms).
     act(() => sockets[0].emitClose());
-    expect(footer()).toHaveTextContent('Disconnected');
+    expect(footer()).toHaveAttribute('aria-label', 'Disconnected');
     expect(delays).toEqual([1000]);
 
     // Advance to reconnect; second socket drops -> backoff attempt #2 (2000ms).
@@ -366,7 +368,7 @@ describe('FRG-UI-001: WebSocketBridge maps messages to cache operations', () => 
     act(() => vi.advanceTimersByTime(2000));
     expect(sockets).toHaveLength(3);
     act(() => sockets[2].emitOpen());
-    expect(footer()).toHaveTextContent('Connected');
+    expect(footer()).toHaveAttribute('aria-label', 'Connected');
   });
 
   it('FRG-UI-001 — no server data is held in a client store outside React Query', () => {
