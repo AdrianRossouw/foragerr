@@ -50,3 +50,4 @@ credential-bearing or otherwise unsuitable content.
 | 2026-07-10 | `d0a01f3c12c7b845c906618c8d3b2b819faa6450` | gitleaks 8.24.3 + .gitleaks.toml | 0 | known-anomalies gate re-scan with the repo config: 12 raw findings = 11 dispositioned test fixtures + the KA-001 blob (accepted, see KA-001) — bare-key-hex gap closure demonstrated in-scan |
 | 2026-07-10 | `8bb0f40c4466a0032df6fecd299e2369effc7e24` | gitleaks 8.24.3 + .gitleaks.toml | 0 | roadmap-reshape gate re-scan: 12 findings = 11 dispositioned fixtures + KA-001 (accepted) — no new findings |
 | 2026-07-10 | `fffa6b388ddbb657d51f869a4517cb09a70e4414` | gitleaks 8.24.3 + .gitleaks.toml | 0 | m4-design-shell gate re-scan: 12 findings = 11 dispositioned fixtures + KA-001 (accepted) — no new findings |
+| 2026-07-10 | `a98c1739aecdb8a00a007ccca42e26e0b5f4b895` | gitleaks 8.24.3 + .gitleaks.toml | 0 | m4-shell-hotfix gate re-scan: 12 findings = 11 fixtures + KA-001 (accepted) |

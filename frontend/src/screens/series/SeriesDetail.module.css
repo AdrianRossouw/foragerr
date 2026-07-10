@@ -37,6 +37,11 @@
 /* Context overrides for the shared Poster frame (structure lives in Poster.module.css). */
 .posterFrame {
   flex: 0 0 170px;
+  /* The hero row's default align-stretch forces the frame to the row's full
+     height, defeating the 2:3 aspect-ratio and cropping the cover once the
+     description gets long — pin the frame to its own aspect instead. */
+  align-self: flex-start;
+  width: 170px;
   border-radius: var(--radius-md);
   overflow: hidden;
   background: var(--surface-card);
