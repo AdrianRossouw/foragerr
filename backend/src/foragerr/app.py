@@ -103,8 +103,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Ring-buffer log capture (m4-logs-viewer, FRG-API-021/FRG-NFR-015):
     # installed AFTER setup_logging above so the handler's own redaction
     # filter is guaranteed to run before a record is ever buffered (see
-    # foragerr.logging_buffer module docstring for the ordering proof).
-    log_buffer_handler = install_log_buffer(settings.log_buffer_records)
+    # foragerr.logging_buffer module docstring for the ordering proof). The
+    # SAME configured level as setup_logging above, so a child logger
+    # explicitly lowered below that threshold cannot leak into the buffer.
+    log_buffer_handler = install_log_buffer(
+        settings.log_buffer_records, level=settings.log_level
+    )
 
     app = FastAPI(
         title="foragerr",

@@ -119,7 +119,7 @@ export function LogsScreen() {
             </thead>
             <tbody>
               {records.map((record, index) => (
-                <tr key={index} data-testid="log-row">
+                <tr key={`${record.time}-${index}`} data-testid="log-row">
                   <td className={systemStyles.muted}>{formatDateTime(record.time)}</td>
                   <td>
                     <span

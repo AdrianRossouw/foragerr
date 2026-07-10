@@ -9,6 +9,35 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.4.3] — 2026-07-10
+
+m4-logs-viewer: in-app log visibility for debugging acquisition (owner request).
+
+### Added
+- **System → Logs screen** (FRG-UI-024): a dense live view of the backend's
+  recent log records — time, level pill, logger, message — with minimum-level
+  and logger-prefix filters and a **Follow** toggle that tails the newest
+  records (polling; stops when off or when you leave the screen). Honest
+  empty/error states.
+- **Log records API** (FRG-API-021): `GET /api/v1/log` serves a bounded
+  in-memory ring buffer of recent records, paged newest-first with level and
+  logger filters. Records pass the secret-redaction filter *before* they can
+  be buffered, so the endpoint can never serve an unredacted registered
+  secret — proven by tests covering direct, `%s`-args, exception-traceback,
+  and logger-name paths.
+- **Retention setting** (FRG-NFR-015): `FORAGERR_LOG_BUFFER_RECORDS`
+  (default 2000) bounds the buffer; per-record messages are capped
+  server-side. Memory-only — a restart clears the buffer; container stdout
+  remains the durable log.
+
+### Notes
+- Threat model + risk register updated for the new read surface (T-API-7,
+  RISK-043). A durable access/audit log is deliberately deferred to the auth
+  milestone and recorded as such. No dependency changes. Review-gate note:
+  first change run under the tiered-gate policy (small + security-touching:
+  three targeted angles including a dedicated secret-leak adversary, plus
+  the independent-model review).
+
 ## [v0.4.2] — 2026-07-10
 
 m4-library-views: the library index rebuilt to the M4 design — three views,

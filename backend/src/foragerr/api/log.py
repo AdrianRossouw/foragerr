@@ -27,9 +27,12 @@ router = APIRouter(prefix="/log", tags=["log"])
 #: value — Sonarr-style "at or above" filtering.
 _MIN_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 
-#: Numeric ordering for the "at or above" comparison; mirrors the stdlib
-#: logging levels so any levelname the buffer ever stores (including
-#: CRITICAL, or an unrecognized custom level) compares sensibly.
+#: Maps an accepted query-param level name to its numeric stdlib threshold.
+#: Only used to PARSE the ``level`` query param — filtering itself compares
+#: against each buffered record's own ``levelno`` (captured at emit time via
+#: ``record.levelno``), so a custom-level record (a levelname not in this
+#: map, e.g. via ``logging.log(25, ...)``) still compares correctly instead
+#: of falling through to 0 and vanishing under any active filter.
 _LEVEL_VALUE = {
     "DEBUG": 10,
     "INFO": 20,
@@ -98,7 +101,7 @@ async def list_log(
     records.reverse()  # buffer is oldest-first; the API is newest-first
 
     if threshold is not None:
-        records = [r for r in records if _LEVEL_VALUE.get(r.level, 0) >= threshold]
+        records = [r for r in records if r.levelno >= threshold]
     if logger:
         records = [r for r in records if r.logger.startswith(logger)]
 

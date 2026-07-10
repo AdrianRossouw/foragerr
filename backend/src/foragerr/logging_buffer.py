@@ -31,9 +31,16 @@ from foragerr.logging import RedactionFilter
 __all__ = [
     "BufferedLogRecord",
     "RingBufferHandler",
-    "get_log_buffer_handler",
     "install_log_buffer",
 ]
+
+#: Per-record message length cap (design.md: "bounded records x bounded
+#: formatted message length"). Applied AFTER the exc_text fold-in so a single
+#: huge traceback or response body logged inline cannot blow the bounded-
+#: buffer memory promise (FRG-NFR-015) — the deque bounds record COUNT, this
+#: bounds each record's SIZE.
+_MESSAGE_CAP = 8192
+_TRUNCATION_MARKER = "… [truncated]"
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +49,7 @@ class BufferedLogRecord:
 
     time: datetime
     level: str
+    levelno: int
     logger: str
     message: str
 
@@ -69,10 +77,13 @@ class RingBufferHandler(logging.Handler):
             message = f"{message}\n{record.exc_text}"
         elif record.exc_info:
             message = f"{message}\n{self.formatException(record.exc_info)}"
+        if len(message) > _MESSAGE_CAP:
+            message = message[:_MESSAGE_CAP] + _TRUNCATION_MARKER
         self._records.append(
             BufferedLogRecord(
                 time=datetime.fromtimestamp(record.created, tz=timezone.utc),
                 level=record.levelname,
+                levelno=record.levelno,
                 logger=record.name,
                 message=message,
             )
@@ -83,12 +94,19 @@ class RingBufferHandler(logging.Handler):
         return list(self._records)
 
 
-def install_log_buffer(maxlen: int) -> RingBufferHandler:
+def install_log_buffer(maxlen: int, level: str) -> RingBufferHandler:
     """Attach a fresh :class:`RingBufferHandler` to the root logger.
 
     Call AFTER ``foragerr.logging.setup_logging`` (see module docstring for
-    why that ordering guarantees redaction-before-buffer). Idempotent like
-    ``setup_logging``: any previously-installed ring-buffer handler is
+    why that ordering guarantees redaction-before-buffer). ``level`` must be
+    the SAME configured level passed to ``setup_logging`` (``settings.log_level``
+    in ``create_app``): a handler left at the default ``NOTSET`` accepts
+    every record regardless of root/logger level, so a child logger explicitly
+    lowered below the configured threshold (e.g. ``getLogger("x").setLevel
+    (DEBUG)`` under an INFO-configured app) would leak below-threshold
+    records into the buffer even though stdout/file never see them at that
+    verbosity. Setting the handler's own level closes that gap. Idempotent
+    like ``setup_logging``: any previously-installed ring-buffer handler is
     removed first, so repeated ``create_app()`` calls (tests) never
     accumulate handlers or leak buffered records between apps. Marked
     ``_foragerr = True`` so the shared test-isolation fixture that sweeps
@@ -100,15 +118,8 @@ def install_log_buffer(maxlen: int) -> RingBufferHandler:
             root.removeHandler(handler)
             handler.close()
     handler = RingBufferHandler(maxlen)
+    handler.setLevel(level)
     handler.addFilter(RedactionFilter())
     handler._foragerr = True  # type: ignore[attr-defined]
     root.addHandler(handler)
     return handler
-
-
-def get_log_buffer_handler() -> RingBufferHandler | None:
-    """The currently-installed ring-buffer handler, if any."""
-    for handler in logging.getLogger().handlers:
-        if isinstance(handler, RingBufferHandler):
-            return handler
-    return None

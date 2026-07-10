@@ -39,14 +39,17 @@ _TEST_LOGGER_NAME = "foragerr.test"
 
 
 @contextlib.contextmanager
-def _log_app(maxlen: int):
+def _log_app(maxlen: int, level: str = "DEBUG"):
     """A minimal FastAPI app exposing only ``GET /api/v1/log``, backed by a
     real ring-buffer handler installed on the root logger the same way
-    ``create_app`` does."""
+    ``create_app`` does. ``level`` is the handler's own configured level
+    (mirrors ``settings.log_level`` in production) — defaults to DEBUG so
+    existing callers see every record their logger emits, same as before
+    the handler had a level of its own."""
     test_logger = logging.getLogger(_TEST_LOGGER_NAME)
     previous_level = test_logger.level
     test_logger.setLevel(logging.DEBUG)
-    handler = install_log_buffer(maxlen)
+    handler = install_log_buffer(maxlen, level=level)
     app = FastAPI()
     register_error_handlers(app)
     app.include_router(log_router, prefix="/api/v1")
@@ -131,6 +134,89 @@ def test_registered_secret_never_served_by_log_api(log_client):
 
 
 @pytest.mark.req("FRG-API-021")
+def test_registered_secret_via_percent_s_args_never_served(log_client):
+    # Regression: the secret arrives as a %s substitution argument, not
+    # concatenated inline — RedactionFilter must still catch it because it
+    # operates on the INTERPOLATED message (record.getMessage()), same
+    # scenario as test_registered_secret_masked_in_message_args_and_traceback
+    # in test_logging.py but proven end-to-end through the log API response.
+    register_secret(SENTINEL)
+    logging.getLogger("foragerr.test.secret.args").info("key=%s", SENTINEL)
+
+    resp = log_client.get("/api/v1/log")
+    assert resp.status_code == 200
+    assert SENTINEL not in resp.text
+
+    record = next(
+        r for r in resp.json()["records"] if r["logger"] == "foragerr.test.secret.args"
+    )
+    assert MASK in record["message"]
+    assert SENTINEL not in record["message"]
+
+
+@pytest.mark.req("FRG-API-021")
+def test_registered_secret_in_exception_traceback_never_served(log_client):
+    # Regression: the secret only appears inside a raised exception's
+    # traceback, logged via exc_info=True — the buffered record's message
+    # folds in exc_text (RingBufferHandler.emit), so redaction of exc_text
+    # must happen before that fold-in.
+    register_secret(SENTINEL)
+    log = logging.getLogger("foragerr.test.secret.exc")
+    try:
+        raise ValueError(f"upstream rejected key {SENTINEL}")
+    except ValueError:
+        log.exception("upstream call failed")
+
+    resp = log_client.get("/api/v1/log")
+    assert resp.status_code == 200
+    assert SENTINEL not in resp.text
+
+    record = next(
+        r for r in resp.json()["records"] if r["logger"] == "foragerr.test.secret.exc"
+    )
+    assert MASK in record["message"]
+    assert SENTINEL not in record["message"]
+    assert "ValueError" in record["message"]  # traceback still present, just masked
+
+
+@pytest.mark.req("FRG-API-021")
+def test_registered_secret_in_logger_name_never_served(log_client):
+    # Regression (gate-review fix 1): a secret appearing in the LOGGER NAME
+    # itself (contrived, but RedactionFilter previously only redacted
+    # msg/args/exc_text/stack_info and left record.name untouched) must also
+    # be masked in the served `logger` field.
+    register_secret(SENTINEL)
+    logging.getLogger(f"foragerr.test.{SENTINEL}").info("hello")
+
+    resp = log_client.get("/api/v1/log")
+    assert resp.status_code == 200
+    assert SENTINEL not in resp.text
+
+    record = next(r for r in resp.json()["records"] if r["message"] == "hello")
+    assert MASK in record["logger"]
+    assert SENTINEL not in record["logger"]
+
+
+@pytest.mark.req("FRG-API-021")
+def test_custom_level_record_passes_low_filter_excluded_by_high_filter(log_client):
+    # Regression (gate-review fix 4): a level with no entry in the levelname
+    # map (e.g. a custom numeric level between INFO and WARNING) must still
+    # compare correctly against the "at or above" threshold instead of
+    # falling through to 0 and disappearing under every filter.
+    custom_level = 25  # between INFO (20) and WARNING (30)
+    logging.addLevelName(custom_level, "NOTICE")
+    logging.getLogger("foragerr.test.customlevel").log(custom_level, "custom notice")
+
+    resp_low = log_client.get("/api/v1/log?level=INFO")
+    assert resp_low.status_code == 200
+    assert any(r["message"] == "custom notice" for r in resp_low.json()["records"])
+
+    resp_high = log_client.get("/api/v1/log?level=WARNING")
+    assert resp_high.status_code == 200
+    assert not any(r["message"] == "custom notice" for r in resp_high.json()["records"])
+
+
+@pytest.mark.req("FRG-API-021")
 def test_empty_buffer_after_restart_returns_empty_page(log_client):
     # Scoped to our own logger namespace via the `logger` prefix filter: the
     # full test session shares one process-wide root logger, so an earlier
@@ -184,3 +270,48 @@ def test_invalid_log_buffer_records_fails_fast(config_dir, monkeypatch, value):
     with pytest.raises(ConfigError) as excinfo:
         load_settings()
     assert "log_buffer_records" in str(excinfo.value)
+
+
+@pytest.mark.req("FRG-NFR-015")
+def test_log_buffer_records_default_is_2000(config_dir):
+    settings = load_settings()
+    assert settings.log_buffer_records == 2000
+
+
+@pytest.mark.req("FRG-NFR-015")
+def test_child_logger_below_configured_level_is_not_buffered():
+    # Regression (gate-review fix 2): install_log_buffer's handler is now
+    # given the SAME configured level as the app (here INFO). A child
+    # logger explicitly lowered to DEBUG must NOT leak DEBUG records into
+    # the buffer/API even though the child logger itself would happily
+    # emit them.
+    with _log_app(2000, level="INFO") as client:
+        child = logging.getLogger("foragerr.test.childlevel")
+        previous = child.level
+        child.setLevel(logging.DEBUG)
+        try:
+            child.debug("child debug record")
+            child.info("child info record")
+        finally:
+            child.setLevel(previous)
+
+        body = client.get("/api/v1/log?logger=foragerr.test.childlevel").json()
+        messages = [r["message"] for r in body["records"]]
+        assert "child debug record" not in messages
+        assert "child info record" in messages
+
+
+@pytest.mark.req("FRG-NFR-015")
+def test_oversized_message_is_truncated_in_served_record():
+    # Regression (gate-review fix 3): design.md promises the per-record
+    # message is "bounded" server-side. An oversized message (e.g. a huge
+    # traceback or response body logged inline) must be truncated with a
+    # marker rather than stored/served unbounded.
+    with _log_app(2000) as client:
+        huge = "x" * 50_000
+        logging.getLogger("foragerr.test.oversize").error(huge)
+
+        body = client.get("/api/v1/log?logger=foragerr.test.oversize").json()
+        record = body["records"][0]
+        assert record["message"].endswith("… [truncated]")
+        assert len(record["message"]) < 10_000  # bounded, well under the raw 50k
