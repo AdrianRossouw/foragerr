@@ -33,7 +33,7 @@ docs/manual/
   admin/
     configuration.md      config.yaml, FORAGERR_* env vars
     secrets.md             secrets handling
-    network.md              port, Tailscale-only posture, no auth before M8
+    network.md              port, Tailscale-only posture, no authentication
     deployment.md            Docker image build, run, upgrade
 ```
 
@@ -42,13 +42,13 @@ docs/manual/
 This manual describes application behavior **already merged to `main`**. As of the
 last update to this statement, that is everything through M1 (v0.1.x: foundation,
 filename parser, library + metadata, search + indexers, downloads, import pipeline,
-UI + OPDS + deployment, integration/e2e) and the M2 changes merged so far (v0.2.x:
-settings/naming/recycle-bin configuration, manual import + ComicInfo tagging,
-lookup error surfacing, existing-library import, delete/OpenSearch/quick-search
-daily-use surfaces, search autosuggest, scheduled backups + restore + the
-System status/health/tasks screens, the Settings → General ComicVine-key UI
-+ first-run default GetComics/DDL provider seeding, and the listener/WebSocket
-resource-limit configuration that closes out M2 (m2-hardening-performance)).
+UI + OPDS + deployment, integration/e2e), M2 (v0.2.x: configuration, manual
+import + ComicInfo tagging, existing-library import, daily-use surfaces,
+scheduled backups + System screens, hardening/performance), M3 (v0.3.x: OPDS
+page streaming, franchise volume grouping, collected-edition typing, the
+public-repository posture), and the M4 changes merged so far (v0.4.x: the
+design refresh's app shell and library views, the logs viewer, and the
+redesigned series detail with trade containment).
 It does not describe behavior that exists only in an open change branch or an
 unmerged proposal.
 

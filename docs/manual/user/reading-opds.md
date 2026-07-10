@@ -13,7 +13,8 @@ http://<your-tailnet-address>:8789/opds
 ```
 
 (The `/opds` base path is configurable — `FORAGERR_OPDS_BASE_PATH`; see
-`admin/configuration.md`.) No credentials are required before the auth milestone (M8): the catalog is
+`admin/configuration.md`.) No credentials are required, as foragerr currently has
+no authentication: the catalog is
 protected only by your tailnet — the same Tailscale-only exposure rule as the web
 UI (`admin/network.md`). Do not expose the port beyond the tailnet.
 

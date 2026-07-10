@@ -199,8 +199,14 @@ def test_history_scan_evidence_names_a_real_commit():
 @pytest.mark.req("FRG-PROC-014")
 def test_no_private_framing_in_controlled_documents():
     text = _readme()
-    assert re.search(r"^## Roadmap", text, re.M), (
+    roadmap = re.search(r"^## Roadmap\b.*?(?=^## )", text, re.M | re.S)
+    assert roadmap, (
         "unshipped intentions belong under an explicit Roadmap heading"
+    )
+    assert re.search(r"\]\(docs/roadmap\.md\)", roadmap.group(0)), (
+        "the README Roadmap section must link to docs/roadmap.md (the single "
+        "home for forward-looking content) rather than restate unshipped plans "
+        "(FRG-PROC-014, FRG-PROC-018)"
     )
     assert "not solicited" in text, (
         "README must state the source-available contribution posture"
@@ -229,19 +235,33 @@ def test_no_private_framing_in_controlled_documents():
 
 @pytest.mark.req("FRG-PROC-011")
 def test_roadmap_milestone_labels_match_the_registry():
-    """README roadmap items citing an FRG ID must carry the registry's
-    milestone — a roadmap reshape that forgets the README (or vice versa)
-    fails here instead of shipping a stale public claim."""
-    text = _readme()
-    roadmap = re.search(r"^## Roadmap.*?(?=^## )", text, re.M | re.S)
-    assert roadmap, "README must keep the Roadmap section"
-    for item in re.finditer(
-        r"^- \*\*.*?\*\*\s*\((M\d+)[^)]*\)(?:[^\n]|\n(?!-))*", roadmap.group(0), re.M
-    ):
-        milestone = item.group(1)
-        for rid in re.findall(r"FRG-[A-Z]+-\d{3}", item.group(0)):
+    """docs/roadmap.md items citing an FRG ID must carry the registry's
+    milestone — a roadmap reshape that forgets the roadmap document (or vice
+    versa) fails here instead of shipping a stale public claim. Retargeted
+    from the README by roadmap-single-source (FRG-PROC-018): the README no
+    longer restates roadmap entries."""
+    text = (REPO_ROOT / "docs" / "roadmap.md").read_text()
+    sections = re.split(r"^## ", text, flags=re.M)[1:]
+    checked = 0
+    for section in sections:
+        heading = section.splitlines()[0]
+        milestone_token = re.search(r"\bM\d+\b", heading)
+        if not milestone_token:
+            assert not re.search(r"FRG-[A-Z]+-\d{3}", section), (
+                f"roadmap section {heading!r} cites FRG ids but its heading "
+                "carries no milestone token, so those ids would escape this "
+                "check — add the milestone to the heading"
+            )
+            continue
+        milestone = milestone_token.group(0)
+        for rid in re.findall(r"FRG-[A-Z]+-\d{3}", section):
             row = REGISTRY.get(rid)
             assert row and row["milestone"] == milestone, (
-                f"README roadmap labels {rid} as {milestone} but the registry "
+                f"docs/roadmap.md labels {rid} as {milestone} but the registry "
                 f"says {row['milestone'] if row else 'UNREGISTERED'}"
             )
+            checked += 1
+    assert checked, (
+        "expected docs/roadmap.md to cite at least one FRG id under a "
+        "milestone heading — the parser or the roadmap layout changed"
+    )

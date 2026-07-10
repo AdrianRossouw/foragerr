@@ -188,21 +188,9 @@ handling, and the network posture live in the admin manual:
 
 ## Roadmap
 
-Planned, not yet shipped — each will arrive as its own approved OpenSpec change
-(statuses live in the [registry](docs/traceability/requirements-registry.md)):
-
-- **Design refresh with a weekly pull / calendar view** (M4; FRG-UI-018) — a
-  redesigned interface culminating in a comics-native new-releases screen.
-- **Creators & follows** (M5) — follow writers and artists, browse their work
-  in and beyond your library.
-- **Sources** (M6) — an encrypted credential store first, then a Humble
-  Bundle importer (unpack purchased bundles straight into the library) and an
-  archive.org importer for public-domain issues.
-- **Torrents** (M7) — Transmission support with Torznab indexing via your
-  existing Prowlarr/Jackett, honoring tracker seeding requirements
-  (per-torrent ratio and seed-time limits).
-- **Authentication** (M8) — the accepted no-auth posture (`RISK-020`) is
-  scheduled to be replaced, not kept forever.
+Planned-but-unshipped work lives in [the roadmap](docs/roadmap.md), the single
+controlled document for forward-looking intentions; authoritative statuses are
+in the [requirements registry](docs/traceability/requirements-registry.md).
 
 ## License & contributions
 

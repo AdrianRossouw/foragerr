@@ -7,23 +7,25 @@ defaults `0.0.0.0` and `8789`). Inside a container, the default all-interfaces b
 means the port is reachable however you choose to publish it — the actual exposure
 boundary is up to you (see below).
 
-## No authentication before the auth milestone (M8) — an accepted risk
+## No authentication — an accepted risk
 
 **foragerr currently ships with no authentication on the web UI, API, or OPDS
-surfaces.** This is a deliberate, owner-approved decision, not an oversight:
+surfaces.** This is a deliberate, owner-approved decision, not an oversight.
+Replacing this posture with real authentication is tracked in
+[the roadmap](../../roadmap.md), not a shipped capability.
 
-- Requirement `FRG-AUTH-001` states that until authentication ships (targeted M8 (2026-07-10 reshape)), the
-  system operates without credentials on every surface. There is no partial or
-  dormant auth code path to accidentally rely on — a route-inventory test asserts no
-  auth middleware or dependency is registered on any route.
+- Requirement `FRG-AUTH-001` states that the system operates without credentials
+  on every surface. There is no partial or dormant auth code path to accidentally
+  rely on — a route-inventory test asserts no auth middleware or dependency is
+  registered on any route.
 - This is recorded in `docs/security/risk-register.md` as **RISK-020**
   (Spoofing/Elevation, impact H, likelihood H), explicitly **accepted** by the project
-  owner, with a stated review trigger: *any exposure beyond the tailnet, or before auth-milestone (M8)
-  sign-off*.
+  owner, with a stated review trigger: *any exposure beyond the tailnet, or before
+  authentication is added*.
 - The compensating control is **Tailscale-only network exposure**
   (`FRG-DEP-011`): foragerr is operated as reachable only via the home server's
-  Tailscale network until authentication ships (M8; re-accepted through M7 by the owner, 2026-07-10). There is no requirement for it to be safe to expose to
-  the public internet before authentication (M8) lands.
+  Tailscale network. There is no requirement for it to be safe to expose to
+  the public internet while it has no authentication.
 
 ### What this means operationally
 
@@ -41,11 +43,11 @@ If you widen exposure beyond the tailnet before authentication exists, you are
 operating outside the accepted-risk boundary recorded in the risk register, and should
 treat that as a decision requiring its own review, not an incidental config change.
 
-### What is exempt from auth even after it ships (M8)
+### Endpoints that answer without credentials
 
-The `/health` endpoint (`FRG-DEP-007`) is designed to remain unauthenticated even once
-login is added — it exists for container health checks (Docker `HEALTHCHECK`) and
-needs to answer without credentials.
+The `/health` endpoint (`FRG-DEP-007`) answers without credentials by design — it
+exists for container health checks (Docker `HEALTHCHECK`) and must respond
+regardless of any authentication configuration.
 
 ## Related security posture
 

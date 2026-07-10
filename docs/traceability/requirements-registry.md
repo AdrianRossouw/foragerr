@@ -54,6 +54,7 @@ moved `M5`→`M8`.
 | FRG-PROC-015 | Repository history hygiene | dev-process | active | — |
 | FRG-PROC-016 | Known-anomalies register | dev-process | active | — |
 | FRG-PROC-017 | Regenerable README screenshots | dev-process | implemented | M4 |
+| FRG-PROC-018 | Roadmap single source of truth | dev-process | implemented | M4 |
 | FRG-SER-001 | Series entity from ComicVine volume | ser | implemented | M1 |
 | FRG-SER-002 | Issue entity | ser | implemented | M1 |
 | FRG-SER-003 | Two-level monitored flags | ser | implemented | M1 |
