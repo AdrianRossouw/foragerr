@@ -1,4 +1,5 @@
 import {
+  memo,
   useEffect,
   useMemo,
   useRef,
@@ -165,7 +166,7 @@ function CoverChrome({
 
 /* --- flat poster card ------------------------------------------------------ */
 
-function PosterCard({ series }: { series: SeriesResource }) {
+const PosterCard = memo(function PosterCard({ series }: { series: SeriesResource }) {
   const { statistics: stats } = series;
   return (
     <Link
@@ -209,11 +210,11 @@ function PosterCard({ series }: { series: SeriesResource }) {
       </div>
     </Link>
   );
-}
+});
 
 /* --- overview row (flat) --------------------------------------------------- */
 
-function OverviewRow({ series }: { series: SeriesResource }) {
+const OverviewRow = memo(function OverviewRow({ series }: { series: SeriesResource }) {
   const { statistics: stats } = series;
   const cont = statusLabel(series) === 'Continuing';
   const total = stats.issue_count;
@@ -261,11 +262,11 @@ function OverviewRow({ series }: { series: SeriesResource }) {
       </div>
     </Link>
   );
-}
+});
 
 /* --- table row (flat) ------------------------------------------------------ */
 
-function SeriesTableRow({ series }: { series: SeriesResource }) {
+const SeriesTableRow = memo(function SeriesTableRow({ series }: { series: SeriesResource }) {
   const { statistics: stats } = series;
   const cont = statusLabel(series) === 'Continuing';
   return (
@@ -300,7 +301,7 @@ function SeriesTableRow({ series }: { series: SeriesResource }) {
       <td className={styles.yearCol}>{series.start_year ?? '—'}</td>
     </tr>
   );
-}
+});
 
 function SeriesTable({ children }: { children: ReactNode }) {
   return (
@@ -411,6 +412,7 @@ function FranchiseMenuButton({
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -420,7 +422,12 @@ function FranchiseMenuButton({
       }
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
+      // Mirror the shared Menu: Escape closes AND returns focus to the ⋯ trigger
+      // so a keyboard user is not stranded in the (now-removed) popover.
+      if (e.key === 'Escape') {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
     };
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
@@ -438,6 +445,7 @@ function FranchiseMenuButton({
     >
       <button
         type="button"
+        ref={triggerRef}
         className={styles.menuButton}
         aria-haspopup="menu"
         aria-expanded={open}
@@ -476,8 +484,6 @@ function StackedGroupCard({
   members: SeriesResource[];
   seriesById: Map<number, SeriesResource>;
 }) {
-  const navigate = useNavigate();
-
   // Newest run (max start year); its id is the navigation + cover target even
   // when it is not yet resolved in the flat cache.
   const newest = [...group.series].sort(
@@ -503,61 +509,55 @@ function StackedGroupCard({
   const monitored = group.series.some((m) => m.monitored);
   const title = resolvedNewest?.title ?? group.title;
 
-  const openNewest = () => {
-    if (newest) navigate(`/series/${newest.id}`);
-  };
-
+  // The cover + title are a real Link to the newest run's detail (mirroring the
+  // flat PosterCard) so a card is a plain, accessible link with NO focusable
+  // descendants; the ⋯ affordance is a positioned SIBLING of the link, never
+  // nested inside it (a role=link must not contain interactive children).
   return (
-    <div
-      className={`${styles.card} ${styles.stackCard}`}
-      data-testid="franchise-group"
-      role="link"
-      tabIndex={0}
-      onClick={openNewest}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          openNewest();
-        }
-      }}
-    >
-      <div className={styles.coverRegion}>
-        <Poster
-          initial={group.title.charAt(0)}
-          src={resolvedNewest ? coverUrl(resolvedNewest) : null}
-          alt={`${title} cover`}
-          tint={publisherTint(publisher)}
-          overlay
-          frameClassName={styles.posterFrame}
-          fallbackClassName={styles.posterFallback}
-          lazy
-        />
-        <CoverChrome
+    <div className={styles.stackCardOuter}>
+      <Link
+        to={newest ? `/series/${newest.id}` : '#'}
+        className={`${styles.card} ${styles.stackCard}`}
+        data-testid="franchise-group"
+      >
+        <div className={styles.coverRegion}>
+          <Poster
+            initial={group.title.charAt(0)}
+            src={resolvedNewest ? coverUrl(resolvedNewest) : null}
+            alt={`${title} cover`}
+            tint={publisherTint(publisher)}
+            overlay
+            frameClassName={styles.posterFrame}
+            fallbackClassName={styles.posterFallback}
+            lazy
+          />
+          <CoverChrome
+            monitored={monitored}
+            topRight={
+              <>
+                {publisher && <Chip tone="overlay">{publisher}</Chip>}
+                <Chip tone="accent">
+                  <LayersIcon size={10} /> {group.series_count} vols
+                </Chip>
+              </>
+            }
+          />
+        </div>
+        <ProgressStrip
+          have={group.owned_count}
+          total={group.issue_count}
           monitored={monitored}
-          topRight={
-            <>
-              {publisher && <Chip tone="overlay">{publisher}</Chip>}
-              <Chip tone="accent">
-                <LayersIcon size={10} /> {group.series_count} vols
-              </Chip>
-            </>
-          }
+          variant="strip"
         />
-      </div>
-      <ProgressStrip
-        have={group.owned_count}
-        total={group.issue_count}
-        monitored={monitored}
-        variant="strip"
-      />
-      <div className={styles.cardFooter}>
-        <div className={styles.stackTitleRow}>
+        <div className={`${styles.cardFooter} ${styles.stackFooter}`}>
           <span className={styles.cardTitle} title={group.title}>
             {group.title}
           </span>
-          <FranchiseMenuButton group={group} members={members} />
+          <span className={styles.cardSubline}>{groupSubline}</span>
         </div>
-        <span className={styles.cardSubline}>{groupSubline}</span>
+      </Link>
+      <div className={styles.stackMenu}>
+        <FranchiseMenuButton group={group} members={members} />
       </div>
     </div>
   );
@@ -620,7 +620,7 @@ function FranchiseGroup({
 }
 
 /** A slim run row used under a franchise header and for single-run groups. */
-function MemberRow({ series }: { series: SeriesResource }) {
+const MemberRow = memo(function MemberRow({ series }: { series: SeriesResource }) {
   const { statistics: stats } = series;
   const cont = statusLabel(series) === 'Continuing';
   return (
@@ -650,13 +650,20 @@ function MemberRow({ series }: { series: SeriesResource }) {
       <span className={styles.memberYear}>{series.start_year ?? '—'}</span>
     </Link>
   );
-}
+});
 
 /* --- grouped body ---------------------------------------------------------- */
 
 interface Franchise {
   group: SeriesGroupResource;
   members: SeriesResource[];
+  allMembers: SeriesResource[];
+  multiRun: boolean;
+}
+
+/** A franchise before the keystroke-sensitive member narrowing is applied. */
+interface FranchiseBase {
+  group: SeriesGroupResource;
   allMembers: SeriesResource[];
   multiRun: boolean;
 }
@@ -668,32 +675,45 @@ function useFranchises(
   collectedFilter: LibraryCollectedFilter,
   statusFilter: LibraryStatusFilter,
 ): Franchise[] {
-  return useMemo(() => {
-    const filtering =
-      needle.length > 0 || collectedFilter !== 'all' || statusFilter !== 'all';
+  // Expensive, filter-independent work — the group→member join and both
+  // localeCompare sorts — is memoized on [groups, seriesById] only, so a filter
+  // keystroke never re-runs it.
+  const base = useMemo<FranchiseBase[]>(() => {
     return groups
-      .map((group): Franchise => {
+      .map((group): FranchiseBase => {
         const allMembers = group.series
           .map((m) => seriesById.get(m.id))
           .filter((s): s is SeriesResource => s !== undefined)
           .sort((a, b) => a.sort_title.localeCompare(b.sort_title));
+        // Multi-run is AUTHORITATIVE from the projection, not the count of
+        // members cached in the flat index right now.
+        const multiRun = group.kind === 'group' || group.series_count > 1;
+        return { group, allMembers, multiRun };
+      })
+      .sort((a, b) => a.group.title.localeCompare(b.group.title));
+  }, [groups, seriesById]);
+
+  // Only the per-needle / per-filter member narrowing recomputes on a keystroke;
+  // `allMembers` is still passed unfiltered to the ⋯ menu.
+  return useMemo(() => {
+    const filtering =
+      needle.length > 0 || collectedFilter !== 'all' || statusFilter !== 'all';
+    return base
+      .map(({ group, allMembers, multiRun }): Franchise => {
         const members = allMembers.filter(
           (s) =>
             matchesText(s, needle) &&
             matchesCollected(s, collectedFilter) &&
             matchesStatus(s, statusFilter),
         );
-        // Multi-run is AUTHORITATIVE from the projection, not the count of
-        // members cached in the flat index right now.
-        const multiRun = group.kind === 'group' || group.series_count > 1;
         return { group, members, allMembers, multiRun };
       })
       // Keep a multi-run franchise (header/stack stand on the projection) unless
       // a filter is active and no member matches; drop a single-run franchise
-      // whose sole run has not resolved or does not match.
-      .filter((f) => (f.multiRun && !filtering ? true : f.members.length > 0))
-      .sort((a, b) => a.group.title.localeCompare(b.group.title));
-  }, [groups, seriesById, needle, collectedFilter, statusFilter]);
+      // whose sole run has not resolved or does not match. Order is inherited
+      // from `base` (already sorted by group title).
+      .filter((f) => (f.multiRun && !filtering ? true : f.members.length > 0));
+  }, [base, needle, collectedFilter, statusFilter]);
 }
 
 function GroupedBody({
@@ -768,6 +788,8 @@ function CheckRow({
   return (
     <button
       type="button"
+      role="menuitemradio"
+      aria-checked={active}
       className={styles.optionRow}
       data-menuitem
       data-active={active}
@@ -805,6 +827,9 @@ export function LibraryIndex() {
   const [filter, setFilter] = useState('');
   // One raised menu open at a time; a content-region click closes it.
   const [openMenu, setOpenMenu] = useState<'options' | 'sort' | 'filter' | null>(null);
+  // Set during a content mousedown while a menu is open so the following click is
+  // swallowed (closes the menu without also activating the content beneath it).
+  const suppressNextClick = useRef(false);
 
   const groupsQuery = useSeriesGroups(groupByFranchise);
   const seriesById = useMemo(() => {
@@ -815,16 +840,20 @@ export function LibraryIndex() {
 
   const needle = filter.trim().toLowerCase();
 
-  const visible = useMemo(() => {
-    const records = data ?? [];
-    const filtered = records.filter(
-      (s) =>
-        matchesText(s, needle) &&
-        matchesCollected(s, collectedFilter) &&
-        matchesStatus(s, statusFilter),
-    );
-    return sortSeries(filtered, sortKey);
-  }, [data, needle, sortKey, collectedFilter, statusFilter]);
+  // Sort the whole library ONCE per [data, sortKey]; a filter keystroke then only
+  // narrows the already-sorted list (filtering preserves order), so the expensive
+  // localeCompare pass never re-runs on every keypress.
+  const sorted = useMemo(() => sortSeries(data ?? [], sortKey), [data, sortKey]);
+  const visible = useMemo(
+    () =>
+      sorted.filter(
+        (s) =>
+          matchesText(s, needle) &&
+          matchesCollected(s, collectedFilter) &&
+          matchesStatus(s, statusFilter),
+      ),
+    [sorted, needle, collectedFilter, statusFilter],
+  );
 
   const franchises = useFranchises(
     groupsQuery.data ?? [],
@@ -845,8 +874,11 @@ export function LibraryIndex() {
   }, [data]);
 
   // Live per-option counts for the Filter menu. Status counts respect the text +
-  // collected context; edition counts respect the text + status context.
+  // collected context; edition counts respect the text + status context. Only
+  // computed while the Filter panel is actually open (its CheckRows are the sole
+  // consumers), so the ~9 passes never run on a keystroke with the menu closed.
   const filterCounts = useMemo(() => {
+    if (openMenu !== 'filter') return null;
     const records = data ?? [];
     const statusPool = records.filter(
       (s) => matchesText(s, needle) && matchesCollected(s, collectedFilter),
@@ -867,7 +899,7 @@ export function LibraryIndex() {
         singles: editionPool.filter((s) => s.booktype === null).length,
       },
     };
-  }, [data, needle, collectedFilter, statusFilter]);
+  }, [openMenu, data, needle, collectedFilter, statusFilter]);
 
   const viewButtons: { mode: LibraryViewMode; label: string; icon: ReactNode }[] = [
     { mode: 'poster', label: 'Posters', icon: <GridIcon size={16} /> },
@@ -940,6 +972,7 @@ export function LibraryIndex() {
                 icon={<SlidersIcon size={16} />}
                 testId="options-menu-trigger"
                 menuTestId="options-menu"
+                panelRole="group"
               >
                 <div className={styles.sectionLabel}>POSTER SIZE</div>
                 <SegmentedControl
@@ -982,6 +1015,12 @@ export function LibraryIndex() {
                 icon={<SortIcon size={16} />}
                 testId="sort-menu-trigger"
                 menuTestId="sort-menu"
+                disabled={groupByFranchise}
+                triggerTitle={
+                  groupByFranchise
+                    ? 'Sorting applies to the flat library views'
+                    : undefined
+                }
               >
                 <CheckRow
                   label="Title"
@@ -1020,28 +1059,28 @@ export function LibraryIndex() {
                 <CheckRow
                   label="All"
                   active={statusFilter === 'all'}
-                  count={filterCounts.status.all}
+                  count={filterCounts?.status.all}
                   onClick={() => setStatusFilter('all')}
                   testId="status-filter-all"
                 />
                 <CheckRow
                   label="Monitored"
                   active={statusFilter === 'monitored'}
-                  count={filterCounts.status.monitored}
+                  count={filterCounts?.status.monitored}
                   onClick={() => setStatusFilter('monitored')}
                   testId="status-filter-monitored"
                 />
                 <CheckRow
                   label="Missing issues"
                   active={statusFilter === 'missing'}
-                  count={filterCounts.status.missing}
+                  count={filterCounts?.status.missing}
                   onClick={() => setStatusFilter('missing')}
                   testId="status-filter-missing"
                 />
                 <CheckRow
                   label="Continuing"
                   active={statusFilter === 'continuing'}
-                  count={filterCounts.status.continuing}
+                  count={filterCounts?.status.continuing}
                   onClick={() => setStatusFilter('continuing')}
                   testId="status-filter-continuing"
                 />
@@ -1050,21 +1089,21 @@ export function LibraryIndex() {
                 <CheckRow
                   label="All editions"
                   active={collectedFilter === 'all'}
-                  count={filterCounts.edition.all}
+                  count={filterCounts?.edition.all}
                   onClick={() => setCollectedFilter('all')}
                   testId="edition-filter-all"
                 />
                 <CheckRow
                   label="Collected only"
                   active={collectedFilter === 'collected'}
-                  count={filterCounts.edition.collected}
+                  count={filterCounts?.edition.collected}
                   onClick={() => setCollectedFilter('collected')}
                   testId="edition-filter-collected"
                 />
                 <CheckRow
                   label="Single issues only"
                   active={collectedFilter === 'singles'}
-                  count={filterCounts.edition.singles}
+                  count={filterCounts?.edition.singles}
                   onClick={() => setCollectedFilter('singles')}
                   testId="edition-filter-singles"
                 />
@@ -1073,7 +1112,28 @@ export function LibraryIndex() {
           </span>
         }
       />
-      <div className={styles.content} onClick={() => setOpenMenu(null)}>
+      <div
+        className={styles.content}
+        // A content click while a raised menu is open should ONLY dismiss the
+        // menu — not also activate whatever sits under the pointer (e.g. navigate
+        // a card link). The shared Menu closes itself on the outside *mousedown*,
+        // so by the time the click fires `openMenu` is already null; we therefore
+        // record "a menu was open" during the mousedown-capture (which runs before
+        // Menu's document handler) and swallow the following click in the capture
+        // phase, before the card link acts. With no menu open we do nothing, so
+        // normal clicks pass through.
+        onMouseDownCapture={() => {
+          suppressNextClick.current = openMenu !== null;
+        }}
+        onClickCapture={(e) => {
+          if (suppressNextClick.current) {
+            e.preventDefault();
+            e.stopPropagation();
+            setOpenMenu(null);
+            suppressNextClick.current = false;
+          }
+        }}
+      >
         {isLoading && <p className={styles.stateNote}>Loading library…</p>}
         {isError && <p className={styles.stateNote}>Could not load the library.</p>}
         {empty && (
@@ -1083,7 +1143,11 @@ export function LibraryIndex() {
         )}
         {data && data.length > 0 && (
           <>
-            <div className={styles.countLine} data-testid="library-count-line">
+            <div
+              className={styles.countLine}
+              data-testid="library-count-line"
+              aria-live="polite"
+            >
               <span className={styles.countTotal}>{counts.total} comics</span>
               <span className={styles.countDot}>·</span>
               <span className={styles.countMonitored}>{counts.monitored} monitored</span>
@@ -1096,7 +1160,9 @@ export function LibraryIndex() {
             {noMatch ? (
               <div className={styles.noMatch}>
                 <BookOpenIcon size={34} />
-                <div className={styles.noMatchText}>No comics match your search.</div>
+                <div className={styles.noMatchText} aria-live="polite">
+                  No comics match your search.
+                </div>
               </div>
             ) : groupByFranchise ? (
               groupsQuery.isLoading ? (

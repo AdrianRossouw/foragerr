@@ -86,6 +86,10 @@
   --color-info-text: #8ab6f0;
   --color-danger: #f05050;
   --color-neutral: #9a9a9a;
+  /* Per-tone tint backgrounds for a toned chip: each hue's own low-alpha wash so
+   * amber/blue chip text no longer rides the green accent tint (semantic match). */
+  --color-warning-tint: rgba(229, 165, 75, 0.15);
+  --color-info-tint: rgba(93, 156, 236, 0.15);
 
   /* --- Progress track (design: complete #2f5d40, incomplete #4a2523, fill
    *     always the accent green) --- */

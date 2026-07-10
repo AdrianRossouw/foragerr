@@ -23,6 +23,8 @@ export function Menu({
   testId,
   menuTestId,
   disabled = false,
+  triggerTitle,
+  panelRole = 'menu',
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -36,6 +38,14 @@ export function Menu({
   /** data-testid for the panel. */
   menuTestId?: string;
   disabled?: boolean;
+  /** Native tooltip on the trigger (e.g. explaining a disabled state). */
+  triggerTitle?: string;
+  /**
+   * ARIA role for the panel. Default `menu` suits a list of menu items; pass
+   * `group` when the panel holds non-menuitem controls (a radiogroup, a switch)
+   * for which `menu` semantics would be invalid.
+   */
+  panelRole?: 'menu' | 'group';
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -64,11 +74,22 @@ export function Menu({
     };
   }, [open, onOpenChange]);
 
-  // Focus the first item when the panel opens.
+  // Focus the first item when the panel opens. A `group` panel (or any panel
+  // with no `[data-menuitem]`) has no menu items to land on, so fall back to the
+  // first focusable control instead of leaving focus stranded on the trigger.
   useEffect(() => {
     if (!open) return;
-    const first = panelRef.current?.querySelector<HTMLElement>('[data-menuitem]');
-    first?.focus();
+    const panel = panelRef.current;
+    if (!panel) return;
+    const first = panel.querySelector<HTMLElement>('[data-menuitem]');
+    if (first) {
+      first.focus();
+      return;
+    }
+    const focusable = panel.querySelector<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])',
+    );
+    focusable?.focus();
   }, [open]);
 
   const onPanelKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -96,6 +117,7 @@ export function Menu({
         aria-haspopup="menu"
         aria-expanded={open}
         disabled={disabled}
+        title={triggerTitle}
         onClick={() => onOpenChange(!open)}
         data-testid={testId}
       >
@@ -105,7 +127,7 @@ export function Menu({
       {open && (
         <div
           ref={panelRef}
-          role="menu"
+          role={panelRole}
           aria-label={label}
           className={styles.panel}
           data-align={align}

@@ -239,17 +239,39 @@
   text-decoration: none;
 }
 
-/* Stacked franchise card: layered offset "spine" shadow; margin keeps the
- * offset layers from being clipped by the grid gap. */
+/* Grid cell wrapping a stacked franchise: it is the positioning context for the
+ * corner ⋯ affordance (a sibling of the card link, never nested inside it) and
+ * carries the margin that keeps the offset "spine" layers from being clipped by
+ * the grid gap. */
+.stackCardOuter {
+  position: relative;
+  margin: 12px 12px 0 0;
+}
+
+/* Stacked franchise card link: layered offset "spine" shadow reads as a pile of
+ * volumes. The whole link opens the newest run's detail. */
 .stackCard {
   box-shadow: var(--shadow-card-stacked);
-  margin: 12px 12px 0 0;
-  cursor: pointer;
 }
 
 .stackCard:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
+}
+
+/* Reserve room at the footer's right edge for the overlaid ⋯ affordance so the
+ * group title / subline never run beneath it. */
+.stackFooter {
+  padding-right: 30px;
+}
+
+/* The ⋯ affordance, positioned over the card's bottom-right corner as a SIBLING
+ * of the link (so no interactive control nests inside the link). */
+.stackMenu {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 4;
 }
 
 .coverRegion {
@@ -301,12 +323,6 @@
   flex-direction: column;
   gap: 3px;
   padding: 9px 11px 10px;
-}
-
-.stackTitleRow {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-xs);
 }
 
 .cardTitle {

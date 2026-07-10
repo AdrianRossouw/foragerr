@@ -17,6 +17,7 @@ import { useUiStore } from '../../store/uiStore';
 import type { FetcherInit } from '../../api/fetcher';
 import type { SeriesGroupResource, SeriesResource } from '../../api/types';
 import { LibraryIndex } from './LibraryIndex';
+import styles from './LibraryIndex.module.css';
 
 /**
  * FRG-UI-003 — Library index screen (M4 redesign): three view modes
@@ -82,6 +83,10 @@ async function pickFilter(user: UserEvent, testId: string) {
 async function toggleGrouping(user: UserEvent) {
   await ensureMenuOpen(user, 'options-menu-trigger', 'options-menu');
   await user.click(screen.getByTestId('group-by-toggle'));
+  // Close the Options menu so a following content click is a fresh interaction,
+  // not a menu-dismissing click (the content region now swallows the click that
+  // closes an open menu, so it never also activates the content beneath it).
+  await user.keyboard('{Escape}');
 }
 
 /** Titles rendered in the poster grid (cards must carry no book-type badge). */
@@ -355,6 +360,75 @@ describe('FRG-UI-003: library index', () => {
     expect(after.librarySortKey).toBe('title');
     expect(after.libraryStatusFilter).toBe('all');
     expect(after.libraryCollectedFilter).toBe('all');
+  });
+
+  it('FRG-UI-003 — a poster card surfaces the publisher as an overlay chip', async () => {
+    renderLibrary([
+      makeSeriesResource({
+        id: 1,
+        title: 'Hellboy',
+        sort_title: 'hellboy',
+        publisher: 'Dark Horse',
+      }),
+    ]);
+
+    const card = await screen.findByTestId('series-card');
+    expect(within(card).getByText('Dark Horse')).toBeInTheDocument();
+  });
+
+  it('FRG-UI-003 — the count line spans carry their semantic (monitored/missing) classes', async () => {
+    renderLibrary([
+      makeSeriesResource({ id: 1, monitored: true, statistics: makeStats({ missing_count: 3 }) }),
+      makeSeriesResource({ id: 2, monitored: false, statistics: makeStats({ missing_count: 0 }) }),
+    ]);
+
+    const line = await screen.findByTestId('library-count-line');
+    expect(within(line).getByText('1 monitored')).toHaveClass(styles.countMonitored);
+    expect(within(line).getByText('1 with missing issues')).toHaveClass(styles.countMissing);
+  });
+
+  it('FRG-UI-003 — the table view renders every header column', async () => {
+    renderLibrary(makeMockLibrary(3));
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('library-poster-grid')).toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole('button', { name: 'Table' }));
+
+    const table = screen.getByTestId('library-table');
+    const headers = within(table).getAllByRole('columnheader');
+    expect(headers).toHaveLength(6);
+    // Icon-only monitor column, labelled for assistive tech, plus the five named
+    // columns.
+    expect(within(table).getByLabelText('Monitored')).toBeInTheDocument();
+    expect(within(table).getByRole('columnheader', { name: 'Title' })).toBeInTheDocument();
+    expect(
+      within(table).getByRole('columnheader', { name: 'Publisher' }),
+    ).toBeInTheDocument();
+    expect(within(table).getByRole('columnheader', { name: 'Issues' })).toBeInTheDocument();
+    expect(within(table).getByRole('columnheader', { name: 'Status' })).toBeInTheDocument();
+    expect(within(table).getByRole('columnheader', { name: 'Year' })).toBeInTheDocument();
+  });
+
+  it('FRG-UI-003 — a content click that closes an open menu does NOT activate the card beneath it', async () => {
+    renderLibrary([makeSeriesResource({ id: 9, title: 'Saga', sort_title: 'saga' })]);
+    const user = userEvent.setup();
+
+    await waitFor(() => expect(screen.getByTestId('series-card')).toBeInTheDocument());
+
+    // Open a menu, then click a series card: the menu dismisses, but navigation is
+    // suppressed (the click only closes the menu).
+    await user.click(screen.getByTestId('sort-menu-trigger'));
+    expect(screen.getByTestId('sort-menu')).toBeInTheDocument();
+    await user.click(screen.getByTestId('series-card'));
+    expect(screen.queryByTestId('sort-menu')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('detail-stub')).not.toBeInTheDocument();
+    expect(screen.getByTestId('library-poster-grid')).toBeInTheDocument();
+
+    // A second click, with no menu open, navigates normally.
+    await user.click(screen.getByTestId('series-card'));
+    expect(screen.getByTestId('detail-stub')).toBeInTheDocument();
   });
 });
 
@@ -657,6 +731,70 @@ describe('FRG-UI-021: grouped library view', () => {
     await user.click(screen.getByTestId('library-count-line'));
     expect(screen.queryByTestId('franchise-menu')).not.toBeInTheDocument();
   });
+
+  it('FRG-UI-021 — the Sort menu is disabled while grouping is on and re-enabled when flat', async () => {
+    renderGrouped();
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId('series-card')).toHaveLength(3),
+    );
+
+    // Flat library: sorting is meaningful, so the trigger is enabled.
+    expect(screen.getByTestId('sort-menu-trigger')).toBeEnabled();
+
+    // Grouped: the group projection owns the order, so sorting is inert and the
+    // trigger is disabled (with an explanatory tooltip).
+    await toggleGrouping(user);
+    const trigger = screen.getByTestId('sort-menu-trigger');
+    expect(trigger).toBeDisabled();
+    expect(trigger).toHaveAttribute(
+      'title',
+      'Sorting applies to the flat library views',
+    );
+
+    // Toggling grouping back off restores the enabled Sort trigger.
+    await toggleGrouping(user);
+    expect(screen.getByTestId('sort-menu-trigger')).toBeEnabled();
+  });
+
+  it('FRG-UI-021 — grouping is display-only: a series keeps its monitored bookmark across a toggle on/off', async () => {
+    const records = [
+      makeSeriesResource({
+        id: 1,
+        title: 'Saga',
+        sort_title: 'saga',
+        monitored: false,
+        series_group_id: null,
+      }),
+    ];
+    const groups = [
+      makeSeriesGroup({
+        id: null,
+        kind: 'series',
+        title: 'Saga',
+        series: [makeGroupMember({ id: 1, monitored: false })],
+      }),
+    ];
+    renderGrouped(records, groups);
+    const user = userEvent.setup();
+
+    const bookmark = () =>
+      within(screen.getByTestId('series-card')).getByLabelText(/Monitored|Unmonitored/);
+
+    await waitFor(() => expect(screen.getByTestId('series-card')).toBeInTheDocument());
+    expect(bookmark()).toHaveAttribute('aria-label', 'Unmonitored');
+
+    // Grouping ON — the single-run franchise renders as an ordinary card whose
+    // bookmark reflects the same (unmonitored) state.
+    await toggleGrouping(user);
+    await waitFor(() => expect(screen.getByTestId('series-card')).toBeInTheDocument());
+    expect(bookmark()).toHaveAttribute('aria-label', 'Unmonitored');
+
+    // Grouping OFF — still unmonitored; the toggle never mutates monitoring.
+    await toggleGrouping(user);
+    expect(bookmark()).toHaveAttribute('aria-label', 'Unmonitored');
+  });
 });
 
 /**
@@ -763,7 +901,10 @@ describe('FRG-UI-022: collected-edition surfacing', () => {
     expect(screen.getAllByTestId('series-card')).toHaveLength(2);
     expect(shownTitles()).toEqual(['Bone', 'Saga']);
 
-    // Navigation from a filtered card is unchanged (display-only).
+    // Navigation from a filtered card is unchanged (display-only). Close the
+    // Filter menu first: a content click that only dismisses an open menu no
+    // longer also activates the card beneath it.
+    await user.keyboard('{Escape}');
     await user.click(
       screen
         .getAllByTestId('series-card')

@@ -35,12 +35,12 @@
 }
 
 .warning {
-  background: var(--color-accent-tint);
+  background: var(--color-warning-tint);
   color: var(--color-warning-text);
 }
 
 .info {
-  background: var(--color-accent-tint);
+  background: var(--color-info-tint);
   color: var(--color-info-text);
 }
 
