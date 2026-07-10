@@ -39,7 +39,7 @@
 
 ## 4. Merge gate
 
-- [ ] 4.1 Full merge-gate checklist per `docs/process/commit-standard.md`
+- [x] 4.1 Full merge-gate checklist per `docs/process/commit-standard.md`
       (suite green, soup_check 0, trace clean, history-scan ancestry,
       CHANGELOG + version bump v0.3.5, release notes) (FRG-PROC-007,
       FRG-PROC-013, FRG-PROC-015)
