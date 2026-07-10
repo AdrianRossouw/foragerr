@@ -37,8 +37,8 @@
 
 ## 5. Merge gate
 
-- [ ] 5.1 Full checklist (backend+frontend suites, e2e spine, soup, trace,
+- [x] 5.1 Full checklist (backend+frontend suites, e2e spine, soup, trace,
       config re-scan + evidence, CHANGELOG v0.4.0 + bump, release notes)
       (FRG-PROC-007, FRG-PROC-013, FRG-PROC-015)
-- [ ] 5.2 Review cycle (angles + Codex ninth); sync deltas; archive; merge
+- [x] 5.2 Review cycle (angles + Codex ninth); sync deltas; archive; merge
       `--no-ff`; tag; push; release

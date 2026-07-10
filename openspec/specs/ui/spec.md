@@ -35,28 +35,37 @@ The frontend SHALL be a React + TypeScript single-page application in which all 
 - **WHEN** the WebSocket connection drops and then is re-established
 - **THEN** the sidebar footer renders a disconnected state, reconnection attempts occur on an increasing backoff interval, and on success the footer renders a connected state; no component holds server data in a store outside React Query
 
-### Requirement: FRG-UI-002 — Design token layer with ant/foraging theme
+### Requirement: FRG-UI-002 — Design token layer with the foragerr dark theme
 
-All UI styling SHALL be driven by a central design-token layer (colors, typography, spacing, iconography) in which the ant/foraging brand theme is expressed once as token values, such that no screen-level component hardcodes brand colors or theme-specific styling.
+The frontend SHALL centralize all colors, typography, spacing, radii, and
+shadows in a design-token layer (CSS variables) consumed by every component —
+no hardcoded values in components. The token set SHALL implement the owner's
+design: dark warm-neutral surfaces (app background `#202020`, panels/sidebar/
+header `#262626`, card `#282828`, raised/menu `#2b2b2b`, input `#1c1c1c`),
+one green accent family (`#57b877` primary, `#7fce9a` light/active, tint
+backgrounds at 14–16% alpha, dark knockout text on accent), semantic status
+hues (owned/complete green, missing/importing amber `#e5a54b`, downloading
+blue `#5d9cec`, queued grey), progress-track colors (complete `#2f5d40`,
+incomplete `#4a2523`, fill `#57b877`), publisher tint and accent palettes as
+data maps, and format-chip colors (TPB blue, Deluxe amber, Omnibus green).
+Typography SHALL be Roboto (300/400/500/700, self-hosted) with the design's
+scale (page titles 30–33px/700 down to uppercase section labels 10–11px with
+letter-spacing), monospace for format labels; icons SHALL be Font Awesome 6
+Free, self-hosted. No external font/icon CDN requests SHALL occur at runtime.
 
-- **Milestone**: M1
-- **Source**: Assignment guidance (ant/foraging theme as a design-token requirement, not per-screen styling); sonarr-architecture.md §7.4 (screen inventory the tokens apply across).
-- **Notes**: Deliberately scoped as one requirement so theming never appears again per-screen. Token names should be theme-neutral (e.g. `--color-accent`, not `--ant-orange`).
+#### Scenario: Components consume tokens only
 
-#### Scenario: Tokens defined once with theme-neutral names
+- **WHEN** the frontend source is inspected
+- **THEN** colors, font sizes, radii, and shadows in components reference the
+  token layer (CSS variables or the exported token/palette maps), and the
+  token file is the single place the palette above appears
 
-- **WHEN** `src/theme/tokens.css` is loaded and its custom properties are enumerated
-- **THEN** tokens such as `--color-accent`, `--surface-*`, and `--spacing-*` are defined with Sonarr-dark default values, and the accent token resolves to the ant brand color value
+#### Scenario: No external asset fetches
 
-#### Scenario: Changing the accent token restyles all screens
-
-- **WHEN** the value of `--color-accent` is overridden at `:root`
-- **THEN** rendered screen components that use accent styling reflect the new computed color, with no screen component hardcoding a brand color literal
-
-#### Scenario: Token-name audit rejects brand-named tokens
-
-- **WHEN** the token-name audit test enumerates every custom property name in `tokens.css`
-- **THEN** the assertion passes only if no token name matches `ant-` or any brand-specific naming, failing the build otherwise
+- **WHEN** the built SPA loads in a browser with the network restricted to
+  the application origin
+- **THEN** fonts and icons render correctly from self-hosted assets and no
+  request leaves the origin
 
 ### Requirement: FRG-UI-003 — Library index screen
 
@@ -635,3 +644,38 @@ with a null book-type SHALL show no badge.
 - **WHEN** the operator applies the collected-editions filter in the library
 - **THEN** only collected-edition (or only single-issues) series are shown, without changing any series' identity, monitoring, or wanted state
 
+### Requirement: FRG-UI-023 — Application shell
+
+The SPA SHALL render every screen inside a fixed three-part shell: a 212px
+sidebar (logo lockup in a 60px header row; a nav list where each item has
+icon, label, and — where meaningful — a live count badge: Comics = library
+series count, Activity = queue length, Wanted = count of series with missing
+issues (warn style); a SYSTEM section with Settings and System; a footer
+status row showing a health indicator and the running version), a 60px
+global header (the existing library quick-search input, health and system
+icon buttons), and a per-screen toolbar slot above a content region that is
+the only scrolling area (no page-level scroll). The active nav item SHALL
+carry the accent treatment (inset accent bar, accent icon). The nav SHALL
+list only screens that exist — entries for future screens (Calendar,
+Creators) appear in the change that ships the screen.
+
+#### Scenario: Shell frames every route
+
+- **WHEN** any existing route (library, series detail, wanted, activity,
+  settings, system) is visited
+- **THEN** the sidebar, global header, and toolbar slot render with the
+  content region scrolling independently, and the active nav item carries
+  the accent treatment
+
+#### Scenario: Nav counts are live
+
+- **WHEN** the library gains a series, the queue gains an item, or a series
+  gains missing issues while the app is open
+- **THEN** the corresponding nav badges update without a page reload (React
+  Query + WS invalidation), and the Wanted badge uses the warn style
+
+#### Scenario: Only shipped screens appear in the nav
+
+- **WHEN** the sidebar nav is inspected
+- **THEN** every entry routes to an implemented screen, and no entry exists
+  for screens not yet shipped
