@@ -23,11 +23,23 @@ from __future__ import annotations
 
 import importlib.util
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _tracked(paths):
+    """Keep only git-tracked files, so a local scratch note under docs/manual/
+    cannot fail the gate on one machine only."""
+    out = subprocess.run(
+        ["git", "ls-files", "-z", "--", *[str(p) for p in paths]],
+        capture_output=True, text=True, cwd=REPO_ROOT,
+    ).stdout
+    tracked = {REPO_ROOT / rel for rel in out.split("\0") if rel}
+    return [p for p in paths if p in tracked]
 
 
 def _load_trace():
@@ -44,14 +56,16 @@ REGISTRY = _load_trace().registry_rows()
 # Controlled documents scanned for forward-looking content. docs/roadmap.md is
 # intentionally *not* here — it is the one document allowed to describe unshipped
 # work.
-SCANNED_DOCS = [
+SCANNED_DOCS = _tracked([
     REPO_ROOT / "README.md",
     *sorted((REPO_ROOT / "docs" / "manual").rglob("*.md")),
-]
+])
 
-# Future-milestone token: M5..M9 as a standalone word. M4 (current milestone) is
-# excluded on purpose — see module docstring / design decision 6.
-MILESTONE_RE = re.compile(r"\bM[5-9]\b")
+# Future-milestone token: M5..M9 (and M10+, so the check survives the project
+# outliving single-digit milestones) as a standalone word, either case. M4 (the
+# current milestone) is excluded on purpose — see module docstring / design
+# decision 6.
+MILESTONE_RE = re.compile(r"\bM(?:[5-9]|[1-9]\d+)\b", re.IGNORECASE)
 
 # Planned-phrasing markers, matched case-insensitively. Kept to compound phrases
 # that read as roadmap prose; bare words ("planned", "future", "upcoming") are
@@ -97,10 +111,22 @@ def test_forward_looking_content_is_contained_to_the_roadmap():
 
 @pytest.mark.req("FRG-PROC-018")
 def test_roadmap_cited_ids_are_registered_and_not_yet_shipped():
-    """Every FRG id the roadmap presents as planned must exist and be unshipped."""
+    """Every FRG id the roadmap presents as planned must exist and be unshipped.
+
+    Only milestone sections (after the first ``## `` heading) are scanned: the
+    intro legitimately cites the governing FRG-PROC-018, which is implemented —
+    a citation of authority, not a planned item."""
     roadmap = (REPO_ROOT / "docs" / "roadmap.md").read_text()
+    sections = roadmap.split("\n## ", 1)
+    body = sections[1] if len(sections) > 1 else ""
+    assert body, "docs/roadmap.md has no milestone sections — layout changed?"
     problems: list[str] = []
-    for line in roadmap.splitlines():
+    for line in body.splitlines():
+        if re.search(r"FRG-[A-Z]+-\d{3}\W{0,2}\.\.", line):
+            problems.append(
+                "id-range shorthand ('..') hides interior ids from this check — "
+                f"spell every planned id out (line: {line.strip()!r})"
+            )
         for rid in re.findall(r"FRG-[A-Z]+-\d{3}", line):
             row = REGISTRY.get(rid)
             if row is None:
@@ -108,7 +134,7 @@ def test_roadmap_cited_ids_are_registered_and_not_yet_shipped():
                     f"{rid} is cited in the roadmap but absent from the registry "
                     f"(line: {line.strip()!r})"
                 )
-            elif row["status"] in ("implemented", "verified"):
+            elif row["status"] in ("implemented", "verified", "withdrawn"):
                 problems.append(
                     f"{rid} is listed as planned in the roadmap but the registry "
                     f"says {row['status']!r} — remove or rework the entry "
@@ -126,9 +152,21 @@ def test_roadmap_lists_humble_and_archive_as_future_work():
     roadmap_path = REPO_ROOT / "docs" / "roadmap.md"
     assert roadmap_path.exists(), "docs/roadmap.md must exist (FRG-PROC-018)"
     roadmap = roadmap_path.read_text()
-    assert "Humble Bundle" in roadmap, (
-        "docs/roadmap.md must list the Humble Bundle importer as future work"
+    sources = next(
+        (
+            s for s in re.split(r"^## ", roadmap, flags=re.M)[1:]
+            if "Sources" in s.splitlines()[0]
+        ),
+        None,
     )
-    assert "public-domain" in roadmap, (
-        "docs/roadmap.md must list the public-domain archive import as future work"
+    assert sources is not None, (
+        "docs/roadmap.md must keep a Sources milestone section"
+    )
+    assert "Humble Bundle" in sources, (
+        "the roadmap's Sources section must list the Humble Bundle importer "
+        "as future work"
+    )
+    assert "public-domain" in sources, (
+        "the roadmap's Sources section must list the public-domain archive "
+        "import as future work"
     )

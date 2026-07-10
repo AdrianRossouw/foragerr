@@ -43,11 +43,11 @@ If you widen exposure beyond the tailnet before authentication exists, you are
 operating outside the accepted-risk boundary recorded in the risk register, and should
 treat that as a decision requiring its own review, not an incidental config change.
 
-### What is exempt from auth even after it is added
+### Endpoints that answer without credentials
 
-The `/health` endpoint (`FRG-DEP-007`) is designed to remain unauthenticated even once
-login is added — it exists for container health checks (Docker `HEALTHCHECK`) and
-needs to answer without credentials.
+The `/health` endpoint (`FRG-DEP-007`) answers without credentials by design — it
+exists for container health checks (Docker `HEALTHCHECK`) and must respond
+regardless of any authentication configuration.
 
 ## Related security posture
 

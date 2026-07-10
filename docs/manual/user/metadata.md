@@ -54,8 +54,7 @@ transaction:
   record stays visible for manual review.
 
 Refresh runs automatically as part of the add-series chain, and manually on demand.
-Scheduled/periodic refresh with staleness skip-rules is a later-milestone feature; M1
-covers on-add and manual refresh.
+There is no scheduled/periodic refresh.
 
 ## Data integrity guarantees
 

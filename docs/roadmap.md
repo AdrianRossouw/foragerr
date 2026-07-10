@@ -50,9 +50,10 @@ with Torznab indexing through an existing Prowlarr/Jackett instance, and honour
 each tracker's seeding requirements (per-torrent ratio and seed-time limits)
 before a completed download is removed.
 
-- Requirements: `FRG-TOR-001`..`FRG-TOR-006` (torrent protocol, client,
-  magnet/.torrent handling, seeding-aware import, seeder-based decisioning,
-  info-hash blocklist), `FRG-IDX-012` (Torznab indexer support).
+- Requirements: `FRG-TOR-001` (torrent protocol), `FRG-TOR-002` (client),
+  `FRG-TOR-003` (magnet/.torrent handling), `FRG-TOR-004` (seeding-aware
+  import), `FRG-TOR-005` (seeder-based decisioning), `FRG-TOR-006` (info-hash
+  blocklist), `FRG-IDX-012` (Torznab indexer support).
 
 ## M8 — Authentication
 
@@ -62,7 +63,8 @@ replaced, not kept forever. This milestone adds a single-user login, session
 and API-key handling, and uniform coverage of the UI, API, and OPDS surfaces.
 Its implementation requires fresh owner approval before work begins.
 
-- Requirements: `FRG-AUTH-002`..`FRG-AUTH-007`, `FRG-AUTH-009`, `FRG-AUTH-010`
-  (login, password KDF, sessions, OPDS Basic realm, API keys and lifecycle,
-  rate limiting/audit, uniform coverage), `FRG-SEC-005` (CSRF stance and
-  WebSocket origin validation).
+- Requirements: `FRG-AUTH-002` (login), `FRG-AUTH-003` (password KDF),
+  `FRG-AUTH-004` (sessions), `FRG-AUTH-005` (OPDS Basic realm), `FRG-AUTH-006`
+  (API keys), `FRG-AUTH-007` (key lifecycle), `FRG-AUTH-009` (rate
+  limiting/audit), `FRG-AUTH-010` (uniform coverage), `FRG-SEC-005` (CSRF
+  stance and WebSocket origin validation).

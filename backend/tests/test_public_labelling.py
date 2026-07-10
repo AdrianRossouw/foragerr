@@ -247,6 +247,11 @@ def test_roadmap_milestone_labels_match_the_registry():
         heading = section.splitlines()[0]
         milestone_token = re.search(r"\bM\d+\b", heading)
         if not milestone_token:
+            assert not re.search(r"FRG-[A-Z]+-\d{3}", section), (
+                f"roadmap section {heading!r} cites FRG ids but its heading "
+                "carries no milestone token, so those ids would escape this "
+                "check — add the milestone to the heading"
+            )
             continue
         milestone = milestone_token.group(0)
         for rid in re.findall(r"FRG-[A-Z]+-\d{3}", section):
