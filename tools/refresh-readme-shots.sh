@@ -142,6 +142,28 @@ print("\n".join(names))')"
     || fail "$(printf "%s staged group(s) lack a ComicVine proposal:\n%s" \
               "$(echo "${UNPROPOSED}" | grep -c .)" "${UNPROPOSED}")"
 
+  # Known demo-library proposal overrides: the auto-match is wrong for some
+  # golden-age titles (ComicVine has same-name modern reprint volumes), which
+  # would silently poison the tour. folder-name -> ComicVine volume id.
+  # Planet Comics (1940, Fiction House) = CV volume 816 (auto-match picks the
+  # 1988 Blackthorne reprint).
+  declare -A CV_OVERRIDES=( ["Planet Comics"]=816 )
+  GROUPS_JSON="$(curl -fsS "${BASE_URL}/api/v1/library-import?rootFolderId=${ROOT_ID}")"
+  for folder in "${!CV_OVERRIDES[@]}"; do
+    GID="$(echo "${GROUPS_JSON}" | python3 -c 'import json,sys
+folder=sys.argv[1]
+for g in json.load(sys.stdin).get("records",[]):
+    if folder in g.get("folder",""):
+        print(g["id"]); break' "${folder}")"
+    if [ -n "${GID}" ]; then
+      log "overriding ${folder} -> CV volume ${CV_OVERRIDES[$folder]}"
+      curl -fsS -X PATCH "${BASE_URL}/api/v1/library-import/groups/${GID}" \
+        -H 'content-type: application/json' \
+        -d "{\"cvVolumeId\":${CV_OVERRIDES[$folder]}}" >/dev/null \
+        || fail "override for ${folder} failed"
+    fi
+  done
+
   IDS_JSON="[$(echo "${GROUP_IDS}" | sed 's/,/, /g')]"
   curl -fsS -X POST "${BASE_URL}/api/v1/library-import/execute" \
     -H 'content-type: application/json' \
