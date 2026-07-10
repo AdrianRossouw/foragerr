@@ -30,6 +30,10 @@ export const queryKeys = {
   queue: {
     all: () => ['queue'] as const,
     page: (page: number) => ['queue', page] as const,
+    // Total tracked-download count for the sidebar Activity badge (FRG-UI-023).
+    // Nested under the ['queue'] prefix so the WebSocketBridge's queue
+    // invalidation (queryKeys.queue.all()) sweeps it with no separate wiring.
+    count: () => ['queue', 'count'] as const,
   },
   // Paged daily surfaces (FRG-UI-010/011/017), family-page convention like
   // ['queue', page] plus a filters hash so two filterings of the same page are

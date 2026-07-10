@@ -1,15 +1,42 @@
+/*
+ * Application shell (FRG-UI-023): fixed three-part frame — 212px sidebar, 60px
+ * global header, per-screen toolbar slot, and a content region that is the only
+ * scrolling area. Every value reads a design token (FRG-UI-002).
+ */
 .shell {
   display: grid;
   grid-template-columns: var(--layout-sidebar-width) 1fr;
   grid-template-rows: 100%;
   height: 100%;
+  overflow: hidden;
 }
 
+/* Skip link: visually hidden until it receives keyboard focus, at which point it
+ * appears top-left as the first focusable element and jumps to the outlet region
+ * (standard a11y bypass-blocks pattern). */
+.skipLink {
+  position: absolute;
+  left: var(--spacing-sm);
+  top: -100px;
+  z-index: 200;
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--color-accent);
+  color: var(--color-accent-contrast);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-base);
+  text-decoration: none;
+}
+
+.skipLink:focus {
+  top: var(--spacing-sm);
+}
+
+/* --- Sidebar --- */
 .sidebar {
   display: flex;
   flex-direction: column;
   background: var(--surface-sidebar);
-  border-right: 1px solid var(--surface-border);
+  border-right: 1px solid var(--surface-border-hard);
   min-height: 0;
 }
 
@@ -19,12 +46,30 @@
   gap: var(--spacing-sm);
   height: var(--layout-header-height);
   padding: 0 var(--spacing-md);
-  font-weight: var(--font-weight-bold);
-  font-size: var(--font-size-lg);
-  border-bottom: 1px solid var(--surface-border);
+  border-bottom: 1px solid var(--surface-border-hard);
+  flex: none;
 }
 
-.brandMark {
+.brandTile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, var(--color-accent), var(--color-accent-light));
+  color: var(--color-accent-contrast);
+  font-size: var(--icon-size-md);
+}
+
+.brandWord {
+  font-size: var(--font-size-lg);
+  font-weight: 900;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+
+.brandWordAccent {
   color: var(--color-accent);
 }
 
@@ -32,73 +77,197 @@
   flex: 1;
   overflow-y: auto;
   padding: var(--spacing-sm) 0;
+  min-height: 0;
 }
 
 .navGroupLabel {
-  padding: var(--spacing-sm) var(--spacing-md) var(--spacing-xs);
+  padding: var(--spacing-md) var(--spacing-md) var(--spacing-xs);
   color: var(--text-muted);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-section-label);
+  font-weight: var(--font-weight-medium);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: var(--letter-spacing-label);
 }
 
 .navLink {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
   padding: var(--spacing-sm) var(--spacing-md);
   color: var(--text-secondary);
+  font-size: var(--font-size-base);
+  line-height: 1.2;
+  border-left: 3px solid transparent;
+}
+
+.navLink:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 .navLinkActive {
   color: var(--text-primary);
+  background: var(--surface-active);
   border-left: 3px solid var(--color-accent);
-  background: var(--surface-card);
 }
 
+.navIcon {
+  display: inline-flex;
+  justify-content: center;
+  width: var(--icon-size-md);
+  color: var(--text-muted);
+  font-size: var(--font-size-base);
+}
+
+.navLinkActive .navIcon {
+  color: var(--color-accent);
+}
+
+.navLabel {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.navBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-menu);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+}
+
+.navBadgeWarn {
+  background: var(--color-warning);
+  color: var(--color-accent-contrast);
+}
+
+/* --- Sidebar status footer (health pulse + version) --- */
 .footer {
-  padding: var(--spacing-sm) var(--spacing-md);
-  border-top: 1px solid var(--surface-border);
-  font-size: var(--font-size-sm);
   display: flex;
   align-items: center;
   gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-top: 1px solid var(--surface-border-hard);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  flex: none;
 }
 
 .statusDot {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
+  flex: none;
+  box-shadow: 0 0 0 0 currentColor;
 }
 
-.statusConnected {
+.statusHealthy {
+  color: var(--color-success);
   background: var(--color-success);
 }
 
-.statusDisconnected {
-  background: var(--color-danger);
-}
-
-.statusConnecting {
+.statusWarn {
+  color: var(--color-warning);
   background: var(--color-warning);
 }
 
+.statusDisconnected {
+  color: var(--color-danger);
+  background: var(--color-danger);
+}
+
+.footerText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-left: auto;
+  flex: none;
+}
+
+.connConnected {
+  background: var(--color-success);
+}
+
+.connConnecting {
+  background: var(--color-warning);
+}
+
+.connDisconnected {
+  background: var(--color-danger);
+}
+
+/* --- Main column --- */
 .main {
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
 }
 
+/* --- Global header (60px): quick-search left, icon buttons right --- */
 .header {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  gap: var(--spacing-md);
   height: var(--layout-header-height);
   padding: 0 var(--spacing-lg);
   background: var(--surface-chrome);
-  border-bottom: 1px solid var(--surface-border);
+  border-bottom: 1px solid var(--surface-border-hard);
   position: relative;
+  flex: none;
 }
 
+.headerSearch {
+  width: 320px;
+  max-width: 40vw;
+}
+
+.headerSpacer {
+  flex: 1;
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+.iconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--font-size-lg);
+  cursor: pointer;
+}
+
+.iconButton:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+/* --- Per-screen toolbar slot + scroll-confined content --- */
 .toolbar {
   display: flex;
   align-items: center;
@@ -107,6 +276,17 @@
   padding: 0 var(--spacing-md);
   background: var(--surface-chrome);
   border-bottom: 1px solid var(--surface-border);
+  flex: none;
+}
+
+/* The outlet host: the ONLY scrolling region of the frame. Each screen renders
+ * its own toolbar + body inside here; page-level scroll never happens. */
+.outlet {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
 }
 
 .content {

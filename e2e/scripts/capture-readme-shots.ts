@@ -167,7 +167,9 @@ async function shoot(page: Page, name: string): Promise<void> {
 async function main(): Promise<void> {
   await mkdir(OUT_DIR, { recursive: true });
   const selected = ONLY.length ? shots.filter((s) => ONLY.includes(s.id)) : shots;
-  const browser = await chromium.launch();
+  // --disable-dev-shm-usage: containers often mount a small /dev/shm and the
+  // renderer crashes taking full-page screenshots without it.
+  const browser = await chromium.launch({ args: ['--disable-dev-shm-usage'] });
   const context = await browser.newContext({
     viewport: VIEWPORT,
     deviceScaleFactor: 1,

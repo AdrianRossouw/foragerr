@@ -9,6 +9,39 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.4.0] — 2026-07-10
+
+m4-design-shell: the M4 design refresh begins — new design language and app shell.
+
+### Added
+- **New app shell** (FRG-UI-023): 212px sidebar with the Foragerr lockup, grouped
+  navigation with live count badges (Comics, Queue, Wanted in warn style),
+  Settings/System sections, and a health-pulse footer showing the running
+  version — with honest connection reporting ("reconnecting…" text + live
+  region when the WebSocket drops) and a skip-to-content link. 60px global
+  header with the library quick-search and Health/System buttons. Content is
+  the single scrolling region.
+- **One-command README screenshot refresh** (FRG-PROC-017):
+  `tools/refresh-readme-shots.sh` regenerates the README tour against the
+  public-domain demo library — with stale-port and partial-import guards —
+  and every UI-affecting change re-runs it before merging. This release's
+  tour already shows the new interface.
+
+### Changed
+- **Design tokens rebuilt** (FRG-UI-002): dark warm-neutral surfaces, the
+  green accent family, semantic status and progress colors, publisher and
+  format-chip palettes as data; Roboto and Font Awesome 6 self-hosted — the
+  app makes no font/icon CDN requests, and non-woff2 fallbacks are dropped
+  from the bundle (~516 KB smaller).
+- Calendar and Creators do not appear in the navigation yet — nav lists
+  shipped screens only; they arrive with their screens (M4 ch5, M5).
+
+### Notes
+- SOUP register gains @fontsource/roboto (OFL-1.1) and
+  @fortawesome/fontawesome-free (CC-BY-4.0/OFL-1.1/MIT), both bundled static
+  assets. Screens' behavior is unchanged — redesigns of the individual
+  screens land through the rest of M4.
+
 ## [v0.3.7] — 2026-07-10
 
 roadmap-reshape: M4 design refresh · M5 creators · M6 sources · M7 torrents · M8 auth.

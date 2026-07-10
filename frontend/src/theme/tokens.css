@@ -1,56 +1,93 @@
 /*
  * foragerr design-token layer (FRG-UI-002).
  *
- * The ant/foraging brand theme is expressed ONCE here as token values. No
+ * The foraging brand theme is expressed ONCE here as token values. No
  * screen-level component may hardcode a brand color or theme-specific style —
  * everything reads these custom properties.
  *
  * Token NAMES are deliberately theme-neutral (--color-accent, --surface-*,
  * --spacing-*), never brand-named. A token-name audit test enforces this: any
- * property whose name references `ant-`/brand naming fails the build.
+ * property whose name references a brand segment (`ant-`/`forager`/`brand`)
+ * fails the build.
  *
- * Default values are the Sonarr-dark design school (measured set:
- * page #202020, chrome #2a2a2a, cards #333, sidebar 210px, header/toolbar 60px,
- * Roboto 14px/1.53). --color-accent resolves to the ant brand color (#57b877).
+ * Values implement the owner's 2026-07-10 design handoff: dark warm-neutral
+ * surfaces (app bg #202020, panels/sidebar/header #262626, card #282828,
+ * raised menu #2b2b2b, input #1c1c1c) under one green accent family (#57b877
+ * primary, #7fce9a light/active), semantic status hues, and progress-track
+ * colors. Publisher tint/accent and format-chip palettes live as DATA maps in
+ * `theme/palettes.ts` (design decision 1), not as CSS tokens, because they are
+ * looked up per-publisher/format at render time.
  */
 :root {
-  /* --- Accent (the one place the brand color lives) --- */
+  /* --- Accent (the one place the brand green lives) --- */
   --color-accent: #57b877;
-  --color-accent-hover: #6bc98a;
-  --color-accent-contrast: #ffffff;
+  --color-accent-light: #7fce9a;
+  --color-accent-hover: #66c98a;
+  --color-accent-tint: rgba(87, 184, 119, 0.15);
+  --color-accent-selected-bg: #31543f;
+  /* Dark knockout text on an accent-filled surface (design: #0f1f0d). */
+  --color-accent-contrast: #0f1f0d;
+  /* Toggle-switch knob: stays white in BOTH the off (neutral) and on (green)
+   * track states so the knob reads clearly — the accent-contrast knockout would
+   * be near-invisible on the green on-track. */
+  --color-switch-knob: #ffffff;
 
-  /* --- Surfaces (Sonarr-dark shell) --- */
+  /* --- Surfaces (warm-neutral dark shell) --- */
   --surface-page: #202020;
-  --surface-chrome: #2a2a2a;
-  --surface-card: #333333;
-  --surface-card-hover: #3a3a3a;
-  --surface-sidebar: #2a2a2a;
+  --surface-chrome: #262626;
+  --surface-sidebar: #262626;
+  --surface-card: #282828;
+  --surface-card-hover: #2c2c2c;
+  --surface-menu: #2b2b2b;
+  --surface-input: #1c1c1c;
+  --surface-hover: #2f2f2f;
+  --surface-active: #2f2f2f;
   --surface-overlay: rgba(0, 0, 0, 0.6);
-  --surface-border: #454545;
+  --surface-border: #333333;
+  --surface-border-soft: #3a3a3a;
+  --surface-border-hard: #161616;
+  --surface-row-border: #2b2b2b;
 
   /* --- Text --- */
-  --text-primary: #ffffff;
-  --text-secondary: #a0a0a0;
-  --text-muted: #707070;
+  --text-primary: #e6e6e6;
+  --text-secondary: #9a9a9a;
+  --text-muted: #7a7a7a;
+  --text-faint: #5f5f5f;
   --text-on-accent: var(--color-accent-contrast);
 
-  /* --- Status --- */
-  --color-success: #27c24c;
-  --color-warning: #ddb500;
+  /* --- Status (semantic hues; owned/complete green, missing/importing amber,
+   *     downloading blue, queued/neutral grey) --- */
+  --color-success: #57b877;
+  --color-success-text: #7fce9a;
+  --color-warning: #e5a54b;
+  --color-warning-text: #d99a5b;
+  --color-info: #5d9cec;
+  --color-info-text: #8ab6f0;
   --color-danger: #f05050;
-  --color-info: #5a9dd4;
+  --color-neutral: #9a9a9a;
+
+  /* --- Progress track (design: complete #2f5d40, incomplete #4a2523, fill
+   *     always the accent green) --- */
+  --color-progress-complete: #2f5d40;
+  --color-progress-incomplete: #4a2523;
+  --color-progress-fill: #57b877;
 
   /* --- Typography --- */
   --font-family-base: 'Roboto', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-  --font-family-mono: 'Roboto Mono', 'SFMono-Regular', Menlo, monospace;
+  --font-family-mono: 'Roboto Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
   --font-size-base: 14px;
   --font-size-sm: 12px;
+  --font-size-xs: 11px;
   --font-size-lg: 16px;
   --font-size-heading: 21px;
+  --font-size-page-title: 32px;
+  --font-size-section-label: 10px;
+  --font-weight-light: 300;
   --font-weight-normal: 400;
   --font-weight-medium: 500;
   --font-weight-bold: 700;
   --line-height-base: 1.53;
+  --letter-spacing-label: 0.09em;
 
   /* --- Spacing --- */
   --spacing-xs: 4px;
@@ -60,17 +97,19 @@
   --spacing-xl: 32px;
 
   /* --- Layout --- */
-  --layout-sidebar-width: 210px;
+  --layout-sidebar-width: 212px;
   --layout-header-height: 60px;
-  --layout-toolbar-height: 60px;
+  --layout-toolbar-height: 62px;
   --layout-content-max-width: 1450px;
 
   /* --- Radius / elevation / iconography --- */
   --radius-sm: 3px;
-  --radius-md: 4px;
+  --radius-md: 5px;
   --radius-lg: 8px;
-  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.35);
-  --shadow-overlay: 0 6px 24px rgba(0, 0, 0, 0.5);
+  --radius-pill: 999px;
+  --shadow-card: 0 1px 4px rgba(0, 0, 0, 0.4);
+  --shadow-menu: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.5);
   --icon-size-sm: 14px;
   --icon-size-md: 18px;
   --icon-size-lg: 24px;
