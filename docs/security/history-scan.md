@@ -13,18 +13,27 @@ history-affecting operation is pushed to the public remote).
 - **Scanned HEAD**: `36d7273dc3ead13ee4b624fbdf4faf15a3b08163`
   (branch `change/going-public`; 392 commits, ~7.48 MB scanned — see re-scan log)
 - **Raw result**: 11 findings, all rule `generic-api-key`
-- **Unresolved findings**: **0**
+- **Unresolved findings**: **0** (the 11 raw findings are dispositioned below;
+  the separately-identified real credential is resolved-by-acceptance as KA-001)
 
 ## Disposition of the 11 raw findings
 
-All 11 occur in `backend/tests/**` and are synthetic, checked-in test fixtures
-or regex false positives — no real credential has ever been committed:
+All 11 gitleaks findings occur in `backend/tests/**` and are synthetic,
+checked-in test fixtures or regex false positives. Separately, one **real**
+credential is present in git history — the owner's ComicVine API key embedded in
+`docs/research/Foragerr.dc.html` — which gitleaks structurally misses (a bare
+`KEY = '<40 hex>'` assignment is indistinguishable from a commit SHA to generic
+rules). That finding is evaluated and **accepted** as **KA-001** in the
+known-anomalies register (`known-anomalies.md`); the `.gitleaks.toml`
+`bare-key-hex` rule added in that change closes the detection gap so a re-scan
+now surfaces it:
 
 | Matched value | Where | Disposition |
 |---|---|---|
 | `CV-SECRET-KEY-abc123` | `tests/flows_support.py`, `tests/metadata/cv_support.py`, `tests/test_comicvine_credential_resource.py` (and their historical revisions) | Deliberately fake fixture key (3 findings) |
 | `sab-secret-key-4321` | `tests/downloads/test_downloadclient_crud_api.py` | Deliberately fake fixture key (1 finding) |
 | `comicvine_min_interval_seconds=0.25` call-sites | `tests/test_comicvine_credential_resource.py`, `tests/metadata/test_client.py`, `tests/metadata/test_live.py` (historical revisions) | Regex false positive on a rate-limit kwarg adjacent to `comicvine_api_key=` — not a secret (7 findings) |
+| Bare `KEY = '<40 lowercase hex>'` (ComicVine API key) | `docs/research/Foragerr.dc.html` (blob `495f29e`, reachable from all tags `v0.1.0`–`v0.3.5`) | **Real** credential; missed by the default gitleaks ruleset (SHA-shaped). **Accepted** per **KA-001** — resolved-by-acceptance; detection gap closed by `.gitleaks.toml` `bare-key-hex` (see `known-anomalies.md`) |
 
 Corroborating checks (same date): no `.env` file was ever committed on any ref
 (`git log --all --diff-filter=A -- '*.env' '.env*'` is empty), and the release

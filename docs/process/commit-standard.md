@@ -32,7 +32,10 @@ Governed by **FRG-PROC-001** and **FRG-PROC-002** (message format) and
    scan recorded in `docs/security/history-scan.md` must name an
    ancestor-or-equal of the merge HEAD; re-run and append to its re-scan log
    before any history-affecting operation (force-push, rewrite) is pushed to
-   the public remote.
+   the public remote. Run the scan with the repo's `.gitleaks.toml`
+   (`gitleaks git --config .gitleaks.toml`), whose custom `bare-key-hex` rule
+   closes the KA-001 detection gap and whose fixture allowlist keeps the
+   synthetic `backend/tests/**` secrets from re-flagging under that rule.
 8. Registry rows flipped, matrix regenerated, change archived, branch deleted
    after merge.
 8. Release record per FRG-PROC-013 (`openspec/specs/dev-process/spec.md` owns the
