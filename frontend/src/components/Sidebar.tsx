@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom';
+import { Link, NavLink } from 'react-router-dom';
 import { useConnectionStore, type ConnectionStatus } from '../ws/connectionStore';
 import {
   useSeriesIndex,
@@ -156,14 +156,15 @@ export function Sidebar() {
 
   return (
     <aside className={styles.sidebar}>
-      <div className={styles.brand}>
+      {/* The lockup doubles as the way home (owner request 2026-07-10). */}
+      <Link to="/" className={styles.brand} aria-label="Foragerr — home">
         <span className={styles.brandTile} aria-hidden>
           <LogoMarkIcon size={21} />
         </span>
         <span className={styles.brandWord}>
           Forage<span className={styles.brandWordAccent}>rr</span>
         </span>
-      </div>
+      </Link>
       <nav className={styles.nav} aria-label="Primary">
         {NAV_GROUPS.map((group, index) => (
           <div key={group.label ?? `group-${index}`}>

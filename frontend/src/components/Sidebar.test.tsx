@@ -147,7 +147,9 @@ describe('FRG-UI-023: logo lockup', () => {
 
     // The handoff's mark is pure SVG (ant + hexagon knocked out on the tile);
     // a regression back to an icon-font placeholder would render an <i> here.
-    const brand = container.querySelector('aside > div');
+    // The lockup is also the home link (owner request 2026-07-10).
+    const brand = container.querySelector('aside > a');
+    expect(brand?.getAttribute('href')).toBe('/');
     expect(brand?.querySelector('svg')).not.toBeNull();
     expect(brand?.querySelector('i[class*="fa-"]')).toBeNull();
     expect(brand?.textContent).toBe('Foragerr');
