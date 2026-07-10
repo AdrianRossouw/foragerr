@@ -84,7 +84,11 @@ change control going forward.
 
 ## Approval
 
-*Pending — Adrian approves before implementation begins (FRG-PROC-009).
-The accept-the-exposure decision itself was made by Adrian in conversation,
-2026-07-09 ("i think we can document it and accept... i could always create
-another account... somebody could also register their own free account").*
+Approved by Adrian, 2026-07-10 ("and known anomolies change is approved").
+The accept-the-exposure decision itself was made 2026-07-09 ("i think we can
+document it and accept... i could always create another account... somebody
+could also register their own free account"). Scope additions agreed in the
+same conversation: remove the working-tree copy of the key-bearing design
+export (docs/research/Foragerr.dc.html) so the current tree stops
+republishing it, and record the owner's FRG-AUTH-008 direction (encryption
+key from environment only, never a file) as a note on RISK-041.

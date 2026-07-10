@@ -18,6 +18,13 @@
       of the published key; accept with compensating mitigations; review
       triggers; cross-link KA-001 (FRG-PROC-006)
 
+- [ ] 1.5 Commit the removal of `docs/research/Foragerr.dc.html` from the
+      working tree (owner decision: design handoff stays out of the repo; the
+      historical blob remains, accepted per KA-001) (FRG-PROC-016)
+- [ ] 1.6 Record the owner's 2026-07-10 FRG-AUTH-008 direction on RISK-041:
+      at-rest encryption key comes from the environment only, never a file;
+      key rotation designed at the user-accounts milestone (FRG-PROC-006)
+
 ## 2. Scanner gap
 
 - [ ] 2.1 Add repo-root `.gitleaks.toml`: custom rule for 32+ char hex/base64
