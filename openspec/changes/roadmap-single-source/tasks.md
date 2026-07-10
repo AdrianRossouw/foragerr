@@ -37,9 +37,9 @@
 
 ## 4. Spec sync and gate
 
-- [ ] 4.1 Sync the dev-process delta into `openspec/specs/dev-process/spec.md`
+- [x] 4.1 Sync the dev-process delta into `openspec/specs/dev-process/spec.md`
       (FRG-PROC-018 added, FRG-PROC-014 modified) (FRG-PROC-003)
-- [ ] 4.2 Full suite green; regenerate traceability matrix (`tools/trace.py`);
+- [x] 4.2 Full suite green; regenerate traceability matrix (`tools/trace.py`);
       `tools/soup_check.py` exit 0 (no dependency changes expected); merge-gate
       checklist per `docs/process/commit-standard.md` (FRG-PROC-004,
       FRG-PROC-005, FRG-PROC-012)
