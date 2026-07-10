@@ -28,8 +28,21 @@ Governed by **FRG-PROC-001** and **FRG-PROC-002** (message format) and
    rationale) was carried out in `docs/manual/` / `README.md`.
 5. Security docs updated if the change added attack surface (FRG-PROC-006).
 6. Code review + simplify pass on the branch diff, including an
-   independent-model (Codex) full-diff review as a required ninth
-   perspective (owner instruction 2026-07-10).
+   independent-model (Codex) full-diff review as a required independent
+   perspective (owner instruction 2026-07-10). The review fleet is
+   **tiered to the diff** (owner instruction 2026-07-10, m4-logs-viewer):
+   - **Small** (≲500 changed lines AND no new attack surface): 2–3
+     targeted angles + Codex; mechanical angles (test/trace audit, token
+     discipline) run on the cheaper model tier.
+   - **Medium**: 4–5 angles + Codex, mixed model tiers.
+   - **Large or security-touching** (new listener/endpoint, parser of
+     untrusted input, credentials — regardless of size): the full
+     eight-angle fleet + Codex, subtle angles on the strong model tier.
+     A size-small change that adds attack surface keeps the small fleet
+     but MUST include a dedicated adversarial security angle for that
+     surface, and the new surface's spec MUST carry a tested
+     abuse/leak scenario.
+   Angle count and tier are recorded in the gate evidence.
 7. History hygiene (FRG-PROC-015, public repository): the full-history secret
    scan recorded in `docs/security/history-scan.md` must name an
    ancestor-or-equal of the merge HEAD; re-run and append to its re-scan log
