@@ -33,7 +33,7 @@ docs/manual/
   admin/
     configuration.md      config.yaml, FORAGERR_* env vars
     secrets.md             secrets handling
-    network.md              port, Tailscale-only posture, no auth before M8
+    network.md              port, Tailscale-only posture, no authentication
     deployment.md            Docker image build, run, upgrade
 ```
 

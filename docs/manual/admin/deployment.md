@@ -6,7 +6,7 @@ an unauthenticated `/health` endpoint for the container health check, and a grac
 SIGTERM shutdown. The image serves everything on one port (`8789`): the web UI at `/`,
 the API at `/api`, the OPDS catalog at `/opds`, and the health probe at `/health`.
 
-> **Read `network.md` first.** foragerr has **no authentication** until the auth milestone (M8)
+> **Read `network.md` first.** foragerr has **no authentication**
 > (`FRG-AUTH-001`, an owner-accepted risk — `RISK-020`). Its only supported exposure
 > model is **Tailscale-only**. The compose example below binds the listener to the
 > host's tailnet address for that reason. Do **not** port-forward foragerr to the
@@ -165,10 +165,11 @@ Status screen (see `../user/web-ui.md`) lists the managed paths, including
 
 ### Tailscale-only is the compensating control
 
-foragerr operates with **no authentication** on the UI, API, and OPDS surfaces in
-all pre-auth milestones (re-accepted through M7, 2026-07-10). This is a deliberate, owner-approved decision recorded as **`RISK-020`** in
-`docs/security/risk-register.md` ("no auth before the auth milestone (M8), network-scoped exposure",
-accepted). The **compensating control** is that foragerr is reachable **only over the
+foragerr operates with **no authentication** on the UI, API, and OPDS surfaces.
+This is a deliberate, owner-approved decision recorded as **`RISK-020`** in
+`docs/security/risk-register.md` ("no auth, network-scoped exposure",
+accepted); adding authentication is tracked in
+[the roadmap](../../roadmap.md). The **compensating control** is that foragerr is reachable **only over the
 home server's Tailscale network** (`FRG-DEP-011`) — that is what keeps the no-auth
 posture inside its accepted-risk boundary. Transport security is provided by the
 tailnet; foragerr performs no TLS termination of its own.
@@ -177,7 +178,7 @@ tailnet; foragerr performs no TLS termination of its own.
 
 **Do not** expose foragerr's port to the public internet, a shared/untrusted LAN, or a
 reverse proxy without its own access control. Widening exposure beyond the tailnet
-before authentication ships (targeted M8 (2026-07-10 reshape)) puts you outside the accepted-risk boundary
+while foragerr has no authentication puts you outside the accepted-risk boundary
 in the risk register and is a decision that needs its own review — not an incidental
 config change. See `network.md` for the operational detail.
 
