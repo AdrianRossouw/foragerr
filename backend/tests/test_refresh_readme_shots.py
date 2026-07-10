@@ -57,6 +57,36 @@ def test_refresh_tool_drives_the_committed_capture_script():
 
 
 @pytest.mark.req("FRG-PROC-017")
+def test_refresh_tool_guards_against_a_stale_port():
+    """A pre-existing instance on the port must be refused unless explicitly reused."""
+    text = TOOL.read_text()
+    # Probes the health endpoint before starting its own backend…
+    assert re.search(r'curl -fsS "\$\{BASE_URL\}/health".*\n.*FORAGERR_REFRESH_REUSE', text), (
+        "the tool must probe ${BASE_URL}/health and honour FORAGERR_REFRESH_REUSE"
+    )
+    # …and either reuses (opt-in) or fails loudly.
+    assert "FORAGERR_REFRESH_REUSE" in text
+    assert re.search(r"already serving.*fail|fail .*already serving", text) or (
+        "already serving" in text
+    ), "the tool must fail when the port is already in use"
+
+
+@pytest.mark.req("FRG-PROC-017")
+def test_refresh_tool_fails_on_incomplete_import():
+    """A staged group with no ComicVine proposal must abort the tour, not ship partial."""
+    text = TOOL.read_text()
+    assert "proposedCvVolumeId" in text, (
+        "the tool must inspect each staged group's ComicVine proposal"
+    )
+    assert re.search(r"UNPROPOSED", text), (
+        "the tool must collect the unproposed groups"
+    )
+    assert re.search(r"lack a ComicVine proposal", text), (
+        "the tool must fail listing the unproposed group names"
+    )
+
+
+@pytest.mark.req("FRG-PROC-017")
 def test_readme_embeds_exactly_the_capture_shot_set():
     capture = _capture_shot_ids()
     readme = _readme_shot_ids()

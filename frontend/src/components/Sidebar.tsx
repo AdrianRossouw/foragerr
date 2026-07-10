@@ -141,9 +141,16 @@ export function Sidebar() {
     : connection === 'disconnected'
       ? styles.statusDisconnected
       : styles.statusHealthy;
+  // Visible footer text must not claim "all healthy" while the socket is down —
+  // the red connection dot and the words would contradict each other. Health
+  // warnings still take precedence (they are the more serious signal); otherwise
+  // a dropped/reconnecting socket surfaces as "reconnecting…", and only a
+  // connected, warning-free app reads "all healthy".
   const healthLabel = !healthy
     ? `${warningCount} warning${warningCount === 1 ? '' : 's'}`
-    : 'all healthy';
+    : connection !== 'connected'
+      ? 'reconnecting…'
+      : 'all healthy';
   const version = status.data?.version;
 
   return (
@@ -183,7 +190,12 @@ export function Sidebar() {
           </div>
         ))}
       </nav>
-      <div className={styles.footer} data-testid="sidebar-status">
+      <div
+        className={styles.footer}
+        data-testid="sidebar-status"
+        role="status"
+        aria-live="polite"
+      >
         <span className={`${styles.statusDot} ${healthDotClass}`} aria-hidden />
         <span className={styles.footerText}>
           Foragerr{version ? ` ${version}` : ''} — {healthLabel}

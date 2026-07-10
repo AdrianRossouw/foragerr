@@ -80,7 +80,7 @@ export function BlocklistScreen() {
           </span>
         }
       />
-      <div className={styles.content}>
+      <div>
         {notice && (
           <p className={styles.notice} role="alert">
             {notice}

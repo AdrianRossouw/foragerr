@@ -1,8 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { screen, within, waitFor, act } from '@testing-library/react';
 import { renderWithProviders } from '../test/renderWithProviders';
 import { createQueryClient } from '../queryClient';
 import { queryKeys } from '../api/queryKeys';
+import { useConnectionStore } from '../ws/connectionStore';
 import {
   makeSeriesResource,
   makeSystemStatus,
@@ -47,6 +48,12 @@ function withMissing(id: number, missing: number): SeriesResource {
   const s = makeSeriesResource({ id });
   return { ...s, statistics: { ...s.statistics, missing_count: missing } };
 }
+
+// The connection store is a module-level singleton; reset it to a connected
+// baseline before each test so footer-text assertions are not order-dependent.
+beforeEach(() => {
+  useConnectionStore.setState({ status: 'connected' });
+});
 
 /**
  * FRG-UI-016 — nav reachability: the System area (Status / Health / Tasks)
@@ -181,6 +188,31 @@ describe('FRG-UI-023: sidebar count badges are live', () => {
     });
     await waitFor(() =>
       expect(screen.getByTestId('nav-badge-series')).toHaveTextContent('2'),
+    );
+  });
+
+  it('FRG-UI-023 — a dropped socket surfaces as reconnecting even when health is clean', async () => {
+    act(() => {
+      useConnectionStore.setState({ status: 'disconnected' });
+    });
+    renderWithProviders(<Sidebar />, {
+      withRouter: true,
+      client: createQueryClient(),
+      // Healthy cache (no warnings) — the visible text must still reflect the
+      // dropped connection rather than claiming "all healthy".
+      fetcher: sidebarFetcher({ series: [], queueTotal: 0, version: '1.4.2' }),
+    });
+
+    const footer = screen.getByTestId('sidebar-status');
+    await waitFor(() => expect(footer).toHaveTextContent('reconnecting…'));
+    expect(footer).not.toHaveTextContent('all healthy');
+    // The row is an assertive-but-polite live region for screen readers.
+    expect(footer).toHaveAttribute('role', 'status');
+    expect(footer).toHaveAttribute('aria-live', 'polite');
+    // The connection dot still reflects the disconnected state.
+    expect(screen.getByTestId('connection-status')).toHaveAttribute(
+      'data-status',
+      'disconnected',
     );
   });
 });

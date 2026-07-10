@@ -3,6 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import tokensCss from './tokens.css?raw';
+import { PUBLISHER_ACCENT_DEFAULT } from './palettes';
 
 /**
  * FRG-UI-002 — token definitions parsed straight from tokens.css.
@@ -72,6 +73,16 @@ describe('FRG-UI-002: design tokens defined once with neutral names', () => {
     expect(byName.get('color-progress-complete')?.toLowerCase()).toBe('#2f5d40');
     expect(byName.get('color-progress-incomplete')?.toLowerCase()).toBe('#4a2523');
     expect(byName.get('color-progress-fill')?.toLowerCase()).toBe('#57b877');
+  });
+
+  it('FRG-UI-002 — the publisher/format default accent stays pinned to the token accent', () => {
+    // palettes.ts intentionally duplicates the brand green as its fallback
+    // accent (it feeds inline styles, not CSS). This pin fails the build if the
+    // two drift, so a token-layer accent change can never silently leave the
+    // data-map default behind.
+    expect(PUBLISHER_ACCENT_DEFAULT.toLowerCase()).toBe(
+      byName.get('color-accent')?.toLowerCase(),
+    );
   });
 
   it('FRG-UI-002 — token-name audit rejects brand-named tokens (no ant-/forager/brand naming)', () => {

@@ -19,6 +19,9 @@ export function AppShell({ socketFactory }: { socketFactory?: SocketFactory }) {
   const navigate = useNavigate();
   return (
     <div className={styles.shell}>
+      <a className={styles.skipLink} href="#main-content">
+        Skip to content
+      </a>
       <WebSocketBridge socketFactory={socketFactory} />
       <Sidebar />
       <div className={styles.main}>
@@ -50,7 +53,9 @@ export function AppShell({ socketFactory }: { socketFactory?: SocketFactory }) {
             </button>
           </div>
         </header>
-        <Outlet />
+        <div className={styles.outlet} id="main-content">
+          <Outlet />
+        </div>
       </div>
     </div>
   );

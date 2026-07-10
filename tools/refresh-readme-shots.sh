@@ -55,23 +55,38 @@ if [ -f "${REPO}/.env" ]; then
   unset CVKEY
 fi
 
+# --- Stale-port guard --------------------------------------------------------
+# If something already answers on ${BASE_URL}, we would otherwise capture that
+# unknown instance (wrong library, wrong build) or fail confusingly. Refuse to
+# proceed unless the operator opts in to reusing it.
+if curl -fsS "${BASE_URL}/health" >/dev/null 2>&1; then
+  if [ "${FORAGERR_REFRESH_REUSE:-}" = "1" ]; then
+    log "reusing the instance already running on ${BASE_URL} (FORAGERR_REFRESH_REUSE=1)"
+    REUSING=1
+  else
+    fail "something is already serving ${BASE_URL} — stop that instance first, or set FORAGERR_REFRESH_REUSE=1 to intentionally reuse it"
+  fi
+fi
+
 # --- Start the backend against the demo library ------------------------------
-export FORAGERR_CONFIG_DIR="${CONFIG_DIR}"
-export FORAGERR_HOST=127.0.0.1
-export FORAGERR_PORT="${PORT}"
-export FORAGERR_LOG_LEVEL=WARNING
-export FORAGERR_LIBRARY_IMPORT_MODE=move
-export FORAGERR_STATIC_DIR="${REPO}/frontend/dist"
+if [ "${REUSING:-}" != "1" ]; then
+  export FORAGERR_CONFIG_DIR="${CONFIG_DIR}"
+  export FORAGERR_HOST=127.0.0.1
+  export FORAGERR_PORT="${PORT}"
+  export FORAGERR_LOG_LEVEL=WARNING
+  export FORAGERR_LIBRARY_IMPORT_MODE=move
+  export FORAGERR_STATIC_DIR="${REPO}/frontend/dist"
 
-log "starting backend on ${BASE_URL}…"
-( cd "${REPO}/backend" && exec uv run foragerr ) &
-BACKEND_PID=$!
+  log "starting backend on ${BASE_URL}…"
+  ( cd "${REPO}/backend" && exec uv run foragerr ) &
+  BACKEND_PID=$!
 
-for _ in $(seq 1 60); do
-  if curl -fsS "${BASE_URL}/health" >/dev/null 2>&1; then break; fi
-  sleep 1
-done
-curl -fsS "${BASE_URL}/health" >/dev/null 2>&1 || fail "backend did not become healthy"
+  for _ in $(seq 1 60); do
+    if curl -fsS "${BASE_URL}/health" >/dev/null 2>&1; then break; fi
+    sleep 1
+  done
+  curl -fsS "${BASE_URL}/health" >/dev/null 2>&1 || fail "backend did not become healthy"
+fi
 
 # --- Populate the library if empty (register /comics, then library-import) ---
 series_count() {
@@ -83,8 +98,11 @@ if [ "$(series_count)" -eq 0 ]; then
   log "library empty — importing ${COMICS_DIR}"
   [ -d "${COMICS_DIR}" ] || fail "demo library ${COMICS_DIR} does not exist"
 
+  # Build the request body with json.dumps so a COMICS_DIR containing quotes,
+  # backslashes, or other JSON-significant characters cannot corrupt the payload.
+  ROOT_BODY="$(COMICS_DIR="${COMICS_DIR}" python3 -c 'import json,os; print(json.dumps({"path": os.environ["COMICS_DIR"]}))')"
   ROOT_ID="$(curl -fsS -X POST "${BASE_URL}/api/v1/rootfolder" \
-    -H 'content-type: application/json' -d "{\"path\":\"${COMICS_DIR}\"}" \
+    -H 'content-type: application/json' -d "${ROOT_BODY}" \
     | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
 
   curl -fsS -X POST "${BASE_URL}/api/v1/library-import/scan" \
@@ -110,6 +128,19 @@ print(",".join(str(i) for i in ids))')"
   done
   [ -n "${GROUP_IDS}" ] && [ "${GROUP_IDS}" = "${PREV}" ] \
     || fail "library-import staging did not stabilize"
+
+  # Import completeness: every staged group must carry a ComicVine proposal. A
+  # partial tour (some folders silently dropped for want of a match) must not
+  # ship — fail loudly, naming the unproposed folders so the operator can fix
+  # the metadata or exclude them deliberately.
+  UNPROPOSED="$(curl -fsS "${BASE_URL}/api/v1/library-import?rootFolderId=${ROOT_ID}" \
+    | python3 -c 'import json,sys
+d=json.load(sys.stdin)
+names=[g.get("folder","?") for g in d.get("records",[]) if not g.get("proposedCvVolumeId")]
+print("\n".join(names))')"
+  [ -z "${UNPROPOSED}" ] \
+    || fail "$(printf "%s staged group(s) lack a ComicVine proposal:\n%s" \
+              "$(echo "${UNPROPOSED}" | grep -c .)" "${UNPROPOSED}")"
 
   IDS_JSON="[$(echo "${GROUP_IDS}" | sed 's/,/, /g')]"
   curl -fsS -X POST "${BASE_URL}/api/v1/library-import/execute" \

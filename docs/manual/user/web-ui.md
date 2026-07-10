@@ -25,13 +25,22 @@ and only the content region scrolls:
   nav lists only screens that exist today; entries for planned screens appear in
   the release that ships them. The footer shows a health pulse and the running
   version (e.g. "Foragerr 0.4.0 — all healthy"); it turns amber when the Health
-  screen has active warnings. Fonts (Roboto) and icons (Font Awesome) are served
-  from foragerr itself — nothing is fetched from an external CDN, so the UI works
-  fully offline on your tailnet.
+  screen has active warnings. A small connection dot sits at the right of the
+  footer: green when the live WebSocket is connected, red when it drops. While
+  the socket is down the footer text reads "reconnecting…" (rather than claiming
+  "all healthy") until the connection is re-established, so the words never
+  contradict the red dot. The footer is a screen-reader live region, so assistive
+  tech announces these state changes. Fonts (Roboto) and icons (Font Awesome) are
+  served from foragerr itself — nothing is fetched from an external CDN, so the UI
+  works fully offline on your tailnet.
 - **Global header** (top): the library quick-search on the left (see below) and
   quick-access buttons to the Health and System screens on the right.
 - **Page toolbar** (below the header): each screen's own primary actions and view
   controls.
+
+A "Skip to content" link is the first thing keyboard focus reaches (press Tab
+when the page loads): it is hidden until focused, and activating it jumps past the
+sidebar and header straight to the scrolling content region.
 
 ## Library
 

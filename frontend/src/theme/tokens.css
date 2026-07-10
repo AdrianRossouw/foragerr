@@ -27,6 +27,10 @@
   --color-accent-selected-bg: #31543f;
   /* Dark knockout text on an accent-filled surface (design: #0f1f0d). */
   --color-accent-contrast: #0f1f0d;
+  /* Toggle-switch knob: stays white in BOTH the off (neutral) and on (green)
+   * track states so the knob reads clearly — the accent-contrast knockout would
+   * be near-invisible on the green on-track. */
+  --color-switch-knob: #ffffff;
 
   /* --- Surfaces (warm-neutral dark shell) --- */
   --surface-page: #202020;

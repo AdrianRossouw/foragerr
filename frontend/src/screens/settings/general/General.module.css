@@ -4,9 +4,6 @@
  * private stylesheet. */
 
 .page {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
   padding: var(--spacing-lg);
   max-width: var(--layout-content-max-width);
 }
