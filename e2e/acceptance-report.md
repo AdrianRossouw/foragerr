@@ -4,8 +4,8 @@ _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.m
 
 - **Verdict:** GREEN
 - **Scenarios:** 15 (14 pass, 0 fail, 1 skipped, 0 flaky, 0 not run)
-- **Run started:** 2026-07-10T01:50:32.603Z
-- **Duration:** 62.5s
+- **Run started:** 2026-07-10T09:43:58.132Z
+- **Duration:** 62.4s
 
 ## Scenario → requirement coverage
 

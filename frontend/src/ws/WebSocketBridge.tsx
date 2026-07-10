@@ -25,7 +25,10 @@ export interface WebSocketBridgeProps {
  *
  * The SINGLE place server-push messages touch client state. It maps
  * {name, action, resource} messages onto React Query cache operations:
- *   - a `series` message invalidates ['series'] (active queries refetch);
+ *   - a `series` message invalidates ['series'] (active queries refetch), plus
+ *     the sibling ['issues', id] family so a series-detail issues table (e.g.
+ *     the one an operator lands on right after adding a series, once the
+ *     chained refresh populates its issues) is never left stale;
  *   - a queue-progress message PATCHES the cached ['queue', page] entry in place
  *     with NO new request (no backend emitter in M1; byte-level ticks are M2);
  *   - any other `queue` message (the backend's `{name:'queue', action:'updated'}`
@@ -124,10 +127,23 @@ export function WebSocketBridge({
           // — refresh it explicitly so a franchise view stays in sync with the
           // pushed series change (membership, counts, or a pruned group).
           void queryClient.invalidateQueries({ queryKey: queryKeys.series.groups() });
+          // Issues live under the sibling ['issues', id] key (queryKeys.issues.forSeries),
+          // never reached by the series-prefix invalidation above — invalidate it
+          // explicitly so the detail page's issues table refetches. This is exactly
+          // the case that surfaces after adding a series: the chained refresh lands
+          // issues while the operator is already sitting on the detail page, and
+          // without this the table stays empty/stale until a manual reload.
+          void queryClient.invalidateQueries({
+            queryKey: queryKeys.issues.forSeries(id),
+          });
         } else {
           // An id-less push invalidates the whole ['series'] prefix, which
-          // already sweeps the nested groups key.
+          // already sweeps the nested groups key. ['issues', …] is also a
+          // sibling family here (not nested under ['series']), so a broad,
+          // id-less push must invalidate its prefix too — otherwise a series
+          // change reported without an id could strand every open issues table.
           void queryClient.invalidateQueries({ queryKey: queryKeys.series.all() });
+          void queryClient.invalidateQueries({ queryKey: queryKeys.issues.all() });
         }
         return;
       }

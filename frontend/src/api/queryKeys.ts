@@ -62,6 +62,10 @@ export const queryKeys = {
     schema: (kind: string) => [kind, 'schema'] as const,
   },
   issues: {
+    // Prefix, used by the WebSocketBridge's id-less series-push fallback: an
+    // id-less push can't target one series' issues, so it sweeps every open
+    // issues table rather than stranding one it can't identify.
+    all: () => ['issues'] as const,
     forSeries: (seriesId: number) => ['issues', seriesId] as const,
   },
   command: {
