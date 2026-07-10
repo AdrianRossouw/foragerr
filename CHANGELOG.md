@@ -9,6 +9,34 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.3.5] — 2026-07-10
+
+ddl-optin-seeding: the first-run DDL provider pair now ships disabled.
+
+### Changed
+- **Fresh installs no longer acquire anything on their own.** First-run
+  seeding still creates the GetComics indexer and built-in DDL client rows —
+  pre-configured and visible in Settings — but both ship **disabled**, with
+  the indexer's automatic-search/RSS toggles off. Enable the pair (Settings →
+  Indexers, Settings → Download Clients) to start acquiring; one toggle each,
+  no other configuration (FRG-DEP-013).
+- Existing installs are untouched: rows seeded enabled under the old posture
+  stay enabled, and the never-resurrect / never-inject rules are unchanged.
+- RISK-015/RISK-016 posture returns from default-enabled to opt-in; the
+  triggering event (a fresh demo install auto-grabbing live downloads within
+  a minute of a library import creating wanted issues, 2026-07-09) is
+  recorded in the risk register and threat model.
+
+### Fixed
+- The image-build secret scanner no longer false-positives on code
+  identifiers shaped like `comicvine_api_key: ComicVineKeyStatus` — the
+  generic rule now requires a digit-bearing value, while still reporting a
+  line that carries both a benign identifier and a real secret.
+
+### Notes
+- No dependency changes; no new attack surface (the default surface strictly
+  shrinks).
+
 ## [v0.3.4] — 2026-07-09
 
 going-public: the repository is opened to the public. A docs/process/labelling

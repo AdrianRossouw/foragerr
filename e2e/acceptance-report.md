@@ -3,15 +3,16 @@
 _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.mjs` — do not edit by hand (FRG-PROC-010)._
 
 - **Verdict:** GREEN
-- **Scenarios:** 14 (13 pass, 0 fail, 1 skipped, 0 flaky, 0 not run)
-- **Run started:** 2026-07-06T16:41:36.657Z
-- **Duration:** 62.2s
+- **Scenarios:** 15 (14 pass, 0 fail, 1 skipped, 0 flaky, 0 not run)
+- **Run started:** 2026-07-10T00:00:58.645Z
+- **Duration:** 61.7s
 
 ## Scenario → requirement coverage
 
 | Result | Scenario | FRG requirement ids |
 | --- | --- | --- |
 | PASS | FRG-PROC-010 FRG-DEP-007 FRG-DEP-001: first run is healthy and the SPA loads | FRG-DEP-001, FRG-DEP-007, FRG-PROC-010 |
+| PASS | FRG-PROC-010 FRG-DEP-013: the seeded DDL pair ships disabled and is enabled as an explicit opt-in | FRG-DEP-013, FRG-PROC-010 |
 | PASS | FRG-PROC-010 FRG-SER-005 FRG-UI-005: add a series from the ComicVine fixture lands issues | FRG-PROC-010, FRG-SER-005, FRG-UI-005 |
 | PASS | FRG-PROC-010 FRG-UI-008: created indexers are visible in settings | FRG-PROC-010, FRG-UI-008 |
 | PASS | FRG-PROC-010 FRG-UI-007 FRG-SRCH-001: interactive search renders verbatim rejection reasons | FRG-PROC-010, FRG-SRCH-001, FRG-UI-007 |
@@ -35,6 +36,7 @@ _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.m
 | FRG-DDL-010 | PASS |
 | FRG-DEP-001 | PASS |
 | FRG-DEP-007 | PASS |
+| FRG-DEP-013 | PASS |
 | FRG-DL-007 | PASS |
 | FRG-IMP-022 | PASS |
 | FRG-IMP-023 | PASS |

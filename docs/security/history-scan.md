@@ -37,3 +37,4 @@ credential-bearing or otherwise unsuitable content.
 |------|------|------|-----------|------|
 | 2026-07-09 | `8a676db76cb337ce499b1e41f4ba5c93778351f8` | gitleaks 8.24.3 | 0 | Initial pre-flip scan (going-public change) |
 | 2026-07-09 | `36d7273dc3ead13ee4b624fbdf4faf15a3b08163` | gitleaks 8.24.3 | 0 | Gate re-scan, final pre-merge HEAD (392 commits); finding fingerprint set identical to the initial scan's 11 dispositioned fixtures |
+| 2026-07-10 | `e7c35bd2552c22a7aef3348f1a727b713c56deaa` | gitleaks 8.24.3 | 0 | ddl-optin-seeding gate re-scan; same 11 dispositioned fixtures. NOTE: a known credential exposure predating these scans is pending KA-001 (known-anomalies change) — gitleaks structurally misses it (bare KEY + hex); see that change for the disposition and detection-gap closure |

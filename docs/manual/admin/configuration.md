@@ -130,6 +130,15 @@ they were never consumed by anything and have been removed from the `Settings`
 model (`m2-first-run-defaults`) — a stale `config.yaml` that still carries them
 keeps loading fine (see the unknown-key note above), the keys are just ignored.
 
+On first run against an empty database, foragerr seeds a keyless GetComics
+indexer and a built-in DDL download-client so the pipeline is pre-configured and
+discoverable, but both rows are seeded **disabled** (the indexer's automatic-
+search/RSS toggles off) — an opt-in posture: no search, scrape, grab, or
+download happens until an operator enables the pair in Settings → Indexers /
+Download Clients (`ddl-optin-seeding`, amending `m2-first-run-defaults`). Newznab
+indexers and SABnzbd are never seeded. See `docs/manual/user/downloads.md` for
+the enable steps and RISK-015/RISK-016 in `docs/security/risk-register.md`.
+
 ## Listener resource limits
 
 The `listener_*` and `ws_*` settings above are availability safety valves on the

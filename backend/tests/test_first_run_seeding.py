@@ -1,9 +1,11 @@
 """FRG-DEP-013 — first-run default DDL provider seeding.
 
-A fresh install seeds exactly one enabled GetComics indexer and one enabled
-built-in DDL client (a keyless pipeline), gated by a persisted marker so an
-upgrade never gets rows injected and a user-deleted seeded row is never
-resurrected. See ``foragerr.db.first_run``.
+A fresh install seeds exactly one **disabled** GetComics indexer (automatic-
+search/RSS usage toggles off) and one **disabled** built-in DDL client — the
+keyless pipeline is discoverable in Settings but performs no acquisition until
+the operator opts in (ddl-optin-seeding, 2026-07-09). Seeding is gated by a
+persisted marker so an upgrade never gets rows injected and a user-deleted
+seeded row is never resurrected. See ``foragerr.db.first_run``.
 """
 
 from __future__ import annotations
@@ -44,6 +46,7 @@ from foragerr.indexers.repo import (
     create_indexer,
     delete_indexer,
     list_indexers,
+    select_for_path,
 )
 from foragerr.ddl.settings import GetComicsSettings
 
@@ -127,7 +130,7 @@ def _ddl_clients(rows):
 
 
 @pytest.mark.req("FRG-DEP-013")
-async def test_fresh_start_seeds_enabled_getcomics_and_ddl_and_sets_marker(db):
+async def test_fresh_start_seeds_disabled_getcomics_and_ddl_and_sets_marker(db):
     assert await is_seed_complete(db) is False  # fresh DB: marker unset
 
     await seed_first_run_defaults(db)
@@ -139,7 +142,12 @@ async def test_fresh_start_seeds_enabled_getcomics_and_ddl_and_sets_marker(db):
     idx = indexers[0]
     assert idx.name == SEEDED_INDEXER_NAME
     assert idx.protocol == "ddl"
-    assert idx.enabled is True
+    # ddl-optin-seeding: the seeded indexer ships disabled, with its automatic-
+    # search and RSS usage toggles off, so it performs no acquisition until the
+    # operator opts in.
+    assert idx.enabled is False
+    assert idx.enable_rss is False
+    assert idx.enable_auto is False
     assert json.loads(idx.settings) == {
         "base_url": "https://getcomics.org",
         "min_interval_seconds": 15,
@@ -149,7 +157,8 @@ async def test_fresh_start_seeds_enabled_getcomics_and_ddl_and_sets_marker(db):
     assert len(clients) == 1
     client = clients[0]
     assert client.protocol == "ddl"
-    assert client.enabled is True
+    # ddl-optin-seeding: the seeded DDL client ships disabled too.
+    assert client.enabled is False
     assert json.loads(client.settings) == {
         "host_priority": "main,mirror,pixeldrain,mediafire,mega",
         "prefer_upscaled": True,
@@ -299,10 +308,13 @@ def test_startup_hook_seeds_on_first_run(tmp_path):
     getcomics = [i for i in indexers if i["implementation"] == "getcomics"]
     ddl = [c for c in clients if c["implementation"] == "ddl"]
     assert len(getcomics) == 1
-    assert getcomics[0]["enabled"] is True
+    # ddl-optin-seeding: seeded disabled with usage toggles off.
+    assert getcomics[0]["enabled"] is False
+    assert getcomics[0]["enable_rss"] is False
+    assert getcomics[0]["enable_auto"] is False
     assert getcomics[0]["protocol"] == "ddl"
     assert len(ddl) == 1
-    assert ddl[0]["enabled"] is True
+    assert ddl[0]["enabled"] is False
     assert ddl[0]["protocol"] == "ddl"
 
 
@@ -355,3 +367,97 @@ async def test_startup_hook_skips_established_database(tmp_path):
         assert _ddl_clients(await list_download_clients(database)) == []
     finally:
         await database.close()
+
+
+# --------------------------------------------------------------------------- #
+# Opt-in posture (ddl-optin-seeding): no traffic before opt-in; one-toggle      #
+# activation restores the old default-enabled pipeline behavior                 #
+# --------------------------------------------------------------------------- #
+
+
+async def _fleet_getcomics(db, path: str) -> list:
+    """The seeded-getcomics rows a given fetch path would actually search.
+
+    Uses ``select_for_path`` directly — the same enabled/usage-toggle boundary
+    every disabled indexer is filtered at (and the same pattern as
+    test_indexer_repo_toggles) — rather than the full ``select_fleet``
+    pipeline, which adds health-splitting and engine config this check does
+    not depend on.
+    """
+    rows = await list_indexers(db)
+    return [
+        r
+        for r in select_for_path(rows, path)
+        if r.implementation == GETCOMICS_IMPLEMENTATION
+    ]
+
+
+@pytest.mark.req("FRG-DEP-013")
+async def test_disabled_seed_is_excluded_from_all_fetch_paths(db):
+    """No acquisition traffic before opt-in: with the seeded pair disabled, the
+    search / RSS / backlog candidate sets exclude the seeded provider, so no DDL
+    fetch is ever dispatched to it — the disabled row is filtered at the same
+    ``select_for_path`` boundary as any other disabled indexer."""
+    await seed_first_run_defaults(db)
+
+    # The seeded row exists and is discoverable...
+    seeded = _getcomics_indexers(await list_indexers(db))
+    assert len(seeded) == 1
+    assert seeded[0].enabled is False
+
+    # ...but is absent from EVERY fetch path's candidate set (rss/backlog=auto/
+    # interactive), so the search pipeline never queries it. No candidate -> no
+    # search -> no scrape/grab/download to the DDL upstream.
+    for path in ("rss", "auto", "interactive"):
+        assert await _fleet_getcomics(db, path) == []
+
+
+@pytest.mark.req("FRG-DEP-013")
+def test_enabling_seeded_pair_via_api_restores_old_pipeline_behavior(tmp_path):
+    """One-toggle activation: enabling the seeded GetComics indexer and DDL
+    client via the API makes the pipeline behave exactly as under the old
+    default-enabled posture — the provider re-enters the search candidate sets
+    and the client is active, with no additional configuration."""
+    path = tmp_path / "cfg"
+    path.mkdir()
+    app = create_app(Settings(config_dir=path))
+
+    with TestClient(app) as client:
+        indexer = next(
+            i for i in client.get("/api/v1/indexer").json()
+            if i["implementation"] == "getcomics"
+        )
+        ddl = next(
+            c for c in client.get("/api/v1/downloadclient").json()
+            if c["implementation"] == "ddl"
+        )
+        # Precondition: seeded disabled, excluded from the search candidate set.
+        assert indexer["enabled"] is False
+        assert ddl["enabled"] is False
+        assert client.portal.call(_fleet_getcomics, app.state.db, "auto") == []
+
+        # Enable both seeded rows (the single deliberate opt-in).
+        assert client.put(
+            f"/api/v1/indexer/{indexer['id']}",
+            json={"enabled": True, "enable_rss": True, "enable_auto": True},
+        ).status_code == 200
+        assert client.put(
+            f"/api/v1/downloadclient/{ddl['id']}",
+            json={"enabled": True},
+        ).status_code == 200
+
+        # Now the provider is back in the search candidate sets (old behavior)
+        # and the client is enabled — the keyless pipeline is live again.
+        enabled_idx = next(
+            i for i in client.get("/api/v1/indexer").json()
+            if i["implementation"] == "getcomics"
+        )
+        enabled_ddl = next(
+            c for c in client.get("/api/v1/downloadclient").json()
+            if c["implementation"] == "ddl"
+        )
+        assert enabled_idx["enabled"] is True
+        assert enabled_ddl["enabled"] is True
+        rows = client.portal.call(_fleet_getcomics, app.state.db, "auto")
+        assert len(rows) == 1
+        assert rows[0].name == SEEDED_INDEXER_NAME

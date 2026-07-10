@@ -6,20 +6,32 @@ interface, so the rest of foragerr — the queue view, tracking, import handoff,
 failure handling — treats them identically. There is no separate "DDL world"; a DDL
 grab looks like any other download except for its protocol/client fields.
 
-**A fresh install ships with the GetComics/DDL pair already enabled** — no
-credentials are needed for either usenet indexer or download client, so a brand
-new instance can search and download immediately. This is a deliberate
-default-on choice: the GetComics indexer and the built-in DDL client are seeded
-once, on first startup against a genuinely empty database, both enabled. This
-means outbound scraping of a third-party site (getcomics.org) happens without
-you opting in first. Delete the seeded indexer and/or download client (Settings
-→ Indexers / Download Clients) if you don't want this — deleting one is
-permanent, it is never re-created. See `docs/security/threat-model.md` (the
-`m2-first-run-defaults` delta) and RISK-015/RISK-016 in
-`docs/security/risk-register.md` for the accepted risk this default-on posture
-now carries (single hardcoded upstream; scraping-automation ToS considerations).
-SABnzbd and any Newznab indexer (DogNZB, NZB.su) remain opt-in — they need
-credentials, so they are never seeded automatically.
+**A fresh install ships with the GetComics/DDL pair seeded but disabled — enable
+it in Settings to start acquiring.** On first startup against a genuinely empty
+database, foragerr seeds the GetComics indexer and the built-in DDL client once,
+so the keyless pipeline is pre-configured and discoverable — but **both rows are
+created disabled** (the indexer's automatic-search and RSS toggles are off too),
+so nothing is searched, scraped, grabbed, or downloaded until you deliberately
+turn them on. Wanted issues simply stay wanted until then. No credentials are
+needed for either, so activation is one toggle, not a configuration task:
+
+1. **Settings → Indexers** — open the seeded **GetComics** indexer and enable it
+   (turn on Enable, plus Automatic Search / RSS if you want unattended grabbing).
+2. **Settings → Download Clients** — open the seeded **GetComics** built-in DDL
+   client and enable it.
+
+Once both are enabled, the pipeline searches and downloads exactly as before,
+with no further setup. This is a deliberate **opt-in** posture: enabling the
+GetComics indexer starts outbound scraping of a third-party site
+(getcomics.org), so foragerr never begins that on its own — you decide when. If
+you don't want DDL at all, just leave the pair disabled or delete it (Settings →
+Indexers / Download Clients); a deleted seeded row is permanent and never
+re-created. See `docs/security/threat-model.md` (the `m2-first-run-defaults`
+delta, amended by `ddl-optin-seeding`) and RISK-015/RISK-016 in
+`docs/security/risk-register.md` for the accepted risk this opt-in posture
+carries once you enable it (single hardcoded upstream; scraping-automation ToS
+considerations). SABnzbd and any Newznab indexer (DogNZB, NZB.su) remain opt-in
+too — they need credentials, so they are never seeded automatically.
 
 ## Configuring a download client
 
