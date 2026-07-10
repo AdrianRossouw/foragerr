@@ -28,8 +28,8 @@
 
 ## 4. Merge gate
 
-- [ ] 4.1 Merge-gate checklist (suites, soup, trace, config re-scan +
+- [x] 4.1 Merge-gate checklist (suites, soup, trace, config re-scan +
       evidence, CHANGELOG v0.3.7 + bump, release notes) (FRG-PROC-007,
       FRG-PROC-013, FRG-PROC-015)
-- [ ] 4.2 Review cycle (proportionate + Codex ninth); archive; merge
+- [x] 4.2 Review cycle (proportionate + Codex ninth); archive; merge
       `--no-ff`; tag; push; release
