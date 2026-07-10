@@ -53,6 +53,7 @@ moved `M5`→`M8`.
 | FRG-PROC-014 | Public repository labelling and posture | dev-process | active | — |
 | FRG-PROC-015 | Repository history hygiene | dev-process | active | — |
 | FRG-PROC-016 | Known-anomalies register | dev-process | active | — |
+| FRG-PROC-017 | Regenerable README screenshots | dev-process | proposed | M4 |
 | FRG-SER-001 | Series entity from ComicVine volume | ser | implemented | M1 |
 | FRG-SER-002 | Issue entity | ser | implemented | M1 |
 | FRG-SER-003 | Two-level monitored flags | ser | implemented | M1 |
@@ -254,6 +255,7 @@ moved `M5`→`M8`.
 | FRG-UI-020 | Settings: General with ComicVine metadata credential | ui | implemented | M2 |
 | FRG-UI-021 | Grouped library view | ui | implemented | M3 |
 | FRG-UI-022 | Collected-edition (trade) surfacing | ui | implemented | M3 |
+| FRG-UI-023 | Application shell | ui | proposed | M4 |
 | FRG-OPDS-001 | OPDS 1.2 Atom catalog with navigation root | opds | implemented | M1 |
 | FRG-OPDS-002 | Acquisition feeds with per-entry metadata | opds | implemented | M1 |
 | FRG-OPDS-003 | Library-id-based file resolution only (no client-supplied paths) | opds | implemented | M1 |
