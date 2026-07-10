@@ -30,7 +30,7 @@ from foragerr.config import Settings
 from foragerr.indexers.ratelimit import DEFAULT_MIN_INTERVAL
 from foragerr.library.flows._common import SeriesSearchCommand
 from foragerr.library.models import IssueRow
-from foragerr.library.repo import wanted_issues
+from foragerr.library.repo import missing_issues, wanted_issues
 from foragerr.providers.backoff import ProviderBackoff
 from foragerr.search import Decision
 
@@ -164,16 +164,24 @@ async def _run_wanted_loop(
 
 
 async def _wanted_issue_targets(
-    ctx: HandlerContext, *, series_id: int | None = None
+    ctx: HandlerContext, *, series_id: int | None = None, include_all: bool = False
 ) -> list[tuple[int, int]]:
-    """(series_id, issue_id) for wanted issues, oldest-first (FRG-SRCH-009).
+    """(series_id, issue_id) for wanted (or all missing) issues, oldest-first
+    (FRG-SRCH-009).
 
     Oldest-first = ascending release date (store date preferred, cover date
     fallback), then issue id for a stable total order. Scoped to one series
     when ``series_id`` is given (the series-search walk).
+
+    ``include_all`` (the "Search All" hero action, FRG-SRCH-008) swaps the
+    search-scope selectable from ``repo.wanted_issues()`` to the parallel
+    ``repo.missing_issues()`` — every released issue with no file, regardless
+    of series/issue monitored flags. ``repo.wanted_issues()`` itself is never
+    modified by either path.
     """
     release_date = func.coalesce(IssueRow.store_date, IssueRow.cover_date)
-    stmt = wanted_issues().order_by(release_date.asc(), IssueRow.id.asc())
+    base = missing_issues() if include_all else wanted_issues()
+    stmt = base.order_by(release_date.asc(), IssueRow.id.asc())
     if series_id is not None:
         stmt = stmt.where(IssueRow.series_id == series_id)
     async with ctx.db.read_session() as session:
@@ -221,18 +229,26 @@ async def _handle_issue_search(
 async def run_series_search(
     command: SeriesSearchCommand, ctx: HandlerContext
 ) -> str:
-    """Search every wanted issue of one series (FRG-SRCH-008).
+    """Search wanted (or all missing) issues of one series (FRG-SRCH-008).
 
-    Records a grab hand-off for the best approved release per wanted issue, or
+    Records a grab hand-off for the best approved release per target issue, or
     leaves an explainable no-grab (the decisions carry the rejection reasons).
     Called by the ``series-search`` handler, replacing the change-3 inert stub.
-    No inter-search delay: a single series' wanted issues are few, and the
-    ``search`` pool size of 1 already serializes indexer politeness.
+    No inter-search delay: a single series' issues are few, and the ``search``
+    pool size of 1 already serializes indexer politeness.
+
+    ``command.monitored_only`` (default ``True``) picks the walk's scope: the
+    derived-wanted set when ``True``, every released-and-fileless issue
+    regardless of monitored flags when ``False`` (see
+    :func:`_wanted_issue_targets`).
     """
-    targets = await _wanted_issue_targets(ctx, series_id=command.series_id)
+    targets = await _wanted_issue_targets(
+        ctx, series_id=command.series_id, include_all=not command.monitored_only
+    )
     grabbed = await _run_wanted_loop(ctx, targets, path="auto", delay=0)
+    scope = "wanted" if command.monitored_only else "missing"
     return (
-        f"series {command.series_id}: searched {len(targets)} wanted issue(s), "
+        f"series {command.series_id}: searched {len(targets)} {scope} issue(s), "
         f"{grabbed} grab(s) recorded"
     )
 

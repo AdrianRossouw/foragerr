@@ -116,6 +116,77 @@ async def test_series_search_covers_each_wanted_issue(
 
 
 @pytest.mark.req("FRG-SRCH-008")
+async def test_series_search_all_includes_unmonitored_missing_issue(
+    db, format_profile_id, root_folder_id, monkeypatch, tmp_path
+):
+    """``monitored_only=False`` (the "Search All" hero action) widens the walk
+    to every released, fileless issue regardless of monitored flags; the
+    default ``monitored_only=True`` walk stays exactly today's derived-wanted
+    set (`repo.wanted_issues()`), which excludes the unmonitored issue."""
+    series_id = await make_series(
+        db, format_profile_id=format_profile_id, root_folder_id=root_folder_id
+    )
+    id7 = await make_issue(db, series_id=series_id, issue_number="7")
+    id8 = await make_issue(db, series_id=series_id, issue_number="8", monitored=False)
+    await make_indexer(db)
+
+    handler = feed_handler("Saga 007 (2012)", "Saga 008 (2012)")
+    patch_pipeline_factory(monkeypatch, tmp_path, handler)
+    ctx = make_ctx(db, make_settings(tmp_path))
+
+    # monitored_only=True (default): the unmonitored issue #8 stays excluded.
+    summary_wanted = await get_handler("series-search")(
+        SeriesSearchCommand(series_id=series_id), ctx
+    )
+    grabbed_wanted = {json.loads(r.payload)["issue_id"] for r in await grab_rows(db)}
+    assert grabbed_wanted == {id7}
+    assert "1 wanted issue(s)" in summary_wanted
+
+    # monitored_only=False: #8 is now in scope even though it stays unmonitored.
+    summary_all = await get_handler("series-search")(
+        SeriesSearchCommand(series_id=series_id, monitored_only=False), ctx
+    )
+    grabbed_all = {json.loads(r.payload)["issue_id"] for r in await grab_rows(db)}
+    assert grabbed_all == {id7, id8}
+    assert "2 missing issue(s)" in summary_all
+
+
+@pytest.mark.req("FRG-SRCH-008")
+async def test_series_search_all_excludes_unreleased_issue(
+    db, format_profile_id, root_folder_id, monkeypatch, tmp_path
+):
+    """The widened ``monitored_only=False`` walk still respects "released": a
+    future-dated, fileless issue is NOT searched, exactly like the derived-wanted
+    walk (``missing_issues()`` shares ``wanted_issues()``' released predicate)."""
+    import datetime as dt
+
+    series_id = await make_series(
+        db, format_profile_id=format_profile_id, root_folder_id=root_folder_id
+    )
+    id7 = await make_issue(db, series_id=series_id, issue_number="7")
+    # Future-dated + fileless + even unmonitored -> unreleased, so out of scope.
+    await make_issue(
+        db,
+        series_id=series_id,
+        issue_number="99",
+        cover_date=dt.date(2999, 1, 1),
+        monitored=False,
+    )
+    await make_indexer(db)
+
+    handler = feed_handler("Saga 007 (2012)")
+    patch_pipeline_factory(monkeypatch, tmp_path, handler)
+    ctx = make_ctx(db, make_settings(tmp_path))
+
+    summary_all = await get_handler("series-search")(
+        SeriesSearchCommand(series_id=series_id, monitored_only=False), ctx
+    )
+    grabbed_all = {json.loads(r.payload)["issue_id"] for r in await grab_rows(db)}
+    assert grabbed_all == {id7}
+    assert "1 missing issue(s)" in summary_all
+
+
+@pytest.mark.req("FRG-SRCH-008")
 async def test_grab_handoff_is_live_in_change_5(
     db, format_profile_id, root_folder_id, tmp_path
 ):

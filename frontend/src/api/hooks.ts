@@ -15,7 +15,10 @@ import type {
   ApiPage,
   BlocklistBulkDeleteResult,
   BlocklistRecord,
+  CollectionRecord,
+  CollectionsResponse,
   CommandResource,
+  ContainmentRangeInput,
   FormatProfileResource,
   HealthWarningItem,
   HistoryRecord,
@@ -136,8 +139,16 @@ export function useSeriesDetail(id: number): UseQueryResult<SeriesResource> {
  * All issues of one series under ['issues', seriesId] (FRG-UI-004), walking
  * the paged endpoint like `useSeriesIndex` (long-running comics exceed one
  * 200-issue page). Default ordering_key sort = persisted reading order.
+ *
+ * `enabled` gates the fetch (default on): the containment dialog's issue
+ * pickers depend on a target series the operator has not chosen yet, so it
+ * mounts this hook against a not-yet-known series and keeps it dormant until a
+ * target is picked — never firing a `seriesId=0` request.
  */
-export function useIssues(seriesId: number): UseQueryResult<IssueResource[]> {
+export function useIssues(
+  seriesId: number,
+  enabled = true,
+): UseQueryResult<IssueResource[]> {
   const fetcher = useFetcher();
   return useQuery({
     queryKey: queryKeys.issues.forSeries(seriesId),
@@ -147,6 +158,81 @@ export function useIssues(seriesId: number): UseQueryResult<IssueResource[]> {
         (page) =>
           `/api/v1/issues?seriesId=${seriesId}&page=${page}&pageSize=${MAX_PAGE_SIZE}`,
       ),
+    enabled,
+  });
+}
+
+/**
+ * Declared collections for one series under ['series', id, 'collections']
+ * (FRG-UI-026 / FRG-API-022). For a single-issues run the records are the
+ * trades that collect it; for a collected edition they are its own issues'
+ * declared contents. Display-only — no wanted/monitor state rides here.
+ */
+export function useCollections(
+  seriesId: number,
+): UseQueryResult<CollectionRecord[]> {
+  const fetcher = useFetcher();
+  return useQuery({
+    queryKey: queryKeys.series.collections(seriesId),
+    queryFn: async () => {
+      const body = await fetcher<CollectionsResponse>(
+        `/api/v1/series/${seriesId}/collections`,
+      );
+      return body.records;
+    },
+  });
+}
+
+/**
+ * PUT /api/v1/issues/{issueId}/collections (FRG-API-022) — declare/replace ALL
+ * of a trade issue's collected ranges. An invalid range rejects with an
+ * `ApiRequestError` the dialog surfaces verbatim. On success both the current
+ * series' collections view and every open issues table (the target series'
+ * collected-in chips) are stale — the affected series is not always the one on
+ * screen — so the collections key plus the broad ['issues'] prefix refresh.
+ */
+export function useSaveContainment(
+  seriesId: number,
+): UseMutationResult<
+  unknown,
+  Error,
+  { issueId: number; ranges: ContainmentRangeInput[] }
+> {
+  const fetcher = useFetcher();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ issueId, ranges }) =>
+      fetcher(`/api/v1/issues/${issueId}/collections`, {
+        method: 'PUT',
+        body: { ranges },
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.series.collections(seriesId),
+      });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.issues.all() });
+    },
+  });
+}
+
+/**
+ * DELETE /api/v1/issues/{issueId}/collections (FRG-API-022) — clear a trade
+ * issue's declared ranges. Same staleness as the declare path.
+ */
+export function useDeleteContainment(
+  seriesId: number,
+): UseMutationResult<unknown, Error, number> {
+  const fetcher = useFetcher();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (issueId: number) =>
+      fetcher(`/api/v1/issues/${issueId}/collections`, { method: 'DELETE' }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.series.collections(seriesId),
+      });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.issues.all() });
+    },
   });
 }
 

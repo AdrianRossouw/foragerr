@@ -8,15 +8,9 @@
   color: var(--text-secondary);
 }
 
-.toolbarActions {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-xs);
-}
-
 .commandChip {
   padding: 2px var(--spacing-sm);
-  margin-right: var(--spacing-sm);
+  align-self: center;
   border-radius: var(--radius-md);
   background: var(--surface-card);
   border: 1px solid var(--color-accent);
@@ -27,25 +21,50 @@
 /* --- hero band ---------------------------------------------------------- */
 
 .hero {
+  position: relative;
+  overflow: hidden;
+}
+
+/* Blurred, darkened LOCAL cover behind the hero (design decision 6). */
+.heroBackdrop {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center 28%;
+  filter: blur(34px) brightness(0.3);
+  transform: scale(1.25);
+}
+
+/* Gradient scrim that fades the backdrop into the page background. */
+.heroScrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.35),
+    rgba(0, 0, 0, 0.82) 62%,
+    var(--surface-page)
+  );
+}
+
+.heroInner {
+  position: relative;
   display: flex;
-  gap: var(--spacing-lg);
-  padding: var(--spacing-lg);
-  background: linear-gradient(var(--surface-chrome), var(--surface-page));
-  border-bottom: 1px solid var(--surface-border);
+  gap: 30px;
+  padding: 36px 36px 28px;
+  align-items: flex-end;
 }
 
 /* Context overrides for the shared Poster frame (structure lives in Poster.module.css). */
 .posterFrame {
-  flex: 0 0 170px;
-  /* The hero row's default align-stretch forces the frame to the row's full
-     height, defeating the 2:3 aspect-ratio and cropping the cover once the
-     description gets long — pin the frame to its own aspect instead. */
+  flex: 0 0 206px;
   align-self: flex-start;
-  width: 170px;
+  width: 206px;
+  aspect-ratio: 2 / 3;
   border-radius: var(--radius-md);
   overflow: hidden;
   background: var(--surface-card);
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--shadow-overlay);
 }
 
 .posterFallback {
@@ -53,23 +72,27 @@
 }
 
 .heroBody {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-sm);
-  min-width: 0;
+  gap: 14px;
+  padding-bottom: 4px;
 }
 
 .titleRow {
   display: flex;
   align-items: center;
-  gap: var(--spacing-sm);
+  gap: 13px;
+  flex-wrap: wrap;
 }
 
 .title {
   margin: 0;
-  font-size: 32px;
+  font-size: 33px;
   font-weight: var(--font-weight-bold);
-  line-height: 1.15;
+  line-height: 1.1;
+  color: var(--text-primary);
 }
 
 .year {
@@ -77,62 +100,182 @@
   font-size: var(--font-size-heading);
 }
 
-.chipRow {
+.metaRow {
   display: flex;
+  align-items: center;
+  gap: 13px;
   flex-wrap: wrap;
+  font-size: var(--font-size-base);
+  color: var(--text-secondary);
+}
+
+.metaMonitor {
+  display: inline-flex;
+  align-items: center;
   gap: var(--spacing-xs);
 }
 
-.chip {
-  padding: 2px var(--spacing-sm);
+.dot {
+  color: var(--text-faint);
+}
+
+.actionRow {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-wrap: wrap;
+  margin-left: -6px;
+}
+
+.action {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-xs);
+  min-width: 64px;
+  padding: var(--spacing-sm) 13px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--font-size-xs);
   border-radius: var(--radius-sm);
-  background: var(--surface-card);
-  border: 1px solid var(--surface-border);
+  cursor: pointer;
+}
+
+.action:hover {
+  background: var(--surface-hover);
+}
+
+.action:first-child {
+  color: var(--color-accent-light);
+}
+
+.actionDanger:hover {
+  background: var(--color-warning-tint);
+  color: var(--color-danger);
+}
+
+/* Overflow menu ("...") items — Rescan, Rename Files (FRG-UI-004). */
+.menuItem {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: var(--spacing-sm) var(--spacing-sm);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
   color: var(--text-secondary);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-base);
+  text-align: left;
+  cursor: pointer;
+}
+
+.menuItem:hover,
+.menuItem:focus-visible {
+  outline: none;
+  color: var(--text-primary);
+  background: var(--surface-hover);
+}
+
+.overviewWrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--spacing-xs);
+}
+
+.overview,
+.overviewExpanded {
+  margin: 0;
+  max-width: 820px;
+  font-size: var(--font-size-base);
+  line-height: 1.6;
+  color: var(--text-secondary);
 }
 
 .overview {
-  margin: 0;
-  max-width: 900px;
-  color: var(--text-primary);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
-.statsRow {
+.showMore {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-accent-light);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+}
+
+.showMore:hover {
+  text-decoration: underline;
+}
+
+/* --- panel -------------------------------------------------------------- */
+
+.panelWrap {
+  padding: 22px 30px 46px;
+}
+
+.panel {
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.panelHeader {
   display: flex;
   align-items: center;
-  gap: var(--spacing-md);
-  color: var(--text-secondary);
-  font-size: var(--font-size-sm);
+  gap: 13px;
+  padding: 12px 16px;
+  background: var(--surface-chrome);
+  border-bottom: 1px solid var(--surface-row-border);
 }
 
-/* --- issue table ---------------------------------------------------------- */
+.panelSpacer {
+  flex: 1;
+}
+
+.progressWrap {
+  width: 160px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+/* --- issue table -------------------------------------------------------- */
 
 .table {
-  width: calc(100% - 2 * var(--spacing-lg));
-  margin: var(--spacing-lg);
+  width: 100%;
   border-collapse: collapse;
+  font-size: var(--font-size-base);
 }
 
 .table th {
-  padding: var(--spacing-sm);
+  padding: 9px var(--spacing-sm);
   text-align: left;
-  font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-medium);
   color: var(--text-secondary);
-  border-bottom: 1px solid var(--surface-border);
+  background: var(--surface-page);
 }
 
 .table td {
-  padding: var(--spacing-sm);
-  border-bottom: 1px solid var(--surface-border);
+  padding: 9px var(--spacing-sm);
+  border-top: 1px solid var(--surface-row-border);
 }
 
 .table tbody tr:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-card-hover);
 }
 
 .selectCol {
-  width: 28px;
+  width: 42px;
+  padding-left: var(--spacing-md) !important;
 }
 
 .iconCol {
@@ -140,33 +283,38 @@
 }
 
 .numberCol {
-  width: 64px;
-  font-family: var(--font-family-mono);
+  width: 70px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+}
+
+.mutedCell {
+  color: var(--text-secondary);
+}
+
+.sizeCol {
+  width: 100px;
 }
 
 .actionsCol {
-  width: 80px;
+  width: 92px;
   text-align: right;
   white-space: nowrap;
+  padding-right: var(--spacing-md) !important;
 }
 
-.bulkMonitorButton {
-  display: inline-flex;
-  padding: var(--spacing-xs);
-  background: none;
-  border: none;
+.collectedCell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-xs);
+}
+
+.collectedChip {
+  display: inline-block;
+  padding: 2px 7px;
   border-radius: var(--radius-sm);
-  color: var(--text-secondary);
-  cursor: pointer;
-}
-
-.bulkMonitorButton:hover:not(:disabled) {
-  color: var(--color-accent);
-}
-
-.bulkMonitorButton:disabled {
-  opacity: 0.4;
-  cursor: default;
+  font-size: var(--font-size-section-label);
+  font-weight: var(--font-weight-bold);
 }
 
 .iconButton {
@@ -180,34 +328,207 @@
 }
 
 .iconButton:hover {
-  color: var(--text-primary);
-  background: var(--surface-card);
+  color: var(--color-accent);
+  background: var(--surface-hover);
 }
 
-.fileChip,
-.missingChip,
-.mutedChip {
+.iconDanger {
+  composes: iconButton;
+  color: var(--text-secondary);
+}
+
+.iconDanger:hover {
+  color: var(--color-danger);
+}
+
+/* --- bulk action bar (FRG-UI-025) --------------------------------------- */
+
+.bulkBar {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--surface-menu);
+  border-bottom: 1px solid var(--surface-row-border);
+}
+
+.bulkCount {
+  margin-right: var(--spacing-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+}
+
+/* --- collections tab (FRG-UI-026) --------------------------------------- */
+
+.collectionsList {
+  display: flex;
+  flex-direction: column;
+}
+
+.collectionRow {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: 13px var(--spacing-md);
+  border-top: 1px solid var(--surface-row-border);
+}
+
+.collectionRow:first-child {
+  border-top: none;
+}
+
+.spine {
+  width: 46px;
+  height: 69px;
+  flex: none;
+  border-radius: var(--radius-sm);
+  border-left: 3px solid;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-xs);
+  font-family: var(--font-family-mono);
+  font-size: 9px;
+  letter-spacing: 0.5px;
+  text-align: center;
+}
+
+.collectionMain {
+  flex: 1;
+  min-width: 0;
+}
+
+.collectionTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.collectionTitle {
+  font-size: 14.5px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+}
+
+.formatChip {
+  display: inline-block;
   padding: 2px var(--spacing-sm);
   border-radius: var(--radius-sm);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-section-label);
+  font-weight: var(--font-weight-bold);
 }
 
-.fileChip {
+.collectionMeta {
+  margin-top: var(--spacing-xs);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.collectionDate {
+  flex: none;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.rowActionButton {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 13px;
+  border: 1px solid var(--surface-border-soft);
   background: var(--surface-card);
+  color: var(--text-primary);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+.rowActionButton:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent-light);
+}
+
+.collectionsEmpty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-xl) var(--spacing-lg);
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+/* --- containment dialog (rendered inside the shared Modal body) ---------- */
+
+.dialogForm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.rangeList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.rangeRow {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--spacing-sm);
+}
+
+.rangeField {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  flex: 1;
+}
+
+.rangeField select,
+.formRow select {
+  height: 30px;
+  padding: 0 var(--spacing-sm);
+  background: var(--surface-input);
   border: 1px solid var(--surface-border);
+  border-radius: var(--radius-sm);
   color: var(--text-primary);
 }
 
-.missingChip {
+.subtleButton {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  align-self: flex-start;
+  padding: var(--spacing-xs) var(--spacing-sm);
   background: none;
-  border: 1px solid var(--color-warning);
-  color: var(--color-warning);
+  border: 1px dashed var(--surface-border-soft);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
 }
 
-.mutedChip {
-  background: none;
-  border: 1px solid var(--surface-border);
-  color: var(--text-muted);
+.subtleButton:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--color-accent);
+}
+
+.subtleButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.dialogActions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-md);
+}
+
+.actionsSpacer {
+  flex: 1;
 }
 
 /* --- overlays / dialogs ---------------------------------------------------- */
@@ -225,13 +546,6 @@
 
 .dialog {
   width: min(440px, 90vw);
-  background: var(--surface-chrome);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-overlay);
-}
-
-.searchOverlay {
-  width: min(1100px, 92vw);
   background: var(--surface-chrome);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-overlay);
@@ -270,15 +584,6 @@
   display: flex;
   flex-direction: column;
   gap: var(--spacing-xs);
-}
-
-.formRow select {
-  height: 30px;
-  padding: 0 var(--spacing-sm);
-  background: var(--surface-card);
-  border: 1px solid var(--surface-border);
-  border-radius: var(--radius-sm);
-  color: var(--text-primary);
 }
 
 .button {
@@ -332,9 +637,4 @@
   color: var(--text-secondary);
   font-size: var(--font-size-sm);
   overflow-wrap: anywhere;
-}
-
-.iconDanger {
-  composes: iconButton;
-  color: var(--color-danger);
 }

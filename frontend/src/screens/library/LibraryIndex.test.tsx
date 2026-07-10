@@ -709,6 +709,25 @@ describe('FRG-UI-021: grouped library view', () => {
     });
   });
 
+  it('FRG-UI-021 — the franchise actions panel is a labeled group (not a menu) and focuses the rename input on open', async () => {
+    renderGrouped();
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId('series-card')).toHaveLength(3),
+    );
+    await toggleGrouping(user);
+    await waitFor(() =>
+      expect(screen.getByTestId('franchise-group')).toBeInTheDocument(),
+    );
+
+    await user.click(screen.getByTestId('franchise-group-menu'));
+    const panel = screen.getByTestId('franchise-menu');
+    expect(panel).toHaveAttribute('role', 'group');
+    expect(panel).toHaveAttribute('aria-label', 'Franchise actions');
+    expect(screen.getByTestId('franchise-rename-input')).toHaveFocus();
+  });
+
   it('FRG-UI-021 — the franchise actions menu closes on Escape and on an outside click', async () => {
     renderGrouped();
     const user = userEvent.setup();

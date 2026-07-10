@@ -186,31 +186,16 @@ Among approved candidates for the same issue, the system SHALL select the best r
 
 ### Requirement: FRG-SRCH-008 — Automatic search commands
 
-The system SHALL provide automatic search as commands — single-issue search, missing-issues search, cutoff-unmet search — triggered after series add (per add options), after failed downloads, and on demand from UI/API, each running the decision engine over automatic-search-enabled indexers and auto-grabbing the best approved release per issue.
+The system SHALL provide automatic search as commands — single-issue search, missing-issues search, cutoff-unmet search — triggered after series add (per add options), after failed downloads, and on demand from UI/API, each running the decision engine over automatic-search-enabled indexers and auto-grabbing the best approved release per issue. `SeriesSearchCommand` SHALL accept a `monitored_only` flag (default true): the default walk covers the series' wanted issues exactly as before, while `monitored_only=false` — reachable only from an explicit operator action ("Search All") — widens the walk to every released, fileless issue of the series regardless of monitored state, via a dedicated selectable that leaves the wanted derivation untouched (FRG-SER-019).
 
-- **Milestone**: M1
-- **Source**: sonarr-arch §2.4 (ReleaseSearchService, command triggers); sonarr-arch §1.2 (post-add search)
-- **Notes**: Command-queue chassis is the SYS/backbone area; SRCH depends on it.
+- **Milestone**: M1 (Search All widening added in M4, m4-series-detail)
+- **Source**: sonarr-arch §2.4 (ReleaseSearchService, command triggers); sonarr-arch §1.2 (post-add search); owner design handoff §2 (Search Monitored / Search All actions).
+- **Notes**: Command-queue chassis is the SYS/backbone area; SRCH depends on it. No scheduler, RSS path, or chained add-flow search may set `monitored_only=false`.
 
-#### Scenario: IssueSearchCommand runs on the search pool and grabs the best release
+#### Scenario: Search All widens to unmonitored missing issues on explicit request only
 
-- **WHEN** an IssueSearchCommand executes on the search command pool (size 1)
-- **THEN** it queries automatic-search-enabled indexers, feeds results through the decision engine, sorts approved decisions by the comparator chain, and records a grab handoff for the top approved release per issue.
-
-#### Scenario: SeriesSearchCommand covers each wanted issue
-
-- **WHEN** a SeriesSearchCommand executes
-- **THEN** it produces, for every wanted issue of the series, either a recorded grab handoff for the best approved release or an explainable no-grab decision carrying its rejection reasons.
-
-#### Scenario: Replaces the change-3 inert stub
-
-- **WHEN** an automatic search command is dispatched
-- **THEN** the live command implementation defined here runs in place of the change-3 inert stub.
-
-#### Scenario: Grab handoff is inert until change 5
-
-- **WHEN** the best approved release is selected
-- **THEN** the grab handoff is recorded but performs no actual download hand-off in this change (inert until change 5).
+- **WHEN** a SeriesSearchCommand executes with `monitored_only=false`
+- **THEN** the walk includes released, fileless issues the wanted set excludes for being unmonitored (and still excludes unreleased issues), while the default `monitored_only=true` walk and every scheduler/chained trigger remain scoped to the wanted set
 
 ### Requirement: FRG-SRCH-009 — Scheduled backlog search with politeness
 

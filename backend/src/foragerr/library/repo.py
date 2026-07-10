@@ -462,6 +462,29 @@ async def wanted_issue_ids(session: AsyncSession, as_of: dt.date | None = None) 
     return [row.id for row in result.scalars().all()]
 
 
+def missing_issues(as_of: dt.date | None = None) -> Select:
+    """Every released issue with no file, monitored flags aside (FRG-SER-005).
+
+    A DELIBERATE sibling of `wanted_issues()`, not a variant of it: same
+    "released" definition (store date preferred, cover date fallback, both-
+    null treated as released) and the same "missing" test (no `issue_files`
+    row), but WITHOUT the series/issue monitored predicates. Backs the
+    "Search All" hero action's widened walk (FRG-SRCH-008); `wanted_issues()`
+    itself is never touched by this, so its absence proofs (FRG-SER-019) keep
+    holding untouched.
+    """
+    as_of = as_of or dt.date.today()
+    released = or_(
+        (IssueRow.store_date.is_not(None)) & (IssueRow.store_date <= as_of),
+        (IssueRow.store_date.is_(None))
+        & (IssueRow.cover_date.is_not(None))
+        & (IssueRow.cover_date <= as_of),
+        (IssueRow.store_date.is_(None)) & (IssueRow.cover_date.is_(None)),
+    )
+    has_file = exists().where(IssueFileRow.issue_id == IssueRow.id)
+    return select(IssueRow).where(released).where(~has_file)
+
+
 # --- statistics (FRG-SER-009) ------------------------------------------------
 
 

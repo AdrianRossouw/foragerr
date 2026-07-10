@@ -343,6 +343,13 @@ function FranchiseMenu({
   const [title, setTitle] = useState(group.title);
   const mutation = useUpdateSeriesGroup();
   const anchor = members[0];
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Focus the first focusable control (the rename input) on open, mirroring
+  // the shared Menu's open-focus behavior (FRG-UI-021 ch2 a11y deferral).
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
 
   const submitRename = (e: FormEvent) => {
     e.preventDefault();
@@ -355,9 +362,15 @@ function FranchiseMenu({
   };
 
   return (
-    <div className={styles.franchiseMenu} role="menu" data-testid="franchise-menu">
+    <div
+      className={styles.franchiseMenu}
+      role="group"
+      aria-label="Franchise actions"
+      data-testid="franchise-menu"
+    >
       <form className={styles.renameRow} onSubmit={submitRename}>
         <input
+          ref={inputRef}
           className={styles.renameInput}
           aria-label="Rename franchise"
           data-testid="franchise-rename-input"

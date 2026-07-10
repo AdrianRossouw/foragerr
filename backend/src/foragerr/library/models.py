@@ -65,6 +65,13 @@ MONITOR_NEW_ITEMS_POLICIES = ("all", "none")
 #: fresh vocabulary rather than a reuse of the parser's classification enum.
 ISSUE_TYPES = ("regular", "annual", "special", "tpb-content")
 
+#: Provenance of a trade-containment record (FRG-SER-020). ``declared`` = the
+#: operator declared the range from the dialog (the only value v1 writes);
+#: ``derived_description`` is reserved for a later feature that mines CV
+#: description text into non-binding suggestions (the column exists now so that
+#: lands without a migration).
+ISSUE_COLLECTION_SOURCES = ("declared", "derived_description")
+
 #: Library-import staging group lifecycle (FRG-IMP-023, m2-existing-library-
 #: import design decision 2): ``proposed`` (scan staged it, a ComicVine match
 #: may or may not be attached yet), ``confirmed`` (user accepted/overrode the
@@ -366,4 +373,67 @@ class LibraryImportGroupRow(Base):
             "root_folder_id", "matching_key", name="uq_library_import_root_key"
         ),
         Index("ix_library_import_groups_root_folder_id", "root_folder_id"),
+    )
+
+
+class IssueCollectionRow(Base):
+    """One trade-containment record (FRG-SER-020): a single issue of a
+    trade-typed series (one collected book, ``trade_issue_id``) collects a
+    contiguous range of a ``target_series_id``'s issues.
+
+    The range is stored as *copied ordering keys* (``start_ordering_key`` ..
+    ``end_ordering_key``) — the same fixed-width sortable encoding
+    ``IssueRow.ordering_key`` uses — rather than issue-id endpoints: keys are
+    ``BETWEEN``-comparable in SQL and stay stable if ComicVine renumbers the
+    volume. One row per contiguous sub-range, so a non-contiguous collection
+    or a multi-series omnibus is several rows.
+
+    This is a *display-only* side table (FRG-SER-020): NOTHING here ever
+    reaches the derived-wanted choke point (``repo.wanted_issues``) or
+    ``series_statistics`` — trades never suppress single-issue wanted state
+    (extends FRG-SER-019). Coverage (Collected / Partial / Not collected) is a
+    request-time read rollup over file presence within the range, never a
+    stored column. Both FKs cascade on delete so removing the trade issue or
+    the target series drops the dependent records and nothing else.
+    """
+
+    __tablename__ = "issue_collections"
+
+    id: Mapped[int] = mapped_column(StrictInteger, primary_key=True, autoincrement=True)
+    #: The collected book — one issue of a trade-typed series (FRG-SER-018).
+    trade_issue_id: Mapped[int] = mapped_column(
+        StrictInteger, ForeignKey("issues.id", ondelete="CASCADE"), nullable=False
+    )
+    #: The single-issues (or other) series whose issues this book collects.
+    target_series_id: Mapped[int] = mapped_column(
+        StrictInteger, ForeignKey("series.id", ondelete="CASCADE"), nullable=False
+    )
+    #: Copied ``IssueRow.ordering_key`` bounds (inclusive). Internally-derived
+    #: sortable encodings — plain ``Text``, like ``issues.ordering_key``.
+    start_ordering_key: Mapped[str] = mapped_column(Text, nullable=False)
+    end_ordering_key: Mapped[str] = mapped_column(Text, nullable=False)
+    #: Human-readable label derived from the endpoint issues' verbatim issue
+    #: numbers (``"#1–#6"``, or ``"#8"`` for a single-issue range). Internally
+    #: derived — plain ``Text``.
+    range_label: Mapped[str] = mapped_column(Text, nullable=False)
+    #: Provenance (FRG-SER-020); v1 only ever writes ``declared``. Internally
+    #: set enum value — plain ``Text``.
+    source: Mapped[str] = mapped_column(Text, nullable=False, default="declared")
+    #: Provenance confidence (0.0–1.0); ``declared`` records are ``1.0``. Plain
+    #: ``Float``: SQLite REAL storage has no sentinel-string collision risk.
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    created_at: Mapped[dt.datetime] = mapped_column(StrictDateTime, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint(
+            f"source IN {ISSUE_COLLECTION_SOURCES!r}",
+            name="issue_collections_source_valid",
+        ),
+        Index("ix_issue_collections_trade_issue_id", "trade_issue_id"),
+        Index(
+            "ix_issue_collections_target_series",
+            "target_series_id",
+            "start_ordering_key",
+            "end_ordering_key",
+        ),
     )

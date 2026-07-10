@@ -1,7 +1,7 @@
 import { Routes, Route } from 'react-router-dom';
 import { AppShell } from './components/AppShell';
 import { LibraryIndex } from './screens/library/LibraryIndex';
-import { SeriesDetail } from './screens/series/SeriesDetail';
+import { SeriesDetailRoute } from './screens/series/SeriesDetail';
 import { AddSeries } from './screens/add/AddSeries';
 import { LibraryImport } from './screens/library-import/LibraryImport';
 import { QueueScreen } from './screens/queue/QueueScreen';
@@ -32,7 +32,7 @@ export function App() {
     <Routes>
       <Route element={<AppShell />}>
         <Route index element={<LibraryIndex />} />
-        <Route path="series/:id" element={<SeriesDetail />} />
+        <Route path="series/:id" element={<SeriesDetailRoute />} />
         <Route path="add" element={<AddSeries />} />
         <Route path="library-import" element={<LibraryImport />} />
         <Route path="wanted" element={<WantedScreen />} />

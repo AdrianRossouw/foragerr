@@ -9,6 +9,56 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.4.4] — 2026-07-10
+
+m4-series-detail: the series detail screen rebuilt to the M4 design, plus the
+trade "collected in" containment model.
+
+### Added
+- **Redesigned series detail** (FRG-UI-004): a hero with the cover blurred
+  into the backdrop, the sharp cover beside title/meta (monitored, publisher,
+  first issue, status, count, formats), an icon action row — Search
+  Monitored, **Search All** (now genuinely searches every missing issue
+  regardless of monitored state, FRG-SRCH-008), Refresh, Edit, Delete, and a
+  ⋯ overflow keeping Rescan and Rename Files — and a long overview collapsed
+  behind "show more". Below, an Issues/Collections panel with a compact
+  progress bar.
+- **Bulk issue actions** (FRG-UI-025, owner request): row checkboxes with
+  shift-click range selection, header select-all, and a labeled action bar —
+  Monitor, Unmonitor, Search selected (sequential, duplicate-click guarded,
+  partial failures reported) — replacing the old unlabeled header button.
+- **Trade containment** (FRG-SER-020/API-022/UI-026): declare which issues a
+  collected edition collects (dialog with per-range target and issue
+  pickers; multiple sub-ranges; edit pre-fills what's declared and save
+  replaces it wholesale — stated in the dialog). The Issues tab shows
+  "Collected in" chips; the Collections tab shows both directions — what
+  collects this series, and what a trade's own books declare — with
+  Collected / Partial / Not collected coverage pills computed from files on
+  disk. **Display-only by construction**: the wanted machinery provably
+  never reads containment (the never-suppress invariant's absence proof now
+  covers the new table).
+
+### Fixed
+- Dialogs on the detail screen (Delete, Delete File, Edit, containment) now
+  trap and restore focus, close on Escape, and announce errors — via the
+  shared modal.
+- Fileless issues with no dates now read Missing (matching what the wanted
+  set says) instead of a neutral Unreleased pill.
+- Navigating series → series (e.g. via a Collections "Open") resets
+  selection, tab, and command status; segmented controls gained proper
+  arrow-key behavior.
+- The grouped-library franchise ⋯ popover mirrors the shared menu's focus
+  and Escape behavior (ch2 review deferral closed).
+
+### Notes
+- Migration 0015 (`issue_collections`, additive). Threat model/risk register
+  record the new containment write surface (T-API-8, RISK-044; RISK-020
+  no-auth lineage). Manual documents the screen and the declare/edit flow.
+  No new dependencies. Derived containment suggestions from ComicVine
+  descriptions are deliberately out — our sanitizer strips the structured
+  links at ingest; the schema carries provenance columns so suggestions can
+  land later without a migration.
+
 ## [v0.4.3] — 2026-07-10
 
 m4-logs-viewer: in-app log visibility for debugging acquisition (owner request).

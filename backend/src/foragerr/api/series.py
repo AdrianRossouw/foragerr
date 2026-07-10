@@ -33,7 +33,7 @@ from foragerr.api.command import CommandResource
 from foragerr.api.errors import ApiError
 from foragerr.api.paging import paginate
 from foragerr.commands import CommandValidationError
-from foragerr.library import repo
+from foragerr.library import containment, repo
 from foragerr.library.flows import (
     BOOKTYPE_EDIT_ACTIONS,
     GROUP_EDIT_ACTIONS,
@@ -364,6 +364,70 @@ class SeriesGroupPage(BaseModel):
     sortDirection: str
     totalRecords: int
     records: list[SeriesGroupResource]
+
+
+class CollectionRangeResource(BaseModel):
+    """One declared sub-range within a collections rollup entry (FRG-API-022).
+
+    ``start_issue_id``/``end_issue_id`` are the target series' issues currently
+    at the stored ordering-key bounds (``null`` when no surviving issue has that
+    exact key) — the edit dialog pre-fills its endpoint pickers from them."""
+
+    target_series_id: int
+    label: str
+    start_issue_id: int | None
+    end_issue_id: int | None
+
+
+class CollectionRecordResource(BaseModel):
+    """One collected book that declares a range targeting this series
+    (FRG-API-022), with request-time singles-coverage.
+
+    ``coverage`` is ``collected`` when every issue in every declared range has
+    a file, ``partial`` when some do, ``none`` when none do (or the ranges
+    cover no issues) — computed read-only, never persisted."""
+
+    trade_issue_id: int
+    trade_series_id: int
+    trade_series_title: str
+    booktype: str | None
+    release_date: dt.date | None
+    ranges: list[CollectionRangeResource]
+    coverage: str
+    issues_in_ranges: int
+    owned_in_ranges: int
+
+    @classmethod
+    def from_rollup(
+        cls, rollup: "containment.CollectionRollup"
+    ) -> "CollectionRecordResource":
+        return cls(
+            trade_issue_id=rollup.trade_issue_id,
+            trade_series_id=rollup.trade_series_id,
+            trade_series_title=rollup.trade_series_title,
+            booktype=rollup.booktype,
+            release_date=rollup.release_date,
+            ranges=[
+                CollectionRangeResource(
+                    target_series_id=r.target_series_id,
+                    label=r.label,
+                    start_issue_id=r.start_issue_id,
+                    end_issue_id=r.end_issue_id,
+                )
+                for r in rollup.ranges
+            ],
+            coverage=rollup.coverage,
+            issues_in_ranges=rollup.issues_in_ranges,
+            owned_in_ranges=rollup.owned_in_ranges,
+        )
+
+
+class CollectionsResponse(BaseModel):
+    """The collections resource for a series (FRG-API-022): containment BOTH
+    directions touch — the collected books that declare a range targeting it
+    and, when the series is itself trade-typed, its own issues' declarations."""
+
+    records: list[CollectionRecordResource]
 
 
 #: Whitelisted sort keys for the grouped projection (FRG-API-006). The
@@ -808,3 +872,24 @@ async def get_series_cover(series_id: int, request: Request) -> FileResponse:
     if not cover_path.is_file():
         raise ApiError(404, f"no cached cover for series {series_id}")
     return FileResponse(cover_path, media_type="image/jpeg")
+
+
+@router.get("/{series_id}/collections", response_model=CollectionsResponse)
+async def list_series_collections(
+    series_id: int, request: Request
+) -> CollectionsResponse:
+    """Containment for this series in BOTH directions (FRG-API-022): the
+    collected books declaring a range targeting it and, when it is itself
+    trade-typed, its own issues' declared contents — each with range labels
+    (plus resolved endpoint issue ids), release date, and a request-time
+    singles-coverage status (``collected``/``partial``/``none``). Read-only —
+    the rollup is computed from bounded queries and touches no wanted/stats
+    state (FRG-SER-020). A missing series yields a 404."""
+    db = request.app.state.db
+    async with db.read_session() as session:
+        if await repo.get_series(session, series_id) is None:
+            raise ApiError(404, f"series {series_id} not found")
+        rollups = await containment.collections_for_series(session, series_id)
+    return CollectionsResponse(
+        records=[CollectionRecordResource.from_rollup(r) for r in rollups]
+    )

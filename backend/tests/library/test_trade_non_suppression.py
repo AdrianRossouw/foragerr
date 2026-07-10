@@ -19,6 +19,8 @@ typed line's entries) lives in tests/pull/test_pull_trade_typing.py.
 
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
 from foragerr.library import repo
@@ -152,3 +154,32 @@ async def test_typing_a_series_does_not_alter_wanted_or_statistics(
     assert wanted_after == wanted_before
     assert stats_after == stats_before
     assert stats_after.missing_count == 2
+
+
+@pytest.mark.req("FRG-SER-019")
+@pytest.mark.req("FRG-SER-020")
+def test_wanted_and_statistics_sql_never_reference_booktype_or_containment():
+    """The absence proof, mechanically: neither the compiled ``wanted_issues``
+    query nor the source of ``wanted_issues``/``series_statistics`` references
+    the collected-edition ``booktype`` predicate (FRG-SER-019) OR the trade
+    containment side table ``issue_collections`` (FRG-SER-020). Both are
+    display-only; a predicate on either reaching the wanted/stats choke point
+    would be the exact regression these invariants forbid."""
+    forbidden = ("booktype", "issue_collections", "IssueCollectionRow")
+
+    # The reusable "wanted" selectable compiles to SQL touching only
+    # series/issues/issue_files — never the trade-typing or containment tables.
+    compiled_wanted = str(repo.wanted_issues()).lower()
+    assert "issue_files" in compiled_wanted  # sanity: it is the real query
+    for token in forbidden:
+        assert token.lower() not in compiled_wanted, (
+            f"wanted_issues() SQL references {token!r}"
+        )
+
+    # series_statistics builds several small aggregates at request time rather
+    # than one Select, so pin the absence at the source level (the same
+    # technique, applied to a multi-statement function).
+    for fn in (repo.wanted_issues, repo.series_statistics):
+        src = inspect.getsource(fn)
+        for token in forbidden:
+            assert token not in src, f"{fn.__name__} references {token!r}"

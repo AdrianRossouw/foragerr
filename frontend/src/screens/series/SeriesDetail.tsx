@@ -1,16 +1,18 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Toolbar } from '../../components/Toolbar';
-import { ToolbarButton, ToolbarSeparator } from '../../components/ToolbarButton';
 import { MonitorToggle } from '../../components/MonitorToggle';
-import { ProgressPill } from '../../components/ProgressPill';
+import { Menu } from '../../components/Menu';
+import { Modal } from '../../components/Modal';
 import { Poster } from '../../components/Poster';
 import { BookTypeBadge } from '../../components/BookTypeBadge';
+import { Chip, type ChipTone } from '../../components/Chip';
+import { SegmentedControl } from '../../components/SegmentedControl';
+import { ProgressStrip } from '../../components/ProgressStrip';
 import {
-  BookmarkIcon,
-  CloseIcon,
   FolderScanIcon,
+  MoreIcon,
   PersonIcon,
   RefreshIcon,
   SearchIcon,
@@ -22,6 +24,7 @@ import { RenamePreviewPanel } from '../settings/naming/RenamePreviewPanel';
 import { useMediaManagementConfig } from '../settings/naming/namingHooks';
 import {
   useBulkSetIssuesMonitored,
+  useCollections,
   useDeleteIssueFile,
   useDeleteSeries,
   useIssues,
@@ -33,20 +36,58 @@ import {
 } from '../../api/hooks';
 import { queryKeys } from '../../api/queryKeys';
 import { coverUrl } from '../../api/urls';
+import { FORMAT_CHIP } from '../../theme/palettes';
 import { useUiStore } from '../../store/uiStore';
 import { InteractiveSearchOverlay } from '../search/InteractiveSearchOverlay';
 import { fileFormat, formatBytes, formatDate } from '../../lib/format';
-import type { IssueResource } from '../../api/types';
+import type { BookType, IssueResource } from '../../api/types';
 import { MONITOR_NEW_ITEMS_POLICIES } from '../../api/types';
+import { CollectionsTab, type OpenContainment } from './CollectionsTab';
+import { ContainmentDialog } from './ContainmentDialog';
 import styles from './SeriesDetail.module.css';
 
 /**
- * Series detail (FRG-UI-004): Sonarr-shaped hero band + command toolbar +
- * flat issue table (comics have no season layer). Issue numbers are rendered
- * VERBATIM as strings — "1.5" and "1.MU" must never be numerically coerced.
- * Series-level actions ride POST /api/v1/command; monitored toggles persist
- * via the series/issues PUT endpoints and write back into the query cache.
+ * Series detail (FRG-UI-004), rebuilt to the M4 design: a hero over a blurred,
+ * darkened LOCAL-cover backdrop, an icon-over-label action row dispatching the
+ * existing commands, and a bordered panel carrying an Issues/Collections
+ * segmented toggle. The Issues tab is a dense table with bulk selection
+ * (FRG-UI-025); the Collections tab surfaces declared containment (FRG-UI-026).
+ *
+ * Issue numbers render VERBATIM as strings — "1.5"/"1.MU" are never coerced.
+ * The e2e selector contract (`issue-row-<id>`, per-row search accessible names,
+ * `interactive-search-overlay`, `command-status`) is unchanged.
  */
+
+/** Book-type-toned collected-in chip colors, tokens-var neutral fallback. */
+function collectedChipStyle(booktype: BookType) {
+  const fc = FORMAT_CHIP[booktype];
+  return fc
+    ? { background: fc.bg, color: fc.text }
+    : { background: 'var(--surface-menu)', color: 'var(--text-secondary)' };
+}
+
+/**
+ * Issue status pill (FRG-UI-004): a file present reads success "Downloaded"; a
+ * released issue with no file reads warn "Missing"; only a future-dated issue
+ * reads neutral "Unreleased". Matches the backend's "released" semantics
+ * (repo.wanted_issues): a dated issue is released once its date has passed, and
+ * an issue with BOTH dates null is treated as released ("unknown-but-listed") —
+ * so a fileless, dateless issue reads Missing, never Unreleased.
+ */
+function issueStatusPill(
+  issue: IssueResource,
+  nowMs: number,
+): { label: string; tone: ChipTone } {
+  if (issue.file) return { label: 'Downloaded', tone: 'success' };
+  const iso = issue.store_date ?? issue.cover_date;
+  const ms = iso ? Date.parse(iso) : NaN;
+  // Both dates null → released (unknown-but-listed); a valid future date →
+  // unreleased; a valid past date → released.
+  const released = iso === null ? true : !Number.isNaN(ms) && ms <= nowMs;
+  return released
+    ? { label: 'Missing', tone: 'warning' }
+    : { label: 'Unreleased', tone: 'neutral' };
+}
 
 function DeleteDialog({
   title,
@@ -66,41 +107,12 @@ function DeleteDialog({
 }) {
   const [deleteFiles, setDeleteFiles] = useState(false);
   return (
-    <div className={styles.overlay}>
-      <div role="dialog" aria-modal="true" aria-label={`Delete ${title}`} className={styles.dialog}>
-        <header className={styles.dialogHeader}>
-          <strong>Delete — {title}</strong>
-          <button type="button" className={styles.iconButton} aria-label="Close" onClick={onCancel}>
-            <CloseIcon size={14} />
-          </button>
-        </header>
-        <div className={styles.dialogBody}>
-          <p>The series will be removed from the library.</p>
-          <label className={styles.checkboxRow}>
-            <input
-              type="checkbox"
-              checked={deleteFiles}
-              disabled={busy}
-              onChange={(e) => setDeleteFiles(e.target.checked)}
-            />
-            Also delete files from disk
-          </label>
-          {/* Truthful since m2-daily-surfaces: deleteFiles=true is implemented
-              (each file routed through the recycle bin before the rows go). */}
-          <p className={styles.dialogHint}>
-            Files are moved to the recycle bin when one is configured; otherwise
-            they are permanently deleted. Unchecked, files stay on disk.
-          </p>
-          {/* deleteFiles=true returns 202: the file removal runs as a watched
-              delete-series-files command whose status shows here until terminal. */}
-          {commandStatus && (
-            <p className={styles.dialogHint} data-testid="delete-command-status">
-              Deleting files: {commandStatus}
-            </p>
-          )}
-          {error && <p className={styles.errorNote}>{error}</p>}
-        </div>
-        <footer className={styles.dialogFooter}>
+    <Modal
+      title={<strong>Delete — {title}</strong>}
+      label={`Delete ${title}`}
+      onClose={onCancel}
+      footer={
+        <>
           <button type="button" className={styles.button} onClick={onCancel}>
             Cancel
           </button>
@@ -112,9 +124,40 @@ function DeleteDialog({
           >
             Delete
           </button>
-        </footer>
+        </>
+      }
+    >
+      <div className={styles.dialogBody}>
+        <p>The series will be removed from the library.</p>
+        <label className={styles.checkboxRow}>
+          <input
+            type="checkbox"
+            checked={deleteFiles}
+            disabled={busy}
+            onChange={(e) => setDeleteFiles(e.target.checked)}
+          />
+          Also delete files from disk
+        </label>
+        {/* Truthful since m2-daily-surfaces: deleteFiles=true is implemented
+            (each file routed through the recycle bin before the rows go). */}
+        <p className={styles.dialogHint}>
+          Files are moved to the recycle bin when one is configured; otherwise
+          they are permanently deleted. Unchecked, files stay on disk.
+        </p>
+        {/* deleteFiles=true returns 202: the file removal runs as a watched
+            delete-series-files command whose status shows here until terminal. */}
+        {commandStatus && (
+          <p className={styles.dialogHint} data-testid="delete-command-status">
+            Deleting files: {commandStatus}
+          </p>
+        )}
+        {error && (
+          <p className={styles.errorNote} role="alert">
+            {error}
+          </p>
+        )}
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -136,7 +179,7 @@ function DeleteFileDialog({
 }) {
   const mmQuery = useMediaManagementConfig();
   const deleteFile = useDeleteIssueFile(seriesId);
-  const issueLabel = issue.issue_number ?? String(issue.id);
+  const issueLabel = issue.issue_number ?? '—';
 
   const recycleConfigured = (mmQuery.data?.recycle_bin_path ?? '') !== '';
   const consequence = mmQuery.isLoading
@@ -148,44 +191,12 @@ function DeleteFileDialog({
         : 'This permanently deletes the file from disk — no recycle bin is configured.';
 
   return (
-    <div className={styles.overlay}>
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Delete file for issue ${issueLabel}`}
-        className={styles.dialog}
-      >
-        <header className={styles.dialogHeader}>
-          <strong>Delete File — #{issueLabel}</strong>
-          <button
-            type="button"
-            className={styles.iconButton}
-            aria-label="Close"
-            onClick={onClose}
-          >
-            <CloseIcon size={14} />
-          </button>
-        </header>
-        <div className={styles.dialogBody}>
-          {issue.file && <p className={styles.dialogPath}>{issue.file.path}</p>}
-          <p>{consequence}</p>
-          {/* Config fetch failed: the consequence is UNKNOWN, so Delete stays
-              disabled (below); offer an explicit retry rather than a dead end. */}
-          {mmQuery.isError && (
-            <button
-              type="button"
-              className={styles.button}
-              disabled={mmQuery.isFetching}
-              onClick={() => void mmQuery.refetch()}
-            >
-              {mmQuery.isFetching ? 'Retrying…' : 'Retry'}
-            </button>
-          )}
-          {deleteFile.error && (
-            <p className={styles.errorNote}>{deleteFile.error.message}</p>
-          )}
-        </div>
-        <footer className={styles.dialogFooter}>
+    <Modal
+      title={<strong>Delete File — #{issueLabel}</strong>}
+      label={`Delete file for issue ${issueLabel}`}
+      onClose={onClose}
+      footer={
+        <>
           <button type="button" className={styles.button} onClick={onClose}>
             Cancel
           </button>
@@ -208,9 +219,31 @@ function DeleteFileDialog({
           >
             Delete File
           </button>
-        </footer>
+        </>
+      }
+    >
+      <div className={styles.dialogBody}>
+        {issue.file && <p className={styles.dialogPath}>{issue.file.path}</p>}
+        <p>{consequence}</p>
+        {/* Config fetch failed: the consequence is UNKNOWN, so Delete stays
+            disabled (footer); offer an explicit retry rather than a dead end. */}
+        {mmQuery.isError && (
+          <button
+            type="button"
+            className={styles.button}
+            disabled={mmQuery.isFetching}
+            onClick={() => void mmQuery.refetch()}
+          >
+            {mmQuery.isFetching ? 'Retrying…' : 'Retry'}
+          </button>
+        )}
+        {deleteFile.error && (
+          <p className={styles.errorNote} role="alert">
+            {deleteFile.error.message}
+          </p>
+        )}
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -229,27 +262,12 @@ function EditDialog({
 }) {
   const [policy, setPolicy] = useState(monitorNewItems);
   return (
-    <div className={styles.overlay}>
-      <div role="dialog" aria-modal="true" aria-label={`Edit ${title}`} className={styles.dialog}>
-        <header className={styles.dialogHeader}>
-          <strong>Edit — {title}</strong>
-          <button type="button" className={styles.iconButton} aria-label="Close" onClick={onCancel}>
-            <CloseIcon size={14} />
-          </button>
-        </header>
-        <div className={styles.dialogBody}>
-          <label className={styles.formRow}>
-            <span>Monitor New Issues</span>
-            <select value={policy} onChange={(e) => setPolicy(e.target.value)}>
-              {MONITOR_NEW_ITEMS_POLICIES.map((p) => (
-                <option key={p} value={p}>
-                  {p === 'all' ? 'All new issues' : 'None'}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        <footer className={styles.dialogFooter}>
+    <Modal
+      title={<strong>Edit — {title}</strong>}
+      label={`Edit ${title}`}
+      onClose={onCancel}
+      footer={
+        <>
           <button type="button" className={styles.button} onClick={onCancel}>
             Cancel
           </button>
@@ -261,24 +279,69 @@ function EditDialog({
           >
             Save
           </button>
-        </footer>
+        </>
+      }
+    >
+      <div className={styles.dialogBody}>
+        <label className={styles.formRow}>
+          <span>Monitor New Issues</span>
+          <select value={policy} onChange={(e) => setPolicy(e.target.value)}>
+            {MONITOR_NEW_ITEMS_POLICIES.map((p) => (
+              <option key={p} value={p}>
+                {p === 'all' ? 'All new issues' : 'None'}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
-    </div>
+    </Modal>
   );
 }
 
-function IssueStatusCell({ issue }: { issue: IssueResource }) {
-  if (issue.file) {
-    return (
-      <span className={styles.fileChip}>
-        {fileFormat(issue.file.path)} · {formatBytes(issue.file.size)}
-      </span>
-    );
-  }
-  return issue.monitored ? (
-    <span className={styles.missingChip}>Missing</span>
-  ) : (
-    <span className={styles.mutedChip}>Unmonitored</span>
+/**
+ * Overview paragraph with a measured show-more (FRG-UI-004, design decision 5).
+ * Collapsed to a CSS line-clamp; the toggle renders ONLY when the text actually
+ * overflows the clamp (scrollHeight vs clientHeight, re-measured on resize and
+ * whenever the collapsed/expanded state flips so "show less" can re-collapse).
+ */
+function Overview({ text }: { text: string }) {
+  const ref = useRef<HTMLParagraphElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [overflowing, setOverflowing] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => setOverflowing(el.scrollHeight > el.clientHeight + 1);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [text, expanded]);
+
+  return (
+    <div className={styles.overviewWrap}>
+      <p
+        ref={ref}
+        id="series-overview-text"
+        className={expanded ? styles.overviewExpanded : styles.overview}
+        data-testid="series-overview"
+      >
+        {text}
+      </p>
+      {(overflowing || expanded) && (
+        <button
+          type="button"
+          className={styles.showMore}
+          aria-expanded={expanded}
+          aria-controls="series-overview-text"
+          onClick={() => setExpanded((e) => !e)}
+        >
+          {expanded ? 'Show less' : 'Show more'}
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -291,6 +354,7 @@ export function SeriesDetail() {
 
   const seriesQuery = useSeriesDetail(seriesId);
   const issuesQuery = useIssues(seriesId);
+  const collectionsQuery = useCollections(seriesId);
   const updateSeries = useUpdateSeries(seriesId);
   const deleteSeries = useDeleteSeries();
   const setIssueMonitored = useSetIssueMonitored(seriesId);
@@ -307,7 +371,6 @@ export function SeriesDetail() {
 
   // The deleteFiles path returns 202 + a delete-series-files command; watch it
   // so the dialog shows progress, then leave for the library once it finishes.
-  // On completion the file_deleted history rows and Wanted changes have landed.
   const deleteCommand = useWatchedCommand((status) => {
     if (status === 'completed') {
       void queryClient.invalidateQueries({ queryKey: queryKeys.wanted.all() });
@@ -327,11 +390,22 @@ export function SeriesDetail() {
     }
   }, [refreshFromAdd, start]);
 
+  const [tab, setTab] = useState<'issues' | 'collections'>('issues');
   const [selected, setSelected] = useState<ReadonlySet<number>>(new Set());
+  const [anchorId, setAnchorId] = useState<number | null>(null);
   const [showDelete, setShowDelete] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
   const [showRename, setShowRename] = useState(false);
+  const [overflowOpen, setOverflowOpen] = useState(false);
   const [deleteFileIssue, setDeleteFileIssue] = useState<IssueResource | null>(null);
+  const [containment, setContainment] = useState<Parameters<OpenContainment>[0] | null>(
+    null,
+  );
+  // Batch-scoped busy + partial-failure surface for "Search selected": true
+  // while the per-issue commands dispatch; the whole bulk bar disables while it
+  // runs (and while the last watched batch command is still live).
+  const [batchSearching, setBatchSearching] = useState(false);
+  const [batchNote, setBatchNote] = useState<string | null>(null);
 
   const interactiveIssueId = useUiStore((s) => s.interactiveSearchIssueId);
   const openInteractiveSearch = useUiStore((s) => s.openInteractiveSearch);
@@ -340,6 +414,10 @@ export function SeriesDetail() {
   useEffect(() => closeInteractiveSearch, [closeInteractiveSearch]);
 
   const issues = useMemo(() => issuesQuery.data ?? [], [issuesQuery.data]);
+  const collections = useMemo(
+    () => collectionsQuery.data ?? [],
+    [collectionsQuery.data],
+  );
   const allSelected = issues.length > 0 && issues.every((i) => selected.has(i.id));
   const selectedIssues = issues.filter((i) => selected.has(i.id));
 
@@ -355,22 +433,82 @@ export function SeriesDetail() {
     );
   };
 
+  const clearSelection = () => {
+    setSelected(new Set());
+    setAnchorId(null);
+  };
+
   const toggleSelectAll = () => {
     setSelected(allSelected ? new Set() : new Set(issues.map((i) => i.id)));
+    setAnchorId(null);
   };
 
-  const toggleSelected = (issueId: number) => {
+  // Anchor-based selection (FRG-UI-025): a plain click toggles one row and
+  // becomes the new anchor; a shift-click selects the visible-row span from the
+  // anchor to the clicked row.
+  const selectRow = (index: number, shiftKey: boolean) => {
+    const id = issues[index].id;
+    if (shiftKey && anchorId !== null) {
+      const anchorIndex = issues.findIndex((i) => i.id === anchorId);
+      if (anchorIndex !== -1) {
+        const [lo, hi] =
+          anchorIndex <= index ? [anchorIndex, index] : [index, anchorIndex];
+        const next = new Set(selected);
+        for (let k = lo; k <= hi; k += 1) next.add(issues[k].id);
+        setSelected(next);
+        return;
+      }
+    }
     const next = new Set(selected);
-    if (next.has(issueId)) next.delete(issueId);
-    else next.add(issueId);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
     setSelected(next);
+    setAnchorId(id);
   };
 
-  const bulkToggleMonitored = () => {
+  const bulkSetMonitored = (monitored: boolean) => {
     if (selectedIssues.length === 0) return;
-    const target = !selectedIssues.every((i) => i.monitored);
-    bulkMonitor.mutate({ issueIds: selectedIssues.map((i) => i.id), monitored: target });
+    bulkMonitor.mutate(
+      { issueIds: selectedIssues.map((i) => i.id), monitored },
+      { onSuccess: clearSelection },
+    );
   };
+
+  // Search selected: dispatch one automatic-search command per selected issue
+  // SEQUENTIALLY through the command queue (await each — no parallel fan-out),
+  // surfacing progress through the shared command-status surface. A re-entrancy
+  // guard makes a second invocation inert while a batch is dispatching or its
+  // last command is still live; partial failure surfaces as a role="alert"
+  // note naming how many dispatched. The selection clears on full success.
+  const bulkBusy = bulkMonitor.isPending || batchSearching || command.running;
+  const searchSelected = async () => {
+    if (bulkBusy) return;
+    const targets = selectedIssues.map((i) => i.id);
+    if (targets.length === 0) return;
+    setBatchSearching(true);
+    setBatchNote(null);
+    let dispatched = 0;
+    try {
+      for (let idx = 0; idx < targets.length; idx += 1) {
+        const record = await runCommand.mutateAsync({
+          name: 'issue-search',
+          payload: { series_id: seriesId, issue_id: targets[idx] },
+        });
+        dispatched += 1;
+        setCommandLabel(`Search selected (${idx + 1}/${targets.length})`);
+        start(record.id);
+      }
+      clearSelection();
+    } catch {
+      setBatchNote(
+        `Search dispatched for ${dispatched} of ${targets.length} selected issue(s); the rest failed.`,
+      );
+    } finally {
+      setBatchSearching(false);
+    }
+  };
+
+  const openContainment: OpenContainment = (args) => setContainment(args);
 
   if (seriesQuery.isLoading) {
     return (
@@ -391,201 +529,392 @@ export function SeriesDetail() {
 
   const series = seriesQuery.data;
   const stats = series.statistics;
+  const backdrop = coverUrl(series);
+  const nowMs = Date.now();
+
+  const firstIssueIso = issues.length
+    ? issues[0].store_date ?? issues[0].cover_date
+    : null;
+  const formats = Array.from(
+    new Set(
+      issues
+        .map((i) => (i.file ? fileFormat(i.file.path) : null))
+        .filter((f): f is string => f !== null && f !== ''),
+    ),
+  )
+    .sort()
+    .join(' / ');
+
+  const commandChip = commandLabel && command.status && (
+    <span className={styles.commandChip} data-testid="command-status">
+      {commandLabel}: {command.status}
+    </span>
+  );
 
   return (
     <>
-      <Toolbar
-        title={series.title}
-        actions={
-          <span className={styles.toolbarActions}>
-            {commandLabel && command.status && (
-              <span className={styles.commandChip} data-testid="command-status">
-                {commandLabel}: {command.status}
-              </span>
-            )}
-            <ToolbarButton
-              icon={<RefreshIcon />}
-              label="Refresh"
-              onClick={() => dispatch('Refresh', 'refresh-series', { series_id: seriesId })}
-            />
-            <ToolbarButton
-              icon={<FolderScanIcon />}
-              label="Rescan"
-              onClick={() => dispatch('Rescan', 'scan-series', { series_id: seriesId })}
-            />
-            <ToolbarButton
-              icon={<SearchIcon />}
-              label="Search Monitored"
-              onClick={() => dispatch('Search', 'series-search', { series_id: seriesId })}
-            />
-            <ToolbarSeparator />
-            <ToolbarButton
-              icon={<TableIcon />}
-              label="Rename Files"
-              onClick={() => setShowRename(true)}
-            />
-            <ToolbarButton icon={<WrenchIcon />} label="Edit" onClick={() => setShowEdit(true)} />
-            <ToolbarButton icon={<TrashIcon />} label="Delete" onClick={() => setShowDelete(true)} />
-          </span>
-        }
-      />
+      <Toolbar title={series.title} />
       <div className={styles.content}>
         <section className={styles.hero}>
-          <Poster
-            initial={series.title.charAt(0)}
-            src={coverUrl(series)}
-            alt={`${series.title} cover`}
-            frameClassName={styles.posterFrame}
-            fallbackClassName={styles.posterFallback}
-          />
-          <div className={styles.heroBody}>
-            <div className={styles.titleRow}>
-              <MonitorToggle
-                monitored={series.monitored}
-                label="series"
-                size={22}
-                disabled={updateSeries.isPending}
-                onToggle={() => updateSeries.mutate({ monitored: !series.monitored })}
-              />
-              <h1 className={styles.title}>{series.title}</h1>
-              {series.start_year !== null && (
-                <span className={styles.year}>({series.start_year})</span>
+          {backdrop && (
+            <div
+              className={styles.heroBackdrop}
+              style={{ backgroundImage: `url(${backdrop})` }}
+              aria-hidden
+            />
+          )}
+          <div className={styles.heroScrim} aria-hidden />
+          <div className={styles.heroInner}>
+            <Poster
+              initial={series.title.charAt(0)}
+              src={backdrop}
+              alt={`${series.title} cover`}
+              frameClassName={styles.posterFrame}
+              fallbackClassName={styles.posterFallback}
+            />
+            <div className={styles.heroBody}>
+              <div className={styles.titleRow}>
+                <h1 className={styles.title}>{series.title}</h1>
+                {series.start_year !== null && (
+                  <span className={styles.year}>({series.start_year})</span>
+                )}
+                <BookTypeBadge booktype={series.booktype} />
+              </div>
+
+              <div className={styles.metaRow}>
+                <span className={styles.metaMonitor}>
+                  <MonitorToggle
+                    monitored={series.monitored}
+                    label="series"
+                    size={14}
+                    disabled={updateSeries.isPending}
+                    onToggle={() => updateSeries.mutate({ monitored: !series.monitored })}
+                  />
+                  {series.monitored ? 'Monitored' : 'Unmonitored'}
+                </span>
+                {series.publisher && (
+                  <>
+                    <span className={styles.dot}>•</span>
+                    <span>{series.publisher}</span>
+                  </>
+                )}
+                {firstIssueIso && (
+                  <>
+                    <span className={styles.dot}>•</span>
+                    <span>First issue {formatDate(firstIssueIso)}</span>
+                  </>
+                )}
+                <span className={styles.dot}>•</span>
+                <span>{series.status}</span>
+                <span className={styles.dot}>•</span>
+                <span>{stats.issue_count} issues</span>
+                {formats && (
+                  <>
+                    <span className={styles.dot}>•</span>
+                    <span>{formats}</span>
+                  </>
+                )}
+              </div>
+
+              <div className={styles.actionRow}>
+                <button
+                  type="button"
+                  className={styles.action}
+                  onClick={() => dispatch('Search', 'series-search', { series_id: seriesId })}
+                >
+                  <SearchIcon size={16} />
+                  Search Monitored
+                </button>
+                <button
+                  type="button"
+                  className={styles.action}
+                  onClick={() =>
+                    dispatch('Search All', 'series-search', {
+                      series_id: seriesId,
+                      monitored_only: false,
+                    })
+                  }
+                >
+                  <SearchIcon size={16} />
+                  Search All
+                </button>
+                <button
+                  type="button"
+                  className={styles.action}
+                  onClick={() => dispatch('Refresh', 'refresh-series', { series_id: seriesId })}
+                >
+                  <RefreshIcon size={16} />
+                  Refresh
+                </button>
+                <button
+                  type="button"
+                  className={styles.action}
+                  onClick={() => setShowEdit(true)}
+                >
+                  <WrenchIcon size={15} />
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.action} ${styles.actionDanger}`}
+                  onClick={() => setShowDelete(true)}
+                >
+                  <TrashIcon size={15} />
+                  Delete
+                </button>
+                <Menu
+                  open={overflowOpen}
+                  onOpenChange={setOverflowOpen}
+                  label="More"
+                  icon={<MoreIcon size={16} />}
+                  align="end"
+                  panelRole="menu"
+                  testId="series-overflow-trigger"
+                  menuTestId="series-overflow-menu"
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    data-menuitem
+                    className={styles.menuItem}
+                    onClick={() => {
+                      setOverflowOpen(false);
+                      dispatch('Rescan', 'scan-series', { series_id: seriesId });
+                    }}
+                  >
+                    <FolderScanIcon size={16} />
+                    Rescan
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    data-menuitem
+                    className={styles.menuItem}
+                    onClick={() => {
+                      setOverflowOpen(false);
+                      setShowRename(true);
+                    }}
+                  >
+                    <TableIcon size={16} />
+                    Rename Files
+                  </button>
+                </Menu>
+                {commandChip}
+              </div>
+
+              {series.description_sanitized && (
+                <Overview text={series.description_sanitized} />
               )}
-            </div>
-            <div className={styles.chipRow}>
-              <BookTypeBadge booktype={series.booktype} />
-              <span className={styles.chip}>{series.path}</span>
-              <span className={styles.chip}>{formatBytes(stats.size_on_disk)}</span>
-              {series.publisher && <span className={styles.chip}>{series.publisher}</span>}
-              <span className={styles.chip}>{series.status}</span>
-              <span className={styles.chip}>
-                {series.monitored ? 'Monitored' : 'Unmonitored'}
-              </span>
-            </div>
-            {series.description_sanitized && (
-              <p className={styles.overview}>{series.description_sanitized}</p>
-            )}
-            <div className={styles.statsRow}>
-              <ProgressPill
-                have={stats.file_count}
-                total={stats.issue_count}
-                monitored={series.monitored}
-              />
-              <span>
-                {stats.issue_count} issues · {stats.file_count} files ·{' '}
-                {stats.missing_count} missing
-              </span>
             </div>
           </div>
         </section>
 
-        {issuesQuery.isLoading && <p className={styles.stateNote}>Loading issues…</p>}
-        {issuesQuery.isError && <p className={styles.stateNote}>Could not load issues.</p>}
-        {issues.length > 0 && (
-          <table className={styles.table}>
-            <thead>
-              <tr>
-                <th className={styles.selectCol}>
-                  <input
-                    type="checkbox"
-                    aria-label="Select all issues"
-                    checked={allSelected}
-                    onChange={toggleSelectAll}
-                  />
-                </th>
-                <th className={styles.iconCol}>
-                  <button
-                    type="button"
-                    className={styles.bulkMonitorButton}
-                    aria-label="Toggle monitored for selected issues"
-                    title="Toggle monitored for selected issues"
-                    disabled={selectedIssues.length === 0 || bulkMonitor.isPending}
-                    onClick={bulkToggleMonitored}
+        <div className={styles.panelWrap}>
+          <div className={styles.panel}>
+            <div className={styles.panelHeader}>
+              <SegmentedControl
+                ariaLabel="Detail view"
+                value={tab}
+                onChange={setTab}
+                options={[
+                  { value: 'issues', label: `Issues · ${stats.issue_count}` },
+                  { value: 'collections', label: `Collections · ${collections.length}` },
+                ]}
+              />
+              <span className={styles.panelSpacer} />
+              <div className={styles.progressWrap}>
+                <ProgressStrip
+                  have={stats.file_count}
+                  total={stats.issue_count}
+                  monitored={series.monitored}
+                  variant="strip"
+                />
+              </div>
+            </div>
+
+            {tab === 'issues' ? (
+              <>
+                {issuesQuery.isLoading && (
+                  <p className={styles.stateNote}>Loading issues…</p>
+                )}
+                {issuesQuery.isError && (
+                  <p className={styles.stateNote}>Could not load issues.</p>
+                )}
+                {selectedIssues.length > 0 && (
+                  <div
+                    className={styles.bulkBar}
+                    role="region"
+                    aria-label="Bulk issue actions"
                   >
-                    <BookmarkIcon filled size={14} />
-                  </button>
-                </th>
-                <th className={styles.numberCol}>#</th>
-                <th>Title</th>
-                <th>Cover Date</th>
-                <th>Status</th>
-                <th className={styles.actionsCol}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {issues.map((issue) => (
-                <tr key={issue.id} data-testid={`issue-row-${issue.id}`}>
-                  <td className={styles.selectCol}>
-                    <input
-                      type="checkbox"
-                      aria-label={`Select issue ${issue.issue_number ?? issue.id}`}
-                      checked={selected.has(issue.id)}
-                      onChange={() => toggleSelected(issue.id)}
-                    />
-                  </td>
-                  <td className={styles.iconCol}>
-                    <MonitorToggle
-                      monitored={issue.monitored}
-                      label={`issue ${issue.issue_number ?? issue.id}`}
-                      size={14}
-                      disabled={setIssueMonitored.isPending}
-                      onToggle={() =>
-                        setIssueMonitored.mutate({
-                          issueId: issue.id,
-                          monitored: !issue.monitored,
-                        })
-                      }
-                    />
-                  </td>
-                  {/* Verbatim string issue number — never coerced (FRG-UI-004). */}
-                  <td className={styles.numberCol}>{issue.issue_number ?? '—'}</td>
-                  <td>{issue.title ?? '—'}</td>
-                  <td>{formatDate(issue.cover_date)}</td>
-                  <td>
-                    <IssueStatusCell issue={issue} />
-                  </td>
-                  <td className={styles.actionsCol}>
+                    <span className={styles.bulkCount} aria-live="polite">
+                      {selectedIssues.length} selected
+                    </span>
                     <button
                       type="button"
-                      className={styles.iconButton}
-                      aria-label={`Automatic search for issue ${issue.issue_number ?? issue.id}`}
-                      title="Automatic search"
-                      onClick={() =>
-                        dispatch(
-                          `Search #${issue.issue_number ?? issue.id}`,
-                          'issue-search',
-                          { series_id: seriesId, issue_id: issue.id },
-                        )
-                      }
+                      className={styles.button}
+                      disabled={bulkBusy}
+                      onClick={() => bulkSetMonitored(true)}
                     >
-                      <SearchIcon size={14} />
+                      Monitor selected
                     </button>
                     <button
                       type="button"
-                      className={styles.iconButton}
-                      aria-label={`Interactive search for issue ${issue.issue_number ?? issue.id}`}
-                      title="Interactive search"
-                      onClick={() => openInteractiveSearch(issue.id)}
+                      className={styles.button}
+                      disabled={bulkBusy}
+                      onClick={() => bulkSetMonitored(false)}
                     >
-                      <PersonIcon size={14} />
+                      Unmonitor selected
                     </button>
-                    {issue.file && (
-                      <button
-                        type="button"
-                        className={styles.iconDanger}
-                        aria-label={`Delete file for issue ${issue.issue_number ?? issue.id}`}
-                        title="Delete file"
-                        onClick={() => setDeleteFileIssue(issue)}
-                      >
-                        <TrashIcon size={14} />
-                      </button>
+                    <button
+                      type="button"
+                      className={styles.button}
+                      disabled={bulkBusy}
+                      onClick={() => void searchSelected()}
+                    >
+                      Search selected
+                    </button>
+                    {batchNote && (
+                      <span className={styles.errorNote} role="alert">
+                        {batchNote}
+                      </span>
                     )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+                  </div>
+                )}
+                {issues.length > 0 && (
+                  <table className={styles.table}>
+                    <thead>
+                      <tr>
+                        <th scope="col" className={styles.selectCol}>
+                          <input
+                            type="checkbox"
+                            aria-label="Select all issues"
+                            checked={allSelected}
+                            onChange={toggleSelectAll}
+                          />
+                        </th>
+                        <th scope="col" className={styles.iconCol} />
+                        <th scope="col" className={styles.numberCol}>Issue</th>
+                        <th scope="col">Release</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Collected in</th>
+                        <th scope="col" className={styles.sizeCol}>Size</th>
+                        <th scope="col" className={styles.actionsCol} />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {issues.map((issue, index) => {
+                        const status = issueStatusPill(issue, nowMs);
+                        const memberships = issue.collected_in ?? [];
+                        // Accessible names use the verbatim issue number (never
+                        // the DB id) — a fileless/dateless issue with no number
+                        // reads "issue —", not an internal row id.
+                        const num = issue.issue_number ?? '—';
+                        return (
+                          <tr key={issue.id} data-testid={`issue-row-${issue.id}`}>
+                            <td className={styles.selectCol}>
+                              <input
+                                type="checkbox"
+                                aria-label={`Select issue ${num}`}
+                                checked={selected.has(issue.id)}
+                                onChange={() => {}}
+                                onClick={(e) => selectRow(index, e.shiftKey)}
+                              />
+                            </td>
+                            <td className={styles.iconCol}>
+                              <MonitorToggle
+                                monitored={issue.monitored}
+                                label={`issue ${num}`}
+                                size={14}
+                                disabled={setIssueMonitored.isPending}
+                                onToggle={() =>
+                                  setIssueMonitored.mutate({
+                                    issueId: issue.id,
+                                    monitored: !issue.monitored,
+                                  })
+                                }
+                              />
+                            </td>
+                            {/* Verbatim string issue number — never coerced. */}
+                            <td className={styles.numberCol}>
+                              {issue.issue_number ?? '—'}
+                            </td>
+                            <td className={styles.mutedCell}>
+                              {formatDate(issue.store_date ?? issue.cover_date)}
+                            </td>
+                            <td>
+                              <Chip tone={status.tone}>{status.label}</Chip>
+                            </td>
+                            <td>
+                              <div className={styles.collectedCell}>
+                                {memberships.map((ci) => (
+                                  <span
+                                    key={ci.trade_issue_id}
+                                    className={styles.collectedChip}
+                                    style={collectedChipStyle(ci.booktype)}
+                                    title={`${ci.trade_series_title} · ${ci.range_label}`}
+                                  >
+                                    {ci.range_label}
+                                  </span>
+                                ))}
+                              </div>
+                            </td>
+                            <td className={styles.mutedCell}>
+                              {issue.file ? formatBytes(issue.file.size) : '—'}
+                            </td>
+                            <td className={styles.actionsCol}>
+                              <button
+                                type="button"
+                                className={styles.iconButton}
+                                aria-label={`Automatic search for issue ${num}`}
+                                title="Automatic search"
+                                onClick={() =>
+                                  dispatch(`Search #${num}`, 'issue-search', {
+                                    series_id: seriesId,
+                                    issue_id: issue.id,
+                                  })
+                                }
+                              >
+                                <SearchIcon size={14} />
+                              </button>
+                              <button
+                                type="button"
+                                className={styles.iconButton}
+                                aria-label={`Interactive search for issue ${num}`}
+                                title="Interactive search"
+                                onClick={() => openInteractiveSearch(issue.id)}
+                              >
+                                <PersonIcon size={14} />
+                              </button>
+                              {issue.file && (
+                                <button
+                                  type="button"
+                                  className={styles.iconDanger}
+                                  aria-label={`Delete file for issue ${num}`}
+                                  title="Delete file"
+                                  onClick={() => setDeleteFileIssue(issue)}
+                                >
+                                  <TrashIcon size={14} />
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </>
+            ) : (
+              <CollectionsTab
+                series={series}
+                seriesId={seriesId}
+                collections={collections}
+                ownIssues={issues}
+                onOpenContainment={openContainment}
+              />
+            )}
+          </div>
+        </div>
       </div>
 
       {/*
@@ -604,6 +933,18 @@ export function SeriesDetail() {
             onClose={closeInteractiveSearch}
           />
         </div>
+      )}
+
+      {containment && (
+        <ContainmentDialog
+          anchorTradeIssueId={containment.anchorTradeIssueId}
+          anchorTradeSeriesId={containment.anchorTradeSeriesId}
+          defaultTargetSeriesId={containment.defaultTargetSeriesId}
+          invalidateSeriesId={seriesId}
+          hasExisting={containment.hasExisting}
+          existingRanges={containment.existingRanges}
+          onClose={() => setContainment(null)}
+        />
       )}
 
       {showDelete && (
@@ -661,4 +1002,15 @@ export function SeriesDetail() {
       )}
     </>
   );
+}
+
+/**
+ * Route wrapper (FRG-UI-004): keys {@link SeriesDetail} by the URL id so ALL
+ * view-local state (active tab, bulk selection, expanded overview, command
+ * status) fully resets when navigating series→series — e.g. a Collections
+ * "Open" jump — instead of leaking the previous series' state into the next.
+ */
+export function SeriesDetailRoute() {
+  const { id } = useParams();
+  return <SeriesDetail key={id} />;
 }

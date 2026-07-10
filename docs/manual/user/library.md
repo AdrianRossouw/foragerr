@@ -206,6 +206,110 @@ the trade series, never to the single-issue series. Type a series as a collected
 edition freely; it changes only how the series is labelled and named, never what is
 wanted.
 
+## The series detail screen
+
+Clicking a series (from any library view, or quick search) opens its detail screen.
+
+### Hero and actions
+
+The hero shows the cover — full-size and, behind it, blurred and darkened as a
+backdrop — over the series title, its book-type badge when typed as a collected
+edition, and a meta row (monitored toggle, publisher, first-issue date, status,
+issue count, and the file formats you own). Below that, an icon-over-label action
+row dispatches the series' commands:
+
+- **Search Monitored** — the ordinary series search, over monitored missing issues.
+- **Search All** — searches for **every missing issue regardless of its monitored
+  flag**; use it to fill gaps without first changing anything's monitored state.
+- **Refresh** — re-pulls metadata from ComicVine and re-scans.
+- **Edit** / **Delete** — see "Editing and deleting a series" below.
+- **More (⋯)** — an overflow menu carrying **Rescan** (see "Per-series rescan"
+  above) and **Rename Files** (opens the rename preview — see `web-ui.md`
+  §Media Management), so no action loses reachability from the hero.
+
+A long overview paragraph collapses behind a **Show more** toggle once it
+overflows a few lines; a short overview shows no toggle at all.
+
+### Issues tab
+
+Below the hero, a bordered panel carries an `Issues · N / Collections · N` toggle
+and a compact owned/total progress bar. The Issues tab is a dense table: a
+selection checkbox, the per-issue monitored toggle, the verbatim issue number,
+release date, a status pill (**Downloaded** when a file is present, **Missing**
+once its release date has passed with no file, **Unreleased** otherwise), any
+**collected-in** chips (see "Collections tab" below), file size, and per-row
+automatic/interactive search actions.
+
+**Bulk selection.** Click a row's checkbox to select it; **shift-click** another
+row's checkbox to select every row in between (the last plain click sets the
+anchor). The header checkbox selects or deselects every visible row. Selecting
+one or more rows shows a labeled action bar above the table — **Monitor
+selected**, **Unmonitor selected**, **Search selected** — replacing the
+unlabeled header icon button older versions used. "Search selected" dispatches
+one automatic-search command per selected issue, one after another (never in
+parallel), so the command-status chip in the hero tracks progress as it goes
+(e.g. "Search selected (2/5)"). The selection lives only on the screen — it
+clears when you leave.
+
+### Collections tab: declaring what a trade collects
+
+foragerr does not scrape ComicVine's "collects" data (see "Collected editions
+(trades)" above for why); instead **you** declare which single issues a trade
+paperback, graphic novel, hardcover, or one-shot collects, and the Collections
+tab both shows and edits those declarations.
+
+What the tab shows depends on which kind of series you're viewing:
+
+- **Viewing a collected edition (a trade-typed series)**: the tab lists that
+  series' own issues — each one a physical collected book (e.g. "Volume 1",
+  "Volume 2" as separate trades in the same run) — with a **Declare contents**
+  button (or **Edit contents** once something is declared).
+- **Viewing a single-issue series**: the tab lists every collected book, from
+  any series in your library, that currently declares a range targeting it —
+  read-only rows with **Open** (jump to that trade's own detail page) and
+  **Edit**.
+
+Either way an empty tab explains itself rather than showing a blank panel, and
+the toggle's `Collections · N` count reflects exactly what's listed.
+
+**Declaring a range.** Declare/Edit contents opens a dialog; when a
+declaration already exists it opens pre-filled with every declared range, so
+you edit what is really there:
+
+1. Each range row has its own **target series** picker — any other series in
+   your library (the trade series itself is excluded); a new row defaults to
+   the previous row's target, so the common one-series case stays a single
+   pick while an omnibus can mix targets.
+2. Pick a **From** and **To** issue from that target's issue list — the
+   inclusive range this collected book contains. Issue numbers show verbatim,
+   exactly as the series lists them. If a pre-filled range's endpoints can no
+   longer be resolved (the target's issues changed since it was declared),
+   the row shows a warning and must be re-picked before saving.
+3. **Add sub-range** for a non-contiguous collection (e.g. a book collecting
+   #1–#6 and separately a bonus #8) — each sub-range is its own row,
+   removable independently.
+4. **Save** replaces the trade issue's *entire* declared set with what's in
+   the dialog (the dialog says so) — with pre-fill, what you see is exactly
+   what will be saved. **Delete all** clears every range for that trade
+   issue.
+
+Each declared range shows as a **"Collects #a–#b"** label (or **"#n"** for a
+single issue) wherever it appears — on the Collections tab and as a
+collected-in chip on the corresponding rows of the target series' Issues tab. A
+**coverage pill** on each collected book reads the declared range against what
+you actually own, computed live each time you look: **Collected** (every issue
+in every declared range has a file), **Partial** (some do), or **Not
+collected** (none do).
+
+**This is display-only, on purpose.** Declaring or deleting a containment range
+never changes any issue's monitored flag, never marks a single issue "owned,"
+and never affects what gets searched for or downloaded — a missing single issue
+stays wanted and searchable no matter what trades declare about it (the same
+invariant that already keeps trades and singles independent tracks — see
+"Collected editions (trades)" above). There is no automatic suggestion:
+foragerr strips ComicVine's own "collects" links as untrusted content at
+ingest, so every declaration you see here is one you made yourself.
+
 ## Editing and deleting a series
 
 `PUT /api/v1/series/{id}` updates a series' monitored flag, monitor-new-items policy,

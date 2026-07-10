@@ -26,6 +26,12 @@ export const queryKeys = {
     // exact-match ['series'] invalidations that back the flat index never touch
     // it; a group edit invalidates this key explicitly.
     groups: () => ['series', 'groups'] as const,
+    // Declared collections for one series (FRG-API-022), mirroring GET
+    // /api/v1/series/{id}/collections. Nested under the ['series', id] prefix so
+    // a broad series-detail invalidation sweeps it, while the exact-match
+    // ['series'] index invalidation (and the setQueryData on ['series', id])
+    // leave it untouched — a plain monitor toggle never refetches collections.
+    collections: (id: number) => ['series', id, 'collections'] as const,
   },
   queue: {
     all: () => ['queue'] as const,
