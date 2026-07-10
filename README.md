@@ -1,5 +1,16 @@
 # foragerr
 
+> **AI-built, human-directed.** foragerr's code, tests, and documentation are
+> written almost entirely by AI (Anthropic's Claude), working under the
+> spec-driven, requirement-traced process described below, with direction,
+> review, and approval by the project's one human operator. That is as much
+> the point of the project as the product is — it demonstrates disciplined
+> AI-driven development of a real application — but weigh the software
+> accordingly: it is young, it is AI-authored, and no human has read every
+> line. The requirement registry, traceability matrix, per-change review
+> gates, and release records in this repository are the honest account of
+> how it was made.
+
 foragerr is a self-hosted, Sonarr-style manager for a comic library you own. It
 imports and renames an existing collection (DRM-free purchases such as Humble
 Bundle drops, public-domain scans from the Digital Comic Museum and the Internet
