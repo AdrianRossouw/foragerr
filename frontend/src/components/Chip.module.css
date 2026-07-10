@@ -43,3 +43,15 @@
   background: var(--color-accent-tint);
   color: var(--color-info-text);
 }
+
+/* Dark translucent chip that rides on top of cover art (publisher chip). */
+.overlay {
+  background: var(--surface-overlay-chip);
+  color: var(--text-overlay-chip);
+}
+
+/* Solid-accent chip with dark knockout text — the grouped `N vols` marker. */
+.accent {
+  background: var(--color-accent);
+  color: var(--color-accent-contrast);
+}

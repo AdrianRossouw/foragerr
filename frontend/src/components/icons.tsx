@@ -161,6 +161,48 @@ export function CheckIcon(props: IconProps) {
   );
 }
 
+/** Stacked layers = the grouped-franchise `N vols` chip (FRG-UI-021). */
+export function LayersIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M12 3l9 5-9 5-9-5z" />
+      <path d="M3 13l9 5 9-5" />
+    </Svg>
+  );
+}
+
+/** Open book = the empty-library / no-match placeholder (FRG-UI-003). */
+export function BookOpenIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M12 6c-1.8-1.2-4.2-2-6.5-2H3v14h2.5c2.3 0 4.7.8 6.5 2" />
+      <path d="M12 6c1.8-1.2 4.2-2 6.5-2H21v14h-2.5c-2.3 0-4.7.8-6.5 2" />
+      <line x1="12" y1="6" x2="12" y2="20" />
+    </Svg>
+  );
+}
+
+/** Plus = the Add New toolbar action (FRG-UI-003). */
+export function PlusIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </Svg>
+  );
+}
+
+/** Import = the library-import toolbar action (FRG-UI-003). */
+export function ImportIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M12 3v12" />
+      <path d="M8 11l4 4 4-4" />
+      <path d="M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2" />
+    </Svg>
+  );
+}
+
 export function RefreshIcon(props: IconProps) {
   return (
     <Svg {...props}>

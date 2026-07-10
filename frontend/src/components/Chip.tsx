@@ -7,7 +7,14 @@ import styles from './Chip.module.css';
  * views. Tone maps to the semantic token palette; `neutral` is the default
  * dark chip. All color comes from tokens — callers never pass a hex.
  */
-export type ChipTone = 'neutral' | 'success' | 'warning' | 'info' | 'muted';
+export type ChipTone =
+  | 'neutral'
+  | 'success'
+  | 'warning'
+  | 'info'
+  | 'muted'
+  | 'overlay'
+  | 'accent';
 
 export function Chip({
   children,

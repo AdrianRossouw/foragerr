@@ -3,8 +3,8 @@ import styles from './ProgressStrip.module.css';
 /**
  * Shared owned/total progress strip (FRG-UI-003, design decision 2). One
  * primitive for the whole library: a track whose color reflects completeness
- * (complete = green-tinted `--color-progress-track-complete`, incomplete =
- * red-tinted `--color-progress-track-incomplete`) and an accent-green fill
+ * (complete = green-tinted `--color-progress-complete`, incomplete =
+ * red-tinted `--color-progress-incomplete`) and an accent-green fill
  * sized to the owned ratio. The count and/or percent read on top.
  *
  * Variants size it per context — `strip` (poster-card footer bar), `bar`
