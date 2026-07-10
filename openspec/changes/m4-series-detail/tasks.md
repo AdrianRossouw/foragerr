@@ -39,11 +39,11 @@
       (no-auth acceptance lineage, tampering note) (FRG-PROC-006)
 - [x] 4.2 Manual: series page (detail anatomy, bulk actions, collections/
       containment how-to) + web-ui section (FRG-PROC-011)
-- [ ] 4.3 Tour: refresh shots if the detail shot changed (FRG-PROC-017)
+- [x] 4.3 Tour: refresh shots if the detail shot changed (FRG-PROC-017)
 
 ## 5. Merge gate (LARGE tier)
 
-- [ ] 5.1 Full suites green; trace 0; soup 0; gitleaks re-scan appended
-- [ ] 5.2 Full fleet + Codex (incl. dedicated wanted-invariant angle and a
+- [x] 5.1 Full suites green; trace 0; soup 0; gitleaks re-scan appended
+- [x] 5.2 Full fleet + Codex (incl. dedicated wanted-invariant angle and a
       security angle on the write endpoints); fixes; CHANGELOG v0.4.4 +
       bump; sync delta; archive; merge; tag; push; release
