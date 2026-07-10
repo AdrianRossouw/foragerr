@@ -7,20 +7,25 @@
 The UI SHALL provide a library index screen listing all series in three view
 modes: **Posters** — a responsive `auto-fill` grid with selectable poster
 sizes (S/M/L ≈ 134/162/196px), each card a 2:3 cover with a monitored
-bookmark chip, publisher and volume chips, an owned/total progress strip
-(track color reflecting complete vs incomplete, accent fill), and title +
-subline; **Overview** — horizontal rows with cover thumb, title, status pill,
-publisher/meta, a wide progress bar and percent complete; **Table** — a dense
-table with monitor icon, Title (+volume), Publisher, Issues (mini progress),
-Status, and Year columns. Above the content a count line SHALL read
+bookmark chip, a publisher chip, the book-type badge where typed
+(FRG-UI-022), an owned/total progress strip (track color reflecting complete
+vs incomplete, accent fill), and title + status/year subline (an `N vols`
+chip appears on the grouped stacked card only — FRG-UI-021); **Overview** —
+horizontal rows with cover thumb, title, status pill, publisher/meta, a wide
+progress bar and percent complete; **Table** — a dense table with monitor
+icon, Title (+ book-type badge), Publisher, Issues (mini progress), Status,
+and Year columns. Above the content a count line SHALL read
 `N comics · N monitored · N with missing issues` with the monitored and
 missing counts in their semantic colors. The toolbar SHALL carry the view
 switcher and three dropdown menus in the design's raised-menu style —
 **Options** (poster-size segmented control, group-volumes toggle), **Sort**
-(Title, Publisher, Issues owned, Year; check mark on the active choice), and
-**Filter** (All, Monitored, Missing issues, Continuing; each option showing
-its count) — plus a text filter; a click in the content region SHALL close
-any open menu. View mode, poster size, sort, and filter selections SHALL
+(Title, Publisher, Issues owned, Year; check mark on the active choice;
+sorting applies to the flat views, so the menu is disabled while grouping is
+on), and **Filter** (All, Monitored, Missing issues, Continuing; each option
+showing its count; plus an EDITIONS section carrying the FRG-UI-022
+collected-editions filter with counts) — plus a text filter; a click in the
+content region SHALL close any open menu without activating the content
+beneath it. View mode, poster size, sort, and filter selections SHALL
 persist across sessions.
 
 - **Milestone**: M1 (redesigned to the owner's design in M4, m4-library-views)

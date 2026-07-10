@@ -39,12 +39,21 @@ design inside the v0.4.0 shell.
   favicon added. Implementation refinement within FRG-UI-023's existing
   "logo lockup" text — no spec delta, no new IDs.
 - Tour regenerated (FRG-PROC-017) — the grid screenshot shows the new cards.
+- **Amendment (owner demo review, 2026-07-10)**: three owner-reported fixes
+  rode this branch after the live demo — (a) series WS pushes now invalidate
+  the sibling `['issues', id]` cache so the detail issues table fills without
+  a reload after an add (FRG-UI-001); (b) cover URLs are versioned by
+  `cover_cached_at` (null → no img) so refreshed art appears without a
+  reload — this touches the series-detail hero's img src (FRG-UI-004);
+  (c) the sidebar lockup links back to the library (FRG-UI-023). All are
+  bug/affordance fixes inside existing requirements; no spec deltas.
 
 ## Non-goals
 
 - No changes to grouping semantics, filtering/search behavior at the API, or
   wanted computation — visual/UX layer only, existing endpoints.
-- No series-detail changes (ch3); no Calendar (ch5).
+- No series-detail redesign (ch3) — the amendment's cover-URL fix adjusts the
+  detail hero's img src only; no Calendar (ch5).
 - Publisher tint/accent backgrounds before cover art loads are in scope only
   as far as the palette maps from ch1 allow — no new metadata fetches.
 
