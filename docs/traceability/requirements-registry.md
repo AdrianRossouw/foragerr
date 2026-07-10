@@ -41,7 +41,7 @@ Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 | FRG-PROC-013 | Release tagging | dev-process | active | — |
 | FRG-PROC-014 | Public repository labelling and posture | dev-process | active | — |
 | FRG-PROC-015 | Repository history hygiene | dev-process | active | — |
-| FRG-PROC-016 | Known-anomalies register | dev-process | proposed | — |
+| FRG-PROC-016 | Known-anomalies register | dev-process | active | — |
 | FRG-SER-001 | Series entity from ComicVine volume | ser | implemented | M1 |
 | FRG-SER-002 | Issue entity | ser | implemented | M1 |
 | FRG-SER-003 | Two-level monitored flags | ser | implemented | M1 |

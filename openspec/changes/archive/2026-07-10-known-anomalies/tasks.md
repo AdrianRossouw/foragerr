@@ -2,7 +2,7 @@
 
 ## 1. Register and seed entry
 
-- [ ] 1.1 Create branch `change/known-anomalies`; allocate FRG-PROC-016 in
+- [x] 1.1 Create branch `change/known-anomalies`; allocate FRG-PROC-016 in
       `docs/traceability/requirements-registry.md` (FRG-PROC-002)
 - [x] 1.2 Create `docs/security/known-anomalies.md` with the register format
       (required fields per FRG-PROC-016) and seed **KA-001**: exposed
@@ -45,7 +45,7 @@
 
 ## 4. Merge gate
 
-- [ ] 4.1 Full merge-gate checklist; CHANGELOG entry + version bump; release
+- [x] 4.1 Full merge-gate checklist; CHANGELOG entry + version bump; release
       notes reference KA-001 per FRG-PROC-016 (FRG-PROC-007, FRG-PROC-013)
-- [ ] 4.2 Review cycle; sync delta to baseline; archive; registry flip;
+- [x] 4.2 Review cycle; sync delta to baseline; archive; registry flip;
       matrix; re-scan evidence; merge `--no-ff`, tag, release
