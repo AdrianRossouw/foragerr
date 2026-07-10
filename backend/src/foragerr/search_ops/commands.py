@@ -173,7 +173,7 @@ async def _wanted_issue_targets(
     fallback), then issue id for a stable total order. Scoped to one series
     when ``series_id`` is given (the series-search walk).
 
-    ``include_all`` (the "Search All" hero action, FRG-SER-005) swaps the
+    ``include_all`` (the "Search All" hero action, FRG-SRCH-008) swaps the
     search-scope selectable from ``repo.wanted_issues()`` to the parallel
     ``repo.missing_issues()`` — every released issue with no file, regardless
     of series/issue monitored flags. ``repo.wanted_issues()`` itself is never

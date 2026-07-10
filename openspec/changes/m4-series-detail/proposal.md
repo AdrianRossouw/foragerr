@@ -51,9 +51,17 @@ deferred.
   affordance opening a containment dialog (target series from the library,
   start/end issue pickers, multiple sub-ranges); "Open" navigates to the
   trade series' detail.
-- **Cleanup (no spec change)**: the grouped-library franchise ⋯ popover is
-  unified onto the shared Menu primitive's a11y behavior (focus/Escape
-  handling), closing the ch2 review deferral (FRG-UI-021).
+- **MODIFIED FRG-SRCH-008 — Search All scope** (amendment, found during
+  implementation): `SeriesSearchCommand` gains `monitored_only` (default
+  true) honored via a new `missing_issues()` sibling selectable, so the
+  detail screen's "Search All" genuinely covers unmonitored missing issues;
+  reachable only from the explicit operator action — schedulers and chained
+  searches stay wanted-scoped, and `wanted_issues()` is untouched.
+- **Cleanup (no spec change)**: the grouped-library franchise ⋯ popover
+  mirrors the shared Menu primitive's a11y behavior (panel role, focus on
+  open, Escape restore — behaviors aligned rather than the component
+  swapped, since the shared trigger styling doesn't fit an inline ⋯
+  button), closing the ch2 review deferral (FRG-UI-021).
 - New registry IDs allocated at proposal time: FRG-SER-020, FRG-API-022,
   FRG-UI-025, FRG-UI-026.
 

@@ -70,6 +70,23 @@ allocated yet).
     registered secret can never enter the buffer and the endpoint can never serve one,
     independent of auth. Coverage: PF `AUTH — M1/M2 no-auth accepted risk` (same Tailscale-only
     compensating control as every other read endpoint). RISK-043.
+  - **T-API-8 (Tampering — containment write endpoints)**: `PUT`/`DELETE
+    /api/v1/issues/{issue_id}/collections` (FRG-API-022, M4 `m4-series-detail`) let any
+    tailnet-position client declare, replace, or delete trade-containment records
+    (FRG-SER-020) — which single-issue series a collected edition declares it collects —
+    without authentication. Named separately from T-API-1 because the mitigation is
+    scope-specific, not just the shared no-auth posture: containment is display-only by
+    construction (a dedicated `issue_collections` side table, no column on
+    `series`/`issues`; the FRG-SER-019 absence-test technique is extended to prove
+    `wanted_issues`/`series_statistics` never reference it), so a hostile or mistaken
+    write can misrepresent what a trade collects but cannot mark an issue owned, flip a
+    monitored flag, touch a file, or feed the wanted list/pull matcher. The write is also
+    validated against the named series before anything is persisted — target series must
+    exist, both endpoint issues must belong to it, bounds must be ordered
+    (`ContainmentValidationError` → 400 naming the field) — so a malformed request cannot
+    corrupt containment for a series it doesn't name either. Coverage: PF `AUTH — M1/M2
+    no-auth accepted risk` (same Tailscale-only compensating control as every other write
+    endpoint). RISK-044.
 
 ---
 
@@ -1227,6 +1244,47 @@ Disposition:
 RISK-043 is added (new) for this row; it cites RISK-020 for the no-auth
 acceptance rather than restating it. No new SOUP (stdlib `logging` +
 `collections.deque` only; `tools/soup_check.py` unaffected).
+
+### 2026-07-10 — m4-series-detail (M4 ch4)
+
+New attack surface on **COMP 1 — Web API/UI**: two new write endpoints, `PUT`/`DELETE
+/api/v1/issues/{issue_id}/collections` (FRG-API-022), plus the read-only `GET
+/api/v1/series/{series_id}/collections` rollup and collected-in chips folded into the
+existing issues listing — the trade-containment model (FRG-SER-020). No new STRIDE
+category, no new COMP; one new risk id (RISK-044), because — like RISK-043 before it —
+the row records a mitigation specific to this write surface, not just the shared
+no-auth acceptance. Disposition:
+
+- **T-API-8 (Tampering) — mitigated by scope, not by auth**: containment is
+  display-only by construction (FRG-SER-020): a dedicated side table
+  (`issue_collections`) carries no column on `series`/`issues`, and the FRG-SER-019
+  never-suppress-wanted absence-test technique is extended so the compiled SQL of
+  `wanted_issues`/`series_statistics` is asserted to never reference it. So an
+  unauthenticated write can misrepresent what a trade collects but cannot mark an
+  issue owned, flip a monitored flag, touch a file, or feed the wanted list/pull
+  matcher — the same invariant that already protects trade-typing (m3-trade-typing)
+  extends to containment. The repo layer
+  (`foragerr.library.containment.replace_issue_collections`) also validates every
+  write BEFORE touching a row — the target series must exist, both endpoint issues
+  must belong to it, and the bounds must be ordered — rejecting otherwise with the
+  standard 400 error shape naming the field, so a malformed request cannot corrupt
+  containment for a series it doesn't name either.
+- **Same accepted posture, no new principal (RISK-020 lineage)**: the endpoints are
+  reachable only over the tailnet, identical posture to every other write endpoint
+  already accepted under RISK-020. They add no new listener, no new credential, and
+  no new outbound integration.
+- **Negligible information disclosure**: the collections/chips reads return only data
+  the operator already declared and can already see on the detail screen (trade
+  identity, book-type, range labels, request-time coverage) — nothing not already
+  visible is newly exposed.
+- **Cascade cleanup, not a new deletion surface**: containment records are removed
+  automatically when their trade issue or target series is deleted (FK CASCADE,
+  FRG-SER-020) — no operator-facing delete action beyond the containment dialog's own
+  Delete/Delete-all.
+
+RISK-044 is added (new) for this row; it cites RISK-020 for the no-auth acceptance
+rather than restating it. No new SOUP (SQLAlchemy ORM + the existing repo/session
+patterns only; `tools/soup_check.py` unaffected).
 
 ## Coverage summary
 

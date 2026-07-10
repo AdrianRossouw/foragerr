@@ -31,13 +31,13 @@
       (FRG-UI-026)
 - [x] 3.5 Franchise ⋯ popover a11y unification onto the shared Menu
       behavior (ch2 deferral; FRG-UI-021, no spec change)
-- [ ] 3.6 Vitest per scenario (IDs in names); e2e spine green
+- [x] 3.6 Vitest per scenario (IDs in names); e2e spine green
 
 ## 4. Docs & security
 
-- [ ] 4.1 Threat model / risk register: containment write endpoints
+- [x] 4.1 Threat model / risk register: containment write endpoints
       (no-auth acceptance lineage, tampering note) (FRG-PROC-006)
-- [ ] 4.2 Manual: series page (detail anatomy, bulk actions, collections/
+- [x] 4.2 Manual: series page (detail anatomy, bulk actions, collections/
       containment how-to) + web-ui section (FRG-PROC-011)
 - [ ] 4.3 Tour: refresh shots if the detail shot changed (FRG-PROC-017)
 

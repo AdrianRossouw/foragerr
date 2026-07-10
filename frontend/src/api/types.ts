@@ -288,13 +288,17 @@ export interface IssueResource {
 
 /**
  * One declared sub-range inside a collection record (FRG-API-022): the target
- * single-issues series the range covers plus its verbatim label ("1-6"). The
- * read resource carries the label, not the endpoint issue ids — the declare
- * dialog re-picks endpoints against the target series' current issue list.
+ * single-issues series the range covers, its verbatim label ("1-6"), and the
+ * target issues currently at the stored ordering-key bounds
+ * (`start_issue_id`/`end_issue_id`, `null` when no surviving issue has that
+ * exact key). The edit dialog pre-fills its endpoint pickers from these ids;
+ * a `null` endpoint means the operator must re-pick that bound.
  */
 export interface CollectionRange {
   target_series_id: number;
   label: string;
+  start_issue_id: number | null;
+  end_issue_id: number | null;
 }
 
 /**

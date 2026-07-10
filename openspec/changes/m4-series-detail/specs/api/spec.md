@@ -8,14 +8,18 @@ The API SHALL surface trade containment (FRG-SER-020) read and write:
 (1) the per-series issues listing SHALL carry each issue's collected-in
 memberships (the trade series id/title, its book-type, and the collected
 book's issue id) so the detail table can render chips without N+1 calls;
-(2) a per-series collections resource SHALL list each collected book that
-declares a range targeting the series — with the trade series/issue
-identifiers, book-type, range labels, release date, and a request-time
-singles-coverage status (`collected` when every issue in every range has a
-file, `partial` when some do, `none` when none do) computed read-only;
+(2) a per-series collections resource SHALL list containment from BOTH
+directions — collected books declaring ranges that target the series, and,
+for a trade-typed series, its own issues' declared contents — each with the
+trade series/issue identifiers, book-type, range labels with their resolved
+endpoint issue ids (so an edit dialog can pre-fill), release date (store
+date preferred, cover date fallback), and a request-time singles-coverage
+status (`collected` when every issue in every range has a file, `partial`
+when some do, `none` when none do) computed read-only;
 (3) declare/replace/delete endpoints SHALL manage a trade issue's
-containment records, validating that the target series exists, that both
-endpoint issues belong to it, and that the bounds are ordered — rejecting
+containment records, validating that the target series exists and is not
+the trade's own series, that both endpoint issues belong to it, that the
+bounds are ordered, and that the ranges list is bounded — rejecting
 otherwise with the API's standard error shape. Writes SHALL touch only
 containment records (no series/issue/file mutation).
 

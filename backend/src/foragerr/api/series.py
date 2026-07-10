@@ -367,10 +367,16 @@ class SeriesGroupPage(BaseModel):
 
 
 class CollectionRangeResource(BaseModel):
-    """One declared sub-range within a collections rollup entry (FRG-API-022)."""
+    """One declared sub-range within a collections rollup entry (FRG-API-022).
+
+    ``start_issue_id``/``end_issue_id`` are the target series' issues currently
+    at the stored ordering-key bounds (``null`` when no surviving issue has that
+    exact key) — the edit dialog pre-fills its endpoint pickers from them."""
 
     target_series_id: int
     label: str
+    start_issue_id: int | None
+    end_issue_id: int | None
 
 
 class CollectionRecordResource(BaseModel):
@@ -403,7 +409,10 @@ class CollectionRecordResource(BaseModel):
             release_date=rollup.release_date,
             ranges=[
                 CollectionRangeResource(
-                    target_series_id=r.target_series_id, label=r.label
+                    target_series_id=r.target_series_id,
+                    label=r.label,
+                    start_issue_id=r.start_issue_id,
+                    end_issue_id=r.end_issue_id,
                 )
                 for r in rollup.ranges
             ],
@@ -414,8 +423,9 @@ class CollectionRecordResource(BaseModel):
 
 
 class CollectionsResponse(BaseModel):
-    """The collections resource for a series (FRG-API-022): every collected
-    book that declares a range targeting it."""
+    """The collections resource for a series (FRG-API-022): containment BOTH
+    directions touch — the collected books that declare a range targeting it
+    and, when the series is itself trade-typed, its own issues' declarations."""
 
     records: list[CollectionRecordResource]
 
@@ -868,8 +878,10 @@ async def get_series_cover(series_id: int, request: Request) -> FileResponse:
 async def list_series_collections(
     series_id: int, request: Request
 ) -> CollectionsResponse:
-    """Every collected book that declares a range targeting this series
-    (FRG-API-022), each with its range labels, release date, and a request-time
+    """Containment for this series in BOTH directions (FRG-API-022): the
+    collected books declaring a range targeting it and, when it is itself
+    trade-typed, its own issues' declared contents — each with range labels
+    (plus resolved endpoint issue ids), release date, and a request-time
     singles-coverage status (``collected``/``partial``/``none``). Read-only —
     the rollup is computed from bounded queries and touches no wanted/stats
     state (FRG-SER-020). A missing series yields a 404."""

@@ -4,13 +4,13 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Toolbar } from '../../components/Toolbar';
 import { MonitorToggle } from '../../components/MonitorToggle';
 import { Menu } from '../../components/Menu';
+import { Modal } from '../../components/Modal';
 import { Poster } from '../../components/Poster';
 import { BookTypeBadge } from '../../components/BookTypeBadge';
 import { Chip, type ChipTone } from '../../components/Chip';
 import { SegmentedControl } from '../../components/SegmentedControl';
 import { ProgressStrip } from '../../components/ProgressStrip';
 import {
-  CloseIcon,
   FolderScanIcon,
   MoreIcon,
   PersonIcon,
@@ -68,8 +68,11 @@ function collectedChipStyle(booktype: BookType) {
 
 /**
  * Issue status pill (FRG-UI-004): a file present reads success "Downloaded"; a
- * released issue with no file reads warn "Missing"; anything not yet released
- * (future- or undated) reads neutral "Unreleased".
+ * released issue with no file reads warn "Missing"; only a future-dated issue
+ * reads neutral "Unreleased". Matches the backend's "released" semantics
+ * (repo.wanted_issues): a dated issue is released once its date has passed, and
+ * an issue with BOTH dates null is treated as released ("unknown-but-listed") —
+ * so a fileless, dateless issue reads Missing, never Unreleased.
  */
 function issueStatusPill(
   issue: IssueResource,
@@ -78,7 +81,9 @@ function issueStatusPill(
   if (issue.file) return { label: 'Downloaded', tone: 'success' };
   const iso = issue.store_date ?? issue.cover_date;
   const ms = iso ? Date.parse(iso) : NaN;
-  const released = !Number.isNaN(ms) && ms <= nowMs;
+  // Both dates null → released (unknown-but-listed); a valid future date →
+  // unreleased; a valid past date → released.
+  const released = iso === null ? true : !Number.isNaN(ms) && ms <= nowMs;
   return released
     ? { label: 'Missing', tone: 'warning' }
     : { label: 'Unreleased', tone: 'neutral' };
@@ -102,41 +107,12 @@ function DeleteDialog({
 }) {
   const [deleteFiles, setDeleteFiles] = useState(false);
   return (
-    <div className={styles.overlay}>
-      <div role="dialog" aria-modal="true" aria-label={`Delete ${title}`} className={styles.dialog}>
-        <header className={styles.dialogHeader}>
-          <strong>Delete — {title}</strong>
-          <button type="button" className={styles.iconButton} aria-label="Close" onClick={onCancel}>
-            <CloseIcon size={14} />
-          </button>
-        </header>
-        <div className={styles.dialogBody}>
-          <p>The series will be removed from the library.</p>
-          <label className={styles.checkboxRow}>
-            <input
-              type="checkbox"
-              checked={deleteFiles}
-              disabled={busy}
-              onChange={(e) => setDeleteFiles(e.target.checked)}
-            />
-            Also delete files from disk
-          </label>
-          {/* Truthful since m2-daily-surfaces: deleteFiles=true is implemented
-              (each file routed through the recycle bin before the rows go). */}
-          <p className={styles.dialogHint}>
-            Files are moved to the recycle bin when one is configured; otherwise
-            they are permanently deleted. Unchecked, files stay on disk.
-          </p>
-          {/* deleteFiles=true returns 202: the file removal runs as a watched
-              delete-series-files command whose status shows here until terminal. */}
-          {commandStatus && (
-            <p className={styles.dialogHint} data-testid="delete-command-status">
-              Deleting files: {commandStatus}
-            </p>
-          )}
-          {error && <p className={styles.errorNote}>{error}</p>}
-        </div>
-        <footer className={styles.dialogFooter}>
+    <Modal
+      title={<strong>Delete — {title}</strong>}
+      label={`Delete ${title}`}
+      onClose={onCancel}
+      footer={
+        <>
           <button type="button" className={styles.button} onClick={onCancel}>
             Cancel
           </button>
@@ -148,9 +124,40 @@ function DeleteDialog({
           >
             Delete
           </button>
-        </footer>
+        </>
+      }
+    >
+      <div className={styles.dialogBody}>
+        <p>The series will be removed from the library.</p>
+        <label className={styles.checkboxRow}>
+          <input
+            type="checkbox"
+            checked={deleteFiles}
+            disabled={busy}
+            onChange={(e) => setDeleteFiles(e.target.checked)}
+          />
+          Also delete files from disk
+        </label>
+        {/* Truthful since m2-daily-surfaces: deleteFiles=true is implemented
+            (each file routed through the recycle bin before the rows go). */}
+        <p className={styles.dialogHint}>
+          Files are moved to the recycle bin when one is configured; otherwise
+          they are permanently deleted. Unchecked, files stay on disk.
+        </p>
+        {/* deleteFiles=true returns 202: the file removal runs as a watched
+            delete-series-files command whose status shows here until terminal. */}
+        {commandStatus && (
+          <p className={styles.dialogHint} data-testid="delete-command-status">
+            Deleting files: {commandStatus}
+          </p>
+        )}
+        {error && (
+          <p className={styles.errorNote} role="alert">
+            {error}
+          </p>
+        )}
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -172,7 +179,7 @@ function DeleteFileDialog({
 }) {
   const mmQuery = useMediaManagementConfig();
   const deleteFile = useDeleteIssueFile(seriesId);
-  const issueLabel = issue.issue_number ?? String(issue.id);
+  const issueLabel = issue.issue_number ?? '—';
 
   const recycleConfigured = (mmQuery.data?.recycle_bin_path ?? '') !== '';
   const consequence = mmQuery.isLoading
@@ -184,44 +191,12 @@ function DeleteFileDialog({
         : 'This permanently deletes the file from disk — no recycle bin is configured.';
 
   return (
-    <div className={styles.overlay}>
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Delete file for issue ${issueLabel}`}
-        className={styles.dialog}
-      >
-        <header className={styles.dialogHeader}>
-          <strong>Delete File — #{issueLabel}</strong>
-          <button
-            type="button"
-            className={styles.iconButton}
-            aria-label="Close"
-            onClick={onClose}
-          >
-            <CloseIcon size={14} />
-          </button>
-        </header>
-        <div className={styles.dialogBody}>
-          {issue.file && <p className={styles.dialogPath}>{issue.file.path}</p>}
-          <p>{consequence}</p>
-          {/* Config fetch failed: the consequence is UNKNOWN, so Delete stays
-              disabled (below); offer an explicit retry rather than a dead end. */}
-          {mmQuery.isError && (
-            <button
-              type="button"
-              className={styles.button}
-              disabled={mmQuery.isFetching}
-              onClick={() => void mmQuery.refetch()}
-            >
-              {mmQuery.isFetching ? 'Retrying…' : 'Retry'}
-            </button>
-          )}
-          {deleteFile.error && (
-            <p className={styles.errorNote}>{deleteFile.error.message}</p>
-          )}
-        </div>
-        <footer className={styles.dialogFooter}>
+    <Modal
+      title={<strong>Delete File — #{issueLabel}</strong>}
+      label={`Delete file for issue ${issueLabel}`}
+      onClose={onClose}
+      footer={
+        <>
           <button type="button" className={styles.button} onClick={onClose}>
             Cancel
           </button>
@@ -244,9 +219,31 @@ function DeleteFileDialog({
           >
             Delete File
           </button>
-        </footer>
+        </>
+      }
+    >
+      <div className={styles.dialogBody}>
+        {issue.file && <p className={styles.dialogPath}>{issue.file.path}</p>}
+        <p>{consequence}</p>
+        {/* Config fetch failed: the consequence is UNKNOWN, so Delete stays
+            disabled (footer); offer an explicit retry rather than a dead end. */}
+        {mmQuery.isError && (
+          <button
+            type="button"
+            className={styles.button}
+            disabled={mmQuery.isFetching}
+            onClick={() => void mmQuery.refetch()}
+          >
+            {mmQuery.isFetching ? 'Retrying…' : 'Retry'}
+          </button>
+        )}
+        {deleteFile.error && (
+          <p className={styles.errorNote} role="alert">
+            {deleteFile.error.message}
+          </p>
+        )}
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -265,27 +262,12 @@ function EditDialog({
 }) {
   const [policy, setPolicy] = useState(monitorNewItems);
   return (
-    <div className={styles.overlay}>
-      <div role="dialog" aria-modal="true" aria-label={`Edit ${title}`} className={styles.dialog}>
-        <header className={styles.dialogHeader}>
-          <strong>Edit — {title}</strong>
-          <button type="button" className={styles.iconButton} aria-label="Close" onClick={onCancel}>
-            <CloseIcon size={14} />
-          </button>
-        </header>
-        <div className={styles.dialogBody}>
-          <label className={styles.formRow}>
-            <span>Monitor New Issues</span>
-            <select value={policy} onChange={(e) => setPolicy(e.target.value)}>
-              {MONITOR_NEW_ITEMS_POLICIES.map((p) => (
-                <option key={p} value={p}>
-                  {p === 'all' ? 'All new issues' : 'None'}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        <footer className={styles.dialogFooter}>
+    <Modal
+      title={<strong>Edit — {title}</strong>}
+      label={`Edit ${title}`}
+      onClose={onCancel}
+      footer={
+        <>
           <button type="button" className={styles.button} onClick={onCancel}>
             Cancel
           </button>
@@ -297,9 +279,22 @@ function EditDialog({
           >
             Save
           </button>
-        </footer>
+        </>
+      }
+    >
+      <div className={styles.dialogBody}>
+        <label className={styles.formRow}>
+          <span>Monitor New Issues</span>
+          <select value={policy} onChange={(e) => setPolicy(e.target.value)}>
+            {MONITOR_NEW_ITEMS_POLICIES.map((p) => (
+              <option key={p} value={p}>
+                {p === 'all' ? 'All new issues' : 'None'}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -329,6 +324,7 @@ function Overview({ text }: { text: string }) {
     <div className={styles.overviewWrap}>
       <p
         ref={ref}
+        id="series-overview-text"
         className={expanded ? styles.overviewExpanded : styles.overview}
         data-testid="series-overview"
       >
@@ -338,6 +334,8 @@ function Overview({ text }: { text: string }) {
         <button
           type="button"
           className={styles.showMore}
+          aria-expanded={expanded}
+          aria-controls="series-overview-text"
           onClick={() => setExpanded((e) => !e)}
         >
           {expanded ? 'Show less' : 'Show more'}
@@ -403,6 +401,11 @@ export function SeriesDetail() {
   const [containment, setContainment] = useState<Parameters<OpenContainment>[0] | null>(
     null,
   );
+  // Batch-scoped busy + partial-failure surface for "Search selected": true
+  // while the per-issue commands dispatch; the whole bulk bar disables while it
+  // runs (and while the last watched batch command is still live).
+  const [batchSearching, setBatchSearching] = useState(false);
+  const [batchNote, setBatchNote] = useState<string | null>(null);
 
   const interactiveIssueId = useUiStore((s) => s.interactiveSearchIssueId);
   const openInteractiveSearch = useUiStore((s) => s.openInteractiveSearch);
@@ -473,16 +476,35 @@ export function SeriesDetail() {
 
   // Search selected: dispatch one automatic-search command per selected issue
   // SEQUENTIALLY through the command queue (await each — no parallel fan-out),
-  // surfacing progress through the shared command-status surface.
+  // surfacing progress through the shared command-status surface. A re-entrancy
+  // guard makes a second invocation inert while a batch is dispatching or its
+  // last command is still live; partial failure surfaces as a role="alert"
+  // note naming how many dispatched. The selection clears on full success.
+  const bulkBusy = bulkMonitor.isPending || batchSearching || command.running;
   const searchSelected = async () => {
+    if (bulkBusy) return;
     const targets = selectedIssues.map((i) => i.id);
-    for (let idx = 0; idx < targets.length; idx += 1) {
-      const record = await runCommand.mutateAsync({
-        name: 'issue-search',
-        payload: { series_id: seriesId, issue_id: targets[idx] },
-      });
-      setCommandLabel(`Search selected (${idx + 1}/${targets.length})`);
-      start(record.id);
+    if (targets.length === 0) return;
+    setBatchSearching(true);
+    setBatchNote(null);
+    let dispatched = 0;
+    try {
+      for (let idx = 0; idx < targets.length; idx += 1) {
+        const record = await runCommand.mutateAsync({
+          name: 'issue-search',
+          payload: { series_id: seriesId, issue_id: targets[idx] },
+        });
+        dispatched += 1;
+        setCommandLabel(`Search selected (${idx + 1}/${targets.length})`);
+        start(record.id);
+      }
+      clearSelection();
+    } catch {
+      setBatchNote(
+        `Search dispatched for ${dispatched} of ${targets.length} selected issue(s); the rest failed.`,
+      );
+    } finally {
+      setBatchSearching(false);
     }
   };
 
@@ -724,13 +746,13 @@ export function SeriesDetail() {
                     role="region"
                     aria-label="Bulk issue actions"
                   >
-                    <span className={styles.bulkCount}>
+                    <span className={styles.bulkCount} aria-live="polite">
                       {selectedIssues.length} selected
                     </span>
                     <button
                       type="button"
                       className={styles.button}
-                      disabled={bulkMonitor.isPending}
+                      disabled={bulkBusy}
                       onClick={() => bulkSetMonitored(true)}
                     >
                       Monitor selected
@@ -738,7 +760,7 @@ export function SeriesDetail() {
                     <button
                       type="button"
                       className={styles.button}
-                      disabled={bulkMonitor.isPending}
+                      disabled={bulkBusy}
                       onClick={() => bulkSetMonitored(false)}
                     >
                       Unmonitor selected
@@ -746,18 +768,23 @@ export function SeriesDetail() {
                     <button
                       type="button"
                       className={styles.button}
-                      disabled={runCommand.isPending}
+                      disabled={bulkBusy}
                       onClick={() => void searchSelected()}
                     >
                       Search selected
                     </button>
+                    {batchNote && (
+                      <span className={styles.errorNote} role="alert">
+                        {batchNote}
+                      </span>
+                    )}
                   </div>
                 )}
                 {issues.length > 0 && (
                   <table className={styles.table}>
                     <thead>
                       <tr>
-                        <th className={styles.selectCol}>
+                        <th scope="col" className={styles.selectCol}>
                           <input
                             type="checkbox"
                             aria-label="Select all issues"
@@ -765,20 +792,23 @@ export function SeriesDetail() {
                             onChange={toggleSelectAll}
                           />
                         </th>
-                        <th className={styles.iconCol} />
-                        <th className={styles.numberCol}>Issue</th>
-                        <th>Release</th>
-                        <th>Status</th>
-                        <th>Collected in</th>
-                        <th className={styles.sizeCol}>Size</th>
-                        <th className={styles.actionsCol} />
+                        <th scope="col" className={styles.iconCol} />
+                        <th scope="col" className={styles.numberCol}>Issue</th>
+                        <th scope="col">Release</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Collected in</th>
+                        <th scope="col" className={styles.sizeCol}>Size</th>
+                        <th scope="col" className={styles.actionsCol} />
                       </tr>
                     </thead>
                     <tbody>
                       {issues.map((issue, index) => {
                         const status = issueStatusPill(issue, nowMs);
                         const memberships = issue.collected_in ?? [];
-                        const num = issue.issue_number ?? issue.id;
+                        // Accessible names use the verbatim issue number (never
+                        // the DB id) — a fileless/dateless issue with no number
+                        // reads "issue —", not an internal row id.
+                        const num = issue.issue_number ?? '—';
                         return (
                           <tr key={issue.id} data-testid={`issue-row-${issue.id}`}>
                             <td className={styles.selectCol}>
@@ -912,6 +942,7 @@ export function SeriesDetail() {
           defaultTargetSeriesId={containment.defaultTargetSeriesId}
           invalidateSeriesId={seriesId}
           hasExisting={containment.hasExisting}
+          existingRanges={containment.existingRanges}
           onClose={() => setContainment(null)}
         />
       )}
@@ -971,4 +1002,15 @@ export function SeriesDetail() {
       )}
     </>
   );
+}
+
+/**
+ * Route wrapper (FRG-UI-004): keys {@link SeriesDetail} by the URL id so ALL
+ * view-local state (active tab, bulk selection, expanded overview, command
+ * status) fully resets when navigating series→series — e.g. a Collections
+ * "Open" jump — instead of leaking the previous series' state into the next.
+ */
+export function SeriesDetailRoute() {
+  const { id } = useParams();
+  return <SeriesDetail key={id} />;
 }

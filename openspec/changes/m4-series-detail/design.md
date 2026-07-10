@@ -18,7 +18,9 @@ our sanitizer's link stripping, schema precedents).
    confidence, created_at)` — one row per contiguous sub-range; endpoints
    are copied ordering keys (robust to CV renumbering, `BETWEEN`-comparable,
    the comparator the schema already uses). No column on `series`/`issues`.
-   Migration 0015 follows the 0013 raw-ALTER FK pattern.
+   Migration 0015 is a pure new table (`create_table` with inline FK
+   constraints — the 0013 raw-ALTER pattern is only needed when adding FK
+   columns to an existing table).
 2. **Display-only is proven by absence, same as FRG-SER-019.** The M3
    invariant test asserting no booktype predicate in
    `wanted_issues`/`series_statistics` is extended: their compiled SQL must

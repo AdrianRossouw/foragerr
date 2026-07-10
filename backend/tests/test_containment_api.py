@@ -162,7 +162,14 @@ def test_collections_rollup_with_coverage(client, tmp_path):
     assert collected["trade_series_id"] == ids["collected_series"]
     assert collected["booktype"] == "tpb"
     assert collected["release_date"] == "2020-05-01"
-    assert collected["ranges"] == [{"target_series_id": ids["target_id"], "label": "#1–#3"}]
+    assert collected["ranges"] == [
+        {
+            "target_series_id": ids["target_id"],
+            "label": "#1–#3",
+            "start_issue_id": ids["issues"]["1"],
+            "end_issue_id": ids["issues"]["3"],
+        }
+    ]
 
     partial = records[ids["partial_trade"]]
     assert partial["coverage"] == "partial"
@@ -223,6 +230,85 @@ def test_declaration_validation_uses_standard_error_shape(client, tmp_path):
 
     # Nothing was written by any rejected call.
     assert client.get(f"/api/v1/series/{ids['target_id']}/collections").json()["records"] == []
+
+
+@pytest.mark.req("FRG-API-022")
+def test_declaration_unknown_target_series_is_400(client, tmp_path):
+    ids = client.portal.call(_seed, client.app, tmp_path / "lib")
+    resp = client.put(
+        f"/api/v1/issues/{ids['collected_trade']}/collections",
+        json={"ranges": [{"target_series_id": 999999,
+                          "start_issue_id": ids["issues"]["1"],
+                          "end_issue_id": ids["issues"]["3"]}]},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["errors"][0]["field"] == "target_series_id"
+    assert client.get(f"/api/v1/series/{ids['target_id']}/collections").json()["records"] == []
+
+
+@pytest.mark.req("FRG-API-022")
+def test_declaration_self_containment_is_400(client, tmp_path):
+    ids = client.portal.call(_seed, client.app, tmp_path / "lib")
+    # Target the trade issue's OWN series (endpoints = the trade issue itself,
+    # which belongs to that series) -> self-containment, field-precise 400.
+    resp = client.put(
+        f"/api/v1/issues/{ids['collected_trade']}/collections",
+        json={"ranges": [{"target_series_id": ids["collected_series"],
+                          "start_issue_id": ids["collected_trade"],
+                          "end_issue_id": ids["collected_trade"]}]},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["errors"][0]["field"] == "target_series_id"
+
+
+@pytest.mark.req("FRG-API-022")
+def test_declaration_ranges_cap_is_400(client, tmp_path):
+    ids = client.portal.call(_seed, client.app, tmp_path / "lib")
+    # More than the 100-range cap -> rejected at the request-validation layer,
+    # mapped to the uniform 400 shape (the app maps RequestValidationError -> 400).
+    too_many = [
+        {"target_series_id": ids["target_id"],
+         "start_issue_id": ids["issues"]["1"],
+         "end_issue_id": ids["issues"]["1"]}
+        for _ in range(101)
+    ]
+    resp = client.put(
+        f"/api/v1/issues/{ids['collected_trade']}/collections",
+        json={"ranges": too_many},
+    )
+    assert resp.status_code == 400
+    assert set(resp.json()) == {"message", "errors"}
+
+
+@pytest.mark.req("FRG-API-022")
+def test_collections_both_directions_over_http(client, tmp_path):
+    """The trade's OWN collections read (direction B) surfaces its issue's
+    declaration with resolved endpoint issue ids, so the edit dialog can
+    pre-fill."""
+    ids = client.portal.call(_seed, client.app, tmp_path / "lib")
+    client.put(
+        f"/api/v1/issues/{ids['collected_trade']}/collections",
+        json={"ranges": [{"target_series_id": ids["target_id"],
+                          "start_issue_id": ids["issues"]["1"],
+                          "end_issue_id": ids["issues"]["3"]}]},
+    )
+
+    # Direction B: read the TRADE series' own collections.
+    resp = client.get(f"/api/v1/series/{ids['collected_series']}/collections")
+    assert resp.status_code == 200
+    records = resp.json()["records"]
+    assert len(records) == 1
+    rec = records[0]
+    assert rec["trade_issue_id"] == ids["collected_trade"]
+    assert rec["coverage"] == "collected"
+    assert rec["ranges"] == [
+        {
+            "target_series_id": ids["target_id"],
+            "label": "#1–#3",
+            "start_issue_id": ids["issues"]["1"],
+            "end_issue_id": ids["issues"]["3"],
+        }
+    ]
 
 
 @pytest.mark.req("FRG-API-022")

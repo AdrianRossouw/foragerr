@@ -225,6 +225,78 @@ async def test_declaration_on_non_trade_issue_is_rejected(
             )
 
 
+@pytest.mark.req("FRG-SER-020")
+@pytest.mark.req("FRG-API-022")
+async def test_self_containment_is_rejected(db, root_folder_id, format_profile_id):
+    """A trade issue may not declare that it collects its OWN series — the
+    target must be a different (single-issues) run."""
+    trade_id, trade_issue_id = await _make_trade(
+        db, root_folder_id, format_profile_id, cv_volume_id=120, title="Ouroboros TPB"
+    )
+    # Give the trade series a second/third issue to use as endpoints against itself.
+    async with db.write_session() as session:
+        a = await repo.create_issue(
+            session, series_id=trade_id, cv_issue_id=120_500, issue_number="2",
+            monitored=True,
+        )
+        b = await repo.create_issue(
+            session, series_id=trade_id, cv_issue_id=120_501, issue_number="3",
+            monitored=True,
+        )
+        await session.flush()
+        a_id, b_id = a.id, b.id
+
+    with pytest.raises(ContainmentValidationError) as exc:
+        async with db.write_session() as session:
+            await containment.replace_issue_collections(
+                session, trade_issue_id, [RangeInput(trade_id, a_id, b_id)]
+            )
+    assert exc.value.field == "target_series_id"
+
+
+@pytest.mark.req("FRG-API-022")
+async def test_collections_both_directions_with_resolved_endpoints(
+    db, root_folder_id, format_profile_id
+):
+    """A trade-typed series' OWN collections read reflects the declarations its
+    issues make (direction B), with each range's endpoints resolved back to the
+    target series' issue ids so an edit dialog can pre-fill."""
+    target_id, issues = await _make_target_series(
+        db, root_folder_id, format_profile_id,
+        cv_volume_id=130, title="Lazarus", numbers=[str(n) for n in range(1, 7)],
+        owned=["1", "2", "3"],
+    )
+    trade_id, trade_issue_id = await _make_trade(
+        db, root_folder_id, format_profile_id, cv_volume_id=230, title="Lazarus Vol 1 TPB"
+    )
+    async with db.write_session() as session:
+        await containment.replace_issue_collections(
+            session, trade_issue_id, [RangeInput(target_id, issues["1"], issues["3"])]
+        )
+
+    # Reading the TRADE series' collections (direction B) surfaces its own
+    # issue's declaration with resolved endpoint ids + coverage.
+    async with db.read_session() as session:
+        rollups = await containment.collections_for_series(session, trade_id)
+    assert len(rollups) == 1
+    rollup = rollups[0]
+    assert rollup.trade_issue_id == trade_issue_id
+    assert rollup.coverage == "collected"
+    assert (rollup.issues_in_ranges, rollup.owned_in_ranges) == (3, 3)
+    [rng] = rollup.ranges
+    assert rng.target_series_id == target_id
+    assert rng.start_issue_id == issues["1"]
+    assert rng.end_issue_id == issues["3"]
+
+    # Reading the TARGET series' collections (direction A) still surfaces the
+    # same record, endpoints resolved identically.
+    async with db.read_session() as session:
+        a_rollups = await containment.collections_for_series(session, target_id)
+    assert len(a_rollups) == 1
+    [a_rng] = a_rollups[0].ranges
+    assert (a_rng.start_issue_id, a_rng.end_issue_id) == (issues["1"], issues["3"])
+
+
 @pytest.mark.req("FRG-API-022")
 async def test_collected_in_chips_are_exact(db, root_folder_id, format_profile_id):
     target_id, issues = await _make_target_series(
@@ -324,8 +396,11 @@ async def test_cascade_on_trade_issue_delete(db, root_folder_id, format_profile_
 
     async with db.read_session() as session:
         assert await containment.list_issue_collections(session, trade_issue_id) == []
-        # The target series' issues + files are untouched.
-        assert len(await repo.list_issues_for_series(session, target_id)) == 3
+        # The target series' issues + files are untouched — including their
+        # monitored flags (containment is display-only, never a wanted lever).
+        target_issues = await repo.list_issues_for_series(session, target_id)
+        assert len(target_issues) == 3
+        assert all(i.monitored for i in target_issues)
 
 
 @pytest.mark.req("FRG-SER-020")

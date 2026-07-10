@@ -14,7 +14,7 @@ import datetime as dt
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
@@ -165,12 +165,20 @@ class CollectionRangeInput(BaseModel):
     end_issue_id: int
 
 
+#: Upper bound on how many sub-ranges one declare/replace may carry. Bounds the
+#: per-range existence work done under the global write lock (a real collected
+#: edition never legitimately declares anywhere near this many sub-ranges).
+MAX_CONTAINMENT_RANGES = 100
+
+
 class IssueCollectionsUpdate(BaseModel):
     """Request body for ``PUT /api/v1/issues/{id}/collections`` — replace-all
     semantics: the supplied ranges become the trade issue's complete
-    containment set. ``[]`` clears it (equivalent to DELETE)."""
+    containment set. ``[]`` clears it (equivalent to DELETE). The list is capped
+    at ``MAX_CONTAINMENT_RANGES`` (a 400 via the uniform validation shape
+    otherwise)."""
 
-    ranges: list[CollectionRangeInput]
+    ranges: list[CollectionRangeInput] = Field(max_length=MAX_CONTAINMENT_RANGES)
 
 
 class StoredRangeResource(BaseModel):

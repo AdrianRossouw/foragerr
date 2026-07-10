@@ -5,6 +5,7 @@ import { FORMAT_CHIP } from '../../theme/palettes';
 import { formatDate } from '../../lib/format';
 import type {
   BookType,
+  CollectionRange,
   CollectionRecord,
   IssueResource,
   SeriesResource,
@@ -59,6 +60,9 @@ export type OpenContainment = (args: {
   anchorTradeSeriesId: number;
   defaultTargetSeriesId: number | null;
   hasExisting: boolean;
+  /** The trade issue's already-declared ranges (with resolved endpoint ids),
+   * for the dialog to pre-fill in edit mode; empty when declaring fresh. */
+  existingRanges: CollectionRange[];
 }) => void;
 
 /**
@@ -136,6 +140,7 @@ export function CollectionsTab({
                     anchorTradeSeriesId: seriesId,
                     defaultTargetSeriesId: null,
                     hasExisting: record !== undefined,
+                    existingRanges: record?.ranges ?? [],
                   })
                 }
               >
@@ -207,6 +212,7 @@ export function CollectionsTab({
                   anchorTradeSeriesId: record.trade_series_id,
                   defaultTargetSeriesId: seriesId,
                   hasExisting: true,
+                  existingRanges: record.ranges,
                 })
               }
             >

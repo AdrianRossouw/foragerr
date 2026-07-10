@@ -49,9 +49,11 @@ Overview, or Table — switched from the toolbar, with sorting, filtering, and a
 text filter alongside them; see `user/library.md` §The library index for the
 full set of controls. Posters come from the local cover cache — nothing is
 fetched from ComicVine at view time. Clicking a series opens its detail page: a
-hero band with the series' key facts, per-issue rows with monitored toggles,
-each issue's file status, and buttons that dispatch real commands — refresh
-metadata, rescan the series folder, or search for an issue.
+blurred-cover hero with the series' key facts and an action row (search,
+refresh, edit, delete, and a **More** menu for rescan/rename), and a bordered
+panel below it with an Issues/Collections toggle — a dense issue table with
+bulk selection, and a tab for declared trade containment. See
+`user/library.md` §The series detail screen for the full anatomy.
 
 ## Adding a series
 

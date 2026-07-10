@@ -20,7 +20,7 @@ import type {
   IssueResource,
   SeriesResource,
 } from '../../api/types';
-import { SeriesDetail } from './SeriesDetail';
+import { SeriesDetail, SeriesDetailRoute } from './SeriesDetail';
 
 /**
  * FRG-UI-004 — M4 series detail: blurred local-cover hero, icon-over-label
@@ -659,7 +659,7 @@ describe('FRG-UI-026: collections tab', () => {
       trade_series_title: 'Invincible Compendium One',
       booktype: 'tpb',
       release_date: '2011-09-01',
-      ranges: [{ target_series_id: 7, label: '1-8' }],
+      ranges: [{ target_series_id: 7, label: '1-8', start_issue_id: 71, end_issue_id: 78 }],
       coverage: 'collected',
       issues_in_ranges: 8,
       owned_in_ranges: 8,
@@ -670,7 +670,7 @@ describe('FRG-UI-026: collections tab', () => {
       trade_series_title: 'Invincible TPB Vol 2',
       booktype: 'tpb',
       release_date: '2004-01-01',
-      ranges: [{ target_series_id: 7, label: '9-13' }],
+      ranges: [{ target_series_id: 7, label: '9-13', start_issue_id: 79, end_issue_id: 83 }],
       coverage: 'partial',
       issues_in_ranges: 5,
       owned_in_ranges: 2,
@@ -757,7 +757,7 @@ describe('FRG-UI-026: collections tab', () => {
     await user.click(screen.getByRole('button', { name: 'Declare contents for Volume One' }));
 
     const dialog = await screen.findByRole('dialog', { name: 'Declare contents' });
-    await user.selectOptions(within(dialog).getByLabelText('Target series'), '5');
+    await user.selectOptions(within(dialog).getByLabelText('Range 1 target series'), '5');
     await user.selectOptions(within(dialog).getByLabelText('Range 1 start issue'), '51');
     await user.selectOptions(within(dialog).getByLabelText('Range 1 end issue'), '52');
     await user.click(within(dialog).getByRole('button', { name: /Add sub-range/ }));
@@ -828,5 +828,559 @@ describe('FRG-UI-022: series-detail collected-edition badge', () => {
       expect(screen.getByRole('heading', { name: 'Invincible' })).toBeInTheDocument(),
     );
     expect(screen.queryByTestId('booktype-badge')).toBeNull();
+  });
+});
+
+/** FRG-UI-004 — hero meta row + panel header (first-issue date, formats, toggle). */
+describe('FRG-UI-004: hero meta row + panel header', () => {
+  it('FRG-UI-004 — the meta row reads the first-issue date, status, and formats; the panel shows the Issues toggle and a progress strip', async () => {
+    renderDetail();
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Invincible' })).toBeInTheDocument(),
+    );
+    // First issue date derived from the first issue's store/cover date.
+    expect(screen.getByText('First issue Jan 1, 2003')).toBeInTheDocument();
+    expect(screen.getByText('continuing')).toBeInTheDocument();
+    // Distinct file formats present across the issue files, sorted + joined.
+    expect(screen.getByText('CBR / CBZ')).toBeInTheDocument();
+    // Panel header: the Issues·N segment label and the owned/total progress.
+    expect(screen.getByRole('radio', { name: 'Issues · 4' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('status', { name: '2 of 4 issues on disk' }),
+    ).toBeInTheDocument();
+  });
+
+  it('FRG-UI-004 — the hero Edit action opens the edit dialog and its Save persists monitor_new_items via PUT', async () => {
+    const { spy } = renderDetail();
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Invincible' })).toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Edit Invincible' });
+    await user.selectOptions(within(dialog).getByLabelText('Monitor New Issues'), 'none');
+    await user.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith('/api/v1/series/7', {
+        method: 'PUT',
+        body: { monitor_new_items: 'none' },
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Edit Invincible' })).not.toBeInTheDocument(),
+    );
+  });
+
+  it('FRG-UI-004 — the Edit dialog closes on Escape (shared Modal a11y)', async () => {
+    renderDetail();
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Invincible' })).toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    expect(await screen.findByRole('dialog', { name: 'Edit Invincible' })).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Edit Invincible' })).not.toBeInTheDocument(),
+    );
+  });
+});
+
+/**
+ * FRG-UI-004 — issue status "released" semantics match the backend: a fileless
+ * issue with BOTH dates null is released → Missing, never Unreleased. Its
+ * a11y names use the verbatim number (here "—"), never the DB id (FRG-UI-025).
+ */
+describe('FRG-UI-004: status pill released semantics', () => {
+  it('FRG-UI-004 — a fileless, dateless issue reads Missing (released), and its row a11y names never use the DB id', async () => {
+    const issues: IssueResource[] = [
+      makeIssue({
+        id: 80,
+        issue_number: null,
+        cover_date: null,
+        store_date: null,
+        has_file: false,
+        file: null,
+      }),
+    ];
+    renderDetail({ issues });
+
+    await waitFor(() => expect(screen.getByTestId('issue-row-80')).toBeInTheDocument());
+    expect(within(screen.getByTestId('issue-row-80')).getByText('Missing')).toBeInTheDocument();
+    // Accessible name uses the em-dash number, not "80".
+    expect(screen.getByRole('checkbox', { name: 'Select issue —' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Automatic search for issue —' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('checkbox', { name: 'Select issue 80' }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+/** FRG-UI-025 — bulk-bar a11y + Unmonitor + batch search re-entrancy/failure. */
+describe('FRG-UI-025: bulk bar a11y and batch search', () => {
+  it('FRG-UI-025 — the selected-count is an aria-live region and the table headers are column scopes', async () => {
+    renderDetail();
+    const user = userEvent.setup();
+
+    await waitFor(() => expect(screen.getByTestId('issue-row-71')).toBeInTheDocument());
+    expect(screen.getByRole('columnheader', { name: 'Release' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('checkbox', { name: 'Select issue 1' }));
+    expect(screen.getByText('1 selected')).toHaveAttribute('aria-live', 'polite');
+  });
+
+  it('FRG-UI-025 — Unmonitor selected applies the bulk mutation with monitored:false', async () => {
+    const { spy } = renderDetail();
+    const user = userEvent.setup();
+
+    await waitFor(() => expect(screen.getByTestId('issue-row-71')).toBeInTheDocument());
+    await user.click(screen.getByRole('checkbox', { name: 'Select issue 1' }));
+    await user.click(screen.getByRole('button', { name: 'Unmonitor selected' }));
+
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith('/api/v1/issues/monitor', {
+        method: 'PUT',
+        body: { issue_ids: [71], monitored: false },
+      }),
+    );
+  });
+
+  it('FRG-UI-025 — while a batch is dispatching the bulk bar is disabled (re-entrancy guard) and it clears the selection on completion', async () => {
+    // Gate the first command POST so the batch is observably in-flight.
+    let releaseFirst: () => void = () => {};
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let posts = 0;
+    const { spy, fetcher } = fakeFetcher(async (path, options) => {
+      const method = options?.method ?? 'GET';
+      if (method === 'GET' && path === '/api/v1/series/7') return mockSeriesResource;
+      if (method === 'GET' && path === '/api/v1/series/7/collections') return { records: [] };
+      if (method === 'GET' && path.startsWith('/api/v1/issues?seriesId=7')) {
+        return pageOf(mockIssues);
+      }
+      if (method === 'GET' && path === '/api/v1/config/mediamanagement') {
+        return makeMediaManagementConfig();
+      }
+      if (method === 'POST' && path === '/api/v1/command') {
+        posts += 1;
+        if (posts === 1) await firstGate;
+        return makeCommand({ id: 88, name: 'issue-search', status: 'queued' });
+      }
+      if (method === 'GET' && path === '/api/v1/command/88') {
+        return makeCommand({ id: 88, status: 'completed' });
+      }
+      throw new Error(`unexpected request: ${method} ${path}`);
+    });
+    const user = userEvent.setup();
+    renderWithProviders(
+      <Routes>
+        <Route path="/series/:id" element={<SeriesDetail />} />
+      </Routes>,
+      { fetcher, route: '/series/7' },
+    );
+
+    await waitFor(() => expect(screen.getByTestId('issue-row-71')).toBeInTheDocument());
+    await user.click(screen.getByRole('checkbox', { name: 'Select issue 1' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Select issue 2' }));
+    // The onClick is fire-and-forget; the first POST hangs on the gate.
+    await user.click(screen.getByRole('button', { name: 'Search selected' }));
+
+    // Mid-batch: the whole bulk bar is disabled — a second click is inert.
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Search selected' })).toBeDisabled(),
+    );
+    expect(screen.getByRole('button', { name: 'Monitor selected' })).toBeDisabled();
+
+    releaseFirst();
+    // On completion the selection clears (the bulk bar unmounts) and exactly
+    // one command per selected issue was dispatched — never doubled.
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('region', { name: 'Bulk issue actions' }),
+      ).not.toBeInTheDocument(),
+    );
+    const searchCount = spy.mock.calls.filter(
+      ([path, init]) =>
+        path === '/api/v1/command' &&
+        (init?.body as { name?: string })?.name === 'issue-search',
+    ).length;
+    expect(searchCount).toBe(2);
+  });
+
+  it('FRG-UI-025 — a partial batch failure surfaces a role=alert note naming how many dispatched', async () => {
+    // The 2nd command POST fails; the 1st dispatched.
+    let posts = 0;
+    const { fetcher } = fakeFetcher((path, options) => {
+      const method = options?.method ?? 'GET';
+      if (method === 'GET' && path === '/api/v1/series/7') return mockSeriesResource;
+      if (method === 'GET' && path === '/api/v1/series/7/collections') return { records: [] };
+      if (method === 'GET' && path.startsWith('/api/v1/issues?seriesId=7')) {
+        return pageOf(mockIssues);
+      }
+      if (method === 'GET' && path === '/api/v1/config/mediamanagement') {
+        return makeMediaManagementConfig();
+      }
+      if (method === 'POST' && path === '/api/v1/command') {
+        posts += 1;
+        if (posts >= 2) throw new Error('command service unavailable');
+        return makeCommand({ id: 88, name: 'issue-search', status: 'queued' });
+      }
+      if (method === 'GET' && path === '/api/v1/command/88') {
+        return makeCommand({ id: 88, status: 'completed' });
+      }
+      throw new Error(`unexpected request: ${method} ${path}`);
+    });
+    const user = userEvent.setup();
+    renderWithProviders(
+      <Routes>
+        <Route path="/series/:id" element={<SeriesDetail />} />
+      </Routes>,
+      { fetcher, route: '/series/7' },
+    );
+
+    await waitFor(() => expect(screen.getByTestId('issue-row-71')).toBeInTheDocument());
+    await user.click(screen.getByRole('checkbox', { name: 'Select issue 1' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Select issue 2' }));
+    await user.click(screen.getByRole('button', { name: 'Search selected' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Search dispatched for 1 of 2 selected issue(s)');
+  });
+});
+
+/** FRG-UI-004 — view-local state resets when navigating series→series. */
+describe('FRG-UI-004: series-change state reset', () => {
+  it('FRG-UI-004 — navigating from one series to another (Collections Open) resets the tab and selection', async () => {
+    const single = makeSeriesResource({
+      id: 7,
+      title: 'Invincible',
+      sort_title: 'invincible',
+      booktype: null,
+    });
+    const trade = makeSeriesResource({
+      id: 8,
+      title: 'Invincible Compendium',
+      sort_title: 'invincible compendium',
+      booktype: 'tpb',
+    });
+    const collections: CollectionRecord[] = [
+      {
+        trade_issue_id: 900,
+        trade_series_id: 8,
+        trade_series_title: 'Invincible Compendium',
+        booktype: 'tpb',
+        release_date: '2011-09-01',
+        ranges: [{ target_series_id: 7, label: '1-4', start_issue_id: 71, end_issue_id: 74 }],
+        coverage: 'partial',
+        issues_in_ranges: 4,
+        owned_in_ranges: 2,
+      },
+    ];
+    const { fetcher } = fakeFetcher((path, options) => {
+      const method = options?.method ?? 'GET';
+      if (method === 'GET' && path === '/api/v1/series/7') return single;
+      if (method === 'GET' && path === '/api/v1/series/7/collections') {
+        return { records: collections };
+      }
+      if (method === 'GET' && path.startsWith('/api/v1/issues?seriesId=7')) {
+        return pageOf(mockIssues);
+      }
+      if (method === 'GET' && path === '/api/v1/series/8') return trade;
+      if (method === 'GET' && path === '/api/v1/series/8/collections') return { records: [] };
+      if (method === 'GET' && path.startsWith('/api/v1/issues?seriesId=8')) {
+        return pageOf([makeIssue({ id: 900, series_id: 8, issue_number: '1', title: 'Volume One' })]);
+      }
+      throw new Error(`unexpected request: ${method} ${path}`);
+    });
+    const user = userEvent.setup();
+    renderWithProviders(
+      <Routes>
+        <Route path="/series/:id" element={<SeriesDetailRoute />} />
+      </Routes>,
+      { fetcher, route: '/series/7' },
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Invincible' })).toBeInTheDocument(),
+    );
+    // Select an issue (bulk bar appears) then move to the Collections tab.
+    await user.click(screen.getByRole('checkbox', { name: 'Select issue 1' }));
+    expect(screen.getByRole('region', { name: 'Bulk issue actions' })).toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: 'Collections · 1' }));
+
+    // Open the collecting trade → navigate series 7 → 8; the keyed route remounts.
+    await user.click(screen.getByRole('button', { name: 'Open Invincible Compendium' }));
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Invincible Compendium' })).toBeInTheDocument(),
+    );
+    // Tab reset to Issues (row visible) and the selection did not leak across.
+    await waitFor(() => expect(screen.getByTestId('issue-row-900')).toBeInTheDocument());
+    expect(
+      screen.queryByRole('region', { name: 'Bulk issue actions' }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+/** FRG-UI-026 — collections trade branch reflection + containment edit pre-fill. */
+describe('FRG-UI-026: collections trade branch + containment edit', () => {
+  it('FRG-UI-026 — a collected edition reflects a fresh declaration after save (count, coverage pill, Edit label)', async () => {
+    const trade = makeSeriesResource({
+      id: 7,
+      title: 'Invincible TPB',
+      sort_title: 'invincible tpb',
+      booktype: 'tpb',
+    });
+    const tradeIssues: IssueResource[] = [
+      makeIssue({ id: 900, series_id: 7, issue_number: '1', title: 'Volume One', has_file: false, file: null }),
+    ];
+    const targetIssues: IssueResource[] = [
+      makeIssue({ id: 51, series_id: 5, issue_number: '1' }),
+      makeIssue({ id: 52, series_id: 5, issue_number: '2' }),
+    ];
+    const libraryIndex = [
+      trade,
+      makeSeriesResource({ id: 5, title: 'Invincible', sort_title: 'invincible', booktype: null }),
+    ];
+    // STATEFUL: GET /collections returns the declared record only AFTER the PUT.
+    let declared: CollectionRecord[] = [];
+    const { fetcher } = fakeFetcher((path, options) => {
+      const method = options?.method ?? 'GET';
+      if (method === 'GET' && path === '/api/v1/series/7') return trade;
+      if (method === 'GET' && path === '/api/v1/series/7/collections') {
+        return { records: declared };
+      }
+      if (method === 'GET' && path.startsWith('/api/v1/issues?seriesId=7')) {
+        return pageOf(tradeIssues);
+      }
+      if (method === 'GET' && path.startsWith('/api/v1/series?')) return pageOf(libraryIndex);
+      if (method === 'GET' && path.startsWith('/api/v1/issues?seriesId=5')) {
+        return pageOf(targetIssues);
+      }
+      if (method === 'PUT' && path === '/api/v1/issues/900/collections') {
+        declared = [
+          {
+            trade_issue_id: 900,
+            trade_series_id: 7,
+            trade_series_title: 'Invincible TPB',
+            booktype: 'tpb',
+            release_date: null,
+            ranges: [{ target_series_id: 5, label: '#1–#2', start_issue_id: 51, end_issue_id: 52 }],
+            coverage: 'none',
+            issues_in_ranges: 2,
+            owned_in_ranges: 0,
+          },
+        ];
+        return {};
+      }
+      throw new Error(`unexpected request: ${method} ${path}`);
+    });
+    const user = userEvent.setup();
+    renderWithProviders(
+      <Routes>
+        <Route path="/series/:id" element={<SeriesDetail />} />
+      </Routes>,
+      { fetcher, route: '/series/7' },
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Invincible TPB' })).toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole('radio', { name: 'Collections · 0' }));
+    await user.click(screen.getByRole('button', { name: 'Declare contents for Volume One' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Declare contents' });
+    await user.selectOptions(within(dialog).getByLabelText('Range 1 target series'), '5');
+    await user.selectOptions(within(dialog).getByLabelText('Range 1 start issue'), '51');
+    await user.selectOptions(within(dialog).getByLabelText('Range 1 end issue'), '52');
+    await user.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+    // The declaration reflects: count 0 → 1, coverage pill + Edit label appear.
+    await waitFor(() =>
+      expect(screen.getByRole('radio', { name: 'Collections · 1' })).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId('coverage-900')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Declare contents for Volume One' }),
+    ).toHaveTextContent('Edit contents');
+  });
+
+  it('FRG-UI-026 — editing pre-fills the resolved endpoints and Save preserves the untouched range; Delete all clears it', async () => {
+    const single = makeSeriesResource({
+      id: 5,
+      title: 'Invincible',
+      sort_title: 'invincible',
+      booktype: null,
+    });
+    const record: CollectionRecord = {
+      trade_issue_id: 900,
+      trade_series_id: 8,
+      trade_series_title: 'Compendium',
+      booktype: 'tpb',
+      release_date: '2011-09-01',
+      ranges: [{ target_series_id: 5, label: '#1–#2', start_issue_id: 51, end_issue_id: 52 }],
+      coverage: 'partial',
+      issues_in_ranges: 2,
+      owned_in_ranges: 1,
+    };
+    const targetIssues: IssueResource[] = [
+      makeIssue({ id: 51, series_id: 5, issue_number: '1' }),
+      makeIssue({ id: 52, series_id: 5, issue_number: '2' }),
+      makeIssue({ id: 53, series_id: 5, issue_number: '3' }),
+    ];
+    const libraryIndex = [
+      single,
+      makeSeriesResource({ id: 8, title: 'Compendium', sort_title: 'compendium', booktype: 'tpb' }),
+    ];
+    const { spy, fetcher } = fakeFetcher((path, options) => {
+      const method = options?.method ?? 'GET';
+      if (method === 'GET' && path === '/api/v1/series/5') return single;
+      if (method === 'GET' && path === '/api/v1/series/5/collections') {
+        return { records: [record] };
+      }
+      if (method === 'GET' && path.startsWith('/api/v1/issues?seriesId=5')) {
+        return pageOf(targetIssues);
+      }
+      if (method === 'GET' && path.startsWith('/api/v1/series?')) return pageOf(libraryIndex);
+      if (method === 'PUT' && path === '/api/v1/issues/900/collections') return {};
+      if (method === 'DELETE' && path === '/api/v1/issues/900/collections') return undefined;
+      throw new Error(`unexpected request: ${method} ${path}`);
+    });
+    const user = userEvent.setup();
+    renderWithProviders(
+      <Routes>
+        <Route path="/series/:id" element={<SeriesDetail />} />
+      </Routes>,
+      { fetcher, route: '/series/5' },
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Invincible' })).toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole('radio', { name: 'Collections · 1' }));
+    await user.click(screen.getByRole('button', { name: 'Edit containment for Compendium' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Edit contents' });
+    // The note declares replace-all semantics.
+    expect(
+      within(dialog).getByText('Saving replaces all declared contents for this book.'),
+    ).toBeInTheDocument();
+    // Endpoints are pre-filled from the resolved ids (1 / 2), not blank.
+    await waitFor(() =>
+      expect(within(dialog).getByLabelText<HTMLSelectElement>('Range 1 start issue').value).toBe('51'),
+    );
+    expect(within(dialog).getByLabelText<HTMLSelectElement>('Range 1 end issue').value).toBe('52');
+
+    // Save untouched → the pre-filled range round-trips verbatim.
+    await user.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith('/api/v1/issues/900/collections', {
+        method: 'PUT',
+        body: { ranges: [{ target_series_id: 5, start_issue_id: 51, end_issue_id: 52 }] },
+      }),
+    );
+  });
+
+  it('FRG-UI-026 — an edit range whose stored endpoint no longer resolves warns and blocks Save until re-picked', async () => {
+    const single = makeSeriesResource({ id: 5, title: 'Invincible', sort_title: 'invincible', booktype: null });
+    // The stored end endpoint resolved to null (the issue no longer exists).
+    const record: CollectionRecord = {
+      trade_issue_id: 900,
+      trade_series_id: 8,
+      trade_series_title: 'Compendium',
+      booktype: 'tpb',
+      release_date: '2011-09-01',
+      ranges: [{ target_series_id: 5, label: '#1–#2', start_issue_id: 51, end_issue_id: null }],
+      coverage: 'partial',
+      issues_in_ranges: 2,
+      owned_in_ranges: 1,
+    };
+    const targetIssues: IssueResource[] = [
+      makeIssue({ id: 51, series_id: 5, issue_number: '1' }),
+      makeIssue({ id: 52, series_id: 5, issue_number: '2' }),
+    ];
+    const libraryIndex = [single, makeSeriesResource({ id: 8, title: 'Compendium', sort_title: 'compendium', booktype: 'tpb' })];
+    const { fetcher } = fakeFetcher((path, options) => {
+      const method = options?.method ?? 'GET';
+      if (method === 'GET' && path === '/api/v1/series/5') return single;
+      if (method === 'GET' && path === '/api/v1/series/5/collections') return { records: [record] };
+      if (method === 'GET' && path.startsWith('/api/v1/issues?seriesId=5')) return pageOf(targetIssues);
+      if (method === 'GET' && path.startsWith('/api/v1/series?')) return pageOf(libraryIndex);
+      throw new Error(`unexpected request: ${method} ${path}`);
+    });
+    const user = userEvent.setup();
+    renderWithProviders(
+      <Routes>
+        <Route path="/series/:id" element={<SeriesDetail />} />
+      </Routes>,
+      { fetcher, route: '/series/5' },
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Invincible' })).toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole('radio', { name: 'Collections · 1' }));
+    await user.click(screen.getByRole('button', { name: 'Edit containment for Compendium' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Edit contents' });
+
+    // A warning names the missing endpoint; Save stays disabled until re-picked.
+    expect(await within(dialog).findByText(/re-pick From\/To/i)).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled();
+
+    await user.selectOptions(within(dialog).getByLabelText('Range 1 end issue'), '52');
+    await waitFor(() =>
+      expect(within(dialog).getByRole('button', { name: 'Save' })).toBeEnabled(),
+    );
+  });
+
+  it('FRG-UI-026 — Delete all clears a declaration via DELETE', async () => {
+    const single = makeSeriesResource({ id: 5, title: 'Invincible', sort_title: 'invincible', booktype: null });
+    const record: CollectionRecord = {
+      trade_issue_id: 900,
+      trade_series_id: 8,
+      trade_series_title: 'Compendium',
+      booktype: 'tpb',
+      release_date: '2011-09-01',
+      ranges: [{ target_series_id: 5, label: '#1–#2', start_issue_id: 51, end_issue_id: 52 }],
+      coverage: 'partial',
+      issues_in_ranges: 2,
+      owned_in_ranges: 1,
+    };
+    const libraryIndex = [single, makeSeriesResource({ id: 8, title: 'Compendium', sort_title: 'compendium', booktype: 'tpb' })];
+    const { spy, fetcher } = fakeFetcher((path, options) => {
+      const method = options?.method ?? 'GET';
+      if (method === 'GET' && path === '/api/v1/series/5') return single;
+      if (method === 'GET' && path === '/api/v1/series/5/collections') return { records: [record] };
+      if (method === 'GET' && path.startsWith('/api/v1/issues?seriesId=5')) return pageOf([]);
+      if (method === 'GET' && path.startsWith('/api/v1/series?')) return pageOf(libraryIndex);
+      if (method === 'DELETE' && path === '/api/v1/issues/900/collections') return undefined;
+      throw new Error(`unexpected request: ${method} ${path}`);
+    });
+    const user = userEvent.setup();
+    renderWithProviders(
+      <Routes>
+        <Route path="/series/:id" element={<SeriesDetail />} />
+      </Routes>,
+      { fetcher, route: '/series/5' },
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Invincible' })).toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole('radio', { name: 'Collections · 1' }));
+    await user.click(screen.getByRole('button', { name: 'Edit containment for Compendium' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Edit contents' });
+    await user.click(within(dialog).getByRole('button', { name: 'Delete all' }));
+
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith('/api/v1/issues/900/collections', { method: 'DELETE' }),
+    );
   });
 });

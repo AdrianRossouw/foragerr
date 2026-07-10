@@ -91,10 +91,16 @@ async def replace_issue_collections(
     - the trade issue exists (:class:`ContainmentNotFoundError`) and belongs to
       a trade-typed series — ``series.booktype IS NOT NULL``
       (:class:`ContainmentValidationError`, ``field="issue_id"``);
-    - per range: the target series exists (``field="target_series_id"``), both
-      endpoint issues exist AND belong to that target series
+    - per range: the target series exists (``field="target_series_id"``) and is
+      NOT the trade's own series (self-containment — ``field="target_series_id"``),
+      both endpoint issues exist AND belong to that target series
       (``field="start_issue_id"``/``"end_issue_id"``), and the start does not
       sort after the end by ordering key (``field="end_issue_id"``).
+
+    The existence lookups are BATCHED into two ``IN`` queries (one for the
+    target series, one for the endpoint issues) rather than three
+    ``session.get`` round trips per range — the whole write runs under the
+    single global write lock, so the per-range cost matters.
 
     On success replaces the trade issue's records wholesale (delete-all then
     insert), deriving each ``range_label`` from the endpoints' verbatim issue
@@ -112,25 +118,57 @@ async def replace_issue_collections(
             field="issue_id",
         )
 
+    # Batch the existence lookups: one IN query for every named target series,
+    # one for every named endpoint issue — instead of three session.get round
+    # trips per range under the write lock.
+    target_ids = {rng.target_series_id for rng in ranges}
+    issue_ids = {rng.start_issue_id for rng in ranges} | {
+        rng.end_issue_id for rng in ranges
+    }
+    existing_targets: set[int] = set()
+    if target_ids:
+        existing_targets = set(
+            (
+                await session.execute(
+                    select(SeriesRow.id).where(SeriesRow.id.in_(target_ids))
+                )
+            )
+            .scalars()
+            .all()
+        )
+    issues_by_id: dict[int, IssueRow] = {}
+    if issue_ids:
+        issue_rows = (
+            await session.execute(
+                select(IssueRow).where(IssueRow.id.in_(issue_ids))
+            )
+        ).scalars()
+        issues_by_id = {iss.id: iss for iss in issue_rows}
+
     # Validate every range first, collecting the resolved rows to write — no
     # DB mutation happens until all ranges pass.
     resolved: list[tuple[int, str, str, str]] = []
     for rng in ranges:
-        target = await session.get(SeriesRow, rng.target_series_id)
-        if target is None:
+        if rng.target_series_id not in existing_targets:
             raise ContainmentValidationError(
                 f"target series {rng.target_series_id} does not exist",
                 field="target_series_id",
             )
-        start = await session.get(IssueRow, rng.start_issue_id)
-        if start is None or start.series_id != target.id:
+        # A collected edition cannot declare that it collects its own series.
+        if rng.target_series_id == trade_series.id:
+            raise ContainmentValidationError(
+                "a collected edition cannot collect its own series",
+                field="target_series_id",
+            )
+        start = issues_by_id.get(rng.start_issue_id)
+        if start is None or start.series_id != rng.target_series_id:
             raise ContainmentValidationError(
                 f"start issue {rng.start_issue_id} does not belong to target "
                 f"series {rng.target_series_id}",
                 field="start_issue_id",
             )
-        end = await session.get(IssueRow, rng.end_issue_id)
-        if end is None or end.series_id != target.id:
+        end = issues_by_id.get(rng.end_issue_id)
+        if end is None or end.series_id != rng.target_series_id:
             raise ContainmentValidationError(
                 f"end issue {rng.end_issue_id} does not belong to target "
                 f"series {rng.target_series_id}",
@@ -143,7 +181,12 @@ async def replace_issue_collections(
                 field="end_issue_id",
             )
         resolved.append(
-            (target.id, start.ordering_key, end.ordering_key, _range_label(start, end))
+            (
+                rng.target_series_id,
+                start.ordering_key,
+                end.ordering_key,
+                _range_label(start, end),
+            )
         )
 
     await delete_issue_collections(session, trade_issue_id)
@@ -246,7 +289,14 @@ async def collected_in_for_series(
     result = await session.execute(stmt)
 
     memberships: dict[int, list[CollectedInMembership]] = {}
+    # Dedupe per (issue, trade issue): a trade whose overlapping declared
+    # sub-ranges both contain an issue (e.g. "#1–#6" and "#3–#8" over #4) must
+    # still emit ONE chip for that trade, not one per covering range.
+    seen: set[tuple[int, int]] = set()
     for issue_id, ts_id, ts_title, ts_booktype, ti_id, label in result.all():
+        if (issue_id, ti_id) in seen:
+            continue
+        seen.add((issue_id, ti_id))
         memberships.setdefault(issue_id, []).append(
             CollectedInMembership(
                 issue_id=issue_id,
@@ -262,12 +312,20 @@ async def collected_in_for_series(
 
 @dataclass(frozen=True, slots=True)
 class CollectionRange:
-    """One declared sub-range in a collection rollup entry."""
+    """One declared sub-range in a collection rollup entry.
+
+    ``start_issue_id``/``end_issue_id`` are the target series' issues that
+    currently sit at the stored ordering-key bounds (``None`` when no surviving
+    issue has that exact key) — resolved read-only so an edit dialog can
+    pre-fill the endpoint pickers without round-tripping labels.
+    """
 
     target_series_id: int
     label: str
     start_ordering_key: str
     end_ordering_key: str
+    start_issue_id: int | None
+    end_issue_id: int | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -304,22 +362,47 @@ def _owned_target_issue_expr(target_issue):
 async def collections_for_series(
     session: AsyncSession, series_id: int
 ) -> list[CollectionRollup]:
-    """Per-collected-book rollup for every trade that collects into
-    ``series_id`` (FRG-API-022), with request-time singles-coverage.
+    """Per-collected-book rollup for the containment BOTH directions touch
+    around ``series_id`` (FRG-API-022), with request-time singles-coverage.
 
-    Two bounded queries (no N+1): one lists the containment records targeting
-    the series (joined to the trade issue/series for identity + release date),
-    the other aggregates, per trade issue, how many of the target series'
-    issues fall inside its declared ranges and how many of those have a file.
-    Coverage is derived from those counts. Pure read — touches no wanted/stats
-    state."""
+    Two directions of records are returned (deduped by containment-record id):
+
+    - records whose declared range TARGETS ``series_id`` — the trades that
+      collect this single-issues run; and
+    - when ``series_id`` is itself trade-typed, records whose trade issue
+      BELONGS to it — this collection's own issues' declared contents (so its
+      own tab reflects what it declares, with the coverage/Edit affordances).
+
+    Coverage is computed against each record's OWN target series (a trade whose
+    issues target several runs still rolls up per trade issue over exactly the
+    included ranges). Each range also carries the target issues currently at its
+    stored ordering-key bounds (``start_issue_id``/``end_issue_id``, ``None``
+    when no surviving issue has that exact key), for an edit dialog to pre-fill.
+    Release date prefers the trade issue's store date, cover date as fallback
+    (the codebase-wide release-date convention). Pure read — touches no
+    wanted/stats state."""
     ic = IssueCollectionRow
     trade_issue = aliased(IssueRow)
     trade_series = aliased(SeriesRow)
 
+    is_trade = (
+        await session.scalar(
+            select(SeriesRow.booktype).where(SeriesRow.id == series_id)
+        )
+    ) is not None
+
+    # Direction A: records targeting this series. Direction B (trade-typed only):
+    # records whose trade issue belongs to this series (self-containment is
+    # rejected on write, so the two directions never overlap in practice).
+    direction = ic.target_series_id == series_id
+    if is_trade:
+        direction = direction | (trade_issue.series_id == series_id)
+
+    release_date_expr = func.coalesce(trade_issue.store_date, trade_issue.cover_date)
     records = (
         await session.execute(
             select(
+                ic.id,
                 ic.trade_issue_id,
                 ic.target_series_id,
                 ic.range_label,
@@ -328,18 +411,24 @@ async def collections_for_series(
                 trade_series.id,
                 trade_series.title,
                 trade_series.booktype,
-                trade_issue.cover_date,
+                release_date_expr,
             )
             .select_from(ic)
             .join(trade_issue, trade_issue.id == ic.trade_issue_id)
             .join(trade_series, trade_series.id == trade_issue.series_id)
-            .where(ic.target_series_id == series_id)
-            .order_by(trade_issue.cover_date, ic.trade_issue_id, ic.start_ordering_key)
+            .where(direction)
+            .order_by(
+                release_date_expr, ic.trade_issue_id, ic.start_ordering_key
+            )
         )
     ).all()
     if not records:
         return []
 
+    record_ids = [r[0] for r in records]
+
+    # Coverage over EXACTLY the included records (both directions), grouped by
+    # trade issue — each range joined to its own target series' issues.
     target_issue = aliased(IssueRow)
     coverage_rows = (
         await session.execute(
@@ -358,7 +447,7 @@ async def collections_for_series(
                     )
                 ),
             )
-            .where(ic.target_series_id == series_id)
+            .where(ic.id.in_(record_ids))
             .group_by(ic.trade_issue_id)
         )
     ).all()
@@ -366,10 +455,32 @@ async def collections_for_series(
         ti_id: (total, owned) for ti_id, total, owned in coverage_rows
     }
 
+    # Resolve every range endpoint to the target issue sitting at its stored
+    # ordering key (one bounded query over all target series + keys involved).
+    involved_targets = {r[2] for r in records}
+    involved_keys: set[str] = set()
+    for r in records:
+        involved_keys.add(r[4])
+        involved_keys.add(r[5])
+    issue_by_key: dict[tuple[int, str], int] = {}
+    if involved_targets and involved_keys:
+        for s_id, key, iss_id in (
+            await session.execute(
+                select(IssueRow.series_id, IssueRow.ordering_key, IssueRow.id)
+                .where(
+                    IssueRow.series_id.in_(involved_targets),
+                    IssueRow.ordering_key.in_(involved_keys),
+                )
+                .order_by(IssueRow.id)
+            )
+        ).all():
+            issue_by_key.setdefault((s_id, key), iss_id)
+
     # Preserve the release-ordered record order while grouping by trade issue.
     order: list[int] = []
     grouped: dict[int, dict] = {}
     for (
+        _rec_id,
         ti_id,
         target_series_id,
         label,
@@ -378,7 +489,7 @@ async def collections_for_series(
         ts_id,
         ts_title,
         ts_booktype,
-        cover_date,
+        release_date,
     ) in records:
         entry = grouped.get(ti_id)
         if entry is None:
@@ -387,7 +498,7 @@ async def collections_for_series(
                 "trade_series_id": ts_id,
                 "trade_series_title": ts_title,
                 "booktype": ts_booktype,
-                "release_date": cover_date,
+                "release_date": release_date,
                 "ranges": [],
             }
         entry["ranges"].append(
@@ -396,6 +507,8 @@ async def collections_for_series(
                 label=label,
                 start_ordering_key=start_key,
                 end_ordering_key=end_key,
+                start_issue_id=issue_by_key.get((target_series_id, start_key)),
+                end_issue_id=issue_by_key.get((target_series_id, end_key)),
             )
         )
 
