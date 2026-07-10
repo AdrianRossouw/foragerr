@@ -4,6 +4,64 @@ foragerr tracks comic series the same way Sonarr tracks TV series: you add a ser
 from ComicVine, it becomes part of your library, and foragerr keeps its issue list and
 on-disk files in sync going forward.
 
+## The library index
+
+The Library screen (**Comics** in the sidebar) lists every series in the library. A
+toolbar above the list carries a text filter, a view-mode switcher, and three
+menus — **Options**, **Sort**, and **Filter**.
+
+### View modes
+
+The switcher renders the same series list three ways:
+
+- **Posters** — a responsive card grid (size set by the Options menu). Each card
+  shows the cover, a monitored bookmark, a publisher chip, an owned/total
+  progress strip, and the title with a status/year subline.
+- **Overview** — one row per series: cover thumbnail, title with a status pill
+  (Continuing/Ended), publisher and status/year line, and a wide progress bar
+  with a percent-complete label.
+- **Table** — a dense table with monitor icon, Title (with a book-type badge),
+  Publisher, Issues (mini progress bar), Status, and Year columns.
+
+Clicking a card, row, or table row opens that series' detail page.
+
+### Options menu
+
+- **Poster size** — S / M / L; affects the Posters view only.
+- **Group volumes** — switches to the grouped display described under
+  "Grouping series by franchise" below. Unlike the other toolbar choices, this
+  toggle does not persist — it resets to off each time the page loads.
+
+### Sort menu
+
+Orders the list by **Title** (default), **Publisher**, **Issues owned** (most
+owned first), or **Year** (newest start year first); ties under every non-title
+sort fall back to title order. The active choice carries a check mark.
+
+### Filter menu
+
+The main section filters by status — **All**, **Monitored**, **Missing issues**,
+or **Continuing** — each showing a live count for the current text filter and
+editions choice. A separate **EDITIONS** section filters independently by
+collected-edition typing: **All editions**, **Collected only**, or **Single
+issues only** (see "Collected editions (trades)" below); its counts likewise
+reflect the current text filter and status choice. The two filters combine —
+picking Monitored and Collected only shows monitored trades.
+
+### Text filter and the count line
+
+The toolbar's search box narrows the list to series whose title contains the
+typed text. The count line above the list reports the library as a whole —
+`N comics · N monitored · N with missing issues`, with the monitored and
+missing-issues figures in their semantic colors — independent of any active
+filter.
+
+### What persists
+
+View mode, poster size, sort choice, and both filter choices (status and
+editions) are remembered across browser sessions. The text filter and the
+group-volumes toggle are not — both reset when the page reloads.
+
 ## Adding a series
 
 `POST /api/v1/series` (via the UI's Add Series screen — see
@@ -109,12 +167,17 @@ foragerr strips a trailing volume year (`(2016)`) and `Vol N` designator and fol
 rest, so successive runs of the same title land in one group. A title with only one run
 simply shows as itself.
 
-On the **Comics** screen, the **Group** toggle switches between the flat series list and
-the grouped view. In the grouped view each franchise is a collapsible header showing the
-title and a roll-up of owned/total issues across its runs; the runs nest beneath and
-behave exactly as they do in the flat view (same monitoring, same actions).
+The **Group volumes** toggle in the library index's Options menu switches between the
+flat series list and the grouped view. What grouped looks like depends on the active
+view mode: in **Posters**, a multi-volume franchise stacks into one card with a layered
+shadow, an `N vols` chip, and owned/total summed across its runs; in **Overview** and
+**Table**, a franchise becomes a collapsible header showing the title and a roll-up of
+owned/total issues, with the runs nested beneath it. A franchise with only one run
+always renders as an ordinary card/row, grouped or not. Either way the runs behave
+exactly as they do in the flat view (same monitoring, same actions, same navigation).
 
-If the automatic grouping gets something wrong, you can correct it from a group's menu:
+If the automatic grouping gets something wrong, you can correct it from a group's ⋯
+menu (the stacked card's footer, or the header in Overview/Table):
 
 - **Rename** a group to give the franchise a different display name — the name sticks
   across future metadata refreshes.
@@ -129,8 +192,9 @@ hardcover (HC) — as its own volume, so in foragerr a trade line is an ordinary
 of its own. foragerr **types** such a series from its title (it recognises "TPB",
 "Graphic Novel", "Hardcover" and the like) and shows a small **TPB / GN / HC badge** on
 the series card and its detail page, so collected editions are easy to tell apart from
-single-issue runs. A library **filter** lets you show only collected editions, only
-single-issue runs, or everything. If foragerr types a series wrong, you can set its
+single-issue runs. The library index's Filter menu has an **EDITIONS** section
+(All editions / Collected only / Single issues only) that shows only collected
+editions, only single-issue runs, or everything. If foragerr types a series wrong, you can set its
 book-type explicitly when editing the series; your choice is kept across metadata
 refreshes.
 

@@ -44,12 +44,14 @@ sidebar and header straight to the scrolling content region.
 
 ## Library
 
-The Library index lists every series as a poster grid or a table (toggle in the
-toolbar), with sorting and filtering. Posters come from the local cover cache —
-nothing is fetched from ComicVine at view time. Clicking a series opens its detail
-page: a hero band with the series' key facts, per-issue rows with monitored
-toggles, each issue's file status, and buttons that dispatch real commands —
-refresh metadata, rescan the series folder, or search for an issue.
+The Library index lists every series in one of three view modes — Posters,
+Overview, or Table — switched from the toolbar, with sorting, filtering, and a
+text filter alongside them; see `user/library.md` §The library index for the
+full set of controls. Posters come from the local cover cache — nothing is
+fetched from ComicVine at view time. Clicking a series opens its detail page: a
+hero band with the series' key facts, per-issue rows with monitored toggles,
+each issue's file status, and buttons that dispatch real commands — refresh
+metadata, rescan the series folder, or search for an issue.
 
 ## Adding a series
 
