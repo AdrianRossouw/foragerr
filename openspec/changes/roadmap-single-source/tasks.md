@@ -43,6 +43,13 @@
       `tools/soup_check.py` exit 0 (no dependency changes expected); merge-gate
       checklist per `docs/process/commit-standard.md` (FRG-PROC-004,
       FRG-PROC-005, FRG-PROC-012)
-- [ ] 4.3 Tiered review gate — small change: 2–3 angles + Codex full-diff
+- [x] 4.3 Tiered review gate — small change: 2–3 angles + Codex full-diff
       review; then `--no-ff` merge to `main`, delete branch, archive change
       (FRG-PROC-007)
+      Gate record: 3 Claude angles (check correctness, docs/positioning,
+      process traceability) + Codex full-diff. 1 blocker (freshness check
+      self-red on intro's FRG-PROC-018 citation after registry flip), 6
+      should-fixes, 2 accepted nits (matrix self-hash limitation; phrasing
+      false-negatives accepted by design and documented in design.md). All
+      fixes applied in a7f755a; suites re-run green (backend 1692/11 skipped,
+      frontend 315).
