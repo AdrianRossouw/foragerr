@@ -344,8 +344,10 @@ OPDS reading — with acquisition described content-neutrally and no indexer/DDL
 source promoted in the lead; (b) the license, matching the
 `LICENSE` file; and (c) the contribution posture (source-available personal tool
 and process demonstration; input not solicited). Feature claims in the README SHALL
-describe only shipped behavior; unshipped intentions appear only under an explicit
-Roadmap heading. Each major feature section SHALL carry a screenshot whose caption
+describe only shipped behavior; unshipped intentions live in `docs/roadmap.md`
+per FRG-PROC-018, and the README SHALL retain an explicit Roadmap heading that
+links to `docs/roadmap.md` without restating its entries. Each major feature
+section SHALL carry a screenshot whose caption
 links to the governing `FRG-*` requirement ID(s) and the relevant spec and/or
 manual document, and every such link SHALL resolve: referenced IDs exist in
 `docs/traceability/requirements-registry.md`, and referenced paths exist in the
@@ -357,8 +359,9 @@ retains the claim that foragerr is private or not released publicly.
 - **WHEN** the documentation-consistency checks run against `README.md`
 - **THEN** the README names the GPL-3.0 license and links `LICENSE`, states the
   source-available contribution posture, contains no "not released publicly" /
-  "private tool" self-description, and contains a Roadmap heading under which the
-  Humble Bundle importer and public-domain archive import are listed as future work
+  "private tool" self-description, and contains a Roadmap heading that links to
+  `docs/roadmap.md`, and `docs/roadmap.md` lists the Humble Bundle importer and
+  public-domain archive import as future work
 
 #### Scenario: Screenshot walkthrough is traceable
 
@@ -462,3 +465,44 @@ public labelling never lags the shipped design.
 - **THEN** they verify the tool exists and is executable and that the README's
   embedded assets exactly match the capture script's shot set, without
   requiring the demo library or a browser
+
+### Requirement: FRG-PROC-018 — Roadmap single source of truth
+
+The project SHALL maintain `docs/roadmap.md` as the only controlled document
+containing forward-looking content — unshipped milestones, planned features,
+and future intentions. Each roadmap entry SHALL name its milestone and, where
+requirement ids are already allocated, cite them. All other controlled
+documents (`README.md`, `docs/manual/**`) SHALL link to `docs/roadmap.md`
+rather than restate its content; incidental forward references they cannot
+avoid SHALL appear on an explicit allowlist that names the file and the
+permitted token, so every exception is reviewable. The merge gate SHALL enforce
+this mechanically with two committed-text checks:
+
+- **Containment**: future-milestone tokens and planned-phrasing markers do not
+  appear in controlled documents outside `docs/roadmap.md`, except where
+  allowlisted.
+- **Freshness**: no `FRG-*` id that `docs/roadmap.md` presents as planned has
+  `implemented` status in `docs/traceability/requirements-registry.md`.
+
+This rule is deliberately narrow (the roadmap instance only); generalizing
+documentation-consistency checking to other cross-document facts requires its
+own proposal.
+
+#### Scenario: Shipping a roadmap item forces the roadmap update
+
+- **WHEN** a requirement id listed as planned in `docs/roadmap.md` reaches
+  `implemented` status in `docs/traceability/requirements-registry.md`
+- **THEN** the freshness check fails until the same change removes or reworks
+  that roadmap entry
+
+#### Scenario: Forward-looking text outside the roadmap is rejected
+
+- **WHEN** a controlled document other than `docs/roadmap.md` contains a
+  future-milestone token or planned-phrasing marker that is not allowlisted
+- **THEN** the containment check fails, naming the file and the offending token
+
+#### Scenario: Allowlist entries are explicit
+
+- **WHEN** an incidental forward reference must remain in a controlled document
+- **THEN** the containment check passes only via an allowlist entry that pairs
+  that specific file with that specific token
