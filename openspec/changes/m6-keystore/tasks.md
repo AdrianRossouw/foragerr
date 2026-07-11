@@ -4,7 +4,7 @@
 
 - [ ] 1.1 Add `cryptography` dependency + SOUP entry in `docs/security/soup-register.md`; `tools/soup_check.py` green
 - [ ] 1.2 `foragerr/keystore.py`: scrypt derivation (documented parameters), MultiFernet wrapper, `encrypt()`/`decrypt()` with `enc:v1:` framing, sentinel create/verify; unit tests incl. tamper detection (`@pytest.mark.req("FRG-AUTH-008")`)
-- [ ] 1.3 Alembic migration 0016: `keystore_meta` single-row table (salt, sentinel, created_at)
+- [ ] 1.3 Alembic migration (next free number — 0016 claimed by M5 creators): `keystore_meta` single-row table (salt, sentinel, created_at)
 - [ ] 1.4 Config validation: require non-empty `FORAGERR_SECRET_KEY` before migrations/data access, actionable error, redaction-register the passphrase; tests for missing/empty/present (`FRG-AUTH-011`)
 
 ## 2. Secret field integration

@@ -61,7 +61,8 @@ _None — this lands within the existing `auth` capability._
 - **Code**: new `foragerr/keystore.py` (derivation, encrypt/decrypt, sentinel);
   `indexers/repo.py` + `downloads/repo.py` settings dump/load paths; startup wiring in
   config validation (FRG-NFR-009 pattern); health check contribution; one alembic
-  migration (0016: keystore meta table); eager data migration at boot, not in alembic
+  migration (keystore meta table; number assigned at implementation — 0016 went to
+  M5 creators); eager data migration at boot, not in alembic
   (needs the env key, which alembic offline contexts don't have).
 - **Dependencies**: `cryptography` added — `docs/security/soup-register.md` entry in
   the same change; `tools/soup_check.py` must stay green.
@@ -89,4 +90,6 @@ _None — this lands within the existing `auth` capability._
 
 ## Approval
 
-_Pending — Adrian approves before implementation begins (FRG-PROC-009)._
+**Approved by Adrian, 2026-07-11** (planning session). Scope as proposed: mandatory
+env passphrase, scrypt+MultiFernet, `enc:v1:` in-place, decrypt-fail-soft, eager
+migration; rotation stays M8. Implementation may begin at M6 start.

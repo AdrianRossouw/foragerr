@@ -60,7 +60,8 @@ importer (follow-up change).
    warning ("credential unavailable — encryption key missing or changed; re-enter the
    secret"). Saving a secret always encrypts under the current key. Rationale: every
    stored secret is re-obtainable, so availability of the library/OPDS wins.
-6. **Migration**: alembic 0016 creates `keystore_meta` only. Data migration
+6. **Migration**: an alembic migration (next free number at implementation — 0016
+   was claimed by the M5 creators backbone) creates `keystore_meta` only. Data migration
    (plaintext → `enc:v1:`) runs **at first keyed boot, not in alembic** — alembic
    contexts don't reliably have the env key, and boot-time migration can use the live
    keystore. Idempotent by prefix check; one-way; logged (count only, no values).
@@ -88,7 +89,7 @@ importer (follow-up change).
 
 1. Release notes: **BREAKING — set `FORAGERR_SECRET_KEY` before upgrading**; compose
    example updated; demo deployment env updated at rollout.
-2. Upgrade boot: alembic 0016 → keystore init (salt+sentinel) → eager plaintext
+2. Upgrade boot: keystore-meta alembic migration → keystore init (salt+sentinel) → eager plaintext
    migration → normal startup.
 3. Rollback: downgrading after migration leaves `enc:v1:` values a pre-keystore
    binary can't read → documented as "re-enter secrets after downgrade" (same
