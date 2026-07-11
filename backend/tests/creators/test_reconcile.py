@@ -184,6 +184,35 @@ async def test_dropped_credit_is_removed(
 
 
 @pytest.mark.req("FRG-CRTR-002")
+async def test_verbatim_only_change_updates_row_in_place(
+    db, settings, commands, root_folder_id, root_folder_path, format_profile_id
+):
+    """A verbatim-only role change (same normalized slot) refreshes the stored
+    verbatim in place — CV is authority for that column too — without churning
+    the row identity, and an identical repeat still writes nothing."""
+    sid = await _make_series(db, root_folder_path, format_profile_id, cv_volume_id=1)
+    # "penciller" normalizes to "penciler" but is retained verbatim.
+    fake = FakeCV().volume(1).issues(
+        1, [issue(100, "1", credits=[credit(10, "Alice", "penciller")])]
+    )
+    await _run_refresh(db, settings, sid, commands, fake)
+    rows = await _credits_for_series(db, sid)
+    assert len(rows) == 1
+    original_id = rows[0].id
+    assert rows[0].role_normalized == "penciler"
+    assert rows[0].role_verbatim == "penciller"
+
+    # Only the verbatim spelling changes; the normalized key ("penciler") is
+    # unchanged, so the SAME row must be updated (stable id), not deleted+re-added.
+    fake.issues(1, [issue(100, "1", credits=[credit(10, "Alice", "penciler")])])
+    await _run_refresh(db, settings, sid, commands, fake)
+    rows = await _credits_for_series(db, sid)
+    assert len(rows) == 1
+    assert rows[0].id == original_id  # row identity preserved
+    assert rows[0].role_verbatim == "penciler"  # verbatim re-authored by CV
+
+
+@pytest.mark.req("FRG-CRTR-002")
 async def test_partial_fetch_never_deletes_credits(
     db, settings, commands, root_folder_id, root_folder_path, format_profile_id
 ):
@@ -348,3 +377,38 @@ async def test_touched_creditless_creator_survives_and_is_not_reseeded(
 
     alice = await _creator_by_cv(db, 10)
     assert alice.followed is False  # never re-seeded
+
+
+@pytest.mark.req("FRG-CRTR-002")
+async def test_followed_creditless_creator_survives_prune(
+    db, settings, commands, root_folder_id, root_folder_path, format_profile_id
+):
+    """A currently-FOLLOWED creator (not user-touched) with zero remaining
+    credits survives the prune — the ``followed`` predicate spares it, so a
+    threshold-seeded follow is never silently erased by a later refresh that
+    drops all its credits (the followed-branch complement of the touched case)."""
+    await _seed_two_series_creator(
+        db, settings, commands, root_folder_path, format_profile_id
+    )
+    alice = await _creator_by_name(db, "Alice")
+    # Seeded followed by crossing the two-series threshold; never user-touched.
+    assert alice.followed is True
+    assert alice.follow_touched is None
+
+    # Drop Alice from BOTH series -> she becomes creditless. Because she is
+    # followed (even though follow_touched is NULL), prune must spare her.
+    empty1 = FakeCV().volume(1).issues(
+        1,
+        [
+            issue(100, "1", credits=[]),
+            issue(101, "2", credits=[credit(20, "Carol", "letterer")]),
+        ],
+    )
+    empty2 = FakeCV().volume(2).issues(2, [issue(200, "1", credits=[])])
+    await _refresh_by_cv_volume(db, settings, commands, 1, empty1)
+    await _refresh_by_cv_volume(db, settings, commands, 2, empty2)
+
+    alice = await _creator_by_cv(db, 10)
+    assert alice is not None  # survived the creditless prune
+    assert alice.followed is True
+    assert alice.follow_touched is None  # still never user-touched

@@ -68,11 +68,19 @@ class IntervalScheduler:
         *,
         interval_seconds: int,
         min_interval_seconds: int = 60,
+        initial_last_run: dt.datetime | None = None,
     ) -> ScheduledTaskDef:
         """Register a recurring task, clamping the interval to its minimum.
 
         The persisted row keeps its ``last_run`` across restarts so the task
         fires at ``last_run + interval`` — never immediately-on-every-start.
+
+        ``initial_last_run`` stamps ``last_run`` on a NEWLY-created row, in the
+        same transaction that inserts it — so the row is never observable with
+        ``last_run IS NULL`` (which the tick treats as "due"). Existing rows keep
+        their persisted ``last_run``. Used by the one-shot ``creators-backfill``
+        registration, whose only auto-trigger is a marker-gated startup hook, to
+        close the enqueue-then-stamp race a live scheduler tick could exploit.
         """
         effective = interval_seconds
         if effective < min_interval_seconds:
@@ -97,7 +105,9 @@ class IntervalScheduler:
             if row is None:
                 session.add(
                     ScheduledTaskRow(
-                        name=name, interval_seconds=effective, last_run=None
+                        name=name,
+                        interval_seconds=effective,
+                        last_run=initial_last_run,
                     )
                 )
             else:

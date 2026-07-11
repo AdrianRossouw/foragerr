@@ -56,13 +56,21 @@ class _FakeScheduler:
         self._db = db
         self._defs: dict[str, dict] = {}
 
-    async def register_task(self, *, name, command_name, interval_seconds, min_interval_seconds):
+    async def register_task(
+        self, *, name, command_name, interval_seconds, min_interval_seconds, initial_last_run=None
+    ):
         self._defs[name] = {"command_name": command_name, "interval_seconds": interval_seconds}
         async with self._db.write_session() as session:
             row = await session.get(ScheduledTaskRow, name)
             if row is None:
+                # Mirror the real scheduler: a fresh row is stamped atomically in
+                # the SAME insert transaction, never observable with last_run NULL.
                 session.add(
-                    ScheduledTaskRow(name=name, interval_seconds=interval_seconds, last_run=None)
+                    ScheduledTaskRow(
+                        name=name,
+                        interval_seconds=interval_seconds,
+                        last_run=initial_last_run,
+                    )
                 )
 
 
@@ -217,6 +225,35 @@ async def test_registration_stamps_last_run_so_scheduler_never_auto_fires(
         row = await session.get(ScheduledTaskRow, CREATORS_BACKFILL_TASK)
     assert row is not None
     assert row.last_run is not None
+
+
+@pytest.mark.req("FRG-CRTR-003")
+async def test_registration_row_is_never_committed_with_null_last_run(
+    db, settings, commands, root_folder_id, root_folder_path, format_profile_id
+):
+    """Against the REAL scheduler, the committed task row is stamped atomically:
+    it is never observable with last_run NULL, so no concurrent scheduler tick
+    can auto-fire the one-shot backfill in an enqueue-then-stamp window."""
+    from foragerr.commands.scheduler import IntervalScheduler
+
+    scheduler = IntervalScheduler(db, commands)
+    await register_creators_backfill_task(scheduler, db)
+
+    # Read the committed row immediately: because register_task inserts it with
+    # last_run already set (one transaction), there is no NULL state to observe.
+    async with db.read_session() as session:
+        row = await session.get(ScheduledTaskRow, CREATORS_BACKFILL_TASK)
+    assert row is not None
+    assert row.last_run is not None
+
+    # A re-registration leaves the existing (possibly force-run) last_run intact.
+    async with db.write_session() as session:
+        existing = await session.get(ScheduledTaskRow, CREATORS_BACKFILL_TASK)
+        stamped = existing.last_run
+    await register_creators_backfill_task(scheduler, db)
+    async with db.read_session() as session:
+        row = await session.get(ScheduledTaskRow, CREATORS_BACKFILL_TASK)
+    assert row.last_run == stamped  # unchanged on re-register
 
 
 @pytest.mark.req("FRG-CRTR-003")

@@ -75,8 +75,12 @@ async def _replace_issue_credits(
     """Diff-replace one issue's credit rows to match ``credits`` (idempotent).
 
     Keyed by ``(creator_id, role_normalized)``: rows the fetch no longer lists
-    are deleted, newly listed ones inserted, unchanged ones left alone (so a
-    repeat refresh writes nothing).
+    are deleted, newly listed ones inserted. A row whose key still matches is
+    kept in place, but its ``role_verbatim`` is refreshed when CV's verbatim
+    spelling changed (e.g. ``"penciller"`` -> ``"penciler"``, both normalizing
+    to ``penciler``) — CV is the authority for that column too (FRG-CRTR-002
+    Notes). The verbatim is written only on an actual change, so an identical
+    repeat refresh still writes nothing.
     """
     desired: dict[tuple[int, str], str] = {}
     for credit in credits:
@@ -88,15 +92,22 @@ async def _replace_issue_credits(
             select(IssueCreditRow).where(IssueCreditRow.issue_id == issue_id)
         )
     ).scalars().all()
-    existing_keys: set[tuple[int, str]] = set()
+    existing_by_key: dict[tuple[int, str], IssueCreditRow] = {}
     for row in existing:
         key = (row.creator_id, row.role_normalized)
-        existing_keys.add(key)
         if key not in desired:
             await session.delete(row)
+        else:
+            existing_by_key[key] = row
 
     for (creator_id, role_normalized), role_verbatim in desired.items():
-        if (creator_id, role_normalized) in existing_keys:
+        existing_row = existing_by_key.get((creator_id, role_normalized))
+        if existing_row is not None:
+            # Same (creator, normalized role) already stored: keep the row (stable
+            # id), but let CV re-author a changed verbatim spelling. Guarded on
+            # inequality so idempotency holds (identical input writes nothing).
+            if existing_row.role_verbatim != role_verbatim:
+                existing_row.role_verbatim = role_verbatim
             continue
         session.add(
             IssueCreditRow(

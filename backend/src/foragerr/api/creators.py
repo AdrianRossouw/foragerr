@@ -139,6 +139,23 @@ async def _series_count_by_creator(session: AsyncSession) -> dict[int, int]:
     return {creator_id: int(count) for creator_id, count in rows}
 
 
+async def _series_count_for_creator(session: AsyncSession, creator_id: int) -> int:
+    """Distinct-library-series count for a SINGLE creator (indexed lookup).
+
+    The follow-toggle path rebuilds one row, so it uses this creator-scoped query
+    rather than the whole-library GROUP BY in :func:`_series_count_by_creator`
+    (which the list path still wants, since it counts every creator at once)."""
+    return int(
+        await session.scalar(
+            select(func.count(func.distinct(IssueRow.series_id)))
+            .select_from(IssueCreditRow)
+            .join(IssueRow, IssueRow.id == IssueCreditRow.issue_id)
+            .where(IssueCreditRow.creator_id == creator_id)
+        )
+        or 0
+    )
+
+
 async def _roles_by_creator(
     session: AsyncSession, creator_ids: list[int]
 ) -> dict[int, list[str]]:
@@ -202,7 +219,7 @@ async def _build_row(
     """Assemble one creator's grid row resource (reused by the follow toggle)."""
     roles = (await _roles_by_creator(session, [row.id]))[row.id]
     works = (await _works_by_creator(session, [row.id]))[row.id]
-    series_count = (await _series_count_by_creator(session)).get(row.id, 0)
+    series_count = await _series_count_for_creator(session, row.id)
     return CreatorResource(
         id=row.id,
         name=row.name,
@@ -317,70 +334,77 @@ async def get_creator_profile(creator_id: int, request: Request) -> CreatorProfi
         if creator is None:
             raise ApiError(404, f"creator {creator_id} not found")
 
-        # One row per (series, credited issue, role) for this creator — the
-        # basis for every per-series aggregate below.
+        # One row per (series, role) this creator is credited in — the basis for
+        # the per-series role sets and the set of series the profile spans.
         rows = list(
             await session.execute(
                 select(
                     IssueRow.series_id,
                     SeriesRow.title,
                     SeriesRow.publisher,
-                    IssueCreditRow.issue_id,
                     IssueCreditRow.role_normalized,
                 )
                 .join(IssueRow, IssueRow.id == IssueCreditRow.issue_id)
                 .join(SeriesRow, SeriesRow.id == IssueRow.series_id)
                 .where(IssueCreditRow.creator_id == creator_id)
+                .distinct()
             )
         )
 
-        credited_issue_ids = {issue_id for _, _, _, issue_id, _ in rows}
-        owned_issue_ids: set[int] = set()
-        if credited_issue_ids:
-            owned_issue_ids = set(
-                (
-                    await session.execute(
-                        select(IssueFileRow.issue_id)
-                        .where(IssueFileRow.issue_id.in_(credited_issue_ids))
-                        .distinct()
-                    )
+        # owned/total counts are WHOLE-SERIES (FRG-API-023: "owned/total issue
+        # counts across those series") — the profile's progress bars track each
+        # credited series' overall progress, not just the issues the creator is
+        # credited on. Count over ALL issues of every series the creator touches.
+        series_ids = {series_id for series_id, _, _, _ in rows}
+        total_by_series: dict[int, int] = {}
+        owned_by_series: dict[int, int] = {}
+        if series_ids:
+            total_by_series = {
+                sid: int(n)
+                for sid, n in await session.execute(
+                    select(IssueRow.series_id, func.count())
+                    .where(IssueRow.series_id.in_(series_ids))
+                    .group_by(IssueRow.series_id)
                 )
-                .scalars()
-                .all()
-            )
+            }
+            owned_by_series = {
+                sid: int(n)
+                for sid, n in await session.execute(
+                    select(
+                        IssueRow.series_id,
+                        func.count(func.distinct(IssueRow.id)),
+                    )
+                    .join(IssueFileRow, IssueFileRow.issue_id == IssueRow.id)
+                    .where(IssueRow.series_id.in_(series_ids))
+                    .group_by(IssueRow.series_id)
+                )
+            }
 
-    # Aggregate per series in memory over the small credited set.
+    # Aggregate the per-series role sets in memory over the small credited set;
+    # the owned/total counts come from the whole-series aggregates above.
     per_series: dict[int, dict] = {}
-    for series_id, title, publisher, issue_id, role in rows:
+    for series_id, title, publisher, role in rows:
         entry = per_series.setdefault(
             series_id,
-            {
-                "title": title,
-                "publisher": publisher,
-                "roles": set(),
-                "issues": set(),
-            },
+            {"title": title, "publisher": publisher, "roles": set()},
         )
         entry["roles"].add(role)
-        entry["issues"].add(issue_id)
 
     series_stats: list[CreatorSeriesStat] = []
     for series_id, entry in per_series.items():
-        issues = entry["issues"]
-        owned = len(issues & owned_issue_ids)
         series_stats.append(
             CreatorSeriesStat(
                 seriesId=series_id,
                 title=entry["title"],
                 publisher=entry["publisher"],
                 roles=sorted(entry["roles"]),
-                ownedIssues=owned,
-                totalIssues=len(issues),
+                ownedIssues=owned_by_series.get(series_id, 0),
+                totalIssues=total_by_series.get(series_id, 0),
             )
         )
     series_stats.sort(key=lambda s: (s.title.casefold(), s.seriesId))
 
-    all_roles = sorted({role for _, _, _, _, role in rows})
+    all_roles = sorted({role for _, _, _, role in rows})
     publishers = {
         entry["publisher"] for entry in per_series.values() if entry["publisher"]
     }

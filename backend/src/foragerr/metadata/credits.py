@@ -6,9 +6,11 @@ normalizes CV's free-ish role strings onto a fixed vocabulary.
 
 This lives in :mod:`foragerr.metadata` (not the ``creators`` domain) so the
 ingest mapper (:func:`foragerr.metadata.mapping.map_issue`) can call it without
-crossing the metadata import boundary. The ``creators`` storage layer and the
-0016 migration import only :data:`ROLE_VOCABULARY` from here, so the mapper,
-the ORM CHECK constraint, and the schema can never drift apart.
+crossing the metadata import boundary. The ``creators`` ORM CHECK constraint
+imports :data:`ROLE_VOCABULARY` from here so the mapper and the live schema model
+track one definition. The 0016 migration deliberately does NOT import it — it
+freezes its own copy of the vocabulary (historical migrations are immutable); a
+test asserts the two match today and fails the day they intentionally diverge.
 """
 
 from __future__ import annotations
@@ -35,6 +37,13 @@ ROLE_VOCABULARY = (
     "editor",
     "other",
 )
+
+#: Hard upper bound on credit records emitted for ONE issue, applied after dedup.
+#: Real issues rarely carry more than ~30 credits; this cap stops a hostile or
+#: pathologically-large CV ``person_credits`` payload from exploding into an
+#: unbounded ``issue_credits`` insert inside a single refresh write transaction
+#: (RISK-011 resource-exhaustion arm). The excess is dropped with one debug log.
+MAX_CREDITS_PER_ISSUE = 100
 
 #: Known CV role spellings -> a vocabulary slot. Keys are casefolded; anything
 #: not here maps to ``"other"``. Deliberately includes the obvious CV variants
@@ -108,6 +117,15 @@ def map_person_credits(value: Any) -> tuple[CreditRecord, ...]:
                     role_normalized=normalized,
                 )
             )
+    if len(out) > MAX_CREDITS_PER_ISSUE:
+        # Bound the per-issue row count (RISK-011): truncate an oversized payload
+        # rather than let it drive an unbounded insert.
+        logger.debug(
+            "person_credits: capping %d credits to the %d-per-issue maximum",
+            len(out),
+            MAX_CREDITS_PER_ISSUE,
+        )
+        out = out[:MAX_CREDITS_PER_ISSUE]
     return tuple(out)
 
 

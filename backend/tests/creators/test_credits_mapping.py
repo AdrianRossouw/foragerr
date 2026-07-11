@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import pytest
 
-from foragerr.metadata.credits import map_person_credits
+import logging
+
+from foragerr.metadata.credits import MAX_CREDITS_PER_ISSUE, map_person_credits
 from foragerr.metadata.mapping import map_issue
 from foragerr.metadata.models import CreditRecord
 
@@ -139,3 +141,17 @@ def test_credited_person_without_a_role_is_kept_as_other():
     credits = map_person_credits([{"id": 10, "name": "Alice"}])
     assert len(credits) == 1
     assert credits[0].role_normalized == "other"
+
+
+@pytest.mark.req("FRG-CRTR-001")
+def test_oversized_payload_is_capped_per_issue(caplog):
+    """A hostile/oversized CV payload is bounded to MAX_CREDITS_PER_ISSUE after
+    dedup, so one issue can never explode into an unbounded credit insert
+    (RISK-011). Excess entries are dropped with a single debug log, no error."""
+    entries = [_credit(i, f"Person {i}", "writer") for i in range(1, 151)]
+    with caplog.at_level(logging.DEBUG, logger="foragerr.metadata.credits"):
+        credits = map_person_credits(entries)
+
+    assert len(credits) == MAX_CREDITS_PER_ISSUE  # 150 well-formed -> capped 100
+    cap_logs = [r for r in caplog.records if "capping" in r.getMessage()]
+    assert len(cap_logs) == 1  # exactly one truncation log emitted

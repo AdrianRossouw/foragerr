@@ -180,6 +180,22 @@ async def test_profile_aggregates_match_seeded_credits(tmp_path):
     async with running_app(tmp_path) as (app, client):
         ids = await _seed_library(app, tmp_path)
 
+        # Grow S1 into a whole-series scenario: Alice is credited on only 1 issue
+        # of the series (i1, writer), but the profile's owned/total counts are
+        # WHOLE-SERIES (FRG-API-023: "owned/total issue counts across those
+        # series") = the series' own progress. Bring S1 to 12 issues total and
+        # 6 owned (i1 already owns a file; add 5 more owned + the rest unowned).
+        root = tmp_path / "root"
+        async with app.state.db.write_session() as session:
+            for n in range(3, 13):  # issues #3..#12 -> S1 now has 12 issues
+                iss = await repo.create_issue(
+                    session, series_id=ids["s1"], cv_issue_id=100 + n, issue_number=str(n)
+                )
+                if n <= 7:  # 5 of the new issues own a file (i1 + 5 = 6 owned)
+                    await repo.add_issue_file(
+                        session, issue_id=iss.id, path=str(root / f"alpha-{n}.cbz"), size=10
+                    )
+
         resp = await client.get(f"/api/v1/creators/{ids['alice']}")
         assert resp.status_code == 200
         body = resp.json()
@@ -190,15 +206,17 @@ async def test_profile_aggregates_match_seeded_credits(tmp_path):
 
         stats = body["stats"]
         assert stats["seriesCount"] == 2
-        assert stats["totalIssues"] == 2  # one credited issue in each series
-        assert stats["ownedIssues"] == 1  # only S1#1 has a file
+        # Whole-series sums: S1 (12) + S2 (1) total; S1 (6) + S2 (0) owned.
+        assert stats["totalIssues"] == 13
+        assert stats["ownedIssues"] == 6
         assert stats["publisherCount"] == 2  # Image + DC
 
         by_series = {s["seriesId"]: s for s in body["series"]}
         s1 = by_series[ids["s1"]]
         assert s1["publisher"] == "Image"
-        assert s1["roles"] == ["writer"]
-        assert (s1["totalIssues"], s1["ownedIssues"]) == (1, 1)
+        assert s1["roles"] == ["writer"]  # credited on 1 of the 12 issues
+        # ...but counts are the whole series: 6 owned of 12 total.
+        assert (s1["totalIssues"], s1["ownedIssues"]) == (12, 6)
         s2 = by_series[ids["s2"]]
         assert s2["roles"] == ["artist"]
         assert (s2["totalIssues"], s2["ownedIssues"]) == (1, 0)

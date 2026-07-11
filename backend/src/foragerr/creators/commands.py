@@ -28,10 +28,13 @@ Two trigger surfaces, per FRG-CRTR-003:
 * **Manual force-run** — the command is registered as a scheduled task purely so
   it is force-runnable via the standard task surface
   (``POST /api/v1/system/task/creators-backfill``, FRG-API-014 / FRG-SCHED-007).
-  It is NOT a recurring task: the interval is astronomically large and the
-  scheduler row's ``last_run`` is stamped at registration so the interval tick
-  never auto-fires it (the marker-gated startup hook is the sole automatic
-  trigger). Force-run runs the handler regardless of the marker — the handler
+  It is NOT a recurring task: the interval is astronomically large and a fresh
+  scheduler row is created with ``last_run`` already stamped — atomically, in the
+  same insert transaction (``register_task(initial_last_run=...)``) — so the row
+  is never observable with ``last_run IS NULL`` and the interval tick (which
+  treats NULL as due) never auto-fires it, even if a scheduler loop ticks the
+  instant the row lands. The marker-gated startup hook is the sole automatic
+  trigger. Force-run runs the handler regardless of the marker — the handler
   never reads the marker, it always does the (idempotent) work.
 """
 
@@ -44,7 +47,7 @@ from sqlalchemy import func, select, text
 
 from foragerr.commands.registry import BaseCommand, register_command, register_handler
 from foragerr.commands.service import HandlerContext
-from foragerr.db import ScheduledTaskRow, utcnow
+from foragerr.db import utcnow
 from foragerr.db.first_run import APP_STATE_TABLE
 from foragerr.library.models import SeriesRow
 
@@ -148,22 +151,24 @@ async def register_creators_backfill_task(scheduler, db) -> None:
     """Register ``creators-backfill`` as a (non-recurring) force-runnable task.
 
     The task is registered so ``POST /api/v1/system/task/creators-backfill``
-    resolves (FRG-API-014). The interval is astronomically large AND a fresh
-    row's ``last_run`` is stamped to "now" here, so the scheduler's interval tick
-    (which treats ``last_run IS NULL`` as due) never auto-fires it — the marker-
-    gated startup hook is the sole automatic trigger. An existing row's
+    resolves (FRG-API-014). The interval is astronomically large AND a fresh row
+    is created with ``last_run`` stamped to "now" ATOMICALLY, in the same insert
+    transaction (``register_task(initial_last_run=...)``), so the row is never
+    observable with ``last_run IS NULL`` — closing the window a concurrent
+    scheduler tick (which treats NULL as due) could otherwise auto-fire in. The
+    marker-gated startup hook is the sole automatic trigger. An existing row's
     ``last_run`` (e.g. from a prior force-run) is left untouched.
+
+    ``db`` is retained in the signature for call-site stability but is no longer
+    needed here: the stamp now rides ``register_task``'s own write session.
     """
     await scheduler.register_task(
         name=CREATORS_BACKFILL_TASK,
         command_name=CREATORS_BACKFILL_TASK,
         interval_seconds=CREATORS_BACKFILL_INTERVAL_SECONDS,
         min_interval_seconds=CREATORS_BACKFILL_INTERVAL_SECONDS,
+        initial_last_run=utcnow(),
     )
-    async with db.write_session() as session:
-        row = await session.get(ScheduledTaskRow, CREATORS_BACKFILL_TASK)
-        if row is not None and row.last_run is None:
-            row.last_run = utcnow()
 
 
 async def creators_backfill_startup_hook(app) -> None:
