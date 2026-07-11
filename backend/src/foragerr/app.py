@@ -334,6 +334,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     #     so the backfill only has to fan out one deduplicated refresh per
     #     series. ---
     import foragerr.creators.commands  # noqa: F401 — command/handler registration
+    import foragerr.creators.bibliography  # noqa: F401 — registers the bibliography-fetch command (FRG-CRTR-005)
     from foragerr.api.creators import router as creators_router
     from foragerr.creators.commands import (
         creators_backfill_startup_hook,

@@ -25,6 +25,9 @@ Three routes:
 
 from __future__ import annotations
 
+import datetime as dt
+from typing import Literal
+
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -32,10 +35,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from foragerr.api.errors import ApiError
 from foragerr.creators import repo as creators_repo
-from foragerr.creators.models import CreatorRow, IssueCreditRow
+from foragerr.creators.bibliography import BIBLIOGRAPHY_FETCH_COMMAND
+from foragerr.creators.models import (
+    CreatorBibliographyRow,
+    CreatorRow,
+    IssueCreditRow,
+)
+from foragerr.db.base import utcnow
 from foragerr.library.models import IssueFileRow, IssueRow, SeriesRow
 
 router = APIRouter(prefix="/creators", tags=["creators"])
+
+#: Staleness window for a creator's cached bibliography (FRG-API-024). A cache
+#: stamped within this window is ``fresh`` and served without a refetch; an
+#: unstamped or older cache is served (stale-while-revalidate) while a
+#: deduplicated fetch command is enqueued. A constant with a comment; a config
+#: knob waits for demand (mirrors the fetch cap on the command side).
+BIBLIOGRAPHY_TTL = dt.timedelta(days=7)
 
 _SORT_DIRECTIONS = ("asc", "desc")
 #: Sort keys for the creators grid (FRG-API-023). ``seriesCount`` sorts on the
@@ -121,6 +137,30 @@ class CreatorFollowUpdate(BaseModel):
     """Request body for ``PUT /api/v1/creators/{id}/follow``."""
 
     followed: bool
+
+
+class BibliographyEntry(BaseModel):
+    """One cached external-bibliography volume on a creator (FRG-API-024)."""
+
+    cvVolumeId: int
+    title: str
+    publisher: str | None
+    startYear: int | None
+    countOfIssues: int | None
+
+
+class CreatorBibliography(BaseModel):
+    """``GET /api/v1/creators/{id}/bibliography`` response (FRG-API-024).
+
+    ``state`` is ``fresh`` when the cache is within the TTL (served as-is, no
+    fetch) or ``pending`` when a fetch is in flight/needed — an unstamped ("never
+    fetched") or stale cache both report ``pending`` because the GET enqueues the
+    deduplicated fetch before returning, so from the client's view a refresh is
+    always in flight in that case. Whatever rows exist (minus the live in-library
+    anti-join) are always served, even while pending."""
+
+    state: Literal["fresh", "pending"]
+    records: list[BibliographyEntry]
 
 
 # --- shared aggregate helpers ------------------------------------------------
@@ -443,6 +483,79 @@ async def get_creator_profile(creator_id: int, request: Request) -> CreatorProfi
         followed=creator.followed,
         stats=stats,
         series=series_stats,
+    )
+
+
+@router.get("/{creator_id}/bibliography", response_model=CreatorBibliography)
+async def get_creator_bibliography(
+    creator_id: int, request: Request
+) -> CreatorBibliography:
+    """A creator's external ComicVine bibliography (FRG-API-024).
+
+    Serves the cached suggestions (FRG-CRTR-005) EXCLUDING any volume whose CV id
+    matches a library series — a live read-time anti-join on
+    ``series.cv_volume_id``, so a volume added after caching disappears from the
+    suggestions without a refetch. When the cache is fresh (stamped within
+    :data:`BIBLIOGRAPHY_TTL`) the rows are served with ``state: "fresh"`` and no
+    command is enqueued. When it is unstamped or stale the rows are STILL served
+    (stale-while-revalidate) with ``state: "pending"`` and exactly one
+    deduplicated ``creator-bibliography-fetch`` is enqueued. This handler issues
+    NO ComicVine request — the fetch happens on the command backbone
+    (FRG-API-023's no-CV-in-API discipline extends here). Unknown id -> 404.
+    """
+    db = request.app.state.db
+    async with db.read_session() as session:
+        creator = await creators_repo.get_creator(session, creator_id)
+        if creator is None:
+            raise ApiError(404, f"creator {creator_id} not found")
+        stamp = creator.bibliography_fetched_at
+
+        # Live in-library anti-join: hide any cached volume already in the library.
+        in_library = select(SeriesRow.cv_volume_id)
+        rows = list(
+            (
+                await session.execute(
+                    select(CreatorBibliographyRow)
+                    .where(
+                        CreatorBibliographyRow.creator_id == creator_id,
+                        CreatorBibliographyRow.cv_volume_id.not_in(in_library),
+                    )
+                    # Serve newest-start_year-first (NULLS LAST), matching how the
+                    # fetch ranked them; a stable cv_volume_id tie-break.
+                    .order_by(
+                        CreatorBibliographyRow.start_year.is_(None),
+                        CreatorBibliographyRow.start_year.desc(),
+                        CreatorBibliographyRow.cv_volume_id.desc(),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    fresh = stamp is not None and (utcnow() - stamp) <= BIBLIOGRAPHY_TTL
+    if not fresh:
+        # Cold (never fetched) OR stale: enqueue the deduplicated fetch and report
+        # pending. Dedup (FRG-SCHED-003) keeps a repeat view / an already-running
+        # fetch to a single queued command. No ComicVine request is issued here.
+        await request.app.state.commands.enqueue(
+            BIBLIOGRAPHY_FETCH_COMMAND,
+            {"creator_id": creator_id},
+            triggered_by="bibliography-view",
+        )
+
+    return CreatorBibliography(
+        state="fresh" if fresh else "pending",
+        records=[
+            BibliographyEntry(
+                cvVolumeId=row.cv_volume_id,
+                title=row.title,
+                publisher=row.publisher,
+                startYear=row.start_year,
+                countOfIssues=row.count_of_issues,
+            )
+            for row in rows
+        ],
     )
 
 

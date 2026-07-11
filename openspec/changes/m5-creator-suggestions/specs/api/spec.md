@@ -8,8 +8,9 @@ The API SHALL expose `GET /api/v1/creators/{id}/bibliography` serving the
 cached bibliography (FRG-CRTR-005): rows carrying the CV volume id, title,
 publisher, start year, and issue count, **excluding volumes whose CV id
 matches a library series at read time**, plus a `state` field —
-`fresh` (cache within TTL), `pending` (fetch enqueued/running), or
-`never` (no fetch has succeeded yet). When the cache is absent or older
+`fresh` (cache within TTL, no refresh needed) or `pending` (a fetch is
+enqueued/running — a never-fetched creator is always `pending`, because
+the handler enqueues before responding). When the cache is absent or older
 than the documented TTL (default 7 days), the GET SHALL enqueue the
 deduplicated fetch command and report `pending`/stale-but-served — the
 request itself SHALL issue **no** ComicVine call (FRG-API-023's

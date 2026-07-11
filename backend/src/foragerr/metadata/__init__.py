@@ -31,7 +31,7 @@ from foragerr.metadata.errors import (
     ComicVineUnavailable,
     CoverHostNotAllowed,
 )
-from foragerr.metadata.mapping import map_issue, map_volume
+from foragerr.metadata.mapping import map_issue, map_volume, map_volume_stubs
 from foragerr.metadata.models import (
     CreditRecord,
     IssueRecord,
@@ -42,6 +42,7 @@ from foragerr.metadata.models import (
     SeriesCandidate,
     SeriesRecord,
     SuggestResult,
+    VolumeStub,
 )
 from foragerr.metadata.ratelimit import (
     comicvine_degraded,
@@ -72,6 +73,7 @@ __all__ = [
     "SeriesCandidate",
     "SeriesRecord",
     "SuggestResult",
+    "VolumeStub",
     "cache_cover",
     "comicvine_degraded",
     "comicvine_health",
@@ -79,6 +81,7 @@ __all__ = [
     "map_issue",
     "map_person_credits",
     "map_volume",
+    "map_volume_stubs",
     "normalize_role",
     "plausibility",
     "sanitize_cv_text",

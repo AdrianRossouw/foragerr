@@ -18,7 +18,7 @@ import logging
 from typing import Any
 
 from foragerr.metadata.credits import map_person_credits
-from foragerr.metadata.models import IssueRecord, IssueRef, SeriesRecord
+from foragerr.metadata.models import IssueRecord, IssueRef, SeriesRecord, VolumeStub
 from foragerr.metadata.sanitize import sanitize_cv_text
 
 logger = logging.getLogger("foragerr.metadata.mapping")
@@ -143,6 +143,32 @@ def map_issue(payload: dict[str, Any]) -> IssueRecord:
         image_url=_image_url(payload.get("image")),
         credits=map_person_credits(payload.get("person_credits")),
     )
+
+
+def map_volume_stubs(value: Any) -> tuple[VolumeStub, ...]:
+    """Map an untrusted CV ``volume_credits`` value to typed volume stubs
+    (FRG-CRTR-005).
+
+    Total by contract (mirrors :func:`map_person_credits`): an absent, empty, or
+    malformed value maps to ``()`` and never raises. Each stub carries only a cv
+    volume id and a sanitized name; entries with no usable positive id are
+    dropped, and a volume id already seen is collapsed so the same volume is
+    listed once. The full publisher/start_year/issue-count fields are NOT present
+    on a stub — they come from a later batched :func:`map_volume` hydration.
+    """
+    if not isinstance(value, list):
+        return ()
+    out: list[VolumeStub] = []
+    seen: set[int] = set()
+    for raw in value:
+        if not isinstance(raw, dict):
+            continue
+        vid = _int(raw.get("id"))
+        if not vid or vid <= 0 or vid in seen:
+            continue
+        seen.add(vid)
+        out.append(VolumeStub(cv_volume_id=vid, name=_text(raw.get("name"))))
+    return tuple(out)
 
 
 def map_volume(payload: dict[str, Any]) -> SeriesRecord:

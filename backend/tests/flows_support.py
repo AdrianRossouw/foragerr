@@ -69,6 +69,15 @@ class FakeCV:
         self._issue_credits: dict[int, list[dict]] = {}
         #: cv issue id -> (HTTP status) for a failing detail fetch.
         self._issue_detail_fail: dict[int, int] = {}
+        #: cv person id -> volume_credits STUBS served on the person DETAIL
+        #: endpoint (``person/4040-{id}/``) — id+name only, mirroring the real
+        #: shape (FRG-CRTR-005). Full rows come from the volumes id-filter route.
+        self._person_volume_credits: dict[int, list[dict]] = {}
+        #: cv person id -> HTTP status for a failing person detail fetch.
+        self._person_fail: dict[int, int] = {}
+        #: filter substring that, when present on a ``volumes/?filter=id:...``
+        #: request, makes it fail with the given HTTP status (hydration failure).
+        self._volumes_filter_fail_status: int | None = None
 
     def volume(
         self,
@@ -77,18 +86,59 @@ class FakeCV:
         name: str = "Saga",
         publisher: str | None = "Image",
         start_year: int | None = 2012,
+        count_of_issues: int | None = None,
         description: str | None = "A space opera.",
         image_url: str | None = None,
     ) -> "FakeCV":
         vol: dict = {"id": volume_id, "name": name, "start_year": start_year}
         if publisher is not None:
             vol["publisher"] = {"name": publisher}
+        if count_of_issues is not None:
+            vol["count_of_issues"] = count_of_issues
         if description is not None:
             vol["description"] = description
         if image_url is not None:
             vol["image"] = {"original_url": image_url}
             self._images.add(image_url.split("?")[0])
         self._volumes[volume_id] = vol
+        return self
+
+    def person(
+        self,
+        cv_person_id: int,
+        volume_ids: list[int] | None = None,
+        *,
+        volume_credits: list[dict] | None = None,
+        fail_status: int | None = None,
+    ) -> "FakeCV":
+        """Register a person's ``volume_credits`` STUBS for the person DETAIL
+        endpoint (``person/4040-{id}/``) — the real bibliography source shape:
+        id+name stubs only, NOT the full rows (FRG-CRTR-005). Pass ``volume_ids``
+        for the common case (stub name defaults to ``Volume <id>``), or
+        ``volume_credits`` to supply raw stub dicts (e.g. malformed entries).
+        ``fail_status`` makes the person detail fetch fail with that HTTP status.
+        """
+        if fail_status is not None:
+            self._person_fail[cv_person_id] = fail_status
+        if volume_credits is None:
+            volume_credits = [
+                {
+                    "id": vid,
+                    "name": f"Volume {vid}",
+                    "api_detail_url": (
+                        f"https://comicvine.gamespot.com/api/volume/4050-{vid}/"
+                    ),
+                    "site_detail_url": f"https://comicvine.gamespot.com/v/4050-{vid}/",
+                }
+                for vid in (volume_ids or [])
+            ]
+        self._person_volume_credits[cv_person_id] = volume_credits
+        return self
+
+    def fail_volumes_filter(self, status: int = 500) -> "FakeCV":
+        """Make every ``volumes/?filter=id:...`` hydration request fail (used to
+        exercise the bibliography fetch's cache-preserving failure path)."""
+        self._volumes_filter_fail_status = status
         return self
 
     def issues(
@@ -155,7 +205,26 @@ class FakeCV:
                 return _envelope(
                     {"id": iid, "person_credits": self._issue_credits.get(iid, [])}
                 )
+            if "/person/4040-" in path:
+                # The person DETAIL endpoint (FRG-CRTR-005) — serves volume_credit
+                # STUBS. Type prefix 4040 = person (4050 = volume); the real API
+                # 102s a wrong prefix.
+                pid = int(path.split("4040-")[1].rstrip("/"))
+                fail = self._person_fail.get(pid)
+                if fail is not None:
+                    return httpx.Response(fail, content=b"boom")
+                if pid not in self._person_volume_credits:
+                    return httpx.Response(404, content=b"not found")
+                return _envelope(
+                    {
+                        "id": pid,
+                        "name": f"Person {pid}",
+                        "volume_credits": self._person_volume_credits[pid],
+                    }
+                )
             if path.endswith("/volumes/"):
+                if query.get("filter", "").startswith("id:"):
+                    return self._volumes_by_ids_response(query)
                 return self._search_response(query)
             if path.endswith("/issues/"):
                 return self._issues_response(query)
@@ -182,6 +251,21 @@ class FakeCV:
         ]
         window = matches if offset == 0 else []
         return _envelope(window, number_of_total_results=len(matches))
+
+    def _volumes_by_ids_response(self, query: dict[str, str]) -> httpx.Response:
+        """Answer the batched ``volumes/?filter=id:a|b|c`` hydration endpoint
+        (``get_volumes_by_ids``) from the registered FULL volume rows, mirroring
+        the real pipe-filter shape (FRG-CRTR-005)."""
+        if self._volumes_filter_fail_status is not None:
+            return httpx.Response(self._volumes_filter_fail_status, content=b"boom")
+        filter_value = query.get("filter", "")
+        ids_part = filter_value.split("id:", 1)[1] if "id:" in filter_value else ""
+        ids = [int(tok) for tok in ids_part.split("|") if tok.strip().isdigit()]
+        rows = [self._volumes[i] for i in ids if i in self._volumes]
+        offset = int(query.get("offset", "0"))
+        limit = int(query.get("limit", "100"))
+        window = rows[offset : offset + limit]
+        return _envelope(window, number_of_total_results=len(rows))
 
     def _issues_response(self, query: dict[str, str]) -> httpx.Response:
         filter_value = query.get("filter", "")

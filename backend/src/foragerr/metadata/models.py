@@ -49,6 +49,21 @@ class SeriesRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class VolumeStub:
+    """A lightweight ComicVine volume reference (FRG-CRTR-005).
+
+    The ``volume_credits`` a person-detail response lists are STUBS — a cv volume
+    id plus a (sanitized) name only; they carry no publisher/start_year/issue
+    count. Those full fields come from a later batched hydration
+    (:meth:`ComicVineClient.get_volumes_by_ids`) that maps each row to a full
+    :class:`SeriesRecord`. ``name`` is ``None`` when the stub had no usable name.
+    """
+
+    cv_volume_id: int
+    name: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class CreditRecord:
     """One per-issue person credit mapped from ComicVine (FRG-CRTR-001).
 
