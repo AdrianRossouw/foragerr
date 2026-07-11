@@ -890,6 +890,48 @@ describe('FRG-UI-005: add series autosuggest (m2-search-autosuggest)', () => {
     expect(screen.queryByTestId('suggest-40501234')).not.toBeInTheDocument();
   });
 
+  it('FRG-UI-005 — a degraded (part-way-failed) autosuggest surfaces the failure note, not a silent empty dropdown', async () => {
+    renderAdd({
+      suggest: (path) =>
+        path === '/api/v1/series/lookup/suggest?term=sag'
+          ? { records: [], complete: false }
+          : { records: [], complete: true },
+    });
+    const user = userEvent.setup();
+    await user.type(
+      screen.getByRole('searchbox', { name: 'Search ComicVine' }),
+      'sag',
+    );
+
+    await waitFor(() =>
+      expect(
+        within(screen.getByTestId('suggest-dropdown')).getByRole('alert'),
+      ).toHaveTextContent(/failed part-way/i),
+    );
+  });
+
+  it('FRG-UI-005 — an incomplete autosuggest that still returned candidates renders them (accelerator does not nag)', async () => {
+    renderAdd({
+      suggest: (path) =>
+        path === '/api/v1/series/lookup/suggest?term=sag'
+          ? { records: mockSuggestCandidates, complete: false }
+          : { records: [], complete: true },
+    });
+    const user = userEvent.setup();
+    await user.type(
+      screen.getByRole('searchbox', { name: 'Search ComicVine' }),
+      'sag',
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId('suggest-40501234')).toBeInTheDocument(),
+    );
+    // no failure alert when candidates are present
+    expect(
+      within(screen.getByTestId('suggest-dropdown')).queryByRole('alert'),
+    ).not.toBeInTheDocument();
+  });
+
   it('FRG-UI-005 / FRG-UI-019 — a prefilled term (from the header quick-search fall-through) seeds the input and the autosuggest runs for it on mount', async () => {
     renderAdd({
       suggest: (path) =>

@@ -19,7 +19,6 @@ import { isComicVineAuthError } from '../../api/fetcher';
 import type {
   AddSeriesNavigationState,
   LookupCandidate,
-  LookupResponse,
   SeriesCreatePayload,
 } from '../../api/types';
 import { MONITOR_STRATEGIES } from '../../api/types';
@@ -76,7 +75,11 @@ export function stripHtml(raw: string): string {
 export function lookupOutcomeNote(
   isError: boolean,
   error: unknown,
-  data: LookupResponse | undefined,
+  // Structural subset shared by LookupResponse and SuggestResponse (the latter
+  // has no `truncated`, so it is optional) — the classifier reads only these.
+  data:
+    | { records: readonly unknown[]; complete: boolean; truncated?: boolean }
+    | undefined,
   term: string,
 ): { tone: 'error' | 'status' | 'plain'; text: string } | null {
   if (isError) {
@@ -504,10 +507,18 @@ export function AddSeries() {
   // Reuses the full lookup's outcome classifier verbatim (isComicVineAuthError
   // under the hood) so a suggest credential failure renders the SAME
   // actionable Settings-guidance text, structurally discriminated — never by
-  // sniffing message prose, and never dressed up as an empty dropdown.
-  const suggestNote = showSuggest
-    ? lookupOutcomeNote(suggest.isError, suggest.error, undefined, suggestTerm)
+  // sniffing message prose, and never dressed up as an empty dropdown. Feeding
+  // the suggest data (not undefined) also lets a degraded/part-way-failed
+  // suggest surface as its failure note instead of a silent empty dropdown.
+  // The accelerator keeps ONLY the hard-failure ('error') tone: 'status'
+  // (incomplete/capped) falls through so the candidates it did return still
+  // render, and 'plain' (clean empty) is left to the authoritative full lookup
+  // rather than nagging under every partial term.
+  const rawSuggestNote = showSuggest
+    ? lookupOutcomeNote(suggest.isError, suggest.error, suggest.data, suggestTerm)
     : null;
+  const suggestNote =
+    rawSuggestNote?.tone === 'error' ? rawSuggestNote : null;
   const suggestCandidates =
     showSuggest && !suggest.isError ? suggest.data?.records ?? [] : [];
 
