@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   addWeeks,
   currentIsoWeek,
@@ -76,13 +76,12 @@ describe('isoWeek', () => {
     // Sunday 2026-01-04 closes ISO 2026-W01 (Jan 1 2026 is a Thursday, so W01 is
     // Dec 29–Jan 4); the UTC Monday would wrongly read as 2026-W02. The default
     // week must follow the day the viewer is actually living in.
-    const prevTz = process.env.TZ;
-    process.env.TZ = 'America/Los_Angeles'; // UTC-8 in January (PST)
+    vi.stubEnv('TZ', 'America/Los_Angeles'); // UTC-8 in January (PST)
     try {
       const instant = new Date('2026-01-05T04:00:00.000Z');
       expect(currentIsoWeek(instant)).toBe('2026-W01');
     } finally {
-      process.env.TZ = prevTz;
+      vi.unstubAllEnvs();
     }
   });
 });
