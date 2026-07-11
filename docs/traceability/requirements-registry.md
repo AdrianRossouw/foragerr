@@ -99,6 +99,10 @@ moved `M5`→`M8`.
 | FRG-PULL-007 | Pull view actions | pull | implemented | M4 |
 | FRG-PULL-008 | New-series surfacing (no auto-add) | pull | implemented | M4 |
 | FRG-PULL-009 | Future/solicited releases | pull | implemented | M4 |
+| FRG-CRTR-001 | Per-issue creator credits ingest | crtr | approved | M5 |
+| FRG-CRTR-002 | Creator and credit storage/reconciliation | crtr | approved | M5 |
+| FRG-CRTR-003 | One-time credits backfill | crtr | approved | M5 |
+| FRG-CRTR-004 | Creator follow flag and seeding | crtr | approved | M5 |
 | FRG-ARC-001 | Arc entity import by ComicVine arc ID | arc | approved | B |
 | FRG-ARC-002 | Arc-to-library linking by ComicVine ID | arc | approved | B |
 | FRG-ARC-003 | Arc progress | arc | approved | B |
@@ -238,6 +242,7 @@ moved `M5`→`M8`.
 | FRG-API-020 | Series grouping projection | api | implemented | M3 |
 | FRG-API-021 | Log records resource | api | implemented | M4 |
 | FRG-API-022 | Containment resources | api | implemented | M4 |
+| FRG-API-023 | Creators resource and follow toggle | api | approved | M5 |
 | FRG-UI-001 | SPA architecture: server state via React Query + WS invalidation | ui | implemented | M1 |
 | FRG-UI-002 | Design token layer with ant/foraging theme | ui | implemented | M1 |
 | FRG-UI-003 | Library index screen | ui | implemented | M1 |
