@@ -155,7 +155,7 @@ async function searchFor(term: string) {
 }
 
 describe('FRG-UI-005: add series', () => {
-  it('FRG-UI-005 — search renders ComicVine candidates with plausibility annotations', async () => {
+  it('FRG-UI-005 — search renders CV candidates as design-handoff result cards (cover, name, year, publisher, issue count, deck, In-library badge)', async () => {
     const { spy } = renderAdd();
     await searchFor('saga');
 
@@ -163,27 +163,49 @@ describe('FRG-UI-005: add series', () => {
       expect(spy).toHaveBeenCalledWith('/api/v1/series/lookup?term=saga'),
     );
 
-    // Strong candidate: poster, year, publisher and its plausibility chips.
+    // Strong candidate: cover, name, year, publisher, issue count and a deck.
     const strong = screen.getByTestId('candidate-40501234');
+    expect(
+      within(strong).getByRole('img', { name: 'Saga cover' }),
+    ).toBeInTheDocument();
     expect(within(strong).getByText('Saga')).toBeInTheDocument();
     expect(within(strong).getByText('(2012)')).toBeInTheDocument();
     expect(within(strong).getByText('Image')).toBeInTheDocument();
     expect(within(strong).getByText('63 issues')).toBeInTheDocument();
-    expect(within(strong).getByText('Name match 100%')).toBeInTheDocument();
-    expect(within(strong).getByText('Year match')).toBeInTheDocument();
-    expect(within(strong).getByText('Target issue plausible')).toBeInTheDocument();
+    // The deck renders with its residual CV markup stripped (no tags leak).
+    expect(
+      within(strong).getByText('Epic space opera about star-crossed lovers.'),
+    ).toBeInTheDocument();
+    expect(within(strong).queryByText(/</)).not.toBeInTheDocument();
+    // The retired plausibility chips no longer render on the card face.
+    expect(within(strong).queryByText(/Name match/)).not.toBeInTheDocument();
+    expect(within(strong).queryByText(/Target issue/)).not.toBeInTheDocument();
+    expect(within(strong).queryByText('In library')).not.toBeInTheDocument();
 
-    // Weak candidate: annotations rendered honestly, plus library membership.
-    // Its count_of_issues is null -> the issue-count annotation is OMITTED.
+    // Weak candidate: already owned -> an "In library" badge shows; its
+    // count_of_issues is null so the issue-count meta item is OMITTED.
     const weak = screen.getByTestId('candidate-40509999');
-    expect(within(weak).getByText('Name match 42%')).toBeInTheDocument();
-    expect(within(weak).getByText('Year ±30')).toBeInTheDocument();
-    expect(within(weak).getByText('Target issue unlikely')).toBeInTheDocument();
     expect(within(weak).getByText('In library')).toBeInTheDocument();
     expect(within(weak).queryByText(/\d+ issues?/)).not.toBeInTheDocument();
   });
 
-  it('FRG-UI-005 — selecting a candidate exposes root folder, format profile, monitor strategy and search-on-add controls', async () => {
+  it('FRG-UI-005 / FRG-META-015 — candidates render in the API order, never client-reordered', async () => {
+    // Feed candidates in a deliberate order (Saga first, Swamp Thing second);
+    // the ranked API order is authoritative — the DOM must mirror it exactly.
+    renderAdd();
+    await searchFor('saga');
+
+    await waitFor(() =>
+      expect(screen.getByTestId('candidate-40501234')).toBeInTheDocument(),
+    );
+    const cards = screen.getAllByTestId(/^candidate-\d+$/);
+    expect(cards.map((c) => c.getAttribute('data-testid'))).toEqual([
+      'candidate-40501234',
+      'candidate-40509999',
+    ]);
+  });
+
+  it('FRG-UI-005 — selecting a candidate exposes root folder, format profile, monitor (segmented), collect-as (segmented) and search-on-add controls', async () => {
     renderAdd();
     const user = await searchFor('saga');
 
@@ -219,7 +241,36 @@ describe('FRG-UI-005: add series', () => {
     ).toBeInTheDocument();
     expect(profile).toHaveValue('1');
 
-    expect(within(panel).getByRole('combobox', { name: 'Monitor strategy' })).toBeInTheDocument();
+    // Monitor is now a segmented radiogroup exposing ALL six strategies, with
+    // "All issues" selected by default (the pre-redesign default).
+    const monitor = within(panel).getByRole('radiogroup', {
+      name: 'Monitor strategy',
+    });
+    for (const label of [
+      'All issues',
+      'None',
+      'Future issues',
+      'Missing issues',
+      'Existing issues',
+      'First issue',
+    ]) {
+      expect(within(monitor).getByRole('radio', { name: label })).toBeInTheDocument();
+    }
+    expect(within(monitor).getByRole('radio', { name: 'All issues' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+
+    // Collect-as is a segmented radiogroup with NO default selection (untouched
+    // = derivation), so neither segment starts checked.
+    const collect = within(panel).getByRole('radiogroup', { name: 'Collect as' });
+    expect(
+      within(collect).getByRole('radio', { name: 'Single Issues' }),
+    ).toHaveAttribute('aria-checked', 'false');
+    expect(
+      within(collect).getByRole('radio', { name: 'Collected Editions' }),
+    ).toHaveAttribute('aria-checked', 'false');
+
     expect(
       within(panel).getByRole('checkbox', { name: 'Start search for missing issues' }),
     ).toBeInTheDocument();
@@ -266,10 +317,9 @@ describe('FRG-UI-005: add series', () => {
       within(panel).getByRole('combobox', { name: 'Format profile' }),
       '2',
     );
-    await user.selectOptions(
-      within(panel).getByRole('combobox', { name: 'Monitor strategy' }),
-      'missing',
-    );
+    // Monitor is segmented now: click the "Missing issues" segment, which maps
+    // to the same monitor_strategy value the old <select> sent.
+    await user.click(within(panel).getByRole('radio', { name: 'Missing issues' }));
     await user.click(
       within(panel).getByRole('checkbox', { name: 'Start search for missing issues' }),
     );
@@ -278,6 +328,7 @@ describe('FRG-UI-005: add series', () => {
     await waitFor(() =>
       expect(spy).toHaveBeenCalledWith('/api/v1/series', {
         method: 'POST',
+        // Collect-as left untouched -> NO booktype key in the body (derivation).
         body: {
           cv_volume_id: 40501234,
           root_folder_id: 2,
@@ -313,6 +364,133 @@ describe('FRG-UI-005: add series', () => {
     await waitFor(() =>
       expect(spy).toHaveBeenCalledWith('/api/v1/series/lookup?term=4050-56789'),
     );
+  });
+});
+
+/**
+ * FRG-UI-005 (m4-add-new) — the redesigned result card + inline panel: the
+ * card expand/collapse behavior and the "Collect as" -> add-time booktype
+ * mapping (untouched = no booktype key = derivation; Single Issues = "none";
+ * Collected Editions = "tpb", FRG-SER-018). The full add machinery (ids/
+ * navigate/refresh) is proven above; these pin the new controls.
+ */
+describe('FRG-UI-005: result card + collect-as (m4-add-new)', () => {
+  it('FRG-UI-005 — a result card expands to the inline panel and collapses again', async () => {
+    renderAdd();
+    const user = await searchFor('saga');
+    await waitFor(() =>
+      expect(screen.getByTestId('candidate-40501234')).toBeInTheDocument(),
+    );
+    const toggle = screen.getByRole('button', { name: 'Select Saga' });
+
+    // Collapsed initially.
+    expect(screen.queryByTestId('add-options-panel')).not.toBeInTheDocument();
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+
+    // Click expands.
+    await user.click(toggle);
+    expect(screen.getByTestId('add-options-panel')).toBeInTheDocument();
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+
+    // Clicking the card face again collapses.
+    await user.click(toggle);
+    expect(screen.queryByTestId('add-options-panel')).not.toBeInTheDocument();
+
+    // Re-expand, then the panel's Cancel button collapses it too.
+    await user.click(toggle);
+    await user.click(
+      within(screen.getByTestId('add-options-panel')).getByRole('button', {
+        name: 'Cancel',
+      }),
+    );
+    expect(screen.queryByTestId('add-options-panel')).not.toBeInTheDocument();
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('FRG-UI-005 / FRG-SER-018 — "Single Issues" sends booktype "none"', async () => {
+    const { spy } = renderAdd();
+    const user = await searchFor('saga');
+    await waitFor(() =>
+      expect(screen.getByTestId('candidate-40501234')).toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole('button', { name: 'Select Saga' }));
+    const panel = screen.getByTestId('add-options-panel');
+    await waitFor(() =>
+      expect(screen.getByTestId('ft-add-confirm')).not.toBeDisabled(),
+    );
+
+    await user.click(within(panel).getByRole('radio', { name: 'Single Issues' }));
+    await user.click(within(panel).getByRole('button', { name: 'Add Saga' }));
+
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith('/api/v1/series', {
+        method: 'POST',
+        body: {
+          cv_volume_id: 40501234,
+          root_folder_id: 1,
+          format_profile_id: 1,
+          monitor_strategy: 'all',
+          monitor_new_items: 'all',
+          search_on_add: false,
+          booktype: 'none',
+        },
+      }),
+    );
+  });
+
+  it('FRG-UI-005 / FRG-SER-018 — "Collected Editions" sends booktype "tpb"', async () => {
+    const { spy } = renderAdd();
+    const user = await searchFor('saga');
+    await waitFor(() =>
+      expect(screen.getByTestId('candidate-40501234')).toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole('button', { name: 'Select Saga' }));
+    const panel = screen.getByTestId('add-options-panel');
+    await waitFor(() =>
+      expect(screen.getByTestId('ft-add-confirm')).not.toBeDisabled(),
+    );
+
+    await user.click(
+      within(panel).getByRole('radio', { name: 'Collected Editions' }),
+    );
+    await user.click(within(panel).getByRole('button', { name: 'Add Saga' }));
+
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith('/api/v1/series', {
+        method: 'POST',
+        body: {
+          cv_volume_id: 40501234,
+          root_folder_id: 1,
+          format_profile_id: 1,
+          monitor_strategy: 'all',
+          monitor_new_items: 'all',
+          search_on_add: false,
+          booktype: 'tpb',
+        },
+      }),
+    );
+  });
+
+  it('FRG-UI-005 / FRG-SER-018 — an untouched collect-as omits the booktype key entirely', async () => {
+    const { spy } = renderAdd();
+    const user = await searchFor('saga');
+    await waitFor(() =>
+      expect(screen.getByTestId('candidate-40501234')).toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole('button', { name: 'Select Saga' }));
+    await waitFor(() =>
+      expect(screen.getByTestId('ft-add-confirm')).not.toBeDisabled(),
+    );
+    // Add straight away without touching collect-as.
+    await user.click(screen.getByRole('button', { name: 'Add Saga' }));
+
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith('/api/v1/series', expect.anything()),
+    );
+    const seriesPost = spy.mock.calls.find(([path]) => path === '/api/v1/series');
+    const postBody = seriesPost?.[1]?.body as Record<string, unknown> | undefined;
+    expect(postBody).toBeDefined();
+    expect(postBody).not.toHaveProperty('booktype');
   });
 });
 

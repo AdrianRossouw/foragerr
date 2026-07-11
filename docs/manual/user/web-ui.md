@@ -57,10 +57,22 @@ bulk selection, and a tab for declared trade containment. See
 
 ## Adding a series
 
-Add Series searches ComicVine and annotates each candidate with plausibility
-signals (issue counts, years) so the right volume is easy to pick. The add panel
-lets you choose the root folder, format profile, and monitoring options before the
-add flow kicks off its chained refresh → scan → optional search.
+Add Series searches ComicVine and returns candidates **ranked by relevance** —
+closest title match first, publication-year proximity as the tiebreak when your
+term carries a year — so the volume you meant is normally at the top rather
+than buried in alphabetical order. Nothing is filtered out by the ranking: every
+candidate the search found is still in the list, just ordered.
+
+Each result is an expandable card showing the cover, title and year, publisher,
+issue count, and a short description; a series already in your library carries
+an **In library** badge and can't be added twice. Expanding a card opens the
+add panel inline: root folder and format profile selects, the monitoring
+strategy as a segmented control, a **Collect as** choice (Single Issues /
+Collected Editions — leave it untouched and foragerr types the series from its
+title cues as usual; an explicit choice locks the book-type so refreshes never
+overwrite it, and it can be refined on the series afterwards), and the
+optional start-search-for-missing-issues toggle, before the add flow kicks off
+its chained refresh → scan → optional search.
 
 As you type (three characters or more) a debounced autosuggest dropdown offers up
 to about ten candidates straight from ComicVine, without waiting for the full

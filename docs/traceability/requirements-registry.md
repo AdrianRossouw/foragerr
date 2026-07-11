@@ -19,7 +19,7 @@ containment, add-new, the pull experience [FRG-UI-018, FRG-PULL-007..009],
 screenshot-refresh tooling) · `M5` creators & follows (CRTR ids allocated at
 proposal time) · `M6` sources (FRG-AUTH-008 credential store first, then
 Humble Bundle importer, then archive.org importer) · `M7` torrents
-(Transmission, Torznab-only indexing, seeding etiquette) · `M8`
+(qBittorrent, Torznab-only indexing, seeding etiquette) · `M8`
 authentication (**implementation requires fresh owner approval — the
 2026-07-10 grant ends after M7 merges**) · `B` backlog · `—` process
 (not milestone-bound).

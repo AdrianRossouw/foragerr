@@ -2,7 +2,12 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Toolbar } from '../../components/Toolbar';
 import { Poster } from '../../components/Poster';
-import { SearchIcon, CloseIcon } from '../../components/icons';
+import { Chip } from '../../components/Chip';
+import {
+  SegmentedControl,
+  type SegmentOption,
+} from '../../components/SegmentedControl';
+import { SearchIcon, CloseIcon, CheckIcon, PlusIcon } from '../../components/icons';
 import {
   useAddSeries,
   useFormatProfiles,
@@ -15,17 +20,22 @@ import type {
   AddSeriesNavigationState,
   LookupCandidate,
   LookupResponse,
+  SeriesCreatePayload,
 } from '../../api/types';
 import { MONITOR_STRATEGIES } from '../../api/types';
+import { publisherTint } from '../../theme/palettes';
 import { formatBytes } from '../../lib/format';
 import styles from './AddSeries.module.css';
 
 /**
  * Add series (FRG-UI-005): ComicVine lookup (title text or a pasted CV
- * volume id/URL) -> candidate cards with plausibility annotations
- * (FRG-META-007 signals rendered, never hidden) -> add-options panel ->
- * POST /api/v1/series -> navigate to the new detail route carrying the queued
- * refresh command id so it renders live there.
+ * volume id/URL) -> expandable result cards per the M4 design handoff (cover,
+ * name, year, publisher, issue count, deck, "In library" badge), rendered in
+ * the API's relevance order (FRG-META-015) with no client-side reordering ->
+ * inline add-config panel (root folder, format profile, monitor segmented,
+ * collect-as segmented, search-on-add) -> POST /api/v1/series -> navigate to
+ * the new detail route carrying the queued refresh command id so it renders
+ * live there.
  */
 
 /**
@@ -36,6 +46,21 @@ export function normalizeLookupTerm(raw: string): string {
   const trimmed = raw.trim();
   const idMatch = trimmed.match(/(?:^cv:)?.*?(4050-\d+)/i);
   return idMatch ? idMatch[1] : trimmed;
+}
+
+/**
+ * Defensive display strip of a ComicVine deck/description (FRG-UI-005): CV
+ * deck text is user-editable wiki content (sanitized server-side, but treated
+ * as untrusted here too — FRG-META-014). Reduce any residual markup to its
+ * text by dropping tags and collapsing whitespace; the result is rendered as
+ * React text (auto-escaped), never as HTML. Empty/whitespace-only decks become
+ * `''` so the card can drop the deck row entirely.
+ */
+export function stripHtml(raw: string): string {
+  return raw
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 /**
@@ -124,6 +149,25 @@ export function OutcomeErrorText({
  */
 type AddableCandidate = Pick<LookupCandidate, 'cv_volume_id' | 'name' | 'have_it'>;
 
+/**
+ * The fields the shared result card renders (FRG-UI-005). Structurally
+ * satisfied by BOTH `LookupCandidate` and `SuggestCandidate` so the full
+ * lookup and the suggest dropdown render identical cards; `description` is
+ * optional on both (a suggest candidate may omit it — the deck row is then
+ * simply absent).
+ */
+type CardCandidate = Pick<
+  LookupCandidate,
+  | 'cv_volume_id'
+  | 'name'
+  | 'publisher'
+  | 'start_year'
+  | 'image_url'
+  | 'have_it'
+  | 'count_of_issues'
+  | 'description'
+>;
+
 /** Monitor-strategy display labels, shared with the library-import batch panel. */
 export const STRATEGY_LABELS: Record<string, string> = {
   all: 'All issues',
@@ -134,49 +178,44 @@ export const STRATEGY_LABELS: Record<string, string> = {
   first: 'First issue',
 };
 
-function PlausibilityChips({ candidate }: { candidate: LookupCandidate }) {
-  return (
-    <span className={styles.chipRow}>
-      {candidate.count_of_issues !== null && (
-        <span className={styles.chip}>
-          {candidate.count_of_issues} issue
-          {candidate.count_of_issues === 1 ? '' : 's'}
-        </span>
-      )}
-      <span className={styles.chip}>
-        Name match {Math.round(candidate.name_similarity * 100)}%
-      </span>
-      {candidate.year_proximity !== null && (
-        <span className={styles.chip}>
-          {candidate.year_proximity === 0
-            ? 'Year match'
-            : `Year ±${candidate.year_proximity}`}
-        </span>
-      )}
-      {candidate.target_issue_plausible !== null &&
-        (candidate.target_issue_plausible ? (
-          <span className={`${styles.chip} ${styles.chipGood}`}>
-            Target issue plausible
-          </span>
-        ) : (
-          <span className={`${styles.chip} ${styles.chipWarn}`}>
-            Target issue unlikely
-          </span>
-        ))}
-      {candidate.have_it && (
-        <span className={`${styles.chip} ${styles.chipHave}`}>In library</span>
-      )}
-    </span>
-  );
+/**
+ * "Collect as" control state (FRG-UI-005 / FRG-SER-018). `''` is the default
+ * untouched state — the add request then carries NO booktype and the backend
+ * derives it from title cues as before. `single`/`collected` map to the
+ * explicit locked book-type sent on add.
+ */
+type CollectAs = '' | 'single' | 'collected';
+
+/** The add-time booktype each explicit collect-as choice sends (design decision 3). */
+const COLLECT_AS_BOOKTYPE: Record<Exclude<CollectAs, ''>, string> = {
+  single: 'none',
+  collected: 'tpb',
+};
+
+const COLLECT_AS_OPTIONS: readonly SegmentOption<CollectAs>[] = [
+  { value: 'single', label: 'Single Issues', testId: 'collect-as-single' },
+  { value: 'collected', label: 'Collected Editions', testId: 'collect-as-collected' },
+];
+
+/** Add-options the panel emits on confirm; `booktype` omitted = untouched. */
+export interface AddOptions {
+  rootFolderId: number;
+  formatProfileId: number | null;
+  monitorStrategy: string;
+  searchOnAdd: boolean;
+  booktype?: string;
 }
 
 /**
  * One ComicVine candidate card (FRG-UI-005) — the shared visual shell used by
  * BOTH the suggest dropdown and the full-lookup results so the two render
- * identically. `chips` fills the annotation slot (the suggest dropdown passes
- * inline count/have_it chips; the full lookup passes `PlausibilityChips`) and
- * `panel` is the add-options panel, mounted inline only while this card is the
- * selected one and the volume is not already owned.
+ * identically per the design handoff: cover (publisher-tinted placeholder),
+ * name + year, an "In library" badge when already owned, a
+ * publisher · issue-count · via-ComicVine meta line, and a 2-line deck. The
+ * whole face is a toggle; `panel` is the add-options panel, mounted inline
+ * only while this card is the selected one and the volume is not already owned
+ * (an owned volume's card is inert — nothing to add). The `deck` is stripped
+ * of residual markup before it reaches here.
  */
 function CandidateCard({
   candidate,
@@ -184,26 +223,24 @@ function CandidateCard({
   selectLabel,
   selected,
   onToggle,
-  chips,
   panel,
 }: {
-  candidate: Pick<
-    LookupCandidate,
-    'cv_volume_id' | 'name' | 'publisher' | 'start_year' | 'image_url' | 'have_it'
-  >;
+  candidate: CardCandidate;
   testId: string;
   selectLabel: string;
   selected: boolean;
   onToggle: () => void;
-  chips: ReactNode;
   panel: ReactNode;
 }) {
+  const count = candidate.count_of_issues;
+  const deck = candidate.description ? stripHtml(candidate.description) : '';
   return (
     <div className={styles.candidateCard} data-testid={testId}>
       <button
         type="button"
         className={styles.candidateBody}
         aria-label={selectLabel}
+        aria-expanded={selected}
         disabled={candidate.have_it}
         onClick={onToggle}
       >
@@ -213,22 +250,39 @@ function CandidateCard({
           alt={`${candidate.name ?? 'volume'} cover`}
           frameClassName={styles.posterFrame}
           fallbackClassName={styles.posterFallback}
+          tint={publisherTint(candidate.publisher)}
           lazy
         />
         <span className={styles.candidateInfo}>
-          <span className={styles.candidateTitle}>
-            {candidate.name ?? 'Unnamed volume'}
+          <span className={styles.candidateTitleRow}>
+            <span className={styles.candidateTitle}>
+              {candidate.name ?? 'Unnamed volume'}
+            </span>
             {candidate.start_year !== null && (
-              <span className={styles.candidateYear}>
-                {' '}
-                ({candidate.start_year})
-              </span>
+              <span className={styles.candidateYear}>({candidate.start_year})</span>
+            )}
+            {candidate.have_it && (
+              <Chip tone="accent" className={styles.haveBadge} testId={`${testId}-have`}>
+                <CheckIcon size={11} />
+                In library
+              </Chip>
             )}
           </span>
-          {candidate.publisher && (
-            <span className={styles.publisher}>{candidate.publisher}</span>
-          )}
-          {chips}
+          <span className={styles.metaRow}>
+            {candidate.publisher && (
+              <span className={styles.metaItem}>{candidate.publisher}</span>
+            )}
+            {count !== null && (
+              <span className={styles.metaItem}>
+                {count} issue{count === 1 ? '' : 's'}
+              </span>
+            )}
+            <span className={styles.metaItem}>via ComicVine</span>
+          </span>
+          {deck && <span className={styles.deck}>{deck}</span>}
+        </span>
+        <span className={styles.candidateTrailing} aria-hidden>
+          {candidate.have_it && <CheckIcon size={20} />}
         </span>
       </button>
       {selected && !candidate.have_it && panel}
@@ -241,16 +295,13 @@ function AddOptionsPanel({
   busy,
   error,
   onAdd,
+  onCancel,
 }: {
   candidate: AddableCandidate;
   busy: boolean;
   error: string | null;
-  onAdd: (options: {
-    rootFolderId: number;
-    formatProfileId: number | null;
-    monitorStrategy: string;
-    searchOnAdd: boolean;
-  }) => void;
+  onAdd: (options: AddOptions) => void;
+  onCancel: () => void;
 }) {
   const rootFolders = useRootFolders();
   const formatProfiles = useFormatProfiles();
@@ -258,6 +309,8 @@ function AddOptionsPanel({
   const [rootFolderId, setRootFolderId] = useState<number | null>(null);
   const [formatProfileId, setFormatProfileId] = useState<number | null>(null);
   const [monitorStrategy, setMonitorStrategy] = useState('all');
+  // '' = untouched -> the add carries NO booktype (derivation, FRG-SER-018).
+  const [collectAs, setCollectAs] = useState<CollectAs>('');
   const [searchOnAdd, setSearchOnAdd] = useState(false);
 
   const selectedRootFolderId = rootFolderId ?? rootFolders.data?.[0]?.id ?? null;
@@ -269,61 +322,76 @@ function AddOptionsPanel({
   const noRootFolders =
     rootFolders.data !== undefined && rootFolders.data.length === 0;
 
+  const monitorOptions: SegmentOption<string>[] = MONITOR_STRATEGIES.map((s) => ({
+    value: s,
+    label: STRATEGY_LABELS[s],
+    testId: `monitor-${s}`,
+  }));
+
   return (
     <div className={styles.addPanel} data-testid="add-options-panel">
-      {noRootFolders ? (
-        <p className={styles.errorNote} role="alert" data-testid="add-no-roots">
-          No root folders are registered, so the series has nowhere to live.
-          Add your comics folder as a root folder in{' '}
-          <Link to="/settings/media-management">Media Management settings</Link>{' '}
-          first.
-        </p>
-      ) : (
-        <label className={styles.formRow}>
-          <span>Root Folder</span>
+      <div className={styles.selectGrid}>
+        {noRootFolders ? (
+          <p className={styles.errorNote} role="alert" data-testid="add-no-roots">
+            No root folders are registered, so the series has nowhere to live.
+            Add your comics folder as a root folder in{' '}
+            <Link to="/settings/media-management">Media Management settings</Link>{' '}
+            first.
+          </p>
+        ) : (
+          <label className={styles.formField}>
+            <span className={styles.fieldLabel}>Root Folder</span>
+            <select
+              aria-label="Root folder"
+              value={selectedRootFolderId ?? ''}
+              onChange={(e) => setRootFolderId(Number(e.target.value))}
+            >
+              {rootFolders.data?.map((folder) => (
+                <option key={folder.id} value={folder.id}>
+                  {folder.path}
+                  {folder.free_space !== null &&
+                    ` — ${formatBytes(folder.free_space)} free`}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <label className={styles.formField}>
+          <span className={styles.fieldLabel}>Format Profile</span>
           <select
-            aria-label="Root folder"
-            value={selectedRootFolderId ?? ''}
-            onChange={(e) => setRootFolderId(Number(e.target.value))}
+            aria-label="Format profile"
+            value={selectedProfileId ?? ''}
+            onChange={(e) => setFormatProfileId(Number(e.target.value))}
           >
-            {rootFolders.data?.map((folder) => (
-              <option key={folder.id} value={folder.id}>
-                {folder.path}
-                {folder.free_space !== null &&
-                  ` — ${formatBytes(folder.free_space)} free`}
+            {formatProfiles.data?.map((profile) => (
+              <option key={profile.id} value={profile.id}>
+                {profile.name}
               </option>
             ))}
           </select>
         </label>
-      )}
-      <label className={styles.formRow}>
-        <span>Format Profile</span>
-        <select
-          aria-label="Format profile"
-          value={selectedProfileId ?? ''}
-          onChange={(e) => setFormatProfileId(Number(e.target.value))}
-        >
-          {formatProfiles.data?.map((profile) => (
-            <option key={profile.id} value={profile.id}>
-              {profile.name}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className={styles.formRow}>
-        <span>Monitor</span>
-        <select
-          aria-label="Monitor strategy"
+      </div>
+
+      <div className={styles.formField}>
+        <span className={styles.fieldLabel}>Monitor</span>
+        <SegmentedControl
+          options={monitorOptions}
           value={monitorStrategy}
-          onChange={(e) => setMonitorStrategy(e.target.value)}
-        >
-          {MONITOR_STRATEGIES.map((s) => (
-            <option key={s} value={s}>
-              {STRATEGY_LABELS[s]}
-            </option>
-          ))}
-        </select>
-      </label>
+          onChange={setMonitorStrategy}
+          ariaLabel="Monitor strategy"
+        />
+      </div>
+
+      <div className={styles.formField}>
+        <span className={styles.fieldLabel}>Collect as</span>
+        <SegmentedControl
+          options={COLLECT_AS_OPTIONS}
+          value={collectAs}
+          onChange={setCollectAs}
+          ariaLabel="Collect as"
+        />
+      </div>
+
       <label className={styles.checkboxRow}>
         <input
           type="checkbox"
@@ -332,24 +400,39 @@ function AddOptionsPanel({
         />
         Start search for missing issues
       </label>
+
       {error && <p className={styles.errorNote}>{error}</p>}
-      <button
-        type="button"
-        className={styles.addButton}
-        data-testid="ft-add-confirm"
-        disabled={busy || selectedRootFolderId === null}
-        onClick={() => {
-          if (selectedRootFolderId === null) return;
-          onAdd({
-            rootFolderId: selectedRootFolderId,
-            formatProfileId: selectedProfileId,
-            monitorStrategy,
-            searchOnAdd,
-          });
-        }}
-      >
-        Add {candidate.name ?? 'series'}
-      </button>
+
+      <div className={styles.panelActions}>
+        <button
+          type="button"
+          className={styles.cancelButton}
+          onClick={onCancel}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          className={styles.addButton}
+          data-testid="ft-add-confirm"
+          disabled={busy || selectedRootFolderId === null}
+          onClick={() => {
+            if (selectedRootFolderId === null) return;
+            onAdd({
+              rootFolderId: selectedRootFolderId,
+              formatProfileId: selectedProfileId,
+              monitorStrategy,
+              searchOnAdd,
+              // Untouched collect-as -> omit booktype (derivation); an explicit
+              // choice sends the locked add-time book-type (FRG-SER-018).
+              ...(collectAs ? { booktype: COLLECT_AS_BOOKTYPE[collectAs] } : {}),
+            });
+          }}
+        >
+          <PlusIcon size={13} />
+          Add {candidate.name ?? 'series'}
+        </button>
+      </div>
     </div>
   );
 }
@@ -448,31 +531,24 @@ export function AddSeries() {
     setTerm(next);
   };
 
-  const add = (
-    candidate: AddableCandidate,
-    options: {
-      rootFolderId: number;
-      formatProfileId: number | null;
-      monitorStrategy: string;
-      searchOnAdd: boolean;
-    },
-  ) => {
-    addSeries.mutate(
-      {
-        cv_volume_id: candidate.cv_volume_id,
-        root_folder_id: options.rootFolderId,
-        format_profile_id: options.formatProfileId,
-        monitor_strategy: options.monitorStrategy,
-        monitor_new_items: 'all',
-        search_on_add: options.searchOnAdd,
-      },
-      {
-        onSuccess: (created) =>
-          navigate(`/series/${created.id}`, {
-            state: { refreshCommandId: created.refresh_command_id },
-          }),
-      },
-    );
+  const add = (candidate: AddableCandidate, options: AddOptions) => {
+    const payload: SeriesCreatePayload = {
+      cv_volume_id: candidate.cv_volume_id,
+      root_folder_id: options.rootFolderId,
+      format_profile_id: options.formatProfileId,
+      monitor_strategy: options.monitorStrategy,
+      monitor_new_items: 'all',
+      search_on_add: options.searchOnAdd,
+    };
+    // Only carry the collect-as override when the operator chose one; an
+    // untouched add omits the field so derivation stays byte-identical.
+    if (options.booktype) payload.booktype = options.booktype;
+    addSeries.mutate(payload, {
+      onSuccess: (created) =>
+        navigate(`/series/${created.id}`, {
+          state: { refreshCommandId: created.refresh_command_id },
+        }),
+    });
   };
 
   return (
@@ -528,27 +604,13 @@ export function AddSeries() {
                         : candidate.cv_volume_id,
                     )
                   }
-                  chips={
-                    <span className={styles.chipRow}>
-                      {candidate.count_of_issues !== null && (
-                        <span className={styles.chip}>
-                          {candidate.count_of_issues} issue
-                          {candidate.count_of_issues === 1 ? '' : 's'}
-                        </span>
-                      )}
-                      {candidate.have_it && (
-                        <span className={`${styles.chip} ${styles.chipHave}`}>
-                          In library
-                        </span>
-                      )}
-                    </span>
-                  }
                   panel={
                     <AddOptionsPanel
                       candidate={candidate}
                       busy={addSeries.isPending}
                       error={addSeries.error ? addSeries.error.message : null}
                       onAdd={(options) => add(candidate, options)}
+                      onCancel={() => setSelectedSuggestionId(null)}
                     />
                   }
                 />
@@ -585,13 +647,13 @@ export function AddSeries() {
                     : candidate.cv_volume_id,
                 );
               }}
-              chips={<PlausibilityChips candidate={candidate} />}
               panel={
                 <AddOptionsPanel
                   candidate={candidate}
                   busy={addSeries.isPending}
                   error={addSeries.error ? addSeries.error.message : null}
                   onAdd={(options) => add(candidate, options)}
+                  onCancel={() => setSelectedId(null)}
                 />
               }
             />

@@ -333,6 +333,8 @@ export const mockLookupCandidates: LookupCandidate[] = [
     start_year: 2012,
     image_url: 'https://comicvine.gamespot.com/a/uploads/scale_small/saga.jpg',
     count_of_issues: 63,
+    // Carries residual CV wiki markup so the card's defensive strip is exercised.
+    description: '<p>Epic space opera about star-crossed lovers.</p>',
     name_similarity: 1.0,
     year_proximity: 0,
     target_issue_plausible: true,
@@ -346,6 +348,7 @@ export const mockLookupCandidates: LookupCandidate[] = [
     image_url: 'https://comicvine.gamespot.com/a/uploads/scale_small/swamp.jpg',
     // ComicVine did not report a count — the annotation is omitted, not "0".
     count_of_issues: null,
+    description: 'Alan Moore relaunches the Swamp Thing.',
     name_similarity: 0.42,
     year_proximity: 30,
     target_issue_plausible: false,

@@ -359,6 +359,14 @@ export interface LookupCandidate {
   start_year: number | null;
   image_url: string | null;
   count_of_issues: number | null;
+  /**
+   * The candidate's ComicVine deck/description (FRG-UI-005, m4-add-new): the
+   * source for the 2-line deck on each result card. May carry residual CV
+   * wiki markup, so the card strips it defensively before rendering (see
+   * `stripHtml` in AddSeries). Optional/nullable — a suggest candidate or an
+   * older payload may omit it, in which case the card simply shows no deck.
+   */
+  description?: string | null;
   name_similarity: number;
   year_proximity: number | null;
   target_issue_plausible: boolean | null;
@@ -390,6 +398,11 @@ export interface SuggestCandidate {
   start_year: number | null;
   image_url: string | null;
   count_of_issues: number | null;
+  /**
+   * Optional deck (FRG-UI-005): the suggest endpoint MAY omit it to stay
+   * cheap, so it is optional — the card renders no deck when absent.
+   */
+  description?: string | null;
   have_it: boolean;
 }
 
@@ -446,6 +459,15 @@ export interface SeriesCreatePayload {
   monitor_strategy: string;
   monitor_new_items: string;
   search_on_add: boolean;
+  /**
+   * Add-time "Collect as" book-type override (FRG-SER-018, m4-add-new):
+   * OMITTED when the collect-as control is untouched, so the backend derives
+   * the book-type from title cues exactly as before; a vocabulary value
+   * (`"tpb"`) or the explicit `"none"` (single issues) persists the type
+   * locked and skips derivation. The field is absent — never `null` — when
+   * unset, so an untouched add stays byte-identical to today's request.
+   */
+  booktype?: string;
 }
 
 /** POST /api/v1/series response: the series plus its queued refresh command. */
