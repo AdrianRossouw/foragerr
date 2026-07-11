@@ -52,10 +52,17 @@ images; follow-priority refresh.
   cap + TTL + dedup bound the cost; acceptable for single-operator.
 - [Stale in-library rows in cache] → excluded at read time (Decision 2).
 
+## Gate-accepted trade-off
+
+The API handler decides fresh/stale from a stamp read before its dedup
+enqueue; a fetch completing in exactly that window can slip past dedup
+and schedule one duplicate (idempotent, rate-gated) fetch. Accepted:
+narrow window, bounded cost, single-operator deployment.
+
 ## Migration Plan
 
 Migration 0018: cache table + stamp column; forward-only; no backfill
-(empty cache = `never`, fetched on first profile view).
+(empty cache reports `pending` on first view, fetched on demand).
 
 ## Open Questions
 

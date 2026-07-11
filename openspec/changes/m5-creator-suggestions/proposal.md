@@ -27,7 +27,7 @@ lookup is needed.
   pass the shared CV sanitizer. Failures degrade (stale cache intact).
 - **Bibliography read (FRG-API-024)**: `GET
   /api/v1/creators/{id}/bibliography` serves the cache with a `state`
-  (`fresh` / `pending` / `never`), enqueuing the fetch command
+  (`fresh` / `pending`), enqueuing the fetch command
   (deduplicated) when absent or stale — the GET itself issues no
   ComicVine request, preserving FRG-API-023's no-CV-in-API discipline.
   In-library volumes are excluded at read time by joining on

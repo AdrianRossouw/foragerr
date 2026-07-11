@@ -136,13 +136,22 @@ async def fetch_creator_bibliography(
             hydrated = (
                 await cv.get_volumes_by_ids(candidate_ids) if candidate_ids else ()
             )
-    except ComicVineError as exc:
-        summary = (
-            f"creator {creator_id} bibliography fetch failed, cache preserved: {exc}"
+    except ComicVineError:
+        # Fail the COMMAND (framework records status=failed + the verbatim
+        # error): the WS bridge invalidates bibliography queries only on a
+        # COMPLETED fetch, so a broken ComicVine cannot spin an
+        # invalidate → refetch → re-enqueue loop while a profile is open
+        # (gate finding, m5-creator-suggestions). The cache and stamp are
+        # untouched — the next profile view retries via the normal
+        # stale/cold enqueue, rate-bounded by the CV provider back-off.
+        logger.warning(
+            "creator %d bibliography fetch failed; cache preserved", creator_id
         )
-        logger.warning(summary)
-        return summary
+        raise
 
+    # Defensive: a malformed hydration row can map with cv_volume_id=0 —
+    # never cache a suggestion without a positive CV id (gate finding).
+    hydrated = tuple(r for r in hydrated if r.cv_volume_id and r.cv_volume_id > 0)
     rows = _rank_and_cap(hydrated, in_library)
 
     # --- one write transaction: replace this creator's rows + stamp ------------

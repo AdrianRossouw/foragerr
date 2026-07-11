@@ -12,7 +12,7 @@
       cache); tagged tests incl. failure/atomicity/no-acquisition
       (FRG-CRTR-005)
 - [x] 1.3 `GET /creators/{id}/bibliography` (cache + live in-library
-      anti-join, state fresh/pending/never, cold/stale enqueue dedup, no
+      anti-join, state fresh/pending, cold/stale enqueue dedup, no
       CV in handler — asserted); tagged tests (FRG-API-024)
 
 ## 2. Frontend

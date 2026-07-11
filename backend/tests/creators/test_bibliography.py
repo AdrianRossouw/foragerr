@@ -22,6 +22,7 @@ from foragerr.creators.models import CreatorBibliographyRow, CreatorRow
 from foragerr.db import CommandRow
 from foragerr.db.base import utcnow
 from foragerr.library import repo
+from foragerr.metadata import ComicVineError
 from foragerr.library.models import SeriesRow
 
 from flows_support import FakeCV, build_factory
@@ -156,13 +157,15 @@ async def test_hydration_failure_preserves_cache_and_stamp(
     fake.fail_volumes_filter(500)  # hydration blows up mid-run
 
     factory = build_factory(settings, fake.handler())
-    summary = await fetch_creator_bibliography(db, settings, creator_id, factory=factory)
+    # The handler RAISES so the command framework records status=failed — the
+    # WS bridge invalidates only COMPLETED fetches, so a broken ComicVine
+    # cannot spin an invalidate→refetch→re-enqueue loop (gate finding).
+    with pytest.raises(ComicVineError):
+        await fetch_creator_bibliography(db, settings, creator_id, factory=factory)
 
-    # The previous cache + stamp survive untouched; the command records the
-    # failure without raising.
+    # The previous cache + stamp survive untouched.
     assert await _cached_volume_ids(db, creator_id) == {777}
     assert await _stamp(db, creator_id) == marker
-    assert "preserved" in summary
 
 
 @pytest.mark.req("FRG-CRTR-005")
@@ -181,11 +184,11 @@ async def test_person_fetch_failure_preserves_cache(
     fake.person(100, volume_ids=[60], fail_status=503)
 
     factory = build_factory(settings, fake.handler())
-    summary = await fetch_creator_bibliography(db, settings, creator_id, factory=factory)
+    with pytest.raises(ComicVineError):
+        await fetch_creator_bibliography(db, settings, creator_id, factory=factory)
 
     assert await _cached_volume_ids(db, creator_id) == {777}
     assert await _stamp(db, creator_id) is None  # never advanced
-    assert "preserved" in summary
 
 
 @pytest.mark.req("FRG-CRTR-005")
