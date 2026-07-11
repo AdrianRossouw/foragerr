@@ -57,6 +57,31 @@ export const FORMAT_CHIP: Record<string, FormatChipColor> = {
   omnibus: { bg: 'rgba(87, 184, 119, 0.18)', text: '#7fce9a' },
 };
 
+/**
+ * Creator role chip palette keyed by the FIXED normalized-role vocabulary
+ * (FRG-CRTR-001: writer/artist/penciler/inker/colorist/letterer/cover/editor/
+ * other). Like FORMAT_CHIP these are DATA — a per-role tint+text looked up at
+ * render time and fed into inline styles — so they live here beside the
+ * publisher/format maps, not as CSS tokens. Each role gets a distinct low-alpha
+ * wash + a legible text tone so a card's role chips read apart at a glance.
+ */
+export const ROLE_CHIP: Record<string, FormatChipColor> = {
+  writer: { bg: 'rgba(93, 156, 236, 0.16)', text: '#8ab6f0' },
+  artist: { bg: 'rgba(155, 111, 192, 0.18)', text: '#b892d8' },
+  penciler: { bg: 'rgba(87, 184, 119, 0.16)', text: '#7fce9a' },
+  inker: { bg: 'rgba(90, 134, 192, 0.16)', text: '#8fb2d8' },
+  colorist: { bg: 'rgba(229, 165, 75, 0.18)', text: '#e0b06a' },
+  letterer: { bg: 'rgba(201, 122, 168, 0.18)', text: '#d69ac2' },
+  cover: { bg: 'rgba(90, 163, 143, 0.18)', text: '#7fc4b0' },
+  editor: { bg: 'rgba(154, 154, 154, 0.16)', text: '#bcbcbc' },
+  other: { bg: 'rgba(122, 122, 122, 0.16)', text: '#a4a4a4' },
+};
+
+/** Resolve a role's chip colors, falling back to the neutral "other" slot. */
+export function roleChip(role: string): FormatChipColor {
+  return ROLE_CHIP[role] ?? ROLE_CHIP.other;
+}
+
 /** Resolve a publisher's cover tint, falling back to the neutral tint. */
 export function publisherTint(publisher: string | null | undefined): string {
   if (!publisher) return PUBLISHER_TINT_DEFAULT;

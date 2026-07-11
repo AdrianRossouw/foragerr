@@ -103,7 +103,7 @@ describe('FRG-UI-020: Settings nav group', () => {
  * count, Wanted = series-with-missing-issues in warn style).
  */
 describe('FRG-UI-023: sidebar nav lists only shipped screens', () => {
-  it('FRG-UI-023 — every nav entry routes to an implemented route; Calendar shipped, no Creators', () => {
+  it('FRG-UI-023 — every nav entry routes to an implemented route; Calendar + Creators shipped', () => {
     renderWithProviders(<Sidebar />, {
       withRouter: true,
       fetcher: sidebarFetcher({ series: [], queueTotal: 0 }),
@@ -112,6 +112,7 @@ describe('FRG-UI-023: sidebar nav lists only shipped screens', () => {
 
     const shipped = [
       '/',
+      '/creators',
       '/calendar',
       '/add',
       '/library-import',
@@ -138,8 +139,15 @@ describe('FRG-UI-023: sidebar nav lists only shipped screens', () => {
       'href',
       '/calendar',
     );
-    // Creators is still absent until its change ships the screen.
-    expect(screen.queryByRole('link', { name: /creators?/i })).toBeNull();
+    // Creators ships in m5-creators-screens (FRG-UI-027): now present, routing
+    // to /creators, and ordered right after Comics (before Calendar).
+    expect(screen.getByRole('link', { name: /creators/i })).toHaveAttribute(
+      'href',
+      '/creators',
+    );
+    const labels = screen.getAllByRole('link').map((a) => a.textContent);
+    expect(labels.indexOf('Creators')).toBe(labels.indexOf('Comics') + 1);
+    expect(labels.indexOf('Creators')).toBeLessThan(labels.indexOf('Calendar'));
   });
 });
 

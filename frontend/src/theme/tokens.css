@@ -40,6 +40,12 @@
   --color-logo-word: #f0f0f0;
   --shadow-logo-tile: 0 2px 6px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.25);
 
+  /* --- Creator initials avatar (FRG-UI-027/028): a green gradient disc behind
+   *     deterministic initials (no person images). Two endpoints of the
+   *     150deg gradient, sitting beside the logo-gradient tokens. --- */
+  --color-avatar-gradient-from: #3f8f5c;
+  --color-avatar-gradient-to: #2f6b46;
+
   /* --- Surfaces (warm-neutral dark shell) --- */
   --surface-page: #202020;
   --surface-chrome: #262626;

@@ -19,6 +19,9 @@ import type {
   CollectionsResponse,
   CommandResource,
   ContainmentRangeInput,
+  CreatorPage,
+  CreatorProfileResource,
+  CreatorResource,
   FormatProfileResource,
   HealthWarningItem,
   HistoryRecord,
@@ -1160,5 +1163,175 @@ export function useForceRunTask(): UseMutationResult<CommandResource, Error, str
       }),
     onSuccess: () =>
       void queryClient.invalidateQueries({ queryKey: queryKeys.system.tasks() }),
+  });
+}
+
+/*
+ * Creators surface (FRG-UI-027/028 / FRG-API-023). Read hooks over the paged
+ * grid + the profile aggregates, and the explicit-only follow toggle. All data
+ * is library-derived (stored credits) — no ComicVine request is issued.
+ */
+
+/** Params for the creators grid / series-focused strip read. */
+export interface CreatorsListParams {
+  /** Followed-only filter (the header aggregates stay whole-library). */
+  followed?: boolean;
+  /** Focus the list on ONE series' creators (the series-detail strip target). */
+  seriesId?: number;
+  sortKey?: 'name' | 'seriesCount';
+  sortDirection?: 'asc' | 'desc';
+  /** Gate the fetch (e.g. the strip stays dormant for an unknown series id). */
+  enabled?: boolean;
+}
+
+/** The flattened creators grid: every page's rows plus the header aggregates. */
+export interface CreatorsListResult {
+  records: CreatorResource[];
+  totalCreators: number;
+  followedCreators: number;
+}
+
+/**
+ * GET /api/v1/creators — the creators grid (FRG-UI-027), also reused by the
+ * series-detail strip (`seriesId` focus, FRG-UI-004). Walks pages like the
+ * library index (a prolific library can exceed one 200-row page) and returns
+ * the flat rows plus the whole-library header aggregates (read off the first
+ * page's envelope). Each filter/focus/sort combination is its own cache entry.
+ */
+export function useCreatorsList(
+  params: CreatorsListParams = {},
+): UseQueryResult<CreatorsListResult> {
+  const fetcher = useFetcher();
+  const {
+    followed,
+    seriesId,
+    sortKey = 'name',
+    sortDirection = 'asc',
+    enabled = true,
+  } = params;
+  const filters = new URLSearchParams();
+  filters.set('sortKey', sortKey);
+  filters.set('sortDirection', sortDirection);
+  if (followed) filters.set('followed', 'true');
+  if (seriesId != null) filters.set('seriesId', String(seriesId));
+  const paramsHash = filters.toString();
+  return useQuery({
+    queryKey: queryKeys.creators.list(paramsHash),
+    queryFn: async () => {
+      const pagePath = (page: number) =>
+        `/api/v1/creators?page=${page}&pageSize=${MAX_PAGE_SIZE}&${paramsHash}`;
+      const first = await fetcher<CreatorPage>(pagePath(1));
+      const records = [...first.records];
+      const totalPages = Math.max(1, Math.ceil(first.totalRecords / MAX_PAGE_SIZE));
+      for (let page = 2; page <= totalPages; page += 1) {
+        const next = await fetcher<CreatorPage>(pagePath(page));
+        records.push(...next.records);
+      }
+      return {
+        records,
+        totalCreators: first.totalCreators,
+        followedCreators: first.followedCreators,
+      };
+    },
+    enabled,
+  });
+}
+
+/**
+ * GET /api/v1/creators/{id} — the creator profile (FRG-UI-028). An unknown id
+ * 404s (ApiRequestError, status 404) which the screen renders as its not-found
+ * state; retries off so the 404 surfaces immediately.
+ */
+export function useCreatorProfile(
+  creatorId: number,
+): UseQueryResult<CreatorProfileResource> {
+  const fetcher = useFetcher();
+  return useQuery({
+    queryKey: queryKeys.creators.detail(creatorId),
+    queryFn: () =>
+      fetcher<CreatorProfileResource>(`/api/v1/creators/${creatorId}`),
+    enabled: Number.isFinite(creatorId) && creatorId > 0,
+    retry: false,
+  });
+}
+
+/** Toggle `followed` in one cached creators-list result (optimistic patch). */
+function patchListFollow(
+  data: CreatorsListResult | undefined,
+  creatorId: number,
+  followed: boolean,
+): CreatorsListResult | undefined {
+  if (!data) return data;
+  let delta = 0;
+  const records = data.records.map((row) => {
+    if (row.id !== creatorId || row.followed === followed) return row;
+    delta = followed ? 1 : -1;
+    return { ...row, followed };
+  });
+  return {
+    ...data,
+    records,
+    // Keep the header aggregate honest instantly; invalidation reconciles truth.
+    followedCreators: Math.max(0, data.followedCreators + delta),
+  };
+}
+
+/**
+ * PUT /api/v1/creators/{id}/follow — the explicit-only follow toggle
+ * (FRG-API-023 / FRG-CRTR-004): it is the ONLY follow entry point (the grid
+ * pill and the profile button both call it). Optimistic — the pill flips
+ * immediately across every loaded grid entry and the profile — with rollback on
+ * failure (house mutation pattern); on settle it invalidates the whole
+ * `['creators']` family so the list rows, header aggregates, and profile
+ * re-derive from the server. Writes ONLY the flag (no series/issue/search
+ * state), so the toggle is exactly one PUT and no other write.
+ */
+export function useSetCreatorFollow(): UseMutationResult<
+  CreatorResource,
+  Error,
+  { creatorId: number; followed: boolean },
+  { previous: [readonly unknown[], unknown][] }
+> {
+  const fetcher = useFetcher();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ creatorId, followed }) =>
+      fetcher<CreatorResource>(`/api/v1/creators/${creatorId}/follow`, {
+        method: 'PUT',
+        body: { followed },
+      }),
+    onMutate: async ({ creatorId, followed }) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.creators.all() });
+      const previous = queryClient.getQueriesData({
+        queryKey: queryKeys.creators.all(),
+      });
+      for (const [key, value] of previous) {
+        if (value && typeof value === 'object' && 'records' in value) {
+          queryClient.setQueryData(
+            key,
+            patchListFollow(value as CreatorsListResult, creatorId, followed),
+          );
+        } else if (
+          value &&
+          typeof value === 'object' &&
+          'stats' in value &&
+          (value as CreatorProfileResource).id === creatorId
+        ) {
+          queryClient.setQueryData(key, {
+            ...(value as CreatorProfileResource),
+            followed,
+          });
+        }
+      }
+      return { previous };
+    },
+    onError: (_error, _vars, context) => {
+      for (const [key, value] of context?.previous ?? []) {
+        queryClient.setQueryData(key, value);
+      }
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.creators.all() });
+    },
   });
 }

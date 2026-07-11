@@ -5,7 +5,9 @@ import { Routes, Route } from 'react-router-dom';
 import { renderWithProviders } from '../../test/renderWithProviders';
 import { fakeFetcher } from '../../test/fakeFetcher';
 import {
+  creatorPageOf,
   makeCommand,
+  makeCreator,
   makeIssue,
   makeMediaManagementConfig,
   makeSeriesResource,
@@ -887,6 +889,71 @@ describe('FRG-UI-004: hero meta row + panel header', () => {
     await waitFor(() =>
       expect(screen.queryByRole('dialog', { name: 'Edit Invincible' })).not.toBeInTheDocument(),
     );
+  });
+});
+
+/**
+ * FRG-UI-004 (m5 amendment) — the series-detail creators strip: it surfaces the
+ * series' credited creators (names + roles) and opens the creator surfaces; it
+ * is absent (no placeholder) when the series has no ingested credits.
+ */
+describe('FRG-UI-004: creators strip', () => {
+  /** Series-7 backend that also answers the strip's focused creators read. */
+  function stripFetcher(creators: ReturnType<typeof makeCreator>[]) {
+    return fakeFetcher((path, options) => {
+      const method = options?.method ?? 'GET';
+      if (method === 'GET' && path === '/api/v1/series/7') return mockSeriesResource;
+      if (method === 'GET' && path === '/api/v1/series/7/collections') {
+        return { records: [] };
+      }
+      if (method === 'GET' && path.startsWith('/api/v1/issues?seriesId=7')) {
+        return pageOf(mockIssues);
+      }
+      if (method === 'GET' && path.startsWith('/api/v1/creators?')) {
+        return creatorPageOf(creators);
+      }
+      throw new Error(`unexpected request: ${method} ${path}`);
+    });
+  }
+
+  function renderWithStrip(creators: ReturnType<typeof makeCreator>[]) {
+    const { fetcher } = stripFetcher(creators);
+    return renderWithProviders(
+      <Routes>
+        <Route path="/series/:id" element={<SeriesDetail />} />
+        <Route path="/creators/:id" element={<div data-testid="profile-stub" />} />
+        <Route path="/creators" element={<div data-testid="grid-stub" />} />
+      </Routes>,
+      { fetcher, route: '/series/7' },
+    );
+  }
+
+  it('FRG-UI-004 — a credited series shows the strip (names + roles) that opens the creator profile', async () => {
+    renderWithStrip([
+      makeCreator({
+        id: 3,
+        name: 'Robert Kirkman',
+        roles: ['writer'],
+        works: [{ seriesId: 7, title: 'Invincible', coverAvailable: true }],
+      }),
+    ]);
+    const user = userEvent.setup();
+
+    const strip = await screen.findByTestId('creators-strip');
+    expect(within(strip).getByText('Robert Kirkman')).toBeInTheDocument();
+    expect(within(strip).getByText('Writer')).toBeInTheDocument();
+
+    await user.click(within(strip).getByText('Robert Kirkman'));
+    expect(screen.getByTestId('profile-stub')).toBeInTheDocument();
+  });
+
+  it('FRG-UI-004 — a series with no ingested credits shows no strip and no placeholder', async () => {
+    renderWithStrip([]);
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Invincible' })).toBeInTheDocument(),
+    );
+    expect(screen.queryByTestId('creators-strip')).not.toBeInTheDocument();
   });
 });
 

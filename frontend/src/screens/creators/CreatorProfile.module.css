@@ -1,0 +1,310 @@
+/*
+ * Creator profile (FRG-UI-028) — design handoff §8. Colors come only from the
+ * token layer; role chips use the palettes.ts data map (inline styles). The
+ * header gradient reuses the page surface plus a warm-green tint token. No
+ * component hardcodes a palette hex (FRG-UI-002).
+ */
+
+.content {
+  padding-bottom: var(--spacing-xl);
+}
+
+.stateMsg {
+  padding: var(--spacing-lg);
+  color: var(--text-secondary);
+}
+
+/* --- Gradient header --- */
+.hero {
+  padding: var(--spacing-xl) 36px 26px;
+  background: linear-gradient(
+    155deg,
+    var(--surface-chrome),
+    var(--surface-page) 72%
+  );
+  border-bottom: 1px solid var(--surface-row-border);
+}
+
+.heroTop {
+  display: flex;
+  gap: 22px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.heroAvatar {
+  box-shadow: var(--shadow-card);
+}
+
+.heroText {
+  flex: 1;
+  min-width: 220px;
+}
+
+.name {
+  margin: 0;
+  font-size: var(--font-size-page-title);
+  font-weight: var(--font-weight-bold);
+  color: var(--text-bright);
+}
+
+.roles {
+  margin-top: 6px;
+  font-size: var(--font-size-base);
+  color: var(--color-accent-light);
+}
+
+.publishers {
+  margin-top: 2px;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+/* --- Follow button --- */
+.followBtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: 10px 20px;
+  border: 1px solid var(--surface-border-soft);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+}
+
+.followBtn:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  color: var(--text-primary);
+}
+
+.followBtn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.followBtn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.followBtnOn {
+  border-color: var(--color-accent);
+  background: var(--color-accent-tint);
+  color: var(--color-accent-light);
+}
+
+/* --- Stat columns --- */
+.statRow {
+  display: flex;
+  gap: 34px;
+  margin-top: 22px;
+  flex-wrap: wrap;
+}
+
+.stat {
+  min-width: 0;
+}
+
+.statValue {
+  font-size: 24px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-bright);
+}
+
+.statSub {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-normal);
+  color: var(--text-muted);
+}
+
+.statLabel {
+  margin-top: 2px;
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.statDivider {
+  width: 1px;
+  background: var(--surface-border);
+}
+
+/* --- Body / library works --- */
+.body {
+  padding: var(--spacing-lg) 30px 46px;
+}
+
+.backButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  border: 1px solid var(--surface-border-soft);
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  margin-bottom: var(--spacing-lg);
+}
+
+.backButton:hover {
+  background: var(--surface-card-hover);
+  color: var(--text-primary);
+}
+
+.backButton:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.section {
+  margin-top: var(--spacing-xs);
+}
+
+.sectionHead {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 14px;
+}
+
+.sectionLabel {
+  font-size: var(--font-size-xs);
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.sectionCount {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-accent-light);
+  background: var(--color-accent-tint);
+  padding: 1px var(--spacing-sm);
+  border-radius: 9px;
+}
+
+.workGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 14px;
+}
+
+.workCard {
+  display: flex;
+  gap: 14px;
+  text-align: left;
+  background: var(--surface-card);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  padding: 13px;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.workCard:hover {
+  border-color: var(--surface-border-soft);
+  background: var(--surface-card-hover);
+}
+
+.workCard:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.workCover {
+  width: 70px;
+  height: 105px;
+  flex: none;
+  border-radius: var(--radius-sm);
+  background: var(--surface-card-hover);
+}
+
+.workFallback {
+  font-size: var(--font-size-lg);
+}
+
+.workBody {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.workTitle {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+}
+
+.roleChips {
+  display: flex;
+  gap: 6px;
+  margin-top: 7px;
+  flex-wrap: wrap;
+}
+
+.roleChip {
+  font-size: var(--font-size-section-label);
+  font-weight: var(--font-weight-bold);
+  padding: 2px 9px;
+  border-radius: var(--radius-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.workMeta {
+  margin-top: 7px;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.workSpacer {
+  flex: 1;
+  min-height: var(--spacing-sm);
+}
+
+.progressWrap {
+  display: block;
+  margin-top: 10px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+/* --- Not-found state --- */
+.notFound {
+  padding: 80px var(--spacing-lg);
+  text-align: center;
+}
+
+.notFoundTitle {
+  margin: 0 0 var(--spacing-sm);
+  font-size: var(--font-size-heading);
+  color: var(--text-primary);
+}
+
+.notFoundBody {
+  margin: 0 0 var(--spacing-lg);
+  color: var(--text-secondary);
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
