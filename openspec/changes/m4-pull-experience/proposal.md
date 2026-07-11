@@ -37,8 +37,13 @@ it the three approved M4 pull requirements (FRG-PULL-007..009).
   per-week replace (FRG-PULL-003). Forward navigation on the screen then
   shows watched-series matches for the future week, marked not-yet-released.
 - **Manual + docs**: new "Weekly pull / Calendar" section in
-  `docs/manual/user/web-ui.md`; README screenshot set gains the calendar shot
-  (FRG-PROC-017).
+  `docs/manual/user/web-ui.md`; README tour shots refreshed (the sidebar now
+  carries the Calendar entry in every shot, FRG-PROC-017). No dedicated
+  calendar shot: README screenshots come only from the fresh demo-seeded
+  instance (owner instruction 2026-07-11), whose library cannot be relied on
+  to ship anything in an arbitrary capture week — the shot would be
+  nondeterministic and usually the empty state. The e2e spine covers the
+  unconfigured-week render instead.
 
 ## Capabilities
 
