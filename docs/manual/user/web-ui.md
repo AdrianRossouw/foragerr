@@ -288,7 +288,11 @@ with no need to reload the page or restart the container.
 ### Tasks
 
 The Tasks screen lists every scheduled task — including the daily
-`backup-database` task — with its interval and its last/next run time. Every
+`backup-database` task — with its interval and its last/next run time. The
+`creators-backfill` row is a one-time job (it gathers creator credits for
+series added before the feature existed): it runs by itself once and then
+sits with a far-future next run; its **Run Now** button re-runs it safely
+if you ever want to. Every
 row has a **Run Now** button to force-run it immediately (resetting its
 timer); the `backup-database` row's button is labelled **"Back up now"**
 instead, but it is the exact same force-run action. A running task shows its

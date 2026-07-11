@@ -12,12 +12,18 @@ own approved OpenSpec change, and sequencing or scope may shift. Where
 requirement IDs are already allocated they are cited; many future items have no
 IDs yet, because IDs are allocated at proposal time.
 
-## M5 — Creators & follows
+## M5 — Creators & follows (in progress)
 
 Follow the writers and artists behind the comics you own, and browse their work
 both inside your library and across ComicVine's catalogue, as a way to decide
-what to add next. Requirement IDs will be allocated when this milestone is
-proposed.
+what to add next. The data backbone (credit ingest, storage, follows, API)
+shipped first; still to come in this milestone:
+
+- **Creators screens** — the creators grid and creator profile pages, and
+  creator credits surfaced on series detail. Requirement IDs will be
+  allocated when that change is proposed.
+- **Creator suggestions** — a followed creator's broader bibliography from
+  ComicVine with add-to-library affordances (never added automatically).
 
 ## M6 — Sources
 
