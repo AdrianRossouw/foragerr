@@ -204,7 +204,7 @@ class ComicVineClient:
         same ignored-publisher drop, but skips plausibility scoring (no query
         year/target-issue analysis) to keep the call cheap: candidates carry
         only the raw mapped fields (name, start year, publisher, issue count,
-        image, cv_volume_id).
+        description, image, cv_volume_id).
 
         A ComicVine auth failure propagates unchanged (the same carve-out
         ``_paginate`` documents: a credential failure cannot be distinguished

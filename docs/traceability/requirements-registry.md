@@ -19,7 +19,7 @@ containment, add-new, the pull experience [FRG-UI-018, FRG-PULL-007..009],
 screenshot-refresh tooling) · `M5` creators & follows (CRTR ids allocated at
 proposal time) · `M6` sources (FRG-AUTH-008 credential store first, then
 Humble Bundle importer, then archive.org importer) · `M7` torrents
-(Transmission, Torznab-only indexing, seeding etiquette) · `M8`
+(qBittorrent, Torznab-only indexing, seeding etiquette) · `M8`
 authentication (**implementation requires fresh owner approval — the
 2026-07-10 grant ends after M7 merges**) · `B` backlog · `—` process
 (not milestone-bound).
@@ -89,6 +89,7 @@ moved `M5`→`M8`.
 | FRG-META-012 | Heuristic fields with provenance and override | meta | approved | B |
 | FRG-META-013 | Cover art download and cache | meta | implemented | M1 |
 | FRG-META-014 | ComicVine content is untrusted input | meta | implemented | M1 |
+| FRG-META-015 | Relevance ordering of lookup candidates | meta | implemented | M4 |
 | FRG-PULL-001 | Metadata-derived weekly release view | pull | implemented | M3 |
 | FRG-PULL-002 | External pull-source fetch | pull | implemented | M3 |
 | FRG-PULL-003 | Idempotent per-week storage | pull | implemented | M3 |

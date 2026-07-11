@@ -206,6 +206,103 @@ async def test_clearing_the_lock_re_derives_on_next_refresh(
         assert (await repo.get_series(session, sid)).booktype == "tpb"
 
 
+# --- add-time explicit book-type override (FRG-SER-005/018) -----------------
+
+
+async def _add_override(
+    db, settings, commands, root_folder_id, *, cv_volume_id, name, booktype,
+    booktype_locked,
+):
+    """Add a series passing the optional add-time book-type override."""
+    factory = build_factory(settings, FakeCV().volume(cv_volume_id, name=name).handler())
+    result = await add_series(
+        db,
+        settings,
+        cv_volume_id=cv_volume_id,
+        root_folder_id=root_folder_id,
+        commands=commands,
+        enqueue_refresh=False,
+        booktype=booktype,
+        booktype_locked=booktype_locked,
+        factory=factory,
+    )
+    return result.series.id
+
+
+@pytest.mark.req("FRG-SER-018")
+@pytest.mark.req("FRG-SER-005")
+async def test_add_time_explicit_booktype_locks_and_skips_derivation(
+    db, settings, commands, root_folder_id, format_profile_id
+):
+    # Title cue would derive "gn"; the explicit "tpb" override wins and locks,
+    # so derivation is skipped at add and never re-derived at refresh.
+    assert detect_series_booktype("Nimona Graphic Novel") == "gn"
+    sid = await _add_override(
+        db, settings, commands, root_folder_id, cv_volume_id=31,
+        name="Nimona Graphic Novel", booktype="tpb", booktype_locked=True,
+    )
+    async with db.read_session() as session:
+        s = await repo.get_series(session, sid)
+        assert s.booktype == "tpb"
+        assert s.booktype_locked is True
+
+    # Refresh over the same title must NOT re-derive over the locked choice.
+    await _refresh(db, settings, commands, sid, "Nimona Graphic Novel")
+    async with db.read_session() as session:
+        s = await repo.get_series(session, sid)
+        assert s.booktype == "tpb"
+        assert s.booktype_locked is True
+
+
+@pytest.mark.req("FRG-SER-018")
+@pytest.mark.req("FRG-SER-005")
+async def test_add_time_explicit_single_issues_locks_null(
+    db, settings, commands, root_folder_id, format_profile_id
+):
+    # Title carries a TPB cue (derivation would say "tpb"), but the operator
+    # explicitly chose single issues -> persisted NULL and locked.
+    assert detect_series_booktype("Saga TPB") == "tpb"
+    sid = await _add_override(
+        db, settings, commands, root_folder_id, cv_volume_id=32,
+        name="Saga TPB", booktype=None, booktype_locked=True,
+    )
+    async with db.read_session() as session:
+        s = await repo.get_series(session, sid)
+        assert s.booktype is None
+        assert s.booktype_locked is True
+
+    # A later refresh keeps the locked single-issues choice (no re-derive).
+    await _refresh(db, settings, commands, sid, "Saga TPB")
+    async with db.read_session() as session:
+        s = await repo.get_series(session, sid)
+        assert s.booktype is None
+        assert s.booktype_locked is True
+
+
+@pytest.mark.req("FRG-SER-018")
+@pytest.mark.req("FRG-SER-005")
+async def test_add_without_override_derives_exactly_as_before(
+    db, settings, commands, root_folder_id, format_profile_id
+):
+    # Regression pin: absent the override (booktype_locked defaults False), the
+    # add-time behavior is byte-identical to today — derive from the cue, unlocked.
+    trade = await _add_override(
+        db, settings, commands, root_folder_id, cv_volume_id=33,
+        name="Saga TPB", booktype=None, booktype_locked=False,
+    )
+    single = await _add_override(
+        db, settings, commands, root_folder_id, cv_volume_id=34,
+        name="Batman (2011)", booktype=None, booktype_locked=False,
+    )
+    async with db.read_session() as session:
+        t = await repo.get_series(session, trade)
+        assert t.booktype == "tpb"
+        assert t.booktype_locked is False
+        s = await repo.get_series(session, single)
+        assert s.booktype is None
+        assert s.booktype_locked is False
+
+
 @pytest.mark.req("FRG-SER-018")
 async def test_set_with_a_bad_booktype_is_rejected(
     db, settings, commands, root_folder_id, format_profile_id

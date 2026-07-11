@@ -67,3 +67,31 @@ def test_empty_or_html_only_becomes_none():
 def test_malformed_markup_never_raises():
     # Unbalanced/garbage markup must degrade, never raise.
     assert sanitize_cv_text("<a href='<<>'>>text<<</b") is not None
+
+
+@pytest.mark.req("FRG-META-014")
+def test_bidi_override_and_zero_width_chars_are_stripped():
+    """Trojan-Source-class visual-spoofing controls in CV wiki text (bidi
+    overrides/isolates, zero-width joiners, BOM) must not survive to a render
+    surface, where they could reverse or hide the displayed string
+    (RISK-011/014). Surfaced by the m4-add-new adversarial gate."""
+    hostile = (
+        "Saga"
+        "‮" "reversed" "‬"   # RLO ... PDF
+        "⁦" "isolate" "⁩"    # LRI ... PDI
+        "​" "zero‍width"     # ZWSP, ZWJ
+        "⁠" "﻿" "؜"     # word-joiner, BOM, ALM
+    )
+    out = sanitize_cv_text(hostile)
+    assert out is not None
+    for cp in (0x061C, 0x200B, 0x200D, 0x200E, 0x200F,
+               0x202A, 0x202E, 0x2060, 0x2066, 0x2069, 0xFEFF):
+        assert chr(cp) not in out, f"leaked U+{cp:04X}"
+    # legitimate content survives — only the invisible controls are removed
+    assert "Saga" in out and "reversed" in out and "isolate" in out
+
+
+@pytest.mark.req("FRG-META-014")
+def test_ordinary_hyphenated_title_is_unchanged():
+    # guard: the bidi/zero-width strip must not touch normal punctuation
+    assert sanitize_cv_text("Spider-Man 2099") == "Spider-Man 2099"

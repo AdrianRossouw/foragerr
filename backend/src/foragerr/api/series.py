@@ -26,7 +26,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import FileResponse, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 
 from foragerr.api.command import CommandResource
@@ -34,6 +34,7 @@ from foragerr.api.errors import ApiError
 from foragerr.api.paging import paginate
 from foragerr.commands import CommandValidationError
 from foragerr.library import containment, repo
+from foragerr.library.booktype import COLLECTED_BOOKTYPES
 from foragerr.library.flows import (
     BOOKTYPE_EDIT_ACTIONS,
     GROUP_EDIT_ACTIONS,
@@ -55,6 +56,8 @@ from foragerr.metadata import (
     ComicVineAuthError,
     ComicVineClient,
     ComicVineError,
+    sanitize_cv_text,
+    sort_by_relevance,
 )
 
 logger = logging.getLogger("foragerr.api.series")
@@ -173,6 +176,18 @@ class SeriesPage(BaseModel):
     records: list[SeriesResource]
 
 
+#: The explicit-single-issues sentinel accepted in ``SeriesCreate.booktype`` —
+#: distinct from an omitted field (derive as before). It maps to a persisted
+#: NULL book-type with the lock set, so refresh never re-derives a trade cue
+#: over the operator's "these are single issues" choice (FRG-SER-018).
+_BOOKTYPE_NONE = "none"
+
+#: Every value ``SeriesCreate.booktype`` accepts: the collected-edition
+#: vocabulary (``tpb``/``gn``/``hc``/``one_shot``) plus the explicit
+#: single-issues sentinel. Absent/``None`` is also valid and means "derive".
+_ADD_BOOKTYPE_VALUES: tuple[str, ...] = (*COLLECTED_BOOKTYPES, _BOOKTYPE_NONE)
+
+
 class SeriesCreate(BaseModel):
     """Request body for ``POST /api/v1/series`` (write-only add options)."""
 
@@ -183,6 +198,27 @@ class SeriesCreate(BaseModel):
     monitor_new_items: str = "all"
     search_on_add: bool = False
     path: str | None = None
+    #: Optional add-time collected-edition book-type override (FRG-SER-005/018).
+    #: A vocabulary value (``tpb``/``gn``/``hc``/``one_shot``) types the series
+    #: and LOCKS it; an explicit single-issues choice — the literal ``"none"``
+    #: OR an explicit JSON ``null`` — locks it as single issues (persisted
+    #: NULL); *omitting* the field entirely derives the book-type from the title
+    #: exactly as before. Presence is detected via ``model_fields_set`` so an
+    #: explicit ``null`` is never confused with omission. An unknown value is
+    #: rejected at the model boundary — surfacing (like every request-body
+    #: validation failure in this app) as the uniform 400 ``{message, errors}``
+    #: shape, not a bare 422.
+    booktype: str | None = None
+
+    @field_validator("booktype")
+    @classmethod
+    def _validate_booktype(cls, value: str | None) -> str | None:
+        if value is not None and value not in _ADD_BOOKTYPE_VALUES:
+            raise ValueError(
+                f"invalid booktype {value!r}; expected one of "
+                f"{list(_ADD_BOOKTYPE_VALUES)} or omit to derive from the title"
+            )
+        return value
 
 
 class SeriesCreateResponse(SeriesResource):
@@ -247,6 +283,32 @@ class SeriesEdit(BaseModel):
     booktype: SeriesBooktypeEdit | None = None
 
 
+#: Cap on the description/deck shipped on a search/suggest candidate — the add
+#: screen's result card clamps it to two lines, so ~300 chars is ample. Applied
+#: at a word boundary by :func:`_candidate_description`.
+_CANDIDATE_DESCRIPTION_MAX = 300
+
+
+def _candidate_description(raw: str | None) -> str | None:
+    """The short description ("deck") shipped on a lookup/suggest candidate.
+
+    ComicVine volumes reach the API as :class:`SeriesRecord`\\ s whose
+    ``description`` was already ingest-sanitized (``map_volume`` ->
+    ``sanitize_cv_text``, FRG-META-014), but this is the API egress for
+    wiki-editable text, so it re-runs :func:`sanitize_cv_text` as a defensive
+    belt (idempotent on already-clean text; guarantees no raw CV HTML can ever
+    leave here even if a future record path skips ingest sanitization), then
+    truncates to :data:`_CANDIDATE_DESCRIPTION_MAX` chars at a word boundary
+    with a trailing ellipsis. ``None`` stays ``None``.
+    """
+    text = sanitize_cv_text(raw)
+    if text is None or len(text) <= _CANDIDATE_DESCRIPTION_MAX:
+        return text
+    cut = text[:_CANDIDATE_DESCRIPTION_MAX]
+    head, _, _ = cut.rpartition(" ")
+    return (head or cut).rstrip() + "…"
+
+
 class LookupCandidateResource(BaseModel):
     """One ComicVine search candidate annotated with plausibility signals
     (FRG-META-007) and library membership (``have_it``)."""
@@ -260,6 +322,10 @@ class LookupCandidateResource(BaseModel):
     #: did not supply it.
     count_of_issues: int | None
     image_url: str | None
+    #: Sanitized, word-boundary-truncated short description for the result
+    #: card's two-line deck (FRG-META-007/014, via
+    #: :func:`_candidate_description`); ``None`` when ComicVine has none.
+    description: str | None
     name_similarity: float
     year_proximity: int | None
     target_issue_plausible: bool | None
@@ -286,7 +352,9 @@ class SuggestCandidateResource(BaseModel):
     NARROWER than :class:`LookupCandidateResource`: no plausibility signals
     (``name_similarity``/``year_proximity``/``target_issue_plausible``),
     since suggest skips that scoring to stay cheap. ``have_it`` is still
-    computed over the ≤10 returned ids for parity with the full lookup."""
+    computed over the ≤10 returned ids for parity with the full lookup, and
+    ``description`` ships the same sanitized/truncated deck the lookup
+    candidate carries so both result-card renderings agree."""
 
     cv_volume_id: int
     name: str | None
@@ -294,6 +362,9 @@ class SuggestCandidateResource(BaseModel):
     start_year: int | None
     count_of_issues: int | None
     image_url: str | None
+    #: Same sanitized, word-boundary-truncated deck as the lookup candidate
+    #: (FRG-META-007/014, via :func:`_candidate_description`).
+    description: str | None
     have_it: bool
 
 
@@ -634,7 +705,13 @@ async def lookup_series(term: str, request: Request) -> LookupResponse:
     except ComicVineError as exc:
         raise _comicvine_error_to_api_error(exc) from exc
 
-    ids = [candidate.series.cv_volume_id for candidate in result.candidates]
+    # Relevance ordering happens here, after annotation, sharing one sort
+    # function with the suggest route so the two never drift (FRG-META-015).
+    candidates = sort_by_relevance(
+        term, result.candidates, record_of=lambda candidate: candidate.series
+    )
+
+    ids = [candidate.series.cv_volume_id for candidate in candidates]
     have: set[int] = set()
     if ids:
         db = request.app.state.db
@@ -653,12 +730,13 @@ async def lookup_series(term: str, request: Request) -> LookupResponse:
                 start_year=candidate.series.start_year,
                 count_of_issues=candidate.series.count_of_issues,
                 image_url=candidate.series.image_url,
+                description=_candidate_description(candidate.series.description),
                 name_similarity=candidate.plausibility.name_similarity,
                 year_proximity=candidate.plausibility.year_proximity,
                 target_issue_plausible=candidate.plausibility.target_issue_plausible,
                 have_it=candidate.series.cv_volume_id in have,
             )
-            for candidate in result.candidates
+            for candidate in candidates
         ],
         complete=result.complete,
         truncated=result.truncated,
@@ -688,7 +766,15 @@ async def suggest_series(term: str, request: Request) -> SuggestResponse:
     except ComicVineError as exc:
         raise _comicvine_error_to_api_error(exc) from exc
 
-    ids = [record.cv_volume_id for record in result.candidates]
+    # Same relevance ordering as GET /lookup, sharing one sort function so the
+    # candidates the two endpoints have in common appear in the same relative
+    # order (FRG-META-015). Suggest candidates are bare records, so the identity
+    # extractor feeds them straight in.
+    candidates = sort_by_relevance(
+        term, result.candidates, record_of=lambda record: record
+    )
+
+    ids = [record.cv_volume_id for record in candidates]
     have: set[int] = set()
     if ids:
         db = request.app.state.db
@@ -707,9 +793,10 @@ async def suggest_series(term: str, request: Request) -> SuggestResponse:
                 start_year=record.start_year,
                 count_of_issues=record.count_of_issues,
                 image_url=record.image_url,
+                description=_candidate_description(record.description),
                 have_it=record.cv_volume_id in have,
             )
-            for record in result.candidates
+            for record in candidates
         ],
         complete=result.complete,
     )
@@ -736,6 +823,17 @@ async def create_series(
     db = request.app.state.db
     settings = request.app.state.settings
     commands = request.app.state.commands
+    # Resolve the optional add-time book-type override into the two row-shaped
+    # arguments the add flow takes (FRG-SER-005/018). The field was already
+    # vocabulary-validated on the model (bad value -> 400). Presence is read from
+    # ``model_fields_set`` — NOT from ``body.booktype is not None`` — so an
+    # explicit single-issues choice sent as JSON ``null`` locks a NULL book-type
+    # just like the ``"none"`` sentinel, and only an *omitted* field derives from
+    # the title. (Conflating null with omission would silently drop the lock.)
+    booktype_override_present = "booktype" in body.model_fields_set
+    booktype_value = (
+        None if body.booktype in (None, _BOOKTYPE_NONE) else body.booktype
+    )
     try:
         result = await add_series(
             db,
@@ -748,6 +846,8 @@ async def create_series(
             monitor_new_items=body.monitor_new_items,
             search_on_add=body.search_on_add,
             path_override=body.path,
+            booktype=booktype_value,
+            booktype_locked=booktype_override_present,
         )
     except SeriesValidationError as exc:
         raise ApiError(400, str(exc)) from exc

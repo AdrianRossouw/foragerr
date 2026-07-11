@@ -43,7 +43,7 @@ from foragerr.metadata.ratelimit import (
     effective_interval,
 )
 from foragerr.metadata.sanitize import MAX_TEXT_LENGTH, sanitize_cv_text
-from foragerr.metadata.search import plausibility
+from foragerr.metadata.search import plausibility, sort_by_relevance
 
 __all__ = [
     "COMICVINE_CREDENTIAL_MESSAGE",
@@ -72,5 +72,6 @@ __all__ = [
     "map_volume",
     "plausibility",
     "sanitize_cv_text",
+    "sort_by_relevance",
     "user_agent",
 ]

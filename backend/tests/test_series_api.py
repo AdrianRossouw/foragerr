@@ -229,6 +229,125 @@ def test_post_series_full_add_chain_reaches_refresh_completion(
     assert body is not None and body["status"] == "completed"
 
 
+# --- POST add-time book-type override (FRG-SER-005/018) ----------------------
+
+
+@pytest.mark.req("FRG-SER-018")
+@pytest.mark.req("FRG-SER-005")
+def test_post_series_explicit_booktype_is_persisted_locked(
+    client, tmp_path, monkeypatch
+):
+    """An explicit book-type override wins over the title cue and locks."""
+    root_id = make_root_folder(client, tmp_path)
+    # Title cue would derive "gn"; the override "tpb" must win.
+    factory = build_factory(
+        settings=client.app.state.settings,
+        handler=FakeCV().volume(50, name="Nimona Graphic Novel").handler(),
+    )
+    patch_comicvine(monkeypatch, factory)
+
+    response = client.post(
+        "/api/v1/series",
+        json={"cv_volume_id": 50, "root_folder_id": root_id, "booktype": "tpb"},
+    )
+    assert response.status_code == 201
+    assert response.json()["booktype"] == "tpb"
+
+
+@pytest.mark.req("FRG-SER-018")
+@pytest.mark.req("FRG-SER-005")
+def test_post_series_explicit_single_issues_persists_null(
+    client, tmp_path, monkeypatch
+):
+    """The literal "none" locks an explicit single-issues (NULL) choice even
+    when the title carries a collected-edition cue."""
+    root_id = make_root_folder(client, tmp_path)
+    factory = build_factory(
+        settings=client.app.state.settings,
+        handler=FakeCV().volume(51, name="Saga TPB").handler(),
+    )
+    patch_comicvine(monkeypatch, factory)
+
+    response = client.post(
+        "/api/v1/series",
+        json={"cv_volume_id": 51, "root_folder_id": root_id, "booktype": "none"},
+    )
+    assert response.status_code == 201
+    assert response.json()["booktype"] is None
+
+
+@pytest.mark.req("FRG-SER-018")
+@pytest.mark.req("FRG-SER-005")
+def test_post_series_explicit_null_booktype_locks_like_none(
+    client, tmp_path, monkeypatch
+):
+    """An explicit JSON ``null`` is an explicit single-issues choice, distinct
+    from omitting the field: it must persist NULL (not derive the title's
+    collected-edition cue). Presence is read from ``model_fields_set``, so
+    ``null`` and the ``"none"`` sentinel behave identically."""
+    root_id = make_root_folder(client, tmp_path)
+    factory = build_factory(
+        settings=client.app.state.settings,
+        handler=FakeCV().volume(54, name="Saga TPB").handler(),
+    )
+    patch_comicvine(monkeypatch, factory)
+
+    response = client.post(
+        "/api/v1/series",
+        json={"cv_volume_id": 54, "root_folder_id": root_id, "booktype": None},
+    )
+    assert response.status_code == 201
+    # derivation would have produced "tpb" from the title cue — the explicit
+    # null overrode it, proving null was treated as present, not omitted.
+    assert response.json()["booktype"] is None
+
+
+@pytest.mark.req("FRG-SER-018")
+@pytest.mark.req("FRG-SER-005")
+def test_post_series_without_booktype_derives_from_title(
+    client, tmp_path, monkeypatch
+):
+    """Omitting the field derives from the title cue exactly as before."""
+    root_id = make_root_folder(client, tmp_path)
+    factory = build_factory(
+        settings=client.app.state.settings,
+        handler=FakeCV().volume(52, name="Saga TPB").handler(),
+    )
+    patch_comicvine(monkeypatch, factory)
+
+    response = client.post(
+        "/api/v1/series",
+        json={"cv_volume_id": 52, "root_folder_id": root_id},
+    )
+    assert response.status_code == 201
+    assert response.json()["booktype"] == "tpb"
+
+
+@pytest.mark.req("FRG-SER-018")
+def test_post_series_invalid_booktype_is_rejected_and_adds_nothing(
+    client, tmp_path, monkeypatch
+):
+    """An unknown book-type value is rejected at the model boundary and leaves
+    no series row behind. The app normalizes request-body validation failures
+    to the uniform 400 `{message, errors}` shape (see `api/errors.py`), so a bad
+    vocabulary value surfaces there with a clear message — not a bare 422."""
+    root_id = make_root_folder(client, tmp_path)
+    factory = build_factory(
+        settings=client.app.state.settings,
+        handler=FakeCV().volume(53, name="Saga").handler(),
+    )
+    patch_comicvine(monkeypatch, factory)
+
+    response = client.post(
+        "/api/v1/series",
+        json={"cv_volume_id": 53, "root_folder_id": root_id, "booktype": "omnibus"},
+    )
+    assert response.status_code == 400
+    assert set(response.json()) == {"message", "errors"}
+    assert "booktype" in response.text  # the clear message names the field
+    assert client.get("/api/v1/series").json()["totalRecords"] == 0
+
+
 # --- PUT -----------------------------------------------------------------
 
 
@@ -751,6 +870,196 @@ def test_suggest_route_is_not_shadowed_by_series_id_route(client, monkeypatch):
 
     response = client.get("/api/v1/series/lookup/suggest", params={"term": "Saga"})
     assert response.status_code == 200
+
+
+# --- relevance ordering (FRG-META-015) ---------------------------------------
+
+
+@pytest.mark.req("FRG-META-015")
+@pytest.mark.req("FRG-META-007")
+def test_lookup_ranks_closest_title_match_first(client, monkeypatch):
+    """Candidates arrive from CV in `name:asc` order; the closest matching-key
+    match must be returned first, ahead of an alphabetically-earlier but less
+    similar candidate."""
+    volumes = [
+        {"id": 1, "name": "Sabrina", "start_year": "2018"},
+        {"id": 2, "name": "Saga", "start_year": "2012"},
+        {"id": 3, "name": "Sagas of the Northmen", "start_year": "1998"},
+    ]
+    factory = build_factory(
+        settings=client.app.state.settings, handler=_search_handler(volumes)
+    )
+    monkeypatch.setattr(
+        "foragerr.api.series.comicvine_factory", lambda _settings: factory
+    )
+
+    records = client.get(
+        "/api/v1/series/lookup", params={"term": "Saga"}
+    ).json()["records"]
+    assert [r["name"] for r in records][0] == "Saga"
+    # The exact-match jumped ahead of the alphabetically-earlier "Sabrina".
+    assert records[0]["cv_volume_id"] == 2
+
+
+@pytest.mark.req("FRG-META-015")
+def test_lookup_year_tiebreak_prefers_closer_year(client, monkeypatch):
+    """At equal name similarity (two identically-named candidates), the one
+    whose start year is closer to the year in the term ranks first — beating
+    upstream order."""
+    volumes = [
+        {"id": 18, "name": "Thor", "start_year": "2018"},
+        {"id": 20, "name": "Thor", "start_year": "2020"},
+    ]
+    factory = build_factory(
+        settings=client.app.state.settings, handler=_search_handler(volumes)
+    )
+    monkeypatch.setattr(
+        "foragerr.api.series.comicvine_factory", lambda _settings: factory
+    )
+
+    records = client.get(
+        "/api/v1/series/lookup", params={"term": "Thor 2020"}
+    ).json()["records"]
+    assert [r["cv_volume_id"] for r in records] == [20, 18]
+
+
+@pytest.mark.req("FRG-META-015")
+@pytest.mark.req("FRG-META-007")
+def test_lookup_ordering_drops_nothing_and_selects_nothing(client, monkeypatch):
+    """Ranking is presentation only: every candidate the search produced is
+    still present (a very-low-similarity one included) and none is marked
+    selected."""
+    volumes = [
+        {"id": 1, "name": "Saga", "start_year": "2012"},
+        {"id": 2, "name": "Completely Unrelated Title", "start_year": "1990"},
+        {"id": 3, "name": "Saga of the Swamp Thing", "start_year": "1985"},
+    ]
+    factory = build_factory(
+        settings=client.app.state.settings, handler=_search_handler(volumes)
+    )
+    monkeypatch.setattr(
+        "foragerr.api.series.comicvine_factory", lambda _settings: factory
+    )
+
+    records = client.get(
+        "/api/v1/series/lookup", params={"term": "Saga"}
+    ).json()["records"]
+    assert len(records) == 3  # count unchanged, nothing dropped
+    assert {r["cv_volume_id"] for r in records} == {1, 2, 3}
+    # The low-similarity candidate survives (last, but present).
+    assert any(r["cv_volume_id"] == 2 for r in records)
+    # There is no auto-selection concept in the payload — no candidate is flagged.
+    assert all("selected" not in r for r in records)
+
+
+@pytest.mark.req("FRG-META-015")
+def test_lookup_and_suggest_agree_on_order(client, monkeypatch):
+    """The same term through the full lookup and the bounded suggest endpoint
+    returns the shared candidates in the same relative order."""
+    volumes = [
+        {"id": 1, "name": "Sabrina", "start_year": "2018"},
+        {"id": 2, "name": "Saga", "start_year": "2012"},
+        {"id": 3, "name": "Sagas of the Northmen", "start_year": "1998"},
+    ]
+    factory = build_factory(
+        settings=client.app.state.settings, handler=_search_handler(volumes)
+    )
+    monkeypatch.setattr(
+        "foragerr.api.series.comicvine_factory", lambda _settings: factory
+    )
+
+    lookup_order = [
+        r["cv_volume_id"]
+        for r in client.get(
+            "/api/v1/series/lookup", params={"term": "Saga"}
+        ).json()["records"]
+    ]
+    suggest_order = [
+        r["cv_volume_id"]
+        for r in client.get(
+            "/api/v1/series/lookup/suggest", params={"term": "Saga"}
+        ).json()["records"]
+    ]
+    assert lookup_order == suggest_order
+
+
+@pytest.mark.req("FRG-META-015")
+def test_lookup_equal_signal_candidates_keep_upstream_order(client, monkeypatch):
+    """Candidates with identical relevance signals (same name, no year in the
+    term) fall through to the stable upstream tiebreak and keep CV's order."""
+    volumes = [
+        {"id": 7, "name": "Nova", "start_year": "2007"},
+        {"id": 8, "name": "Nova", "start_year": "2013"},
+        {"id": 9, "name": "Nova", "start_year": "1994"},
+    ]
+    factory = build_factory(
+        settings=client.app.state.settings, handler=_search_handler(volumes)
+    )
+    monkeypatch.setattr(
+        "foragerr.api.series.comicvine_factory", lambda _settings: factory
+    )
+
+    records = client.get(
+        "/api/v1/series/lookup", params={"term": "Nova"}
+    ).json()["records"]
+    assert [r["cv_volume_id"] for r in records] == [7, 8, 9]
+
+
+# --- candidate description/deck (FRG-META-007/014) ----------------------------
+
+
+@pytest.mark.req("FRG-META-014")
+@pytest.mark.req("FRG-META-007")
+def test_candidate_description_is_sanitized_and_length_bounded(
+    client, monkeypatch
+):
+    """Both candidate resources ship a `description`, but never raw CV HTML:
+    tags/script bodies are stripped and the text is truncated to the deck cap
+    at a word boundary. Exercised through the REAL client + mapping path, so
+    the ingest sanitizer and the API egress cap are both in play."""
+    hostile = (
+        "<script>alert('xss')</script><p>The <b>sweeping</b> space opera.</p> "
+        + "word " * 120  # pushes well past the ~300-char deck cap
+    )
+    volumes = [{"id": 1, "name": "Saga", "start_year": "2012", "description": hostile}]
+    factory = build_factory(
+        settings=client.app.state.settings, handler=_search_handler(volumes)
+    )
+    monkeypatch.setattr(
+        "foragerr.api.series.comicvine_factory", lambda _settings: factory
+    )
+
+    for path in ("/api/v1/series/lookup", "/api/v1/series/lookup/suggest"):
+        candidate = client.get(path, params={"term": "Saga"}).json()["records"][0]
+        deck = candidate["description"]
+        assert deck is not None
+        assert "<" not in deck and ">" not in deck  # no tags survive
+        assert "alert" not in deck  # script BODY dropped, not just the tags
+        assert deck.startswith("The sweeping space opera.")
+        assert len(deck) <= 301  # 300-char cap + the ellipsis
+        assert deck.endswith("…")
+        # Word-boundary truncation: the cut never splits the repeated token.
+        assert deck.rstrip("…").rstrip().endswith("word")
+
+
+@pytest.mark.req("FRG-META-007")
+def test_candidate_without_description_is_null(client, monkeypatch):
+    """A CV volume with no description yields `description: null` on both
+    endpoints — never an error or a sentinel string."""
+    volumes = [{"id": 2, "name": "Nailbiter", "start_year": "2014"}]
+    factory = build_factory(
+        settings=client.app.state.settings, handler=_search_handler(volumes)
+    )
+    monkeypatch.setattr(
+        "foragerr.api.series.comicvine_factory", lambda _settings: factory
+    )
+
+    for path in ("/api/v1/series/lookup", "/api/v1/series/lookup/suggest"):
+        response = client.get(path, params={"term": "Nailbiter"})
+        assert response.status_code == 200
+        candidate = response.json()["records"][0]
+        assert "description" in candidate
+        assert candidate["description"] is None
 
 
 # --- cover -------------------------------------------------------------------
