@@ -278,6 +278,32 @@ def test_post_series_explicit_single_issues_persists_null(
 
 @pytest.mark.req("FRG-SER-018")
 @pytest.mark.req("FRG-SER-005")
+def test_post_series_explicit_null_booktype_locks_like_none(
+    client, tmp_path, monkeypatch
+):
+    """An explicit JSON ``null`` is an explicit single-issues choice, distinct
+    from omitting the field: it must persist NULL (not derive the title's
+    collected-edition cue). Presence is read from ``model_fields_set``, so
+    ``null`` and the ``"none"`` sentinel behave identically."""
+    root_id = make_root_folder(client, tmp_path)
+    factory = build_factory(
+        settings=client.app.state.settings,
+        handler=FakeCV().volume(54, name="Saga TPB").handler(),
+    )
+    patch_comicvine(monkeypatch, factory)
+
+    response = client.post(
+        "/api/v1/series",
+        json={"cv_volume_id": 54, "root_folder_id": root_id, "booktype": None},
+    )
+    assert response.status_code == 201
+    # derivation would have produced "tpb" from the title cue — the explicit
+    # null overrode it, proving null was treated as present, not omitted.
+    assert response.json()["booktype"] is None
+
+
+@pytest.mark.req("FRG-SER-018")
+@pytest.mark.req("FRG-SER-005")
 def test_post_series_without_booktype_derives_from_title(
     client, tmp_path, monkeypatch
 ):

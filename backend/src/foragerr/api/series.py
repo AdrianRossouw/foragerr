@@ -200,11 +200,14 @@ class SeriesCreate(BaseModel):
     path: str | None = None
     #: Optional add-time collected-edition book-type override (FRG-SER-005/018).
     #: A vocabulary value (``tpb``/``gn``/``hc``/``one_shot``) types the series
-    #: and LOCKS it; the literal ``"none"`` locks it as explicit single issues
-    #: (persisted NULL); omitting the field (``None``) derives the book-type
-    #: from the title exactly as before. An unknown value is rejected at the
-    #: model boundary — surfacing (like every request-body validation failure in
-    #: this app) as the uniform 400 ``{message, errors}`` shape, not a bare 422.
+    #: and LOCKS it; an explicit single-issues choice — the literal ``"none"``
+    #: OR an explicit JSON ``null`` — locks it as single issues (persisted
+    #: NULL); *omitting* the field entirely derives the book-type from the title
+    #: exactly as before. Presence is detected via ``model_fields_set`` so an
+    #: explicit ``null`` is never confused with omission. An unknown value is
+    #: rejected at the model boundary — surfacing (like every request-body
+    #: validation failure in this app) as the uniform 400 ``{message, errors}``
+    #: shape, not a bare 422.
     booktype: str | None = None
 
     @field_validator("booktype")
@@ -822,10 +825,12 @@ async def create_series(
     commands = request.app.state.commands
     # Resolve the optional add-time book-type override into the two row-shaped
     # arguments the add flow takes (FRG-SER-005/018). The field was already
-    # vocabulary-validated on the model (bad value -> 422); here an absent field
-    # derives as before, the ``"none"`` sentinel locks an explicit NULL, and any
-    # vocabulary value locks that value.
-    booktype_override_present = body.booktype is not None
+    # vocabulary-validated on the model (bad value -> 400). Presence is read from
+    # ``model_fields_set`` — NOT from ``body.booktype is not None`` — so an
+    # explicit single-issues choice sent as JSON ``null`` locks a NULL book-type
+    # just like the ``"none"`` sentinel, and only an *omitted* field derives from
+    # the title. (Conflating null with omission would silently drop the lock.)
+    booktype_override_present = "booktype" in body.model_fields_set
     booktype_value = (
         None if body.booktype in (None, _BOOKTYPE_NONE) else body.booktype
     )
