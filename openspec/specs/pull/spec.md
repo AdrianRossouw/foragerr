@@ -69,12 +69,17 @@ codes (619 bad-date, 522 backend-down, 666 client-update-required): a 619 skips 
 affected week with a logged warning; a 522/666 or any transport failure is treated
 as a source outage that **leaves the previously stored week intact** and marks the
 pull source **degraded** in the health surface (FRG-NFR-011 / FRG-API-014) rather
-than failing silently or discarding good data. The source is optional enrichment:
-when disabled or unconfigured, no fetch occurs and FRG-PULL-001 still functions.
+than failing silently or discarding good data. The source SHALL be **enabled by
+default** (owner decision 2026-07-11) so a fresh install's weekly view carries
+external data without configuration; it remains fully optional — when disabled
+(`pull_enabled=false`) or unconfigured, no fetch occurs, no third-party traffic is
+issued, and FRG-PULL-001 still functions.
 
-- **Milestone**: M3
+- **Milestone**: M3 (default flipped to enabled in pull-enabled-default,
+  2026-07-11)
 - **Source**: mylar-feature-surface.md §1 (walksoftly API, error codes 619/522/666,
-  two-week window, stale-data behavior); capability map PULL.
+  two-week window, stale-data behavior); capability map PULL; owner decision
+  2026-07-11 (`docs/process/decisions.md`).
 - **Notes**: Single unofficial third-party dependency — treated as optional
   enrichment over the local-primary view (FRG-PULL-001). Source URL configurable
   because the service is unofficial and has moved. Security (FRG-PROC-006): this is
@@ -83,7 +88,9 @@ when disabled or unconfigured, no fetch occurs and FRG-PULL-001 still functions.
   RISK-025 (SSRF) closed via the external egress profile. Source-supplied ComicVine
   IDs are recorded as *candidates* only; they are not trusted as match authority
   (FRG-PULL-004 still guards them). Only this one source is supported — the legacy
-  PreviewsWorld scrape / flat-file paths are not reimplemented.
+  PreviewsWorld scrape / flat-file paths are not reimplemented. Default-on posture
+  (2026-07-11): every install now issues scheduled traffic to the unofficial source
+  by default; owner-accepted on RISK-039, opt-out preserved.
 
 #### Scenario: Source outage leaves stored data intact and marks health degraded
 
@@ -114,6 +121,15 @@ when disabled or unconfigured, no fetch occurs and FRG-PULL-001 still functions.
 - **WHEN** the source returns a 619 bad-date code for one of the requested weeks
 - **THEN** that week is skipped with a logged warning while the other requested
   week is still fetched and stored, and the run is not treated as a full outage
+
+#### Scenario: Enabled by default; disabling opts out completely
+
+- **WHEN** a fresh install boots with no pull configuration, and separately when
+  the operator sets `pull_enabled=false`
+- **THEN** the fresh install's scheduled pull-refresh fetches from the default
+  source (degrading gracefully if it is down), while the opted-out install issues
+  no third-party traffic, its pull-refresh no-ops cleanly, and the weekly view
+  still renders from local metadata
 
 ### Requirement: FRG-PULL-003 — Idempotent per-week storage
 

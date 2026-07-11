@@ -148,7 +148,7 @@ async def _handle_pull_refresh(command: PullRefreshCommand, ctx: HandlerContext)
     if settings is None:
         raise RuntimeError("pull-refresh requires a settings-bearing service")
     # Enabled-gate (FRG-PULL-006): the task stays registered but no-ops cleanly
-    # when the operator has not opted in — no third-party traffic (FRG-PULL-002).
+    # when the operator disabled the source — no third-party traffic (FRG-PULL-002).
     if not settings.pull_enabled:
         return "weekly pull disabled (pull_enabled=false); nothing fetched"
     source_url = (settings.pull_source_url or "").strip()
