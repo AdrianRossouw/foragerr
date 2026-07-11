@@ -217,6 +217,92 @@ def test_per_entry_field_abuse_is_bounded_and_sanitized():
     assert big_id.cv_series_id is None  # absurd id refused
 
 
+@pytest.mark.req("FRG-NFR-012")
+def test_bidi_and_zero_width_chars_are_stripped_from_source_fields():
+    """Trojan-Source hardening at pull ingest (RISK-011/014, FRG-NFR-012): a
+    hostile source string carrying RLO (‮) / zero-width / isolate / BOM format
+    characters is stripped clean before storage, reusing the SAME character
+    table ``metadata.sanitize`` applies to ComicVine text (no duplication)."""
+    payload = [
+        {
+            # RLO (U+202E) + ZWSP (U+200B) buried inside the series name.
+            "series": "Sa‮ga​",
+            "issue": "1",
+            # LRI isolate (U+2066) + BOM/ZWNBSP (U+FEFF) inside the publisher.
+            "publisher": "Image⁦ Comics﻿",
+            "shipdate": "2026-07-08",
+        }
+    ]
+    entries = parse_pull_payload(json.dumps(payload).encode())
+
+    assert len(entries) == 1
+    entry = entries[0]
+    # The bidi/zero-width characters are gone; the visible text survives intact.
+    assert entry.series_name == "Saga"
+    assert entry.publisher == "Image Comics"
+    for ch in ("‮", "​", "⁦", "﻿"):
+        assert ch not in entry.series_name
+        assert ch not in (entry.publisher or "")
+
+
+@pytest.mark.req("FRG-PULL-009")
+async def test_522_on_only_the_future_week_is_a_skip_not_a_degrade(tmp_path, db):
+    """FRG-PULL-009 Decision 7: a 522 outage on ONLY the future week is contained
+    to a single-week skip — current + previous are still returned for storage,
+    the run is NOT degraded, the future week lands in ``future_skipped``, and NO
+    ladder failure is recorded (a flaky speculative week never backs off a source
+    whose current/previous data is good)."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.params["week"] == "29":  # the future week only
+            return httpx.Response(522)
+        return httpx.Response(200, json=_sample_entries())
+
+    backoff = ProviderBackoff(db)
+    client = PullSourceClient(
+        _factory(tmp_path, _mock(handler)), SOURCE_URL, backoff=backoff
+    )
+    async with client:
+        outcome = await client.fetch_weeks(
+            [(28, 2026), (27, 2026), (29, 2026)], future_week=(29, 2026)
+        )
+
+    assert outcome.degraded is False
+    assert outcome.outage_reason is None
+    assert [w.week for w in outcome.weeks] == [28, 27]  # current + previous kept
+    assert outcome.future_skipped == ((29, 2026),)
+    # Good current/previous data → the run records success → source stays healthy.
+    assert (await backoff.status(PROVIDER_PULL, PULL_PROVIDER_ID)).healthy
+
+
+@pytest.mark.req("FRG-PULL-009")
+@pytest.mark.req("FRG-PULL-002")
+async def test_522_on_current_week_still_degrades_even_with_future_week_set(
+    tmp_path, db
+):
+    """The future-week containment must not weaken FRG-PULL-002: a 522 on the
+    current (or previous) week degrades the whole run exactly as before, even
+    when a ``future_week`` is declared."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(522)  # current week (fetched first) is down
+
+    backoff = ProviderBackoff(db)
+    client = PullSourceClient(
+        _factory(tmp_path, _mock(handler)), SOURCE_URL, backoff=backoff
+    )
+    async with client:
+        outcome = await client.fetch_weeks(
+            [(28, 2026), (27, 2026), (29, 2026)], future_week=(29, 2026)
+        )
+
+    assert outcome.degraded is True
+    assert outcome.outage_reason == "backend-down"
+    assert outcome.weeks == ()
+    assert outcome.future_skipped == ()
+    assert not (await backoff.status(PROVIDER_PULL, PULL_PROVIDER_ID)).healthy
+
+
 @pytest.mark.req("FRG-PULL-002")
 def test_entry_count_cap_bounds_a_hostile_payload():
     flood = [

@@ -50,6 +50,7 @@ from typing import Any, Sequence
 
 from foragerr.db.migrations import app_version
 from foragerr.http import EgressPolicyError, HttpClientFactory, OutboundHttpError
+from foragerr.metadata.sanitize import _BIDI_INVISIBLE_RE
 from foragerr.providers.backoff import (
     PROVIDER_PULL,
     PULL_PROVIDER_ID,
@@ -91,7 +92,11 @@ _MAX_CV_ID = 2_000_000_000
 
 # ANSI/VT escape sequences and C0/DEL control characters (incl. CR/LF) —
 # stripped so a source string can never forge a log line or carry control
-# codes into storage (mirrors metadata.sanitize's RISK-014 posture).
+# codes into storage (mirrors metadata.sanitize's RISK-014 posture). The
+# Unicode bidi-override / zero-width / invisible-format stripping reuses
+# metadata.sanitize's shared ``_BIDI_INVISIBLE_RE`` (single character table,
+# no duplication) so a hostile pull-source string cannot Trojan-Source-spoof
+# the rendered value either (RISK-011/014, FRG-NFR-012).
 _ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b[@-Z\\-_]")
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 _WS_RE = re.compile(r"\s+")
@@ -161,13 +166,19 @@ class PullFetchOutcome:
     an outage never asks area D to overwrite a stored week with partial/empty
     data (FRG-PULL-002 "leaves the previously stored week intact"). ``skipped``
     holds the ``(week, year)`` pairs the source rejected with a 619 bad-date —
-    skipped, not an outage.
+    skipped, not an outage. ``future_skipped`` holds the future ``(week, year)``
+    that hit a source *outage* (522/666/transport/…) and was contained to a
+    single-week skip rather than degrading the whole run (FRG-PULL-009 Decision
+    7): current/previous outage classification is unchanged; only a future-week
+    outage lands here so area D can note it and leave any prior future week
+    intact.
     """
 
     weeks: tuple[PullWeekResult, ...] = ()
     skipped: tuple[tuple[int, int], ...] = ()
     degraded: bool = False
     outage_reason: str | None = None
+    future_skipped: tuple[tuple[int, int], ...] = ()
 
 
 # --- untrusted-JSON parsing (FRG-NFR-012) -----------------------------------
@@ -179,14 +190,18 @@ def _clean_str(value: Any) -> str | None:
     Non-strings are coerced via ``str`` (the source occasionally sends a bare
     number for a field); ANSI escapes and C0/DEL control chars (including CR/LF)
     are stripped so nothing can forge a log line or smuggle control codes into
-    storage; whitespace is collapsed; the result is length-capped. Returns
-    ``None`` when nothing printable remains. Never raises.
+    storage; Unicode bidi-override / zero-width / invisible-format characters
+    are stripped (shared with ``metadata.sanitize``) so the value cannot
+    visually spoof its rendering (Trojan-Source, RISK-011/014); whitespace is
+    collapsed; the result is length-capped. Returns ``None`` when nothing
+    printable remains. Never raises.
     """
     if value is None:
         return None
     text = value if isinstance(value, str) else str(value)
     text = _ANSI_RE.sub("", text)
     text = _CONTROL_RE.sub("", text)
+    text = _BIDI_INVISIBLE_RE.sub("", text)
     text = _WS_RE.sub(" ", text).strip()
     if len(text) > MAX_FIELD_LENGTH:
         text = text[:MAX_FIELD_LENGTH].rstrip()
@@ -345,18 +360,28 @@ class PullSourceClient:
         return parse_pull_payload(content, max_entries=self._max_entries)
 
     async def fetch_weeks(
-        self, weeks: Sequence[tuple[int, int]]
+        self,
+        weeks: Sequence[tuple[int, int]],
+        *,
+        future_week: tuple[int, int] | None = None,
     ) -> PullFetchOutcome:
-        """Fetch a run of weeks (typically current + previous, FRG-PULL-002).
+        """Fetch a run of weeks (current + previous + next, FRG-PULL-002/009).
 
-        A 619 skips only its week and the run continues; ANY outage
-        (522/666/egress/oversize/malformed/transport) degrades the whole run —
-        no weeks are returned for storage (the prior stored data is left intact)
-        and the source is marked degraded in health via the back-off ladder. A
-        fully successful run clears the ladder.
+        A 619 skips only its week and the run continues. An outage
+        (522/666/egress/oversize/malformed/transport) on the **current or
+        previous** week degrades the whole run — no weeks are returned for
+        storage (prior stored data is left intact) and the source is marked
+        degraded via the back-off ladder (FRG-PULL-002, unchanged). An outage on
+        the **future** week (``future_week``, the solicited/next ISO week) is
+        instead contained to a single-week skip: it is recorded in
+        ``future_skipped``, the run is **not** degraded, and no ladder failure is
+        recorded — a flaky speculative future fetch must not back off the source
+        while current/previous data is good (FRG-PULL-009 Decision 7). A run with
+        no current/previous outage clears the ladder.
         """
         results: list[PullWeekResult] = []
         skipped: list[tuple[int, int]] = []
+        future_skipped: list[tuple[int, int]] = []
         for week, year in weeks:
             try:
                 entries = await self.fetch_week(week=week, year=year)
@@ -370,6 +395,20 @@ class PullSourceClient:
                 skipped.append((week, year))
                 continue
             except PullSourceOutage as outage:
+                if future_week is not None and (week, year) == future_week:
+                    # FRG-PULL-009 Decision 7: a single-future-week outage is a
+                    # skip, not a whole-run degrade. Current/previous already
+                    # succeeded (the future week is fetched last), so leave the
+                    # ladder untouched and keep those good weeks for storage.
+                    logger.warning(
+                        "pull source outage (%s) fetching the future week %s of "
+                        "%s; skipping only that week (current/previous unaffected)",
+                        outage.reason,
+                        week,
+                        year,
+                    )
+                    future_skipped.append((week, year))
+                    continue
                 logger.warning(
                     "pull source outage (%s) fetching week %s of %s; leaving stored "
                     "data intact and marking the source degraded",
@@ -387,7 +426,11 @@ class PullSourceClient:
                 PullWeekResult(week=week, year=year, entries=tuple(entries))
             )
         await self._record_success()
-        return PullFetchOutcome(weeks=tuple(results), skipped=tuple(skipped))
+        return PullFetchOutcome(
+            weeks=tuple(results),
+            skipped=tuple(skipped),
+            future_skipped=tuple(future_skipped),
+        )
 
     async def aclose(self) -> None:
         await self._client.aclose()

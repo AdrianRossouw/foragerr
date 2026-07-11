@@ -114,12 +114,20 @@ def _week_key(week: int, year: int) -> str:
     return f"{year}-W{week:02d}"
 
 
+def _future_week(as_of: dt.date | None = None) -> tuple[int, int]:
+    """The ``(week, year)`` ISO pair for the *next* release week (FRG-PULL-009),
+    in the same ordering :func:`_fetch_weeks` yields — the week whose empty
+    payload, 619, or single-week outage is a skip rather than a whole-run
+    degrade or a stored empty week."""
+    as_of = as_of or dt.date.today()
+    iso_year, iso_week, _ = (as_of + dt.timedelta(days=7)).isocalendar()
+    return (iso_week, iso_year)
+
+
 def _future_week_key(as_of: dt.date | None = None) -> str:
     """The stored-week key for the *next* ISO week (FRG-PULL-009) — the week whose
     empty payload is a logged skip rather than a stored empty week or an outage."""
-    as_of = as_of or dt.date.today()
-    iso_year, iso_week, _ = (as_of + dt.timedelta(days=7)).isocalendar()
-    return _week_key(iso_week, iso_year)
+    return _week_key(*_future_week(as_of))
 
 
 @register_command
@@ -163,9 +171,10 @@ async def _handle_pull_refresh(command: PullRefreshCommand, ctx: HandlerContext)
     factory = make_pull_factory(settings)
     today = dt.date.today()
     weeks = _fetch_weeks(today)
-    future_key = _future_week_key(today)
+    future_week = _future_week(today)
+    future_key = _week_key(*future_week)
     async with PullSourceClient(factory, source_url, backoff=backoff) as client:
-        outcome = await client.fetch_weeks(weeks)
+        outcome = await client.fetch_weeks(weeks, future_week=future_week)
 
     # Degraded run (FRG-PULL-002): no weeks to store, prior data untouched, the
     # ladder already marked the source degraded — complete with a note, no crash.
@@ -225,6 +234,13 @@ async def _handle_pull_refresh(command: PullRefreshCommand, ctx: HandlerContext)
         parts.append(f"{len(outcome.skipped)} week(s) skipped (bad-date)")
     if future_skipped:
         parts.append(f"{future_skipped} future week(s) skipped (no data)")
+    if outcome.future_skipped:
+        # FRG-PULL-009 Decision 7: a future-week outage was contained to a
+        # single-week skip (not a whole-run degrade); the prior future week, if
+        # any, was left untouched because it was never returned for storage.
+        parts.append(
+            f"{len(outcome.future_skipped)} future week(s) skipped (source outage)"
+        )
     summary = "pull refresh: " + ", ".join(parts)
     logger.info(summary)
     return summary

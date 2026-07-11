@@ -37,6 +37,7 @@ from foragerr.pull.commands import (
     PULL_REFRESH_TASK,
     PullRefreshCommand,
     _fetch_weeks,
+    _future_week,
     _future_week_key,
     _handle_pull_refresh,
     _week_key,
@@ -91,8 +92,9 @@ class _FakeClient:
     async def aclose(self) -> None:  # pragma: no cover - context manager path used
         return None
 
-    async def fetch_weeks(self, weeks):
+    async def fetch_weeks(self, weeks, *, future_week=None):
         self.calls.append(list(weeks))
+        self.future_week = future_week
         return self._outcome
 
 
@@ -138,6 +140,20 @@ def _settings(config_dir, **over) -> Settings:
     base = dict(pull_enabled=True, pull_source_url="https://pull.example/x")
     base.update(over)
     return Settings(config_dir=config_dir, **base)
+
+
+def _freeze_today(monkeypatch, day: dt.date) -> None:
+    """Pin ``dt.date.today()`` (process-wide, reverted by monkeypatch) to ``day``
+    so the handler's internal 'today' read agrees with the test's — a midnight
+    rollover between the test's read and the handler's can otherwise shift the
+    future-week key and flake these FRG-PULL-009 tests."""
+
+    class _FrozenDate(dt.date):
+        @classmethod
+        def today(cls) -> dt.date:
+            return cls(day.year, day.month, day.day)
+
+    monkeypatch.setattr(dt, "date", _FrozenDate)
 
 
 # --- FRG-PULL-005: refresh trigger -------------------------------------------
@@ -375,6 +391,19 @@ def test_fetch_weeks_are_current_previous_and_next_iso_weeks():
     assert _future_week_key(as_of=dt.date(2026, 7, 8)) == "2026-W29"
 
 
+@pytest.mark.req("FRG-PULL-009")
+def test_future_week_crosses_the_iso_year_boundary():
+    """The future week is computed with ``isocalendar`` on ``as_of + 7 days``, so
+    it rolls the ISO YEAR correctly at a year boundary — 2020-12-28 is ISO
+    2020-W53 (2020 has 53 ISO weeks) and the next week is 2021-W01, not a bogus
+    2020-W54 or a same-year rollover."""
+    as_of = dt.date(2020, 12, 28)  # Monday of ISO 2020-W53
+    assert _future_week(as_of) == (1, 2021)
+    assert _future_week_key(as_of) == "2021-W01"
+    # current + previous + next, all with the correct ISO year across the seam.
+    assert _fetch_weeks(as_of) == [(53, 2020), (52, 2020), (1, 2021)]
+
+
 # --- FRG-PULL-009: future / solicited releases -------------------------------
 
 
@@ -391,7 +420,8 @@ async def test_next_week_entries_are_stored_and_refresh_is_idempotent(
     """The next ISO week is fetched and stored through the standard
     replace-on-refresh, and a repeat refresh leaves exactly one copy of that
     week (idempotent per FRG-PULL-003)."""
-    today = dt.date.today()
+    today = dt.date(2026, 7, 8)  # ISO 2026-W28
+    _freeze_today(monkeypatch, today)  # handler's internal today == the test's
     (cur_w, cur_y), (prev_w, prev_y), (fut_w, fut_y) = _fetch_weeks(today)
     fut_key = _future_week_key(today)
     outcome = PullFetchOutcome(
@@ -422,11 +452,22 @@ async def test_empty_future_week_payload_is_skipped_not_stored(
 ):
     """An empty payload for the future week is a logged skip only: current and
     previous weeks still store, the future week gets no replace_week write (so a
-    prior future week is never clobbered), and the run is not an outage."""
-    today = dt.date.today()
+    PRIOR stored future week is never clobbered), and the run is not an outage."""
+    today = dt.date(2026, 7, 8)  # ISO 2026-W28
+    _freeze_today(monkeypatch, today)
     (cur_w, cur_y), (prev_w, prev_y), (fut_w, fut_y) = _fetch_weeks(today)
     cur_key = _week_key(cur_w, cur_y)
     fut_key = _future_week_key(today)
+
+    # Seed a PRIOR stored future week so a skip is distinguishable from a
+    # store-empty: it must survive the empty refresh byte-for-byte.
+    async with db.write_session() as session:
+        await repo.replace_week(
+            session, fut_key, [_week_entry(fut_w, fut_y, "Spawn", "99")]
+        )
+    async with db.read_session() as session:
+        prior_future = await repo.list_week(session, fut_key)
+
     outcome = PullFetchOutcome(
         weeks=(
             PullWeekResult(week=cur_w, year=cur_y, entries=(_week_entry(cur_w, cur_y, "Spawn", "10"),)),
@@ -443,7 +484,10 @@ async def test_empty_future_week_payload_is_skipped_not_stored(
         stored_current = await repo.list_week(session, cur_key)
         stored_future = await repo.list_week(session, fut_key)
     assert [r.issue_number for r in stored_current] == ["10"]  # current still stored
-    assert stored_future == []  # no empty week written for the future
+    # The prior future week survives untouched — no empty write clobbered it.
+    assert [r.id for r in stored_future] == [r.id for r in prior_future]
+    assert [r.issue_number for r in stored_future] == ["99"]
+    assert [r.fetched_at for r in stored_future] == [r.fetched_at for r in prior_future]
     assert "degraded" not in summary  # not an outage
     assert "future week(s) skipped" in summary
 
@@ -453,13 +497,23 @@ async def test_bad_date_on_future_week_skips_only_that_week(
     db, tmp_path, config_dir, command_registry, monkeypatch
 ):
     """A 619 bad-date for the future week (skipped source-side) skips only that
-    week: the current and previous weeks still store, and the run is not an
-    outage."""
-    today = dt.date.today()
+    week: the current and previous weeks still store, a PRIOR stored future week
+    survives byte-for-byte, and the run is not an outage."""
+    today = dt.date(2026, 7, 8)  # ISO 2026-W28
+    _freeze_today(monkeypatch, today)
     (cur_w, cur_y), (prev_w, prev_y), (fut_w, fut_y) = _fetch_weeks(today)
     cur_key = _week_key(cur_w, cur_y)
     prev_key = _week_key(prev_w, prev_y)
     fut_key = _future_week_key(today)
+
+    # Seed a PRIOR stored future week so a skip is distinguishable from empty.
+    async with db.write_session() as session:
+        await repo.replace_week(
+            session, fut_key, [_week_entry(fut_w, fut_y, "Spawn", "99")]
+        )
+    async with db.read_session() as session:
+        prior_future = await repo.list_week(session, fut_key)
+
     outcome = PullFetchOutcome(
         weeks=(
             PullWeekResult(week=cur_w, year=cur_y, entries=(_week_entry(cur_w, cur_y, "Spawn", "10"),)),
@@ -475,6 +529,59 @@ async def test_bad_date_on_future_week_skips_only_that_week(
     async with db.read_session() as session:
         assert [r.issue_number for r in await repo.list_week(session, cur_key)] == ["10"]
         assert [r.issue_number for r in await repo.list_week(session, prev_key)] == ["9"]
-        assert await repo.list_week(session, fut_key) == []
+        # The prior future week is untouched by a bad-date skip.
+        survived = await repo.list_week(session, fut_key)
+    assert [r.id for r in survived] == [r.id for r in prior_future]
+    assert [r.issue_number for r in survived] == ["99"]
+    assert [r.fetched_at for r in survived] == [r.fetched_at for r in prior_future]
     assert "degraded" not in summary  # not an outage
     assert "skipped (bad-date)" in summary
+
+
+@pytest.mark.req("FRG-PULL-009")
+async def test_outage_on_future_week_skips_only_that_week_prior_survives(
+    db, tmp_path, config_dir, command_registry, monkeypatch
+):
+    """FRG-PULL-009 Decision 7: a 522/transport outage on ONLY the future week
+    (surfaced by the client as ``future_skipped``) is contained to a single-week
+    skip — current + previous still store, a PRIOR stored future week survives
+    byte-for-byte (it was never returned for storage), and the run is NOT an
+    outage/degrade."""
+    today = dt.date(2026, 7, 8)  # ISO 2026-W28
+    _freeze_today(monkeypatch, today)
+    (cur_w, cur_y), (prev_w, prev_y), (fut_w, fut_y) = _fetch_weeks(today)
+    cur_key = _week_key(cur_w, cur_y)
+    prev_key = _week_key(prev_w, prev_y)
+    fut_key = _future_week_key(today)
+
+    async with db.write_session() as session:
+        await repo.replace_week(
+            session, fut_key, [_week_entry(fut_w, fut_y, "Spawn", "99")]
+        )
+    async with db.read_session() as session:
+        prior_future = await repo.list_week(session, fut_key)
+
+    # The client contained the future-week outage: current+previous returned,
+    # future in future_skipped, run not degraded.
+    outcome = PullFetchOutcome(
+        weeks=(
+            PullWeekResult(week=cur_w, year=cur_y, entries=(_week_entry(cur_w, cur_y, "Spawn", "10"),)),
+            PullWeekResult(week=prev_w, year=prev_y, entries=(_week_entry(prev_w, prev_y, "Spawn", "9"),)),
+        ),
+        future_skipped=((fut_w, fut_y),),
+    )
+    _install_client(monkeypatch, outcome)
+    ctx, _svc = await _ctx(db, _settings(config_dir))
+
+    summary = await _handle_pull_refresh(PullRefreshCommand(), ctx)
+
+    async with db.read_session() as session:
+        assert [r.issue_number for r in await repo.list_week(session, cur_key)] == ["10"]
+        assert [r.issue_number for r in await repo.list_week(session, prev_key)] == ["9"]
+        survived = await repo.list_week(session, fut_key)
+    assert [r.id for r in survived] == [r.id for r in prior_future]
+    assert [r.issue_number for r in survived] == ["99"]
+    assert [r.fetched_at for r in survived] == [r.fetched_at for r in prior_future]
+    assert "degraded" not in summary  # a single future-week outage is not a degrade
+    assert "future week(s) skipped" in summary
+    assert "source outage" in summary
