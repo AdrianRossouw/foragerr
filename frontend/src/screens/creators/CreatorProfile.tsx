@@ -4,9 +4,17 @@ import { InitialsAvatar } from '../../components/InitialsAvatar';
 import { Poster } from '../../components/Poster';
 import { ProgressStrip } from '../../components/ProgressStrip';
 import { CheckIcon, PlusIcon } from '../../components/icons';
-import { useCreatorProfile, useSetCreatorFollow } from '../../api/hooks';
-import type { CreatorSeriesStat } from '../../api/types';
-import { roleChip } from '../../theme/palettes';
+import {
+  useCreatorBibliography,
+  useCreatorProfile,
+  useSetCreatorFollow,
+} from '../../api/hooks';
+import type {
+  AddSeriesNavigationState,
+  BibliographyEntry,
+  CreatorSeriesStat,
+} from '../../api/types';
+import { publisherTint, roleChip } from '../../theme/palettes';
 import { roleLabel, roleList } from '../../lib/roles';
 import styles from './CreatorProfile.module.css';
 
@@ -14,11 +22,17 @@ import styles from './CreatorProfile.module.css';
  * Creator profile (FRG-UI-028), rendered to the design handoff §8: a gradient
  * header carrying the large initials avatar, name, roles + publishers lines, and
  * a Follow/Following button; three stat columns (Series · owned-of-total issues
- * in library · Publishers); and an "In your library" section of work cards —
+ * in library · Publishers); an "In your library" section of work cards —
  * local cover, title, this creator's role chips, a meta line, and the
  * whole-series owned/total progress bar (house progress styling) — each opening
- * the series detail. The "More from" bibliography is a later change (non-goal);
- * an unknown creator id renders the standard not-found state.
+ * the series detail; and a "More from <name>" section (FRG-API-024) of the
+ * creator's cached external bibliography as add hand-off cards — a tinted title
+ * placeholder, title, publisher/year meta line, and an "Add to library" button
+ * routing into the standard add flow prefilled for that volume (the system never
+ * adds a series from this section by itself). While the first bibliography fetch
+ * is pending the section shows an unobtrusive gathering line; a fresh-but-empty
+ * (or entirely-in-library) bibliography renders no section at all. An unknown
+ * creator id renders the standard not-found state.
  */
 
 function WorkCard({
@@ -78,12 +92,61 @@ function WorkCard({
   );
 }
 
+/**
+ * One "More from" card (FRG-UI-028): a tinted title placeholder (the handoff's
+ * no-image card — the bibliography carries no local cover), the volume title, a
+ * publisher · year · issue-count meta line, and an "Add to library" button. The
+ * bibliography rows carry NO role, so no role chip is rendered (rather than a
+ * faked one). The Add button hands off to the standard add flow prefilled with
+ * the volume title — the ONLY way this section can lead to a series being added,
+ * and only once the user completes that flow.
+ */
+function MoreFromCard({
+  entry,
+  onAdd,
+}: {
+  entry: BibliographyEntry;
+  onAdd: () => void;
+}) {
+  const metaParts: string[] = [entry.publisher ?? 'Unknown publisher'];
+  if (entry.startYear != null) metaParts.push(String(entry.startYear));
+  if (entry.countOfIssues != null) {
+    metaParts.push(`${entry.countOfIssues} issue${entry.countOfIssues === 1 ? '' : 's'}`);
+  }
+  return (
+    <div className={styles.moreCard} data-testid={`more-card-${entry.cvVolumeId}`}>
+      <span
+        className={styles.morePlaceholder}
+        style={{ background: publisherTint(entry.publisher) }}
+        aria-hidden
+      >
+        {entry.title}
+      </span>
+      <span className={styles.moreBody}>
+        <span className={styles.moreTitle}>{entry.title}</span>
+        <span className={styles.moreMeta}>{metaParts.join(' · ')}</span>
+        <span className={styles.moreSpacer} />
+        <button
+          type="button"
+          className={styles.addBtn}
+          aria-label={`Add ${entry.title} to library`}
+          onClick={onAdd}
+        >
+          <PlusIcon size={11} />
+          Add to library
+        </button>
+      </span>
+    </div>
+  );
+}
+
 export function CreatorProfile() {
   const { id } = useParams();
   const creatorId = Number(id);
   const navigate = useNavigate();
 
   const profileQuery = useCreatorProfile(creatorId);
+  const bibliographyQuery = useCreatorBibliography(creatorId);
   const follow = useSetCreatorFollow();
 
   if (profileQuery.isLoading) {
@@ -127,6 +190,20 @@ export function CreatorProfile() {
         .filter((p): p is string => p !== null && p !== ''),
     ),
   );
+
+  // "More from" bibliography (FRG-API-024): the endpoint always serves whatever
+  // cache rows survive its in-library anti-join plus a self-reported `state`.
+  // Render the cards whenever there ARE rows (even while `pending` — stale-while-
+  // revalidate); show the unobtrusive gathering line only when a fetch is
+  // `pending` with zero rows; render NOTHING for a fresh-but-empty bibliography
+  // (or while the first read is still loading) — no empty section shell.
+  const bibliography = bibliographyQuery.data;
+  const moreEntries = bibliography?.records ?? [];
+  const bibliographyPending = bibliography?.state === 'pending';
+  const goAdd = (term: string): void => {
+    const state: AddSeriesNavigationState = { prefillTerm: term };
+    navigate('/add', { state });
+  };
 
   return (
     <>
@@ -209,6 +286,32 @@ export function CreatorProfile() {
               </div>
             </section>
           )}
+
+          {moreEntries.length > 0 ? (
+            <section className={styles.section} data-testid="creator-more-from">
+              <div className={styles.sectionHead}>
+                <span className={styles.sectionLabel}>More from {creator.name}</span>
+                <span className={styles.sectionCount}>{moreEntries.length}</span>
+              </div>
+              <p className={styles.moreSubline}>
+                Not in your library yet — subscribe to any of these to start
+                tracking them.
+              </p>
+              <div className={styles.moreGrid}>
+                {moreEntries.map((entry) => (
+                  <MoreFromCard
+                    key={entry.cvVolumeId}
+                    entry={entry}
+                    onAdd={() => goAdd(entry.title)}
+                  />
+                ))}
+              </div>
+            </section>
+          ) : bibliographyPending ? (
+            <p className={styles.gathering} data-testid="creator-more-gathering">
+              Gathering {creator.name}&rsquo;s bibliography from ComicVine…
+            </p>
+          ) : null}
         </div>
       </div>
     </>

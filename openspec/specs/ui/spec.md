@@ -998,13 +998,21 @@ Publishers) from the profile aggregates (FRG-API-023); and an "In your
 library" section of work cards — cover (local endpoint), series title,
 volume label where applicable, this creator's role chips for that series,
 a meta line, and an owned/total progress bar — each card navigating to the
-series detail. The profile SHALL render correctly for a creator with no
-external bibliography section present (the "More from" section is a later
-change); an unknown creator id SHALL render the standard not-found state.
+series detail. The profile SHALL additionally render the
+**"More from <name>"** section (handoff §8): the creator's cached external
+bibliography (FRG-API-024) as work cards — title, publisher/year meta line,
+role chip where known — each carrying an **Add to library** button that
+routes into the standard user-driven add flow prefilled for that volume;
+the system SHALL never add a series from this section by itself. While the
+first fetch is pending the section SHALL show an unobtrusive
+gathering state; a creator whose fetched bibliography is empty (or entirely
+in-library) SHALL render no section rather than an empty shell. An unknown
+creator id SHALL render the standard not-found state.
 
 - **Milestone**: M5
-- **Source**: design handoff §8 (creator profile region); FRG-API-023
-  profile aggregates (whole-series owned/total counts).
+- **Source**: design handoff §8 (creator profile region incl. "More
+  from"); FRG-API-023 profile aggregates; FRG-API-024 bibliography
+  (m5-creator-suggestions).
 - **Notes**: Role chips reuse the normalized-role vocabulary; progress
   bars reuse the house progress styling (series detail's owned/total).
   Back navigation returns to the grid preserving its filter state.
@@ -1028,3 +1036,20 @@ change); an unknown creator id SHALL render the standard not-found state.
 - **WHEN** `/creators/{id}` is opened for an id the API 404s
 - **THEN** the screen renders the standard not-found state rather than an
   error boundary or blank page
+
+#### Scenario: More-from cards render from the cache with add hand-offs
+
+- **WHEN** the profile renders for a creator with a fresh cached
+  bibliography containing volumes not in the library
+- **THEN** the "More from" section lists their cards (title,
+  publisher/year), each Add button routes into the standard add flow
+  prefilled for that volume, and no series is created without the user
+  completing that flow
+
+#### Scenario: Pending and empty bibliography states
+
+- **WHEN** the profile renders while the first bibliography fetch is
+  pending, and separately for a creator whose fetched bibliography is
+  empty
+- **THEN** the pending profile shows the gathering state in place of the
+  section, and the empty case renders no section at all

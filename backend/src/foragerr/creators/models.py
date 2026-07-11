@@ -73,10 +73,59 @@ class CreatorRow(Base):
     #: When ``followed`` last became true (via an explicit user follow);
     #: display-only.
     followed_at: Mapped[dt.datetime | None] = mapped_column(StrictDateTime, nullable=True)
+    #: When the external-bibliography cache (:class:`CreatorBibliographyRow`) was
+    #: last successfully fetched+replaced for this creator (FRG-CRTR-005). ``NULL``
+    #: = never fetched; a value older than the read-side TTL (FRG-API-024) makes
+    #: the cache stale-but-served while a refresh is enqueued. Advanced ONLY inside
+    #: the fetch command's replace transaction; a failed fetch leaves it untouched.
+    bibliography_fetched_at: Mapped[dt.datetime | None] = mapped_column(
+        StrictDateTime, nullable=True
+    )
     created_at: Mapped[dt.datetime] = mapped_column(StrictDateTime, nullable=False)
 
     __table_args__ = (
         UniqueConstraint("cv_person_id", name="uq_creators_cv_person_id"),
+    )
+
+
+class CreatorBibliographyRow(Base):
+    """One cached external-bibliography volume for a creator (FRG-CRTR-005).
+
+    A creator's broader ComicVine bibliography (volumes they are credited on that
+    are NOT already in the library) is fetched by the ``creator-bibliography-fetch``
+    command and cached here, replace-per-creator. The FK cascades on delete so
+    removing a creator drops its cached rows. ``unique(creator_id, cv_volume_id)``
+    keeps a volume listed at most once per creator; the ``creator_id`` index serves
+    the per-creator read. In-library exclusion is NOT stored — it is a read-time
+    anti-join on ``series.cv_volume_id`` (FRG-API-024), so a volume added to the
+    library after caching disappears from suggestions without a refetch.
+
+    ``title`` is ``NOT NULL`` (a stub with no name is dropped at fetch time);
+    ``publisher``/``start_year``/``count_of_issues`` are nullable display fields.
+    All strings were sanitized at the ComicVine mapping boundary (FRG-META-014).
+    Created by the forward-only 0018 migration, not ``create_all``.
+    """
+
+    __tablename__ = "creator_bibliography"
+
+    id: Mapped[int] = mapped_column(StrictInteger, primary_key=True, autoincrement=True)
+    creator_id: Mapped[int] = mapped_column(
+        StrictInteger, ForeignKey("creators.id", ondelete="CASCADE"), nullable=False
+    )
+    cv_volume_id: Mapped[int] = mapped_column(StrictInteger, nullable=False)
+    #: CV-authoritative volume name — already sanitized at ingest. Plain ``Text``
+    #: (not ``SentinelFreeText``): ``NOT NULL`` and a legitimately sentinel-shaped
+    #: title must not fold to SQL NULL (same reasoning as ``creators.name``).
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    publisher: Mapped[str | None] = mapped_column(Text, nullable=True)
+    start_year: Mapped[int | None] = mapped_column(StrictInteger, nullable=True)
+    count_of_issues: Mapped[int | None] = mapped_column(StrictInteger, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "creator_id", "cv_volume_id", name="uq_creator_bibliography_creator_volume"
+        ),
+        Index("ix_creator_bibliography_creator_id", "creator_id"),
     )
 
 

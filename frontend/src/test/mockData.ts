@@ -1,7 +1,9 @@
 import type {
   ApiPage,
+  BibliographyEntry,
   BlocklistRecord,
   CommandResource,
+  CreatorBibliography,
   CreatorPage,
   CreatorProfileResource,
   CreatorResource,
@@ -765,4 +767,25 @@ export function makeCreatorProfile(
     series,
     ...overrides,
   };
+}
+
+export function makeBibliographyEntry(
+  overrides: Partial<BibliographyEntry> = {},
+): BibliographyEntry {
+  return {
+    cvVolumeId: 4050,
+    title: 'Oblivion Song',
+    publisher: 'Image',
+    startYear: 2018,
+    countOfIssues: 36,
+    ...overrides,
+  };
+}
+
+/** Wrap bibliography entries in the FRG-API-024 response (state + records). */
+export function makeCreatorBibliography(
+  records: BibliographyEntry[] = [makeBibliographyEntry()],
+  state: CreatorBibliography['state'] = 'fresh',
+): CreatorBibliography {
+  return { state, records };
 }

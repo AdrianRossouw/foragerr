@@ -159,7 +159,11 @@ discovery features; it never downloads anything). Filter to followed
 creators, or arrive from a series page to see just that series' creators
 (a dismissible chip shows the focus). Click through to a creator's profile
 for their roles, publishers, per-series role chips, and how much of their
-work you own — each work card links back to its series. Series pages carry
+work you own — each work card links back to its series. Below that, a
+**More from** section shows the creator's wider ComicVine bibliography
+that isn't in your library yet (gathered on first view, refreshed weekly,
+newest first), each with an **Add to library** button into the normal add
+flow — nothing is ever added for you. Series pages carry
 a matching credits strip. If the screen is empty, credits simply haven't
 been gathered yet: they arrive with metadata refreshes, and the one-time
 `creators-backfill` task (System → Tasks) gathers them for series added

@@ -466,6 +466,73 @@ describe('FRG-UI-001: WebSocketBridge maps messages to cache operations', () => 
     );
   });
 
+  it('FRG-UI-028 — a completed creator-bibliography-fetch invalidates the bibliography family only', async () => {
+    const client = createQueryClient();
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    const { fetcher } = fakeFetcher(() => mockSeriesList);
+    const { factory, last } = makeFakeSocketFactory();
+
+    render(
+      <QueryClientProvider client={client}>
+        <FetcherProvider fetcher={fetcher}>
+          <WebSocketBridge socketFactory={factory} />
+        </FetcherProvider>
+      </QueryClientProvider>,
+    );
+
+    act(() => last().emitOpen());
+    // The fetch reaching `completed` rewrote a creator's cached suggestions →
+    // sweep every loaded bibliography query so a pending "More from" resolves.
+    act(() =>
+      last().emitMessage({
+        name: 'command',
+        action: 'updated',
+        resource: { id: 61, name: 'creator-bibliography-fetch', status: 'completed' },
+      }),
+    );
+
+    await waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith({
+        queryKey: queryKeys.creators.bibliographyAll(),
+      }),
+    );
+    // Narrow: it must NOT invalidate the whole creators family (grids/profiles).
+    expect(invalidate).not.toHaveBeenCalledWith({
+      queryKey: queryKeys.creators.all(),
+    });
+  });
+
+  it('FRG-UI-028 — a still-running creator-bibliography-fetch does NOT invalidate the bibliography family', async () => {
+    const client = createQueryClient();
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    const { fetcher } = fakeFetcher(() => mockSeriesList);
+    const { factory, last } = makeFakeSocketFactory();
+
+    render(
+      <QueryClientProvider client={client}>
+        <FetcherProvider fetcher={fetcher}>
+          <WebSocketBridge socketFactory={factory} />
+        </FetcherProvider>
+      </QueryClientProvider>,
+    );
+
+    act(() => last().emitOpen());
+    act(() =>
+      last().emitMessage({
+        name: 'command',
+        action: 'updated',
+        resource: { id: 61, name: 'creator-bibliography-fetch', status: 'started' },
+      }),
+    );
+
+    await waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.command.all() }),
+    );
+    expect(invalidate).not.toHaveBeenCalledWith({
+      queryKey: queryKeys.creators.bibliographyAll(),
+    });
+  });
+
   it('FRG-UI-001 — reconnect uses increasing backoff and the sidebar footer reflects connection state', async () => {
     vi.useFakeTimers();
     const client = createQueryClient();

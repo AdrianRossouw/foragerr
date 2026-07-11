@@ -951,3 +951,23 @@ export interface CreatorProfileResource {
   stats: CreatorStats;
   series: CreatorSeriesStat[];
 }
+
+/** One cached external-bibliography volume on a creator (FRG-API-024). */
+export interface BibliographyEntry {
+  cvVolumeId: number;
+  title: string;
+  publisher: string | null;
+  startYear: number | null;
+  countOfIssues: number | null;
+}
+
+/**
+ * GET /api/v1/creators/{id}/bibliography response (FRG-API-024). `state` is
+ * `fresh` when the cache is within TTL (served as-is) or `pending` when a
+ * deduplicated fetch was enqueued (unstamped or stale) — whatever rows exist,
+ * minus the live in-library anti-join, are always served even while pending.
+ */
+export interface CreatorBibliography {
+  state: 'fresh' | 'pending';
+  records: BibliographyEntry[];
+}

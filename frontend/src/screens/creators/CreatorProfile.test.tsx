@@ -1,25 +1,41 @@
 import { describe, it, expect } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, useLocation } from 'react-router-dom';
 import { renderWithProviders } from '../../test/renderWithProviders';
 import { fakeFetcher } from '../../test/fakeFetcher';
 import { ApiRequestError, type FetcherInit } from '../../api/fetcher';
-import { makeCreatorProfile, makeCreatorSeriesStat } from '../../test/mockData';
-import type { CreatorProfileResource } from '../../api/types';
+import {
+  makeBibliographyEntry,
+  makeCreatorBibliography,
+  makeCreatorProfile,
+  makeCreatorSeriesStat,
+} from '../../test/mockData';
+import type {
+  AddSeriesNavigationState,
+  CreatorBibliography,
+  CreatorProfileResource,
+} from '../../api/types';
 import { CreatorProfileRoute } from './CreatorProfile';
 
 /**
  * FRG-UI-028 — Creator profile: gradient header (avatar/name/roles/publishers +
  * Follow), three stat columns from the API aggregates, "In your library" work
  * cards (cover, role chips, whole-series owned/total bar) that open the series,
- * and the standard not-found state for an unknown id. Fake fetcher only.
+ * the "More from" bibliography cards with add hand-offs (+ pending/empty
+ * states), and the standard not-found state for an unknown id. Fake fetcher only.
  */
 
-function profileFetcher(profile: CreatorProfileResource) {
+function profileFetcher(
+  profile: CreatorProfileResource,
+  biblio: CreatorBibliography = makeCreatorBibliography([]),
+) {
   const state: CreatorProfileResource = { ...profile };
   const { spy, fetcher } = fakeFetcher((path: string, options?: FetcherInit) => {
     const method = options?.method ?? 'GET';
+    if (method === 'GET' && path === `/api/v1/creators/${state.id}/bibliography`) {
+      return { ...biblio };
+    }
     if (method === 'GET' && path === `/api/v1/creators/${state.id}`) {
       return { ...state };
     }
@@ -37,12 +53,19 @@ function profileFetcher(profile: CreatorProfileResource) {
   return { spy, fetcher };
 }
 
+/** Probe route capturing the prefillTerm handed to /add. */
+function AddProbe() {
+  const state = useLocation().state as AddSeriesNavigationState | null;
+  return <div data-testid="add-stub">{state?.prefillTerm ?? ''}</div>;
+}
+
 function renderProfile(fetcher: ReturnType<typeof profileFetcher>['fetcher'], id = 1) {
   return renderWithProviders(
     <Routes>
       <Route path="/creators/:id" element={<CreatorProfileRoute />} />
       <Route path="/creators" element={<div data-testid="grid-stub" />} />
       <Route path="/series/:id" element={<div data-testid="series-stub" />} />
+      <Route path="/add" element={<AddProbe />} />
     </Routes>,
     { fetcher, route: `/creators/${id}` },
   );
@@ -129,7 +152,11 @@ describe('FRG-UI-028: creator profile', () => {
   it('FRG-UI-028 — an unknown creator id renders the standard not-found state', async () => {
     const { fetcher } = fakeFetcher((path: string, options?: FetcherInit) => {
       const method = options?.method ?? 'GET';
-      if (method === 'GET' && path === '/api/v1/creators/999') {
+      if (
+        method === 'GET' &&
+        (path === '/api/v1/creators/999' ||
+          path === '/api/v1/creators/999/bibliography')
+      ) {
         throw new ApiRequestError(404, { message: 'creator 999 not found', errors: [] }, path);
       }
       throw new Error(`unexpected request: ${method} ${path}`);
@@ -140,5 +167,71 @@ describe('FRG-UI-028: creator profile', () => {
       expect(screen.getByTestId('creator-not-found')).toBeInTheDocument(),
     );
     expect(screen.getByText('Creator not found')).toBeInTheDocument();
+  });
+
+  it('FRG-UI-028 — More-from cards render from a fresh cache and hand off to /add prefilled', async () => {
+    const biblio = makeCreatorBibliography(
+      [
+        makeBibliographyEntry({ cvVolumeId: 4050, title: 'Oblivion Song', publisher: 'Image', startYear: 2018, countOfIssues: 36 }),
+        makeBibliographyEntry({ cvVolumeId: 4051, title: 'Die!Die!Die!', publisher: 'Image', startYear: 2018, countOfIssues: null }),
+      ],
+      'fresh',
+    );
+    const { fetcher } = profileFetcher(makeCreatorProfile(), biblio);
+    renderProfile(fetcher);
+    const user = userEvent.setup();
+
+    // Section shell: label + count chip + the not-in-library subline.
+    const section = await screen.findByTestId('creator-more-from');
+    expect(within(section).getByText('More from Robert Kirkman')).toBeInTheDocument();
+    expect(within(section).getByText('2')).toBeInTheDocument();
+    expect(
+      within(section).getByText(/Not in your library yet/i),
+    ).toBeInTheDocument();
+
+    // A card carries the title (tinted placeholder + heading = 2 nodes), the
+    // publisher/year/count meta line, and an Add button.
+    const card = within(section).getByTestId('more-card-4050');
+    expect(within(card).getAllByText('Oblivion Song').length).toBeGreaterThanOrEqual(1);
+    expect(within(card).getByText('Image · 2018 · 36 issues')).toBeInTheDocument();
+
+    // Add hands off to the standard add flow prefilled with the volume title.
+    await user.click(
+      within(card).getByRole('button', { name: 'Add Oblivion Song to library' }),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('add-stub')).toHaveTextContent('Oblivion Song'),
+    );
+  });
+
+  it('FRG-UI-028 — a pending bibliography with no rows shows the gathering state, no section shell', async () => {
+    const { fetcher } = profileFetcher(
+      makeCreatorProfile(),
+      makeCreatorBibliography([], 'pending'),
+    );
+    renderProfile(fetcher);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('creator-more-gathering')).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId('creator-more-gathering')).toHaveTextContent(
+      /Gathering Robert Kirkman.s bibliography from ComicVine/i,
+    );
+    // No section shell (label/subline) while gathering an empty cache.
+    expect(screen.queryByTestId('creator-more-from')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Not in your library yet/i)).not.toBeInTheDocument();
+  });
+
+  it('FRG-UI-028 — a fresh, empty bibliography renders no More-from section at all', async () => {
+    const { fetcher } = profileFetcher(
+      makeCreatorProfile(),
+      makeCreatorBibliography([], 'fresh'),
+    );
+    renderProfile(fetcher);
+
+    // Wait until the profile itself has rendered, then assert the section is absent.
+    await screen.findByTestId('creator-works');
+    expect(screen.queryByTestId('creator-more-from')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('creator-more-gathering')).not.toBeInTheDocument();
   });
 });
