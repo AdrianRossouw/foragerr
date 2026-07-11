@@ -1,0 +1,433 @@
+/*
+ * Calendar / weekly-pull agenda (FRG-UI-018) — design handoff v2 §4. A
+ * date-grouped agenda, never a 7-column grid. Colors come only from the token
+ * layer (tokens.css) and the publisher tint/accent DATA maps (palettes.ts,
+ * applied as inline styles on the cover spines) — no component hardcodes a
+ * palette hex (FRG-UI-002 audit).
+ */
+
+.toolbarActions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.screen {
+  padding: var(--spacing-lg) var(--spacing-lg) var(--spacing-xl);
+}
+
+/* --- Week navigation row --- */
+.weekBar {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-lg);
+  flex-wrap: wrap;
+}
+
+.weekNav {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.navBtn {
+  width: 34px;
+  height: 34px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+}
+
+.navBtn:hover {
+  background: var(--surface-card-hover);
+  color: var(--text-primary);
+}
+
+.thisWeek {
+  height: 34px;
+  padding: 0 var(--spacing-md);
+  border: none;
+  border-left: 1px solid var(--surface-border);
+  border-right: 1px solid var(--surface-border);
+  background: var(--surface-card-hover);
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+}
+
+.rangeLabel {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+}
+
+.commandChip {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--spacing-sm);
+  white-space: nowrap;
+}
+
+.pubSelect {
+  height: 34px;
+  padding: 0 var(--spacing-lg) 0 var(--spacing-sm);
+  background: var(--surface-input);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+.pubSelect:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+/* --- Reality banner --- */
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  background: var(--surface-chrome);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-lg);
+  padding: 13px var(--spacing-md);
+  margin-bottom: var(--spacing-lg);
+}
+
+.bannerIcon {
+  color: var(--color-accent);
+  font-size: var(--font-size-lg);
+  flex: none;
+}
+
+.bannerText {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* --- New this week strip --- */
+.strip {
+  margin-bottom: var(--spacing-xl);
+}
+
+.stripHeading {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-sm);
+  font-size: var(--font-size-xs);
+  letter-spacing: var(--letter-spacing-label);
+  text-transform: uppercase;
+  color: var(--color-accent-light);
+  font-weight: var(--font-weight-bold);
+}
+
+.stripItems {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.stripCard {
+  display: flex;
+  gap: 11px;
+  align-items: center;
+  background: var(--surface-card);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  padding: 8px 11px 8px 8px;
+}
+
+.addBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  flex: none;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  background: var(--color-accent-tint);
+  color: var(--color-accent-light);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+}
+
+.addBtn:hover {
+  background: var(--color-accent-selected-bg);
+}
+
+/* --- Day group --- */
+.day {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 20px;
+  margin-bottom: var(--spacing-lg);
+}
+
+.gutter {
+  text-align: center;
+  padding-top: 3px;
+}
+
+.dow {
+  font-size: var(--font-size-xs);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: var(--font-weight-bold);
+}
+
+.dowBig {
+  color: var(--color-accent);
+}
+
+.dowToday {
+  color: var(--color-accent-light);
+}
+
+.dateNum {
+  font-size: var(--font-size-page-title);
+  font-weight: var(--font-weight-light);
+  color: var(--text-primary);
+  line-height: 1.05;
+  margin-top: 1px;
+}
+
+.dateNumToday {
+  color: var(--color-accent);
+}
+
+.mon {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.stream {
+  border-left: 2px solid var(--surface-border);
+  padding-left: 20px;
+  min-width: 0;
+}
+
+.streamBig {
+  border-left-color: var(--color-accent);
+}
+
+.dayHeader {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin-bottom: 13px;
+  flex-wrap: wrap;
+}
+
+.badgeNcd {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--color-accent-tint);
+  color: var(--color-accent-light);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: 0.6px;
+  padding: var(--spacing-xs) 11px;
+  border-radius: var(--radius-md);
+  text-transform: uppercase;
+}
+
+.badgeToday {
+  background: var(--color-accent);
+  color: var(--color-accent-contrast);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  padding: var(--spacing-xs) 10px;
+  border-radius: var(--radius-md);
+}
+
+.count {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+}
+
+.followed {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-size-sm);
+  color: var(--color-accent-light);
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(228px, 1fr));
+  gap: 10px;
+}
+
+/* --- Release card --- */
+.card {
+  display: flex;
+  gap: 11px;
+  align-items: center;
+  background: var(--surface-card);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  padding: 8px 11px 8px 8px;
+}
+
+.card:hover {
+  border-color: var(--surface-border-soft);
+}
+
+/* Unmatched rows read one step quieter than followed rows. */
+.cardUnlinked {
+  background: var(--surface-page);
+}
+
+.cardFuture {
+  opacity: 0.72;
+}
+
+.spine {
+  width: 36px;
+  height: 54px;
+  flex: none;
+  border-radius: var(--radius-sm);
+  background-size: cover;
+  background-position: center;
+}
+
+.cardBody {
+  flex: 1;
+  min-width: 0;
+}
+
+.cardTitle {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cardSub {
+  margin-top: 3px;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.unreleased {
+  margin-top: 3px;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  flex: none;
+}
+
+.iconBtn {
+  appearance: none;
+  font: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-xs);
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.iconBtn:hover:not(:disabled) {
+  background: var(--surface-card-hover);
+  color: var(--text-primary);
+}
+
+.iconBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.iconBtn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.stateGlyph {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* --- Derived-state tones (projection of `state`, never a stored value) --- */
+.toneSuccess {
+  color: var(--color-success-text);
+}
+
+.toneInfo {
+  color: var(--color-info-text);
+}
+
+.toneAccent {
+  color: var(--color-accent);
+}
+
+.toneWait {
+  color: var(--color-accent-light);
+}
+
+.toneMuted {
+  color: var(--text-faint);
+}
+
+/* --- Hidden-count / empty / state messages --- */
+.hidden {
+  margin-top: 12px;
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.empty {
+  padding: 70px 0;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.emptyIcon {
+  font-size: var(--font-size-page-title);
+  color: var(--surface-border-soft);
+  margin-bottom: var(--spacing-md);
+}
+
+.stateMsg {
+  padding: var(--spacing-lg);
+  color: var(--text-secondary);
+}

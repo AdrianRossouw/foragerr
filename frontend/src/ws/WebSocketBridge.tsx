@@ -90,6 +90,9 @@ export function WebSocketBridge({
         // here: each has its own dedicated push (below), which also covers the
         // writers a queue transition never sees (e.g. manual file deletes).
         void queryClient.invalidateQueries({ queryKey: queryKeys.queue.all() });
+        // A queue transition changes a linked issue's derived download state, so
+        // any loaded Calendar week (FRG-UI-018) must re-project its cards.
+        void queryClient.invalidateQueries({ queryKey: queryKeys.pull.all() });
         return;
       }
       // Dedicated family pushes (m2-daily-surfaces): each invalidates exactly
@@ -102,6 +105,9 @@ export function WebSocketBridge({
       }
       if (msg.name === 'wanted') {
         void queryClient.invalidateQueries({ queryKey: queryKeys.wanted.all() });
+        // File presence just changed → a linked pull card's derived state
+        // (missing/wanted vs downloaded) is stale; re-project loaded weeks.
+        void queryClient.invalidateQueries({ queryKey: queryKeys.pull.all() });
         return;
       }
       if (msg.name === 'blocklist') {
@@ -145,10 +151,17 @@ export function WebSocketBridge({
           void queryClient.invalidateQueries({ queryKey: queryKeys.series.all() });
           void queryClient.invalidateQueries({ queryKey: queryKeys.issues.all() });
         }
+        // A series/issue change (monitor toggle, refresh creating issues) shifts
+        // pull cards' membership and derived state — re-project loaded weeks.
+        void queryClient.invalidateQueries({ queryKey: queryKeys.pull.all() });
         return;
       }
       if (msg.name === 'command') {
         void queryClient.invalidateQueries({ queryKey: queryKeys.command.all() });
+        // Covers pull-refresh completion (design decision 8): a finished refresh
+        // replaced this week's stored entries. The push carries no command name,
+        // so invalidate broadly — a no-op unless a Calendar week is loaded.
+        void queryClient.invalidateQueries({ queryKey: queryKeys.pull.all() });
       }
     };
 

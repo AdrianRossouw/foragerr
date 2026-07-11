@@ -8,6 +8,7 @@ import { QueueScreen } from './screens/queue/QueueScreen';
 import { HistoryScreen } from './screens/history/HistoryScreen';
 import { BlocklistScreen } from './screens/blocklist/BlocklistScreen';
 import { WantedScreen } from './screens/wanted/WantedScreen';
+import { CalendarScreen } from './screens/calendar/CalendarScreen';
 import { IndexerSettings } from './routes/settings/IndexerSettings';
 import { DownloadClientSettings } from './routes/settings/DownloadClientSettings';
 import { MediaManagement } from './screens/settings/MediaManagement';
@@ -33,6 +34,7 @@ export function App() {
       <Route element={<AppShell />}>
         <Route index element={<LibraryIndex />} />
         <Route path="series/:id" element={<SeriesDetailRoute />} />
+        <Route path="calendar" element={<CalendarScreen />} />
         <Route path="add" element={<AddSeries />} />
         <Route path="library-import" element={<LibraryImport />} />
         <Route path="wanted" element={<WantedScreen />} />

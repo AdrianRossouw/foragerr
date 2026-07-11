@@ -103,7 +103,7 @@ describe('FRG-UI-020: Settings nav group', () => {
  * count, Wanted = series-with-missing-issues in warn style).
  */
 describe('FRG-UI-023: sidebar nav lists only shipped screens', () => {
-  it('FRG-UI-023 — every nav entry routes to an implemented route; no Calendar/Creators', () => {
+  it('FRG-UI-023 — every nav entry routes to an implemented route; Calendar shipped, no Creators', () => {
     renderWithProviders(<Sidebar />, {
       withRouter: true,
       fetcher: sidebarFetcher({ series: [], queueTotal: 0 }),
@@ -112,6 +112,7 @@ describe('FRG-UI-023: sidebar nav lists only shipped screens', () => {
 
     const shipped = [
       '/',
+      '/calendar',
       '/add',
       '/library-import',
       '/wanted',
@@ -132,8 +133,12 @@ describe('FRG-UI-023: sidebar nav lists only shipped screens', () => {
       .map((a) => a.getAttribute('href'));
     for (const href of hrefs) expect(shipped).toContain(href);
 
-    // Future screens are absent until their change ships them.
-    expect(screen.queryByRole('link', { name: /calendar/i })).toBeNull();
+    // Calendar shipped in m4-pull-experience (FRG-UI-018).
+    expect(screen.getByRole('link', { name: /calendar/i })).toHaveAttribute(
+      'href',
+      '/calendar',
+    );
+    // Creators is still absent until its change ships the screen.
     expect(screen.queryByRole('link', { name: /creators?/i })).toBeNull();
   });
 });

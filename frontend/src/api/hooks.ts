@@ -27,6 +27,7 @@ import type {
   LogLevel,
   LogRecordResource,
   LookupResponse,
+  PullEntryRecord,
   QueueItem,
   QueuePageResponse,
   ReleaseDecision,
@@ -563,6 +564,44 @@ export function useWantedPage(
   });
 }
 
+/** Page size the Calendar requests — the endpoint's max (FRG-API-006 cap). */
+const PULL_PAGE_SIZE = 200;
+
+/**
+ * GET /api/v1/pull?week= — the WHOLE ISO week for the Calendar (FRG-UI-018,
+ * design decision 1). Day-grouping, banner counts, and the new-series strip are
+ * all whole-week properties, so the hook aggregates every page (fetches at
+ * pageSize=200 sorted by release_date and concatenates the remaining pages when
+ * `totalRecords` exceeds one page) and returns the flat record list under one
+ * key per week (`queryKeys.pull.week`). The endpoint stays read-only; per-entry
+ * actions and the WebSocketBridge invalidate `queryKeys.pull.all()` so the whole
+ * week re-derives.
+ */
+export function useWeeklyPull(
+  week: string,
+): UseQueryResult<PullEntryRecord[]> {
+  const fetcher = useFetcher();
+  return useQuery({
+    queryKey: queryKeys.pull.week(week),
+    queryFn: async () => {
+      const pagePath = (page: number) =>
+        `/api/v1/pull?week=${week}&page=${page}` +
+        `&pageSize=${PULL_PAGE_SIZE}&sortKey=release_date&sortDirection=asc`;
+      const first = await fetcher<ApiPage<PullEntryRecord>>(pagePath(1));
+      const records = [...first.records];
+      const totalPages = Math.max(
+        1,
+        Math.ceil(first.totalRecords / PULL_PAGE_SIZE),
+      );
+      for (let page = 2; page <= totalPages; page += 1) {
+        const next = await fetcher<ApiPage<PullEntryRecord>>(pagePath(page));
+        records.push(...next.records);
+      }
+      return records;
+    },
+  });
+}
+
 /** GET /api/v1/blocklist — paged banned releases (FRG-UI-017). */
 export function useBlocklistPage(
   page: number,
@@ -943,6 +982,35 @@ export function useSetIssueMonitored(
         queryKeys.issues.forSeries(seriesId),
         (rows) => patchIssueRows(rows, [updated.id], updated.monitored),
       );
+    },
+  });
+}
+
+/**
+ * PUT /api/v1/issues/{id} — single-issue monitored toggle used by the Calendar
+ * (FRG-PULL-007). Unlike `useSetIssueMonitored`, it is not scoped to a series'
+ * issues table: it delegates to the canonical issue endpoint and invalidates the
+ * DERIVED views (pull + wanted + any open issues table) so the pull card's
+ * projected state and the Wanted list re-derive. It writes no pull-side status
+ * (D4) — the card changes only because the issue projection changed.
+ */
+export function useToggleIssueMonitored(): UseMutationResult<
+  IssueResource,
+  Error,
+  { issueId: number; monitored: boolean }
+> {
+  const fetcher = useFetcher();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ issueId, monitored }) =>
+      fetcher<IssueResource>(`/api/v1/issues/${issueId}`, {
+        method: 'PUT',
+        body: { monitored },
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.pull.all() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.wanted.all() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.issues.all() });
     },
   });
 }
