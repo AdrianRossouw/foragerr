@@ -1,4 +1,4 @@
-import { useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Toolbar } from '../../components/Toolbar';
@@ -13,6 +13,7 @@ import {
 } from '../../components/icons';
 import {
   useRunCommand,
+  useSeriesIndex,
   useToggleIssueMonitored,
   useWatchedCommand,
   useWeeklyPull,
@@ -52,6 +53,26 @@ const SCOPE_OPTIONS = [
   { value: 'following' as const, label: 'Following' },
   { value: 'all' as const, label: 'All releases' },
 ];
+
+/** A well-formed `?week=` param: `YYYY-Www` with a plausible ISO week 01..53. */
+const WEEK_PARAM_RE = /^\d{4}-W\d{2}$/;
+
+/**
+ * Guard the URL's `?week=` before it reaches the week utilities. A malformed
+ * value (`?week=not-a-week`) would otherwise flow into `weekMonday`/`weekDates`
+ * and crash the render before the backend's 400 could ever surface — so an
+ * invalid param is rejected here and the screen falls back to the current week.
+ */
+function isValidWeekParam(week: string | null): week is string {
+  if (!week || !WEEK_PARAM_RE.test(week)) return false;
+  const weekNumber = Number(week.slice(6));
+  return weekNumber >= 1 && weekNumber <= 53;
+}
+
+/** Casefold a series title for exact library-membership comparison. */
+function normalizeTitle(title: string): string {
+  return title.trim().toLowerCase();
+}
 
 /** "Following" = linked to a library series (matched) or matched-but-pending. */
 function isFollowing(r: PullEntryRecord): boolean {
@@ -120,13 +141,37 @@ export function CalendarScreen() {
   const queryClient = useQueryClient();
 
   const thisWeek = currentIsoWeek();
-  const week = searchParams.get('week') ?? thisWeek;
+  const rawWeek = searchParams.get('week');
+  const weekParamValid = isValidWeekParam(rawWeek);
+  // A malformed param renders the current week (never a crashed utility); the
+  // effect below also rewrites the URL so it reflects what is actually shown.
+  const week = weekParamValid ? rawWeek : thisWeek;
+
+  useEffect(() => {
+    if (rawWeek !== null && !weekParamValid) {
+      setSearchParams({}, { replace: true });
+    }
+  }, [rawWeek, weekParamValid, setSearchParams]);
 
   const [scope, setScope] = useState<Scope>('following');
   const [publisher, setPublisher] = useState<string>('all');
 
   const { data, isLoading, isError } = useWeeklyPull(week);
   const records = useMemo(() => data ?? [], [data]);
+
+  // Reuse the cached library index (['series'], shared with HeaderQuickSearch)
+  // to suppress a new-series strip row once its series is in the library: after
+  // adding via the strip, the add flow invalidates ['series'], so returning to
+  // the Calendar hides the row without waiting for the next pull-refresh to
+  // rematch it (FRG-PULL-008). Exact casefolded-title match only.
+  const seriesIndex = useSeriesIndex();
+  const libraryTitles = useMemo(() => {
+    const titles = new Set<string>();
+    for (const s of seriesIndex.data ?? []) {
+      if (typeof s.title === 'string') titles.add(normalizeTitle(s.title));
+    }
+    return titles;
+  }, [seriesIndex.data]);
 
   // Per-entry search reuses the Wanted screen's single-watcher seam: a completed
   // search may have grabbed a release, so re-project the pull view + wanted list
@@ -143,9 +188,12 @@ export function CalendarScreen() {
   });
 
   const todayKey = useMemo(() => {
+    // "Today" is the viewer's LOCAL calendar day (read local y/m/d), so the
+    // Today badge lands on the right row for users far from UTC near a day
+    // boundary; the store-date keys it compares against are plain dates.
     const now = new Date();
     return isoDateKey(
-      new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())),
+      new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())),
     );
   }, []);
 
@@ -161,9 +209,18 @@ export function CalendarScreen() {
         : records.filter((r) => r.publisher === publisher);
 
     // New-series debuts render in their own strip and are excluded from the
-    // agenda so a row is never double-counted (design decision 6).
-    const newSeries = pubFiltered.filter((r) => r.matchType === 'new_series');
-    const agenda = pubFiltered.filter((r) => r.matchType !== 'new_series');
+    // agenda so a row is never double-counted (design decision 6). A debut whose
+    // series is already in the library (exact casefolded title) is dropped from
+    // the strip — the stale "Add" affordance would otherwise linger until the
+    // next pull-refresh rematched the row (FRG-PULL-008).
+    const newSeries = pubFiltered
+      .filter((r) => r.matchType === 'new_series')
+      .filter((r) => !libraryTitles.has(normalizeTitle(r.seriesName)));
+    // Defensive: a dateless agenda row renders in no day (its releaseDate never
+    // equals a day key), so it must not inflate the week/day counts either.
+    const agenda = pubFiltered.filter(
+      (r) => r.matchType !== 'new_series' && r.releaseDate != null,
+    );
 
     const weekAll = agenda.length;
     const weekFollowed = agenda.filter(isFollowing).length;
@@ -195,13 +252,18 @@ export function CalendarScreen() {
       .filter((d) => d.count > 0);
 
     return { publishers, newSeries, weekAll, weekFollowed, days };
-  }, [records, publisher, scope, week, todayKey]);
+  }, [records, publisher, scope, week, todayKey, libraryTitles]);
 
+  // The "across every publisher" scope only holds with no publisher filter; when
+  // one is active the count is already scoped to it, so name it (or drop the
+  // suffix) rather than claim a breadth that no longer applies.
+  const publisherScope =
+    publisher === 'all' ? 'across every publisher' : `from ${publisher}`;
   const banner =
     scope === 'following'
       ? `Comics ship in one big weekly drop. You're seeing the ${view.weekFollowed} ` +
         `issue${view.weekFollowed === 1 ? '' : 's'} from series you follow — ` +
-        `${view.weekAll - view.weekFollowed} more titles ship this week across every publisher.`
+        `${view.weekAll - view.weekFollowed} more titles ship this week ${publisherScope}.`
       : `Showing all ${view.weekAll} single issues shipping this week — ` +
         `${view.weekFollowed} from series you already follow.`;
 
@@ -415,7 +477,13 @@ export function CalendarScreen() {
                         {d.dow}
                       </div>
                       <div
-                        className={`${styles.dateNum} ${d.isToday ? styles.dateNumToday : ''}`}
+                        className={`${styles.dateNum} ${
+                          d.isToday
+                            ? styles.dateNumToday
+                            : d.isNewComicDay
+                              ? styles.dateNumBig
+                              : ''
+                        }`}
                       >
                         {d.date}
                       </div>

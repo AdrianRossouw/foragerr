@@ -8,7 +8,12 @@ import {
   type SocketFactory,
   type SocketLike,
 } from './socket';
-import { isQueueProgress, parseWsMessage, type WsMessage } from './messages';
+import {
+  isPullRefreshComplete,
+  isQueueProgress,
+  parseWsMessage,
+  type WsMessage,
+} from './messages';
 
 export interface WebSocketBridgeProps {
   url?: string;
@@ -40,7 +45,12 @@ export interface WebSocketBridgeProps {
  *   - dedicated `history`/`wanted`/`blocklist` messages (m2-daily-surfaces: the
  *     backend emits `history` on every history event, `wanted` when file
  *     presence changes, `blocklist` on blocklist writes) invalidate their family;
- *   - a `command` message invalidates the ['command'] prefix (status pushes).
+ *   - a `command` message invalidates the ['command'] prefix (status pushes),
+ *     and ONLY when it is the pull-refresh command reaching `completed` also
+ *     invalidates ['pull'] — the backend emits a `command` push on every
+ *     lifecycle transition of every command, so invalidating the whole-week
+ *     pull projection on all of them would refetch the Calendar repeatedly
+ *     whenever any background command cycles.
  * It reconnects on an increasing backoff and reflects connection state in the
  * shared store (rendered by the sidebar footer). It holds no server data itself.
  */
@@ -159,9 +169,14 @@ export function WebSocketBridge({
       if (msg.name === 'command') {
         void queryClient.invalidateQueries({ queryKey: queryKeys.command.all() });
         // Covers pull-refresh completion (design decision 8): a finished refresh
-        // replaced this week's stored entries. The push carries no command name,
-        // so invalidate broadly — a no-op unless a Calendar week is loaded.
-        void queryClient.invalidateQueries({ queryKey: queryKeys.pull.all() });
+        // replaced this week's stored entries, so the loaded Calendar week must
+        // re-project. Narrowed to EXACTLY the pull-refresh command reaching
+        // `completed` — the backend pushes a `command` message on every
+        // transition of every command, and invalidating ['pull'] on all of them
+        // refetches the whole week each time any background command cycles.
+        if (isPullRefreshComplete(msg)) {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.pull.all() });
+        }
       }
     };
 

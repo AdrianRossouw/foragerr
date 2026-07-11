@@ -585,17 +585,33 @@ export function useWeeklyPull(
     queryKey: queryKeys.pull.week(week),
     queryFn: async () => {
       const pagePath = (page: number) =>
-        `/api/v1/pull?week=${week}&page=${page}` +
+        `/api/v1/pull?week=${encodeURIComponent(week)}&page=${page}` +
         `&pageSize=${PULL_PAGE_SIZE}&sortKey=release_date&sortDirection=asc`;
+      // Dedup by stable row id across pages. Aggregation is not atomic: if the
+      // projection shifts between page fetches (a row's page changes as totals
+      // move), a row could otherwise appear on two pages and produce two cards
+      // with the same React key. Library-primary rows carry a null id (no stored
+      // pull_entries row, so no stable identity) — those are never collapsed.
+      const records: PullEntryRecord[] = [];
+      const seenIds = new Set<number>();
+      const absorb = (rows: PullEntryRecord[]): void => {
+        for (const row of rows) {
+          if (row.id != null) {
+            if (seenIds.has(row.id)) continue;
+            seenIds.add(row.id);
+          }
+          records.push(row);
+        }
+      };
       const first = await fetcher<ApiPage<PullEntryRecord>>(pagePath(1));
-      const records = [...first.records];
+      absorb(first.records);
       const totalPages = Math.max(
         1,
         Math.ceil(first.totalRecords / PULL_PAGE_SIZE),
       );
       for (let page = 2; page <= totalPages; page += 1) {
         const next = await fetcher<ApiPage<PullEntryRecord>>(pagePath(page));
-        records.push(...next.records);
+        absorb(next.records);
       }
       return records;
     },

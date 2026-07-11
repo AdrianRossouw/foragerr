@@ -68,6 +68,10 @@
   --surface-card-stack-2: #292929;
 
   /* --- Text --- */
+  /* Brightest text tier, above --text-primary: reserved for a numeral/label that
+   * must read as the emphasised element in its cluster (e.g. the Calendar's
+   * New-Comic-Day date numeral, design handoff dc.html). */
+  --text-bright: #f0f0f0;
   --text-primary: #e6e6e6;
   --text-secondary: #9a9a9a;
   --text-muted: #7a7a7a;

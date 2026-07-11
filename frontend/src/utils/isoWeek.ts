@@ -3,11 +3,16 @@
  *
  * Pure arithmetic over the ISO week rules (Thursday rule), NO date library — the
  * Calendar screen needs only week keys, day dates, and a range label, which is
- * ~40 lines of math not worth a new SOUP entry. Everything computes in UTC so a
- * viewer's timezone / DST can never shift which week a date falls in; the keys
- * this produces match the backend's `date.fromisocalendar` behaviour
+ * ~40 lines of math not worth a new SOUP entry. The week/day math itself runs in
+ * UTC (a stored release date is a plain date, so `weekDates`/`addWeeks`/
+ * `weekRangeLabel` are timezone-independent by construction) and the keys match
+ * the backend's `date.fromisocalendar` behaviour
  * (foragerr.pull.projection.current_week / week_date_range), including the
- * year-boundary cases (W52/W53 -> W01).
+ * year-boundary cases (W52/W53 -> W01). The ONE spot that must read local time
+ * is "what day is it for this viewer" (`currentIsoWeek`'s default): near a week
+ * boundary a viewer far from UTC is in a different calendar day than UTC, so the
+ * default week is derived from the LOCAL calendar date before the UTC ISO math
+ * runs on it.
  */
 
 const MS_PER_DAY = 86_400_000;
@@ -72,13 +77,16 @@ export function isoDateKey(date: Date): string {
 }
 
 /**
- * The ISO year-week key (e.g. `"2026-W27"`) for `asOf` (default: now). Reads the
- * date's UTC calendar components so the result is deterministic regardless of
- * the runtime timezone — the store-date week is a date-only, UTC concept.
+ * The ISO year-week key (e.g. `"2026-W27"`) for `asOf` (default: now). "Today"
+ * is the viewer's LOCAL calendar day: near a week boundary a user far from UTC
+ * is on a different date than UTC, and the default Calendar week / Today badge
+ * must follow the day they are actually living in. We read `asOf`'s LOCAL
+ * year/month/day and then run the pure-UTC ISO math on that calendar date (the
+ * week key itself is date-only, so the arithmetic stays timezone-independent).
  */
 export function currentIsoWeek(asOf: Date = new Date()): string {
   const utc = new Date(
-    Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth(), asOf.getUTCDate()),
+    Date.UTC(asOf.getFullYear(), asOf.getMonth(), asOf.getDate()),
   );
   return weekKeyOf(utc);
 }

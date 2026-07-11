@@ -69,4 +69,20 @@ describe('isoWeek', () => {
     expect(weekRangeLabel('2020-W53')).toBe('Dec 28 – Jan 3, 2021');
     expect(weekRangeLabel('2026-W27')).toBe('Jun 29 – Jul 5, 2026');
   });
+
+  it('currentIsoWeek derives "today" from the LOCAL calendar date, not UTC', () => {
+    // A viewer at UTC-8 near a week boundary: the instant below is Monday
+    // 2026-01-05 04:00 UTC, which is still Sunday 2026-01-04 20:00 for them.
+    // Sunday 2026-01-04 closes ISO 2026-W01 (Jan 1 2026 is a Thursday, so W01 is
+    // Dec 29–Jan 4); the UTC Monday would wrongly read as 2026-W02. The default
+    // week must follow the day the viewer is actually living in.
+    const prevTz = process.env.TZ;
+    process.env.TZ = 'America/Los_Angeles'; // UTC-8 in January (PST)
+    try {
+      const instant = new Date('2026-01-05T04:00:00.000Z');
+      expect(currentIsoWeek(instant)).toBe('2026-W01');
+    } finally {
+      process.env.TZ = prevTz;
+    }
+  });
 });
