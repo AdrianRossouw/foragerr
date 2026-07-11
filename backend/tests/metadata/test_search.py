@@ -204,3 +204,61 @@ async def test_suggest_series_drops_ignored_publisher_volumes(tmp_path):
     ids = {c.cv_volume_id for c in result.candidates}
     assert 3 not in ids  # ignored-publisher volume hard-dropped
     assert {1, 2} <= ids
+
+
+# --- shared relevance sort (FRG-META-015) ------------------------------------
+
+
+def _rec(cv_id: int, name: str, year: int | None):
+    """A minimal :class:`SeriesRecord` for the ordering unit tests."""
+    from foragerr.metadata.models import SeriesRecord
+
+    return SeriesRecord(
+        cv_volume_id=cv_id,
+        name=name,
+        publisher=None,
+        imprint=None,
+        start_year=year,
+        count_of_issues=None,
+        aliases=(),
+        description=None,
+        site_url=None,
+        first_issue=None,
+        image_url=None,
+    )
+
+
+@pytest.mark.req("FRG-META-015")
+def test_sort_by_relevance_closest_title_first():
+    from foragerr.metadata.search import sort_by_relevance
+
+    # Upstream (name:asc) order puts "Sabrina" before the exact match.
+    records = [_rec(1, "Sabrina", 2018), _rec(2, "Saga", 2012),
+               _rec(3, "Sagas of the Northmen", 1998)]
+    ordered = sort_by_relevance("Saga", records, record_of=lambda r: r)
+    assert ordered[0].cv_volume_id == 2  # exact match jumps to the front
+    # Nothing is dropped by ordering.
+    assert {r.cv_volume_id for r in ordered} == {1, 2, 3}
+
+
+@pytest.mark.req("FRG-META-015")
+def test_sort_by_relevance_no_year_candidate_sorts_after_yeared():
+    from foragerr.metadata.search import sort_by_relevance
+
+    # Same name -> equal similarity; the term carries a year, so the candidate
+    # WITH a usable year sorts ahead of the one without, regardless of upstream
+    # order.
+    records = [_rec(1, "Thor", None), _rec(2, "Thor", 2020)]
+    ordered = sort_by_relevance("Thor 2020", records, record_of=lambda r: r)
+    assert [r.cv_volume_id for r in ordered] == [2, 1]
+
+
+@pytest.mark.req("FRG-META-015")
+def test_sort_by_relevance_is_stable_for_equal_signals():
+    from foragerr.metadata.search import sort_by_relevance
+
+    # No year in the term and identical names -> all signals equal, so the
+    # stable upstream tiebreak preserves the input order exactly.
+    records = [_rec(7, "Nova", 2007), _rec(8, "Nova", 2013), _rec(9, "Nova", 1994)]
+    ordered = sort_by_relevance("Nova", records, record_of=lambda r: r)
+    assert [r.cv_volume_id for r in ordered] == [7, 8, 9]

@@ -72,6 +72,8 @@ async def add_series(
     monitor_new_items: str = "all",
     search_on_add: bool = False,
     path_override: str | None = None,
+    booktype: str | None = None,
+    booktype_locked: bool = False,
     enqueue_refresh: bool = True,
     factory: HttpClientFactory | None = None,
 ) -> AddSeriesResult:
@@ -84,6 +86,14 @@ async def add_series(
     * ``root_folder_id`` / ``format_profile_id`` reference no real row;
     * ``cv_volume_id`` already has a series row;
     * ``path_override`` does not resolve under a registered root folder.
+
+    ``booktype`` / ``booktype_locked`` carry the optional add-time
+    collected-edition override (FRG-SER-018): with ``booktype_locked=True`` the
+    given ``booktype`` (a vocabulary value, or ``None`` for explicit single
+    issues) is persisted LOCKED and title-cue derivation is skipped at add and
+    at every later refresh; with ``booktype_locked=False`` (the default)
+    ``booktype`` is ignored and the book-type is derived from the title as
+    before.
 
     On success: persists the series (with ``add_options`` encoding the
     strategy / monitor-new-items policy / search-on-add flag as canonical
@@ -175,11 +185,17 @@ async def add_series(
             ),
         )
 
-        # Auto-derive the collected-edition (trade) book-type from the title
-        # (FRG-SER-018) — a display/naming attribute. A brand-new series is
-        # never locked, so this always applies at add. Never touches issue
-        # creation / wanted logic (FRG-SER-019).
-        if not series.booktype_locked:
+        # Collected-edition (trade) book-type (FRG-SER-018) — a display/naming
+        # attribute, never touching issue creation / wanted logic (FRG-SER-019).
+        # An explicit add-time override (``booktype_locked``) persists that
+        # value — which may be ``None`` for explicit single issues — LOCKED, so
+        # neither this add nor a later refresh re-derives over the operator's
+        # choice. Absent the override, derive from the title as before (a
+        # brand-new series is never pre-locked, so this always applies at add).
+        if booktype_locked:
+            series.booktype = booktype
+            series.booktype_locked = True
+        elif not series.booktype_locked:
             series.booktype = detect_series_booktype(title)
 
         # Auto-derive the franchise group for this run (FRG-SER-016) — a
