@@ -112,11 +112,11 @@ The system SHALL compute "wanted" as a derived predicate — series monitored AN
 
 ### Requirement: FRG-SER-005 — Add flow (add → refresh → scan → optional search)
 
-When a series is added, the system SHALL execute a chained sequence: fetch and persist metadata and issues from ComicVine, apply user add-options (root folder, format profile, monitoring strategy, search-on-add), build and validate the series path, scan the path for existing files, and, if requested, queue a search for missing monitored issues — with add-options cleared once the chain completes.
+When a series is added, the system SHALL execute a chained sequence: fetch and persist metadata and issues from ComicVine, apply user add-options (root folder, format profile, monitoring strategy, search-on-add, and an optional explicit collected-edition book-type per FRG-SER-018), build and validate the series path, scan the path for existing files, and, if requested, queue a search for missing monitored issues — with add-options cleared once the chain completes.
 
 - **Milestone**: M1
 - **Source**: sonarr-architecture.md §1.2 (add lifecycle, AddOptions), §8.
-- **Notes**: Chain runs as events/commands on the backbone (SCHED area owns the command queue). Path validation includes root-folder existence and slug/path uniqueness (AddSeriesValidator analogue).
+- **Notes**: Chain runs as events/commands on the backbone (SCHED area owns the command queue). Path validation includes root-folder existence and slug/path uniqueness (AddSeriesValidator analogue). m4-add-new: the optional book-type add-option feeds FRG-SER-018's override/lock mechanics; omitted, derivation behaves exactly as before.
 
 #### Scenario: Add validates before persisting
 
@@ -396,10 +396,12 @@ The system SHALL type a series by its collected-edition **book-type**: a nullabl
 SHALL be **auto-derived** from the series title at add and at refresh using the existing
 `BOOKTYPE_CUES` (the same cues the filename parser uses); a series whose title carries
 no collected-edition cue is typed null. The operator SHALL be able to set the book-type
-explicitly, in which case it is **locked** (`booktype_locked`) so a later
+explicitly — at add time via an optional add-option, or later on the series — in which
+case it is **locked** (`booktype_locked`) so a later
 `refresh-series` does not re-derive over the operator's choice (mirroring the
 grouping-override precedent, FRG-SER-017); clearing the lock returns it to
-auto-derivation. Typing is additive display metadata: it SHALL NOT change series
+auto-derivation. An explicit single-issues choice (null book-type) locks the same way.
+Typing is additive display metadata: it SHALL NOT change series
 identity, monitoring, wanted state, or matching. The filename-derived `{Booktype}`
 naming token is unaffected — series-level typing does not itself drive file naming (a
 series-typed naming default is out of scope; see the proposal's Non-goals).
@@ -413,6 +415,11 @@ series-typed naming default is out of scope; see the proposal's Non-goals).
 
 - **WHEN** the operator sets a series' book-type explicitly and a later `refresh-series` runs
 - **THEN** the operator's book-type persists (it is locked, not re-derived); clearing the lock re-derives on the next refresh
+
+#### Scenario: Add-time explicit book-type is honored and locked
+
+- **WHEN** a series is added with an explicit book-type add-option (a collected-edition value, or an explicit single-issues/null choice)
+- **THEN** the series persists that book-type locked — title-cue derivation is skipped at add and at later refreshes until the lock is cleared — and an add without the option derives exactly as before
 
 ### Requirement: FRG-SER-019 — Trades never suppress single-issue wanted
 

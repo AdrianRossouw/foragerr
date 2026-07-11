@@ -41,7 +41,7 @@
 
 ## 5. Sync, gate, release
 
-- [ ] 5.1 Sync meta/ser/ui deltas into main specs (FRG-PROC-003)
+- [x] 5.1 Sync meta/ser/ui deltas into main specs (FRG-PROC-003)
 - [ ] 5.2 Full suites green; matrix regenerated (no gaps); soup_check exit 0
       (FRG-PROC-004, FRG-PROC-005, FRG-PROC-012)
 - [ ] 5.3 Tiered review gate — medium change: 4–5 angles + Codex full-diff;
