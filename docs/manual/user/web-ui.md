@@ -124,6 +124,27 @@ inline ComicVine search used to correct a match shows the same rejected-key
 guidance (linking to Settings → General) as Add Series. See `import.md` for how
 the scan, in-place registration, and re-scan semantics work.
 
+## Calendar
+
+The Calendar is the weekly pull view: a date-grouped agenda of what ships in a
+given store week, not a month grid — comics land in one Wednesday drop, and the
+layout embraces that with a "New Comic Day" badge on Wednesday and a "Today"
+marker. Navigate weeks with ‹ / › and jump back with **This Week**; the week you
+are viewing is in the URL, so back/forward and reloads keep your place. The view
+defaults to **Following** — releases from series in your library, with a
+"+N more titles shipping" note for everything else — and flips to
+**All releases** to show the full week, publisher-filterable either way. Each
+release card carries its live state (wanted, downloading, downloaded,
+unmonitored), computed from the issue and queue exactly like everywhere else;
+nothing is stored on the calendar itself. Cards for issues in your library offer
+want/skip and an immediate search — the same operations the Wanted screen uses.
+Debut issues (#1s) from series you don't have appear in a separate
+**New this week** strip with a one-click route into the standard add flow;
+foragerr never adds a series by itself. Next week's solicited releases appear
+under forward navigation once the pull source has published them, marked as not
+yet released, and the whole view keeps working from your local metadata when the
+external pull source is unconfigured or down.
+
 ## Queue
 
 The Queue screen shows every tracked download live: state (queued, downloading,

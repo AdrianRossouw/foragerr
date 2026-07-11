@@ -373,6 +373,99 @@ describe('FRG-UI-001: WebSocketBridge maps messages to cache operations', () => 
     await waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
   });
 
+  it('FRG-UI-001 — a non-pull-refresh command transition does NOT invalidate ["pull"]', async () => {
+    const client = createQueryClient();
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    const { fetcher } = fakeFetcher(() => mockSeriesList);
+    const { factory, last } = makeFakeSocketFactory();
+
+    render(
+      <QueryClientProvider client={client}>
+        <FetcherProvider fetcher={fetcher}>
+          <WebSocketBridge socketFactory={factory} />
+        </FetcherProvider>
+      </QueryClientProvider>,
+    );
+
+    act(() => last().emitOpen());
+    // A completed refresh-series command (NOT pull-refresh): the backend pushes
+    // a `command` message on every lifecycle transition of every command, so
+    // this must refresh ['command'] but must NOT churn the whole-week pull view.
+    act(() =>
+      last().emitMessage({
+        name: 'command',
+        action: 'updated',
+        resource: { id: 55, name: 'refresh-series', status: 'completed' },
+      }),
+    );
+
+    await waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.command.all() }),
+    );
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: queryKeys.pull.all() });
+  });
+
+  it('FRG-UI-001 — a still-running pull-refresh command transition does NOT invalidate ["pull"]', async () => {
+    const client = createQueryClient();
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    const { fetcher } = fakeFetcher(() => mockSeriesList);
+    const { factory, last } = makeFakeSocketFactory();
+
+    render(
+      <QueryClientProvider client={client}>
+        <FetcherProvider fetcher={fetcher}>
+          <WebSocketBridge socketFactory={factory} />
+        </FetcherProvider>
+      </QueryClientProvider>,
+    );
+
+    act(() => last().emitOpen());
+    // Only the TERMINAL (completed) pull-refresh rewrote the stored week — an
+    // intermediate `started` transition has not, so it must not refetch pull.
+    act(() =>
+      last().emitMessage({
+        name: 'command',
+        action: 'updated',
+        resource: { id: 60, name: 'pull-refresh', status: 'started' },
+      }),
+    );
+
+    await waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.command.all() }),
+    );
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: queryKeys.pull.all() });
+  });
+
+  it('FRG-UI-001 — a completed pull-refresh command transition DOES invalidate ["pull"]', async () => {
+    const client = createQueryClient();
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    const { fetcher } = fakeFetcher(() => mockSeriesList);
+    const { factory, last } = makeFakeSocketFactory();
+
+    render(
+      <QueryClientProvider client={client}>
+        <FetcherProvider fetcher={fetcher}>
+          <WebSocketBridge socketFactory={factory} />
+        </FetcherProvider>
+      </QueryClientProvider>,
+    );
+
+    act(() => last().emitOpen());
+    // The pull-refresh command reaching `completed` replaced this week's stored
+    // entries → the loaded Calendar week must re-project.
+    act(() =>
+      last().emitMessage({
+        name: 'command',
+        action: 'updated',
+        resource: { id: 60, name: 'pull-refresh', status: 'completed' },
+      }),
+    );
+
+    await waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.pull.all() }),
+    );
+  });
+
   it('FRG-UI-001 — reconnect uses increasing backoff and the sidebar footer reflects connection state', async () => {
     vi.useFakeTimers();
     const client = createQueryClient();

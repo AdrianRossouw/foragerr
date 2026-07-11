@@ -55,6 +55,15 @@ export const queryKeys = {
     page: (page: number, filtersHash = '') =>
       ['wanted', page, filtersHash] as const,
   },
+  // Weekly pull / calendar projection (FRG-API-019), mirroring GET
+  // /api/v1/pull?week=. One cache entry per ISO week (the screen always loads
+  // the whole week — day-grouping/counts are whole-week properties, design
+  // decision 1). The WebSocketBridge and per-entry actions invalidate the bare
+  // family key (`pull.all()`) so every loaded week re-derives its card state.
+  pull: {
+    all: () => ['pull'] as const,
+    week: (week: string) => ['pull', week] as const,
+  },
   blocklist: {
     all: () => ['blocklist'] as const,
     page: (page: number, filtersHash = '') =>

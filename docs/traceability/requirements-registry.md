@@ -96,9 +96,9 @@ moved `M5`→`M8`.
 | FRG-PULL-004 | Matching pull entries to the library | pull | implemented | M3 |
 | FRG-PULL-005 | Refresh trigger for missing pulled issues | pull | implemented | M3 |
 | FRG-PULL-006 | Scheduled and manual pull refresh | pull | implemented | M3 |
-| FRG-PULL-007 | Pull view actions | pull | approved | M4 |
-| FRG-PULL-008 | New-series surfacing (no auto-add) | pull | approved | M4 |
-| FRG-PULL-009 | Future/solicited releases | pull | approved | M4 |
+| FRG-PULL-007 | Pull view actions | pull | implemented | M4 |
+| FRG-PULL-008 | New-series surfacing (no auto-add) | pull | implemented | M4 |
+| FRG-PULL-009 | Future/solicited releases | pull | implemented | M4 |
 | FRG-ARC-001 | Arc entity import by ComicVine arc ID | arc | approved | B |
 | FRG-ARC-002 | Arc-to-library linking by ComicVine ID | arc | approved | B |
 | FRG-ARC-003 | Arc progress | arc | approved | B |
@@ -255,7 +255,7 @@ moved `M5`→`M8`.
 | FRG-UI-015 | Library import (existing files) flow | ui | implemented | M2 |
 | FRG-UI-016 | System status and tasks screens | ui | implemented | M2 |
 | FRG-UI-017 | Blocklist screen | ui | implemented | M2 |
-| FRG-UI-018 | Weekly pull / calendar view | ui | approved | M4 |
+| FRG-UI-018 | Weekly pull / calendar view | ui | implemented | M4 |
 | FRG-UI-019 | Global header quick-search over the local library | ui | implemented | M2 |
 | FRG-UI-020 | Settings: General with ComicVine metadata credential | ui | implemented | M2 |
 | FRG-UI-021 | Grouped library view | ui | implemented | M3 |

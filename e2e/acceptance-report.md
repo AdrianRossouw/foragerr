@@ -3,9 +3,9 @@
 _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.mjs` — do not edit by hand (FRG-PROC-010)._
 
 - **Verdict:** GREEN
-- **Scenarios:** 15 (14 pass, 0 fail, 1 skipped, 0 flaky, 0 not run)
-- **Run started:** 2026-07-10T20:33:20.429Z
-- **Duration:** 62.5s
+- **Scenarios:** 16 (15 pass, 0 fail, 1 skipped, 0 flaky, 0 not run)
+- **Run started:** 2026-07-11T11:18:55.707Z
+- **Duration:** 62.7s
 
 ## Scenario → requirement coverage
 
@@ -18,6 +18,7 @@ _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.m
 | PASS | FRG-PROC-010 FRG-UI-007 FRG-SRCH-001: interactive search renders verbatim rejection reasons | FRG-PROC-010, FRG-SRCH-001, FRG-UI-007 |
 | PASS | FRG-PROC-010 FRG-DDL-010 FRG-DL-007 FRG-PP-009 FRG-PP-010: grab downloads, imports and renames into the library | FRG-DDL-010, FRG-DL-007, FRG-PP-009, FRG-PP-010, FRG-PROC-010 |
 | PASS | FRG-PROC-010 FRG-UI-003 FRG-SER-009: the library browse shows the series with updated stats | FRG-PROC-010, FRG-SER-009, FRG-UI-003 |
+| PASS | FRG-PROC-010 FRG-UI-018: the calendar renders an unconfigured-source week without error | FRG-PROC-010, FRG-UI-018 |
 | PASS | FRG-PROC-010 FRG-OPDS-001 FRG-OPDS-002 FRG-OPDS-003 FRG-OPDS-005: OPDS navigates to a byte-identical comic download | FRG-OPDS-001, FRG-OPDS-002, FRG-OPDS-003, FRG-OPDS-005, FRG-PROC-010 |
 | SKIPPED | FRG-PROC-010: live SABnzbd tier (skipped — no credentials) | FRG-PROC-010 |
 | PASS | FRG-PROC-010 FRG-UI-015 FRG-IMP-022 FRG-IMP-023: library import scans a root, reviews matches and imports existing files in place without a download | FRG-IMP-022, FRG-IMP-023, FRG-PROC-010, FRG-UI-015 |
@@ -57,6 +58,7 @@ _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.m
 | FRG-UI-007 | PASS |
 | FRG-UI-008 | PASS |
 | FRG-UI-015 | PASS |
+| FRG-UI-018 | PASS |
 
 ---
 

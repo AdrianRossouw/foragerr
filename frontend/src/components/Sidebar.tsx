@@ -14,8 +14,9 @@ import styles from './AppShell.module.css';
  * live count badges (Comics = library series count, Queue = tracked-download
  * count, Wanted = series-with-missing-issues in warn style), grouped operator
  * sections, and a footer status row (health pulse + running version). Calendar
- * and Creators are deliberately absent — they enter the nav in the change that
- * ships their screen (mirrors the README shipped-claims rule). All counts read
+ * ships in m4-pull-experience (FRG-UI-018); Creators is still deliberately
+ * absent — it enters the nav in the change that ships its screen (mirrors the
+ * README shipped-claims rule). All counts read
  * existing React Query caches kept live by the WebSocketBridge (no new
  * endpoints, no polling timers of their own).
  */
@@ -42,6 +43,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: null,
     items: [
       { to: '/', label: 'Comics', icon: 'fa-book', end: true, badge: 'series' },
+      { to: '/calendar', label: 'Calendar', icon: 'fa-calendar-days' },
       { to: '/add', label: 'Add New', icon: 'fa-plus' },
       { to: '/library-import', label: 'Library Import', icon: 'fa-folder-tree' },
       {

@@ -12,18 +12,6 @@ own approved OpenSpec change, and sequencing or scope may shift. Where
 requirement IDs are already allocated they are cited; many future items have no
 IDs yet, because IDs are allocated at proposal time.
 
-## Remaining M4 — the weekly pull / new-releases screen
-
-The M4 design refresh has been landing since v0.4.2 (app shell, library views,
-series detail with trade containment, logs). What remains is the comics-native
-weekly pull / new-releases screen: a calendar-style view of the week's releases
-with per-entry actions and surfacing of new series already tracked upstream (no
-automatic adding).
-
-- Requirements: `FRG-UI-018` (weekly pull / calendar view), `FRG-PULL-007`
-  (pull view actions), `FRG-PULL-008` (new-series surfacing, no auto-add),
-  `FRG-PULL-009` (future / solicited releases).
-
 ## M5 — Creators & follows
 
 Follow the writers and artists behind the comics you own, and browse their work

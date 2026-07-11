@@ -255,6 +255,17 @@ test('FRG-PROC-010 FRG-UI-003 FRG-SER-009: the library browse shows the series w
   await expect(page.locator('[data-testid^="issue-row-"]').first()).toBeVisible();
 });
 
+test('FRG-PROC-010 FRG-UI-018: the calendar renders an unconfigured-source week without error', async ({ page }) => {
+  // No pull source is configured in this environment and the fixture series
+  // ships nothing in the current week, so the honest render is the empty
+  // agenda — never an error state (FRG-PULL-001 passthrough).
+  await page.goto('/');
+  await page.getByRole('link', { name: 'Calendar' }).click();
+  await page.waitForURL(/\/calendar/);
+  await expect(page.getByTestId('week-range')).toBeVisible();
+  await expect(page.getByText('No releases this week for that filter.')).toBeVisible();
+});
+
 test('FRG-PROC-010 FRG-OPDS-001 FRG-OPDS-002 FRG-OPDS-003 FRG-OPDS-005: OPDS navigates to a byte-identical comic download', async () => {
   // Root navigation feed advertises the All Series shelf.
   const root = await api.get('/opds');

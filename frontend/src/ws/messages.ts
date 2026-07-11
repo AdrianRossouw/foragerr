@@ -38,6 +38,34 @@ export function isQueueProgress(msg: WsMessage): msg is WsMessage & {
   return true;
 }
 
+/**
+ * Command lifecycle payload carried by a `{name:'command', action:'updated'}`
+ * message (backend/src/foragerr/ws/messages.py maps `CommandStatusChanged` to
+ * `{id, name, status}`). All optional here because the bridge only reads it to
+ * classify a message and must never throw on an unexpected shape.
+ */
+export interface CommandResource {
+  id?: number;
+  name?: string;
+  status?: string;
+}
+
+/** The pull-refresh command name (backend `PULL_REFRESH_TRIGGERED_BY`). */
+export const PULL_REFRESH_COMMAND = 'pull-refresh';
+
+/**
+ * True only for a `command` message that reports the pull-refresh command
+ * reaching `completed` — the single command transition that rewrites this
+ * week's stored pull entries. The backend pushes a `command` message on EVERY
+ * lifecycle transition of EVERY command, so the bridge must NOT invalidate the
+ * (expensive, whole-week) pull projection on all of them — only this one.
+ */
+export function isPullRefreshComplete(msg: WsMessage): boolean {
+  if (msg.name !== 'command') return false;
+  const r = msg.resource as Partial<CommandResource> | null;
+  return !!r && r.name === PULL_REFRESH_COMMAND && r.status === 'completed';
+}
+
 export function parseWsMessage(raw: string): WsMessage | null {
   try {
     const parsed = JSON.parse(raw) as Partial<WsMessage>;

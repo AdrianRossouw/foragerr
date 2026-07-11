@@ -419,6 +419,59 @@ export interface AddSeriesNavigationState {
   prefillTerm?: string;
 }
 
+/*
+ * Weekly pull / calendar projection (FRG-API-019) — the camelCase wire resource
+ * `GET /api/v1/pull` serves (ground truth: backend/src/foragerr/api/pull.py).
+ * The Calendar screen (FRG-UI-018) consumes these; `state` and `matchType` are
+ * the derived, request-time fields the screen projects into card visuals — the
+ * pull endpoint is read-only and stores no status (D4).
+ */
+
+/** How a pull row relates to the library; `null` for a pure library-primary row. */
+export type PullMatchType = 'id' | 'name_seq' | 'unmatched' | 'new_series';
+
+/**
+ * Derived state of a linked pull entry (projection.py). `null` for an
+ * unmatched / new-series entry that links to no issue.
+ */
+export type PullEntryState =
+  | 'missing_wanted'
+  | 'downloading'
+  | 'downloaded'
+  | 'unmonitored'
+  | 'pending_refresh';
+
+export interface PullEntrySeries {
+  id: number;
+  title: string;
+}
+
+export interface PullEntryIssue {
+  id: number;
+  issueNumber: string | null;
+  title: string | null;
+}
+
+/** One weekly pull row. `id` is the stored `pull_entries` row id, or `null` for
+ * a pure library-primary row with no stored entry (degraded/unconfigured
+ * source). `matchedIssueId` set ⇒ the row is linked to a library issue and
+ * exposes per-entry actions (FRG-PULL-007). */
+export interface PullEntryRecord {
+  id: number | null;
+  week: string;
+  publisher: string | null;
+  seriesName: string;
+  issueNumber: string | null;
+  releaseDate: string | null;
+  cvSeriesId: number | null;
+  cvIssueId: number | null;
+  matchType: PullMatchType | null;
+  matchedIssueId: number | null;
+  state: PullEntryState | null;
+  series: PullEntrySeries | null;
+  issue: PullEntryIssue | null;
+}
+
 /**
  * One `GET /api/v1/rootfolder` row (FRG-SER-008). `free_space` is filesystem
  * free bytes, or null when the path could not be stat'd.

@@ -6,7 +6,7 @@ backbone into one command that runs on the existing SCHED backbone:
     fetch (area B)  →  store (area A)  →  match (area C)  →  refresh-trigger
 
 * **Fetch (B).** :class:`foragerr.pull.source.PullSourceClient` fetches the
-  current + previous release weeks over the hardened ``external`` egress
+  current, previous, and next release weeks over the hardened ``external`` egress
   profile, on the shared back-off ladder (``PROVIDER_PULL``). A degraded run
   returns an outcome with no weeks and records the failure on the ladder (which
   is what surfaces the pull source as degraded in health) — this handler then
@@ -93,15 +93,16 @@ def make_pull_factory(settings: Any) -> HttpClientFactory:
 
 
 def _fetch_weeks(as_of: dt.date | None = None) -> list[tuple[int, int]]:
-    """The ``(week, year)`` ISO pairs to fetch this run: current + previous
-    release weeks (FRG-PULL-002), using ``isocalendar`` so a year-boundary date
-    resolves to the correct ISO year (matching ``projection.current_week``)."""
+    """The ``(week, year)`` ISO pairs to fetch this run: current + previous +
+    next release weeks (FRG-PULL-002 widened by FRG-PULL-009), using
+    ``isocalendar`` so a year-boundary date resolves to the correct ISO year
+    (matching ``projection.current_week``)."""
     as_of = as_of or dt.date.today()
     weeks: list[tuple[int, int]] = []
-    for day in (as_of, as_of - dt.timedelta(days=7)):
+    for day in (as_of, as_of - dt.timedelta(days=7), as_of + dt.timedelta(days=7)):
         iso_year, iso_week, _ = day.isocalendar()
         pair = (iso_week, iso_year)
-        if pair not in weeks:  # defensive: same ISO week for both is impossible
+        if pair not in weeks:  # defensive: the three are distinct ISO weeks
             weeks.append(pair)
     return weeks
 
@@ -111,6 +112,22 @@ def _week_key(week: int, year: int) -> str:
     projection (area E) reads (``projection.current_week``), so a stored week
     joins straight onto the weekly view."""
     return f"{year}-W{week:02d}"
+
+
+def _future_week(as_of: dt.date | None = None) -> tuple[int, int]:
+    """The ``(week, year)`` ISO pair for the *next* release week (FRG-PULL-009),
+    in the same ordering :func:`_fetch_weeks` yields — the week whose empty
+    payload, 619, or single-week outage is a skip rather than a whole-run
+    degrade or a stored empty week."""
+    as_of = as_of or dt.date.today()
+    iso_year, iso_week, _ = (as_of + dt.timedelta(days=7)).isocalendar()
+    return (iso_week, iso_year)
+
+
+def _future_week_key(as_of: dt.date | None = None) -> str:
+    """The stored-week key for the *next* ISO week (FRG-PULL-009) — the week whose
+    empty payload is a logged skip rather than a stored empty week or an outage."""
+    return _week_key(*_future_week(as_of))
 
 
 @register_command
@@ -152,9 +169,12 @@ async def _handle_pull_refresh(command: PullRefreshCommand, ctx: HandlerContext)
         )
 
     factory = make_pull_factory(settings)
-    weeks = _fetch_weeks()
+    today = dt.date.today()
+    weeks = _fetch_weeks(today)
+    future_week = _future_week(today)
+    future_key = _week_key(*future_week)
     async with PullSourceClient(factory, source_url, backoff=backoff) as client:
-        outcome = await client.fetch_weeks(weeks)
+        outcome = await client.fetch_weeks(weeks, future_week=future_week)
 
     # Degraded run (FRG-PULL-002): no weeks to store, prior data untouched, the
     # ladder already marked the source degraded — complete with a note, no crash.
@@ -166,8 +186,22 @@ async def _handle_pull_refresh(command: PullRefreshCommand, ctx: HandlerContext)
 
     refreshed: set[int] = set()
     stored_entries = 0
+    future_skipped = 0
     for week in outcome.weeks:
         week_key = _week_key(week.week, week.year)
+        # FRG-PULL-009: an empty payload for the *future* week means the source
+        # has no solicited data for it yet — skip that week only (no replace_week
+        # write, so a previously stored future week is never clobbered by an empty
+        # refresh). Current/previous weeks store normally, and this is NOT an
+        # outage (a 619 for the future week is already skipped upstream). An empty
+        # current/previous payload keeps its existing store-empty semantics.
+        if week_key == future_key and not week.entries:
+            future_skipped += 1
+            logger.info(
+                "pull source: no future-week data for %s yet; skipping that week",
+                week_key,
+            )
+            continue
         # One transaction per week (FRG-DB-007): replace-on-refresh + match
         # commit together, so a mid-week failure never half-replaces the week.
         async with ctx.db.write_session() as session:
@@ -198,6 +232,15 @@ async def _handle_pull_refresh(command: PullRefreshCommand, ctx: HandlerContext)
     ]
     if outcome.skipped:
         parts.append(f"{len(outcome.skipped)} week(s) skipped (bad-date)")
+    if future_skipped:
+        parts.append(f"{future_skipped} future week(s) skipped (no data)")
+    if outcome.future_skipped:
+        # FRG-PULL-009 Decision 7: a future-week outage was contained to a
+        # single-week skip (not a whole-run degrade); the prior future week, if
+        # any, was left untouched because it was never returned for storage.
+        parts.append(
+            f"{len(outcome.future_skipped)} future week(s) skipped (source outage)"
+        )
     summary = "pull refresh: " + ", ".join(parts)
     logger.info(summary)
     return summary
