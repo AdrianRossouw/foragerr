@@ -138,43 +138,53 @@ SHALL record its run in job history like any other command.
 - **WHEN** the operator force-runs `creators-backfill` from the task surface
 - **THEN** it executes again (idempotent), regardless of the one-time marker
 
-### Requirement: FRG-CRTR-004 — Creator follow flag and seeding
+### Requirement: FRG-CRTR-004 — Creator follow flag (explicit-only)
 
 The system SHALL persist a user-owned `followed` flag per creator, togglable
-via the API (FRG-API-023). During reconciliation the system SHALL seed
-`followed = true` for a creator whose credits span **two or more distinct
-library series** — but ONLY when the user has never toggled that creator's
-flag (`follow_touched` unset): a user's explicit follow or unfollow SHALL
-never be overwritten by refresh, seeding, or backfill. Unfollowing a seeded
-creator sticks. Following SHALL NOT trigger any automatic series add or
-search (standing no-auto-add rule); its read-side effects (grid ordering,
-suggestion surfacing) belong to later M5 changes.
+via the API (FRG-API-023) and marked user-touched on every toggle. A follow
+SHALL only ever result from an explicit user action: the system SHALL NOT
+derive, seed, or default the flag from library contents or any other signal
+(owner decision 2026-07-11, `docs/process/decisions.md` — supersedes the
+v0.5.0 ≥2-distinct-series seeding and the design handoff §7 default). A
+one-time data fix SHALL clear `followed` where `follow_touched IS NULL`
+(exactly the seeded rows; explicit follows carry the touched marker and are
+untouched). A user's follow or unfollow SHALL never be overwritten by
+refresh or backfill. Following SHALL NOT trigger any automatic series add,
+search, or download; its read-side effects (display, ch3 suggestion
+surfacing) never acquire content by themselves.
 
 - **Milestone**: M5
-- **Source**: design handoff §7 ("Following defaults on for anyone with ≥2
-  books"); comics-domain exploration (subscribe → suggestions, never
-  auto-add).
-- **Notes**: Seeding at reconciliation time (not query time) keeps the flag
-  a plain stored value the UI can trust. The ≥2 threshold counts distinct
-  series with at least one credit by that creator, regardless of issue
-  ownership.
+- **Source**: owner decision 2026-07-11 (v0.5.0 release-notes review);
+  comics-domain exploration (subscribe → suggestions, never auto-add).
+- **Notes**: The `follow_touched` marker (v0.5.0 schema) is what makes the
+  unseed surgical — seeded follows are precisely the followed rows never
+  touched by the user. The prune rule keeps its touched-survivor behavior;
+  with seeding gone, a followed creator is always a touched creator after
+  the data fix.
 
-#### Scenario: Threshold seeding on first ingest
+#### Scenario: No follow is ever derived
 
-- **WHEN** ingest first gives a creator credits in two distinct library
-  series
-- **THEN** the creator's `followed` flips on with `follow_touched` still
-  unset, and a creator with credits in one series stays unfollowed
+- **WHEN** ingest, refresh, or backfill processes a creator credited in any
+  number of library series
+- **THEN** the creator's `followed` flag is not set by the system — only
+  `PUT /api/v1/creators/{id}/follow` changes it
+
+#### Scenario: Seeded follows are unseeded once, explicit follows survive
+
+- **WHEN** the data fix runs on a database containing v0.5.0-seeded follows
+  (`followed = true`, `follow_touched IS NULL`) and explicit follows
+  (`follow_touched` set)
+- **THEN** seeded rows flip to unfollowed, explicit follows are untouched,
+  and the fix does not run again on subsequent starts
 
 #### Scenario: User toggles are never overwritten
 
-- **WHEN** the user unfollows a seeded creator and any refresh/backfill runs
-  afterwards
-- **THEN** the creator remains unfollowed (`follow_touched` set), even
-  though the ≥2-series condition still holds
+- **WHEN** the user follows or unfollows a creator and any refresh or
+  backfill runs afterwards
+- **THEN** the flag remains exactly as the user set it
 
-#### Scenario: Following causes no writes beyond the flag
+#### Scenario: Following causes no acquisition
 
-- **WHEN** a creator is followed (seeded or manual)
-- **THEN** no series is added, no search is enqueued, and no monitored flag
-  changes anywhere
+- **WHEN** a creator is followed
+- **THEN** no series is added, no search is enqueued, no download occurs,
+  and no monitored flag changes anywhere

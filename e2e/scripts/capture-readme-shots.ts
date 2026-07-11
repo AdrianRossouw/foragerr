@@ -125,6 +125,21 @@ const shots: Shot[] = [
     },
   },
   {
+    id: 'creators-grid',
+    run: async (page) => {
+      await page.goto(`${BASE_URL}/creators`, { waitUntil: 'domcontentloaded' });
+      // Fail loudly on the empty state: credits come from the creators
+      // backfill, so a missing grid means the backfill hasn't landed and a
+      // silent fall-through would overwrite the committed asset with the
+      // empty state. Poll for at least one card.
+      await page.waitForSelector('[data-testid^="creator-card-"]', {
+        timeout: 60_000,
+      });
+      await settle(page);
+      await shoot(page, 'creators-grid');
+    },
+  },
+  {
     id: 'wanted',
     run: async (page) => {
       // The interactive-search results view requires configured indexers; with
