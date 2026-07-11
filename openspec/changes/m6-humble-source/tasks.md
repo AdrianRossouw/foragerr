@@ -9,6 +9,7 @@
 
 - [ ] 2.1 Alembic migration: `sources` + `source_entitlements` tables; SQLAlchemy models (`FRG-SRC-001`)
 - [ ] 2.2 Humble client module: order list/detail, fixture-driven tests, politeness/backoff (NFR-005), bounded requests (NFR-006); cookie as SecretStr through the keystore path (`FRG-SRC-002`)
+- [ ] 2.2b Live-gated tests behind `FORAGERR_TEST_HUMBLE_COOKIE` (.env, operator-provided; skipped when absent, per the existing usenet live-test pattern): real order-list/detail round-trip; capture responses and commit them as fixtures ONLY after redacting gamekeys, signature/expiry params, and account email; confirm the CDN egress allowlist. Operator invalidates the session (browser logout) after merge
 - [ ] 2.3 Connect/validate/disconnect service + API routes; cookie write-only in responses; disconnect deletes credential, keeps data (`FRG-SRC-001`, `FRG-SRC-002`)
 - [ ] 2.4 Sync command on the scheduler (default daily) + Sync-now endpoint: store-native-key diff, comic/other classification, skip-and-log malformed entries, idempotent re-sync (`FRG-SRC-003`)
 - [ ] 2.5 Expiry handling: 401 → `expired`, pause, health contribution, reconnect resumes (`FRG-SRC-005`)
