@@ -89,6 +89,7 @@ moved `M5`→`M8`.
 | FRG-META-012 | Heuristic fields with provenance and override | meta | approved | B |
 | FRG-META-013 | Cover art download and cache | meta | implemented | M1 |
 | FRG-META-014 | ComicVine content is untrusted input | meta | implemented | M1 |
+| FRG-META-015 | Relevance ordering of lookup candidates | meta | proposed | M4 |
 | FRG-PULL-001 | Metadata-derived weekly release view | pull | implemented | M3 |
 | FRG-PULL-002 | External pull-source fetch | pull | implemented | M3 |
 | FRG-PULL-003 | Idempotent per-week storage | pull | implemented | M3 |
