@@ -38,6 +38,12 @@ services:
       # the default 'key' below is a dummy fixture value, not a secret).
       FORAGERR_COMICVINE_BASE_URL: http://mockhub:8080/api
       FORAGERR_COMICVINE_INSECURE_BASE: "true"
+      # The weekly-pull source is ON by default (pull-enabled-default,
+      # 2026-07-11); the hermetic stack pins it OFF so no e2e run ever
+      # attempts real outbound traffic to the unofficial source — the
+      # spine's calendar scenario deliberately exercises the
+      # unconfigured-source render (FRG-PULL-001 passthrough).
+      FORAGERR_PULL_ENABLED: "false"
       # ${VAR-default} (dash, not colon-dash) on purpose: unset -> fixture key;
       # EXPLICITLY EMPTY passes through as empty so the unconfigured-key
       # scenario (zz-unconfigured.spec.ts) can recreate the app with no key.

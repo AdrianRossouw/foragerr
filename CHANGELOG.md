@@ -9,6 +9,23 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.5.1] — 2026-07-11
+
+pull-enabled-default: the weekly-pull source is on by default.
+
+### Changed
+- **Weekly pull enabled out of the box** (FRG-PULL-002, owner decision):
+  `pull_enabled` now defaults to `true`, so a fresh install's Calendar
+  carries the week's releases without configuration. Set
+  `pull_enabled: false` (or `FORAGERR_PULL_ENABLED=false`) to opt out —
+  no third-party traffic is issued when disabled, and the calendar keeps
+  working from your library's own metadata either way. A source outage
+  only degrades health; it never empties the view. **Existing installs are
+  not flipped**: first-run config rendering wrote `pull_enabled: false`
+  into `config.yaml` under the old default, and a value present in the
+  file always wins — set it to `true` (or remove the line) to enable the
+  source on an install created before v0.5.1.
+
 ## [v0.5.0] — 2026-07-11
 
 m5-creators-backbone: creator credits arrive — the data layer for M5's

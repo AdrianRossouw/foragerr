@@ -310,7 +310,7 @@ async def test_config_keys_defaults_and_documented_rendering(config_dir):
     """The three pull config keys carry the owner-decided defaults and are
     rendered with their documentation into config.yaml (FRG-NFR-009)."""
     settings = Settings(config_dir=config_dir)
-    assert settings.pull_enabled is False
+    assert settings.pull_enabled is True  # ON by default (owner decision 2026-07-11)
     assert settings.pull_source_url.startswith("https://walksoftly")
     assert settings.pull_refresh_interval_seconds == 14400
 
@@ -319,7 +319,7 @@ async def test_config_keys_defaults_and_documented_rendering(config_dir):
     assert "pull_source_url:" in body
     assert "pull_refresh_interval_seconds:" in body
     # The documentation comment is emitted, not just the value.
-    assert "opt-in optional" in body
+    assert "ON by default (owner decision 2026-07-11)" in body
 
 
 @pytest.mark.req("FRG-PULL-006")
