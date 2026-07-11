@@ -9,6 +9,35 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.4.7] — 2026-07-11
+
+m4-pull-experience: the weekly pull Calendar — the final M4 chapter.
+
+### Added
+- **Calendar screen** (FRG-UI-018): a date-grouped weekly agenda of what
+  ships in a store week (deliberately not a month grid — comics land in one
+  Wednesday drop, badged "New Comic Day"). Week navigation with the week in
+  the URL, a Following / All releases scope toggle, a publisher filter, and
+  release cards with publisher-accented spines showing each issue's live
+  derived state. Calendar joins the sidebar.
+- **Pull entry actions** (FRG-PULL-007): want/skip and immediate search on
+  calendar cards linked to library issues, delegating to the same issue
+  operations the Wanted screen uses — the calendar itself stores nothing.
+- **New this week** (FRG-PULL-008): unfamiliar #1/#0 debuts surface in a
+  distinct strip with a one-click route into the standard add flow,
+  prefilled. foragerr never adds a series by itself.
+- **Future solicitations** (FRG-PULL-009): pull refresh now also fetches the
+  next ISO week when the source has published it, so forward navigation
+  shows what's coming, marked not yet released. A missing or failing future
+  week is skipped without touching the current week's data.
+
+### Fixed
+- Pull-source text now gets the same Trojan-Source (bidi/zero-width)
+  stripping at ingest that ComicVine text got in v0.4.6, before it renders
+  anywhere (gate finding, RISK-039).
+- WebSocket command chatter no longer re-fetches the loaded calendar week on
+  every background command transition (gate finding).
+
 ## [v0.4.6] — 2026-07-11
 
 m4-add-new: the Add New screen rebuilt to the M4 design, relevance-ranked

@@ -56,6 +56,6 @@
 - [x] 4.2 Registry flips FRG-UI-018 / FRG-PULL-007..009 → implemented;
       regenerate traceability matrix; `tools/soup_check.py` green
       (FRG-PROC-002/005)
-- [ ] 4.3 CHANGELOG entry + version bump ON-BRANCH (v0.4.7), e2e spine green,
+- [x] 4.3 CHANGELOG entry + version bump ON-BRANCH (v0.4.7), e2e spine green,
       tiered review gate (medium: angles + Codex) with findings applied
       before merge (FRG-PROC-007/013)
