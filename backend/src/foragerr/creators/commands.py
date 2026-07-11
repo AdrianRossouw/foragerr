@@ -43,10 +43,11 @@ from __future__ import annotations
 import logging
 from typing import ClassVar, Literal
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select, text, update
 
 from foragerr.commands.registry import BaseCommand, register_command, register_handler
 from foragerr.commands.service import HandlerContext
+from foragerr.creators.models import CreatorRow
 from foragerr.db import utcnow
 from foragerr.db.first_run import APP_STATE_TABLE
 from foragerr.library.models import SeriesRow
@@ -60,6 +61,13 @@ CREATORS_BACKFILL_TASK = "creators-backfill"
 #: for this database (presence of the row is the gate; the value is descriptive).
 BACKFILL_MARKER_KEY = "creators_backfill_done"
 BACKFILL_MARKER_VALUE = "done"
+
+#: Marker key in ``app_state`` recording that the one-time unseed data fix has run
+#: for this database (presence of the row is the gate; the value is descriptive).
+#: The fix clears the v0.5.0 ≥2-distinct-series-seeded follows now forbidden by
+#: FRG-CRTR-004 (owner decision 2026-07-11); it runs at most once per database.
+UNSEED_MARKER_KEY = "creators_unseed_done"
+UNSEED_MARKER_VALUE = "done"
 
 #: ``triggered_by`` recorded on each fanned-out ``refresh-series`` command so a
 #: refresh fired by the backfill is distinguishable in job history (FRG-CRTR-003).
@@ -211,6 +219,67 @@ async def creators_backfill_startup_hook(app) -> None:
     )
 
 
+async def is_unseed_complete(db) -> bool:
+    """True iff the persisted unseed-data-fix marker is set for this database."""
+    async with db.read_session() as session:
+        result = await session.execute(
+            text(f"SELECT 1 FROM {APP_STATE_TABLE} WHERE key = :key"),
+            {"key": UNSEED_MARKER_KEY},
+        )
+        return result.first() is not None
+
+
+async def creators_unseed_startup_hook(app) -> None:
+    """One-time data fix clearing v0.5.0-derived follows (FRG-CRTR-004).
+
+    The v0.5.0 backbone seeded ``followed`` for creators crossing a
+    ≥2-distinct-series threshold; the owner decision of 2026-07-11 forbids any
+    derived follow, so this fix clears exactly those seeded rows — the ones that
+    are ``followed`` but were never user-touched (``follow_touched IS NULL``). An
+    explicit follow carries the touched marker and is untouched. Marker-gated on
+    ``creators_unseed_done`` in ``app_state`` (same idiom as the backfill), so it
+    runs at most once per database; the UPDATE and the marker set commit together
+    in one write session. Runs even on an empty library — a cheap no-op UPDATE
+    plus the marker set — so the marker is always laid down on first boot.
+
+    Registered BEFORE :func:`creators_backfill_startup_hook` in ``create_app`` so
+    a first-boot-after-upgrade can never seed-then-unseed within one start:
+    seeding no longer exists, but the ordering keeps the fix ahead of any credit
+    ingest the backfill fans out (ordering asserted in tests).
+    """
+    db = app.state.db
+    if await is_unseed_complete(db):
+        logger.debug("creators unseed: marker already set; skipping data fix")
+        return
+
+    async with db.write_session() as session:
+        result = await session.execute(
+            update(CreatorRow)
+            .where(
+                CreatorRow.followed.is_(True),
+                CreatorRow.follow_touched.is_(None),
+            )
+            .values(followed=False, followed_at=None)
+        )
+        cleared = result.rowcount or 0
+        # Set the marker in the SAME transaction as the UPDATE, so the fix and its
+        # gate commit atomically. ``WHERE NOT EXISTS`` keeps it idempotent.
+        await session.execute(
+            text(
+                f"INSERT INTO {APP_STATE_TABLE} (key, value) "
+                "SELECT :key, :value "
+                f"WHERE NOT EXISTS (SELECT 1 FROM {APP_STATE_TABLE} WHERE key = :key)"
+            ),
+            {"key": UNSEED_MARKER_KEY, "value": UNSEED_MARKER_VALUE},
+        )
+
+    logger.info(
+        "creators unseed: cleared %d derived follow(s) (followed with "
+        "follow_touched NULL); marker set",
+        cleared,
+    )
+
+
 __all__ = [
     "BACKFILL_MARKER_KEY",
     "BACKFILL_MARKER_VALUE",
@@ -218,8 +287,12 @@ __all__ = [
     "CREATORS_BACKFILL_STARTUP_TRIGGER",
     "CREATORS_BACKFILL_TASK",
     "CREATORS_BACKFILL_TRIGGERED_BY",
+    "UNSEED_MARKER_KEY",
+    "UNSEED_MARKER_VALUE",
     "CreatorsBackfillCommand",
     "creators_backfill_startup_hook",
+    "creators_unseed_startup_hook",
     "is_backfill_complete",
+    "is_unseed_complete",
     "register_creators_backfill_task",
 ]

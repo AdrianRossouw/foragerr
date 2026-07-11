@@ -1,0 +1,208 @@
+/*
+ * Creators grid (FRG-UI-027) — design handoff §7. Colors come only from the
+ * token layer (tokens.css); the avatar gradient lives in InitialsAvatar via its
+ * own tokens. No component hardcodes a palette hex (FRG-UI-002).
+ */
+
+.screen {
+  padding: var(--spacing-lg) var(--spacing-lg) var(--spacing-xl);
+}
+
+/* --- Header: count line + focus chip --- */
+.headerRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: var(--spacing-lg);
+  flex-wrap: wrap;
+  min-height: 26px;
+}
+
+.countLine {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.focusChip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-xs) 11px;
+  border: 1px solid var(--surface-border-soft);
+  border-radius: var(--radius-pill);
+  background: var(--surface-menu);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+.focusChip:hover {
+  background: var(--surface-hover);
+}
+
+.focusChip:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+/* --- Grid --- */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: var(--spacing-md);
+}
+
+.card {
+  background: var(--surface-card);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-md);
+}
+
+.cardTop {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+
+.identity {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.identity:hover {
+  opacity: 0.82;
+}
+
+.identity:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.identityText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.name {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.roleLine {
+  margin-top: 2px;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --- Follow pill --- */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  padding: 7px 14px;
+  border: 1px solid var(--surface-border-soft);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+}
+
+.pill:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  color: var(--text-primary);
+}
+
+.pill:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.pill:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.pillOn {
+  border-color: var(--color-accent);
+  background: var(--color-accent-tint);
+  color: var(--color-accent-light);
+}
+
+/* --- Work spines --- */
+.spines {
+  display: flex;
+  gap: var(--spacing-sm);
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+.spine {
+  width: 44px;
+  height: 66px;
+  flex: none;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--surface-border-soft);
+  background-color: var(--surface-card-hover);
+  background-size: cover;
+  background-position: center;
+  cursor: pointer;
+}
+
+.spine:hover {
+  border-color: var(--color-accent);
+}
+
+.spine:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+/* --- Empty / state messages --- */
+.stateMsg {
+  padding: var(--spacing-lg);
+  color: var(--text-secondary);
+}
+
+.empty {
+  padding: 70px 0;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.emptyIcon {
+  color: var(--surface-border-soft);
+  margin-bottom: var(--spacing-md);
+}
+
+.emptySub {
+  margin-top: var(--spacing-xs);
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}

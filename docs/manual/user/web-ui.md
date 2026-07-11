@@ -145,6 +145,24 @@ under forward navigation once the pull source has published them, marked as not
 yet released, and the whole view keeps working from your local metadata when the
 external pull source is unconfigured or down.
 
+## Creators
+
+The Creators screen lists the writers, artists, and other people credited on
+the comics in your library, gathered automatically from ComicVine metadata.
+Each card shows the creator's initials, their roles, how many of your series
+they worked on, covers of those series, and a **Follow** pill. Following is
+always your explicit choice — foragerr never follows anyone for you — and
+following someone changes nothing but the flag today (it feeds upcoming
+discovery features; it never downloads anything). Filter to followed
+creators, or arrive from a series page to see just that series' creators
+(a dismissible chip shows the focus). Click through to a creator's profile
+for their roles, publishers, per-series role chips, and how much of their
+work you own — each work card links back to its series. Series pages carry
+a matching credits strip. If the screen is empty, credits simply haven't
+been gathered yet: they arrive with metadata refreshes, and the one-time
+`creators-backfill` task (System → Tasks) gathers them for series added
+before the feature existed.
+
 ## Queue
 
 The Queue screen shows every tracked download live: state (queued, downloading,

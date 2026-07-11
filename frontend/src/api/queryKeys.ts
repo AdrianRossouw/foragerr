@@ -162,6 +162,18 @@ export const queryKeys = {
     health: () => ['system', 'health'] as const,
     tasks: () => ['system', 'task'] as const,
   },
+  // Creators surface (FRG-UI-027/028 / FRG-API-023), mirroring
+  //   ['creators', 'list', hash] <-> GET /api/v1/creators?<params>
+  //   ['creators', id]           <-> GET /api/v1/creators/{id}
+  // The list family is keyed by a params hash (followed/seriesId/sort) so each
+  // filtering + focus is its own cache entry; the follow toggle invalidates the
+  // bare family key (`creators.all()`) so every loaded grid/profile re-derives.
+  // 'list' (a string) and the numeric id never collide under the prefix.
+  creators: {
+    all: () => ['creators'] as const,
+    list: (paramsHash: string) => ['creators', 'list', paramsHash] as const,
+    detail: (id: number) => ['creators', id] as const,
+  },
   // The actionable warnings list is deliberately its OWN top-level family
   // (not nested under `system`): it mirrors GET /api/v1/health, distinct from
   // both the root liveness `/health` (no query key — never fetched via React

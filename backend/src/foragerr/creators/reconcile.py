@@ -9,10 +9,14 @@ repeat refresh writes nothing. It then:
 * **prunes** creators that now carry zero credits *and* were never user-touched
   *and* are unfollowed (design decision 4): a followed or user-touched row
   survives even creditless, because pruning it would erase the unfollow memory
-  and let a later re-ingest re-seed it followed (which FRG-CRTR-004 forbids);
-* **seeds** ``followed`` for creators whose credits now span two or more
-  distinct library series, but only while ``follow_touched`` is unset — a user's
-  explicit follow/unfollow is never overwritten (FRG-CRTR-004).
+  and let a later re-ingest resurrect it (a followed creator is always a
+  user-touched creator, so a spared followed row is spared by the touched
+  predicate too).
+
+The system NEVER derives a follow from library contents: ``followed`` only ever
+changes through the explicit follow API (FRG-CRTR-004, owner decision
+2026-07-11). Reconciliation writes credits and prunes orphans; it does not seed,
+default, or otherwise set ``followed``.
 
 Only issues present in the fetch are touched, so a partial fetch
 (``Page.complete == False``) never removes credits for absent issues — it
@@ -28,17 +32,13 @@ from __future__ import annotations
 
 from typing import Sequence
 
-from sqlalchemy import exists, func, select
+from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from foragerr.creators.models import CreatorRow, IssueCreditRow
 from foragerr.db.base import utcnow
 from foragerr.library.models import IssueRow
 from foragerr.metadata.models import CreditRecord, IssueRecord
-
-#: Distinct-library-series threshold at/above which a never-touched creator is
-#: seeded ``followed`` (FRG-CRTR-004: "two or more distinct library series").
-FOLLOW_SEED_SERIES_THRESHOLD = 2
 
 
 async def reconcile_series_credits(
@@ -66,7 +66,6 @@ async def reconcile_series_credits(
         await _replace_issue_credits(session, issue_id, record.credits)
 
     await _prune_orphan_creators(session)
-    await _seed_threshold_follows(session)
 
 
 async def _replace_issue_credits(
@@ -159,38 +158,4 @@ async def _prune_orphan_creators(session: AsyncSession) -> None:
     for row in orphans:
         await session.delete(row)
     if orphans:
-        await session.flush()
-
-
-async def _seed_threshold_follows(session: AsyncSession) -> None:
-    """Seed ``followed`` for never-touched creators crossing the series threshold.
-
-    Counts distinct library series with at least one credit by the creator; at or
-    above :data:`FOLLOW_SEED_SERIES_THRESHOLD`, a creator with ``follow_touched``
-    unset and ``followed`` false flips on (``follow_touched`` stays NULL — seeding
-    is not a user touch). Already-followed or user-touched rows are excluded, so
-    re-reconcile never re-seeds and never overwrites a user's choice.
-    """
-    distinct_series = (
-        select(func.count(func.distinct(IssueRow.series_id)))
-        .select_from(IssueCreditRow)
-        .join(IssueRow, IssueRow.id == IssueCreditRow.issue_id)
-        .where(IssueCreditRow.creator_id == CreatorRow.id)
-        .correlate(CreatorRow)
-        .scalar_subquery()
-    )
-    to_seed = (
-        await session.execute(
-            select(CreatorRow).where(
-                CreatorRow.follow_touched.is_(None),
-                CreatorRow.followed.is_(False),
-                distinct_series >= FOLLOW_SEED_SERIES_THRESHOLD,
-            )
-        )
-    ).scalars().all()
-    now = utcnow()
-    for row in to_seed:
-        row.followed = True
-        row.followed_at = now  # follow_touched deliberately left NULL
-    if to_seed:
         await session.flush()

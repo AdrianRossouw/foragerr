@@ -241,12 +241,23 @@ async def list_creators(
     sortKey: str = Query("name"),
     sortDirection: str = Query("asc"),
     followed: bool | None = Query(None),
+    seriesId: int | None = Query(None, ge=1),
 ) -> CreatorPage:
     """The creators grid (FRG-API-023): a paged, in-process projection.
 
-    ``followed=true`` filters to followed creators only; the header aggregates
-    (``totalCreators`` / ``followedCreators``) are always the whole-library
-    counts, independent of that filter. No ComicVine request is issued."""
+    ``followed=true`` filters the returned rows to followed creators only.
+    ``seriesId`` (the series-detail focus chip, FRG-UI-027) filters the rows to
+    creators credited in that one series; it composes with the followed filter
+    and with paging. An unknown ``seriesId`` matches no creator and yields an
+    empty ``records`` list. ``seriesId`` is validated ``ge=1`` (a non-positive or
+    non-integer value is a 400).
+
+    The header aggregates (``totalCreators`` / ``followedCreators``) are ALWAYS
+    the whole-library counts, independent of BOTH filters: per the grid-header
+    design (FRG-UI-027) the header count line is global (``N creators · M
+    followed``) while the focus chip merely narrows the visible cards. So the
+    filters shape ``records``/``totalRecords`` only; the aggregates stay global.
+    No ComicVine request is issued."""
     if sortDirection not in _SORT_DIRECTIONS:
         raise ApiError(
             400,
@@ -278,6 +289,16 @@ async def list_creators(
         stmt = select(CreatorRow)
         if followed is True:
             stmt = stmt.where(CreatorRow.followed.is_(True))
+        if seriesId is not None:
+            # Focus chip (FRG-UI-027): restrict to creators credited in this one
+            # series. Composes with the followed filter and paging; an unknown
+            # series id matches nothing (empty records, global aggregates intact).
+            credited_in_series = (
+                select(IssueCreditRow.creator_id)
+                .join(IssueRow, IssueRow.id == IssueCreditRow.issue_id)
+                .where(IssueRow.series_id == seriesId)
+            )
+            stmt = stmt.where(CreatorRow.id.in_(credited_in_series))
         creators = list((await session.execute(stmt)).scalars().all())
 
         series_counts = await _series_count_by_creator(session)

@@ -1,0 +1,22 @@
+/*
+ * Initials avatar (FRG-UI-027/028). The gradient endpoints come only from the
+ * token layer (--color-avatar-gradient-*); the initials text is the bright
+ * near-white text tier. No component hardcodes a palette hex (FRG-UI-002).
+ */
+.avatar {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(
+    150deg,
+    var(--color-avatar-gradient-from),
+    var(--color-avatar-gradient-to)
+  );
+  color: var(--text-bright);
+  font-weight: var(--font-weight-medium);
+  line-height: 1;
+  letter-spacing: 0.02em;
+  user-select: none;
+}

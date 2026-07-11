@@ -5,10 +5,11 @@ Uses the typed/sentinel-free column conventions from :mod:`foragerr.db.base`
 
 - :class:`CreatorRow` — one person, keyed by the unique ComicVine person id.
   ComicVine is the authority for ``name`` (refresh updates it); the user owns
-  only ``followed``. ``follow_touched`` records that the user has explicitly
-  toggled the flag so reconciliation seeding can distinguish "never touched"
-  from "deliberately unfollowed" (FRG-CRTR-004) — pruning a user-unfollowed
-  creator would erase that memory, so the prune step spares any touched row.
+  only ``followed``, and a follow is only ever explicit (FRG-CRTR-004, owner
+  decision 2026-07-11 — reconciliation never derives one). ``follow_touched``
+  records that the user has explicitly toggled the flag; pruning a
+  user-unfollowed creator would erase that memory, so the prune step spares any
+  touched row (and any followed row).
 - :class:`IssueCreditRow` — the per-issue credit association (issue FK CASCADE
   -> creator FK CASCADE), carrying the normalized role (constrained to
   :data:`foragerr.metadata.credits.ROLE_VOCABULARY`) plus the verbatim role
@@ -59,17 +60,18 @@ class CreatorRow(Base):
     #: "None") must not fold to SQL NULL and trip the constraint — same
     #: reasoning as ``series.matching_key``.
     name: Mapped[str] = mapped_column(Text, nullable=False)
-    #: User-owned follow flag (FRG-CRTR-004). Seeded ``true`` at reconciliation
-    #: for creators crossing the >=2-distinct-series threshold, but only while
-    #: ``follow_touched`` is unset — a user toggle is never overwritten.
+    #: User-owned follow flag (FRG-CRTR-004). Only ever set by the explicit follow
+    #: API — the system never seeds, defaults, or derives it from library contents
+    #: (owner decision 2026-07-11).
     followed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     #: Set (to "now") the first time the USER toggles ``followed`` via the API.
-    #: ``NULL`` = never user-touched; threshold seeding may set/keep ``followed``
-    #: only for such rows, and prune spares any non-NULL row even when creditless.
+    #: ``NULL`` = never user-touched; prune spares any non-NULL row even when
+    #: creditless, so a deliberate unfollow is never resurrected.
     follow_touched: Mapped[dt.datetime | None] = mapped_column(
         StrictDateTime, nullable=True
     )
-    #: When ``followed`` last became true (seed time or user follow); display-only.
+    #: When ``followed`` last became true (via an explicit user follow);
+    #: display-only.
     followed_at: Mapped[dt.datetime | None] = mapped_column(StrictDateTime, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(StrictDateTime, nullable=False)
 

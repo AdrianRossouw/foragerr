@@ -172,6 +172,82 @@ async def test_list_paging_sort_and_followed_filter(tmp_path):
         assert bad.json()["errors"][0]["field"] == "sortKey"
 
 
+# --- FRG-API-023: seriesId focus filter (FRG-UI-027 focus chip) -------------
+
+
+@pytest.mark.req("FRG-API-023")
+async def test_series_filter_returns_only_credited_creators(tmp_path):
+    async with running_app(tmp_path) as (app, client):
+        ids = await _seed_library(app, tmp_path)
+
+        # S1 credits Alice (writer) + Bob (penciler); S2 credits only Alice.
+        s1 = (await client.get(f"/api/v1/creators?seriesId={ids['s1']}")).json()
+        assert {r["name"] for r in s1["records"]} == {"Alice", "Bob"}
+        assert s1["totalRecords"] == 2
+        # Header aggregates stay GLOBAL regardless of the focus (FRG-UI-027).
+        assert s1["totalCreators"] == 2 and s1["followedCreators"] == 1
+
+        s2 = (await client.get(f"/api/v1/creators?seriesId={ids['s2']}")).json()
+        assert {r["name"] for r in s2["records"]} == {"Alice"}
+        assert s2["totalRecords"] == 1
+        assert s2["totalCreators"] == 2 and s2["followedCreators"] == 1
+
+
+@pytest.mark.req("FRG-API-023")
+async def test_series_filter_composes_with_followed_and_paging(tmp_path):
+    async with running_app(tmp_path) as (app, client):
+        ids = await _seed_library(app, tmp_path)
+
+        # seriesId + followed: S1 credits Alice + Bob, but only Alice is followed.
+        both = (
+            await client.get(
+                f"/api/v1/creators?seriesId={ids['s1']}&followed=true"
+            )
+        ).json()
+        assert [r["name"] for r in both["records"]] == ["Alice"]
+        assert both["totalRecords"] == 1
+        assert both["totalCreators"] == 2 and both["followedCreators"] == 1
+
+        # seriesId + paging: the two S1 creators window across two pages.
+        p1 = (
+            await client.get(f"/api/v1/creators?seriesId={ids['s1']}&pageSize=1&page=1")
+        ).json()
+        p2 = (
+            await client.get(f"/api/v1/creators?seriesId={ids['s1']}&pageSize=1&page=2")
+        ).json()
+        assert len(p1["records"]) == 1 and len(p2["records"]) == 1
+        assert p1["totalRecords"] == 2
+        assert {p1["records"][0]["name"], p2["records"][0]["name"]} == {"Alice", "Bob"}
+
+
+@pytest.mark.req("FRG-API-023")
+async def test_unknown_series_filter_is_empty_with_global_aggregates(tmp_path):
+    async with running_app(tmp_path) as (app, client):
+        await _seed_library(app, tmp_path)
+
+        body = (await client.get("/api/v1/creators?seriesId=999999")).json()
+        assert body["records"] == []
+        assert body["totalRecords"] == 0
+        # The header count line remains the whole-library aggregate (FRG-UI-027).
+        assert body["totalCreators"] == 2 and body["followedCreators"] == 1
+
+
+@pytest.mark.req("FRG-API-023")
+async def test_invalid_series_filter_is_rejected(tmp_path):
+    async with running_app(tmp_path) as (app, client):
+        await _seed_library(app, tmp_path)
+
+        # seriesId is validated ge=1. The house contract maps every
+        # RequestValidationError (query/path/body) to a uniform 400 (see
+        # api.errors._validation_exception_handler) rather than FastAPI's default
+        # 422, so a non-positive / non-integer value is a 400.
+        assert (await client.get("/api/v1/creators?seriesId=0")).status_code == 400
+        assert (await client.get("/api/v1/creators?seriesId=-3")).status_code == 400
+        assert (
+            await client.get("/api/v1/creators?seriesId=notanint")
+        ).status_code == 400
+
+
 # --- FRG-API-023: profile ----------------------------------------------------
 
 

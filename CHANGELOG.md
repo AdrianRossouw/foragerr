@@ -9,6 +9,36 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.5.2] — 2026-07-11
+
+m5-creators-screens: the Creators pages arrive, and follows become
+explicit-only.
+
+### Added
+- **Creators screen** (FRG-UI-027): a grid of everyone credited on your
+  comics — roles, series counts, covers of their work in your library, and
+  a Follow pill. Filter to followed creators, or arrive from a series page
+  focused on just its creators. Creators joins the sidebar.
+- **Creator profiles** (FRG-UI-028): roles, publishers, how much of a
+  creator's work you own, and per-series role chips — each work linking
+  back to its series.
+- **Series credits** (FRG-UI-004): series pages show their credited
+  creators, linking into the creator pages.
+
+### Known issue
+- Real-world credit ingest is currently empty: ComicVine's issue *list*
+  API does not serve `person_credits` (only the per-issue detail endpoint
+  does), which surfaced while capturing these screens against live data.
+  The Creators pages render their honest empty state until the follow-up
+  release switches ingest to per-issue detail fetches.
+
+### Changed
+- **Follows are explicit-only** (FRG-CRTR-004, owner decision): v0.5.0's
+  "auto-follow anyone credited on 2+ of your series" seeding is removed,
+  and follows it created are cleared on upgrade — follows you set yourself
+  are untouched. Following someone is always your action, and it never
+  downloads anything.
+
 ## [v0.5.1] — 2026-07-11
 
 pull-enabled-default: the weekly-pull source is on by default.
