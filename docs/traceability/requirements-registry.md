@@ -269,6 +269,8 @@ moved `M5`→`M8`.
 | FRG-UI-024 | System → Logs screen | ui | implemented | M4 |
 | FRG-UI-025 | Issue bulk selection and actions | ui | implemented | M4 |
 | FRG-UI-026 | Collections tab | ui | implemented | M4 |
+| FRG-UI-027 | Creators grid screen | ui | approved | M5 |
+| FRG-UI-028 | Creator profile screen | ui | approved | M5 |
 | FRG-OPDS-001 | OPDS 1.2 Atom catalog with navigation root | opds | implemented | M1 |
 | FRG-OPDS-002 | Acquisition feeds with per-entry metadata | opds | implemented | M1 |
 | FRG-OPDS-003 | Library-id-based file resolution only (no client-supplied paths) | opds | implemented | M1 |
