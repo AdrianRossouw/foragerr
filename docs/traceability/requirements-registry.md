@@ -334,6 +334,9 @@ moved `M5`→`M8`.
 | FRG-AUTH-008 | at-rest secret encryption | auth | approved | M6 |
 | FRG-AUTH-009 | login rate limiting and audit | auth | approved | M8 |
 | FRG-AUTH-010 | uniform coverage of all surfaces | auth | approved | M8 |
+| FRG-AUTH-011 | mandatory environment key at startup | auth | proposed | M6 |
+| FRG-AUTH-012 | decrypt failure degrades the integration, not the service | auth | proposed | M6 |
+| FRG-AUTH-013 | plaintext secret migration on first keyed boot | auth | proposed | M6 |
 | FRG-NFR-001 | startup time | nfr | implemented | M2 |
 | FRG-NFR-002 | library scan throughput | nfr | implemented | M2 |
 | FRG-NFR-003 | UI responsiveness at library scale | nfr | implemented | M2 |
