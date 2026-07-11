@@ -102,6 +102,7 @@ written into an OpenSpec change proposal.
 | PULL | Weekly pull / release calendar |
 | ARC  | Story arcs |
 | CRTR | Creators & follows (M5) |
+| SRC  | Store sources & entitlements (M6: Humble Bundle first) |
 | TOR  | Torrents (deferred) |
 | NOTIF| Notifications |
 | SCHED| Scheduling & queues |
