@@ -37,9 +37,10 @@ async def set_creator_followed(
 ) -> CreatorRow:
     """Set a creator's user-owned follow flag and stamp ``follow_touched``.
 
-    Stamping ``follow_touched`` records that the flag is now user-owned, so the
-    reconciliation seeder (FRG-CRTR-004) never re-seeds or overwrites it — an
-    unfollow sticks across refreshes. ``followed_at`` advances only when
+    Stamping ``follow_touched`` records that the flag is now user-owned. A follow
+    is only ever explicit (FRG-CRTR-004, owner decision 2026-07-11): reconciliation
+    writes credits and prunes orphans but never sets ``followed``, so a user's
+    follow/unfollow sticks across refreshes. ``followed_at`` advances only when
     following; unfollowing leaves the prior timestamp for reference.
     """
     row = await session.get(CreatorRow, creator_id)

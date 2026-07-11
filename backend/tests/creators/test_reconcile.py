@@ -1,8 +1,10 @@
-"""Credit reconciliation, prune, and follow seeding (FRG-CRTR-002/004).
+"""Credit reconciliation, prune, and explicit-only follows (FRG-CRTR-002/004).
 
 Drives a real ``refresh_series`` through the ``FakeCV`` harness so ingest,
 mapping, storage, and reconciliation are exercised exactly as production runs
-them, inside the single refresh write transaction.
+them, inside the single refresh write transaction. Reconciliation NEVER derives
+a follow (owner decision 2026-07-11); ``followed`` only ever changes through the
+explicit follow API.
 """
 
 from __future__ import annotations
@@ -141,7 +143,8 @@ async def test_reconcile_creates_creators_and_credits(
     assert names == {"Alice", "Bob"}
     # Alice writer on both issues (2 rows) + Bob artist on one (1 row).
     assert len(await _credits_for_series(db, sid)) == 3
-    # Single-series creators are not seeded followed.
+    # Reconciliation never derives a follow: a freshly ingested creator is
+    # unfollowed until an explicit API toggle.
     assert (await _creator_by_name(db, "Alice")).followed is False
 
 
@@ -269,146 +272,145 @@ async def test_issue_delete_cascades_credits_and_prunes_orphan_creator(
     assert {c.role_normalized for c in await _credits_for_series(db, sid)} == {"writer"}
 
 
-# --- FRG-CRTR-004: follow flag + threshold seeding --------------------------
+# --- FRG-CRTR-004: explicit-only follows (no derived follow) -----------------
 
 
-async def _seed_two_series_creator(
-    db, settings, commands, root_folder_path, format_profile_id
+async def _credit_alice_across_series(
+    db, settings, commands, root_folder_path, format_profile_id, cv_volume_ids
 ) -> int:
-    """Refresh two series both crediting Alice; return her creator id."""
-    s1 = await _make_series(db, root_folder_path, format_profile_id, cv_volume_id=1)
-    s2 = await _make_series(db, root_folder_path, format_profile_id, cv_volume_id=2)
-    f1 = FakeCV().volume(1).issues(
-        1,
-        [
-            issue(100, "1", credits=[credit(10, "Alice", "writer")]),
-            issue(101, "2", credits=[credit(20, "Carol", "letterer")]),
-        ],
-    )
-    f2 = FakeCV().volume(2).issues(
-        2, [issue(200, "1", credits=[credit(10, "Alice", "artist")])]
-    )
-    await _run_refresh(db, settings, s1, commands, f1)
-    await _run_refresh(db, settings, s2, commands, f2)
+    """Refresh each of ``cv_volume_ids`` crediting Alice (cv 10); return her id.
+
+    Each series ``v`` gets a single issue with cv id ``100 * v`` so re-refreshing
+    a series by volume can address the same issue.
+    """
+    for cv_volume_id in cv_volume_ids:
+        sid = await _make_series(
+            db, root_folder_path, format_profile_id, cv_volume_id=cv_volume_id
+        )
+        fake = FakeCV().volume(cv_volume_id).issues(
+            cv_volume_id,
+            [issue(100 * cv_volume_id, "1", credits=[credit(10, "Alice", "writer")])],
+        )
+        await _run_refresh(db, settings, sid, commands, fake)
     return (await _creator_by_name(db, "Alice")).id
 
 
 @pytest.mark.req("FRG-CRTR-004")
-async def test_threshold_seeding_two_series_follows_one_series_does_not(
+async def test_reconcile_never_derives_a_follow_even_across_many_series(
     db, settings, commands, root_folder_id, root_folder_path, format_profile_id
 ):
-    await _seed_two_series_creator(
-        db, settings, commands, root_folder_path, format_profile_id
+    """Tripwire: a creator credited in THREE distinct library series is never
+    auto-followed. Reconciliation does not seed, default, or otherwise derive
+    ``followed`` (owner decision 2026-07-11) — only the explicit API sets it."""
+    await _credit_alice_across_series(
+        db, settings, commands, root_folder_path, format_profile_id, [1, 2, 3]
     )
     alice = await _creator_by_name(db, "Alice")
-    carol = await _creator_by_name(db, "Carol")
-    # Alice spans two series -> seeded followed; follow_touched stays NULL.
-    assert alice.followed is True
+    assert alice.followed is False
     assert alice.follow_touched is None
-    assert alice.followed_at is not None
-    # Carol is in one series only -> stays unfollowed.
-    assert carol.followed is False
+    assert alice.followed_at is None
 
 
 @pytest.mark.req("FRG-CRTR-004")
-async def test_user_unfollow_is_never_overwritten_by_refresh(
+async def test_user_follow_is_never_overwritten_by_refresh(
     db, settings, commands, root_folder_id, root_folder_path, format_profile_id
 ):
-    alice_id = await _seed_two_series_creator(
-        db, settings, commands, root_folder_path, format_profile_id
+    """A user's explicit follow survives later refreshes — reconciliation never
+    writes ``followed`` in either direction (FRG-CRTR-004 user-toggle scenario)."""
+    alice_id = await _credit_alice_across_series(
+        db, settings, commands, root_folder_path, format_profile_id, [1, 2]
     )
-    # User unfollows the seeded creator -> follow_touched set.
     async with db.write_session() as session:
-        await creators_repo.set_creator_followed(session, alice_id, False)
+        await creators_repo.set_creator_followed(session, alice_id, True)
 
-    # Re-refresh both series (Alice still spans two series) -> seeding must NOT
-    # re-follow her, because the flag is now user-owned.
-    f1 = FakeCV().volume(1).issues(
-        1, [issue(100, "1", credits=[credit(10, "Alice", "writer")])]
+    # Re-refresh both series -> the explicit follow is untouched.
+    await _refresh_by_cv_volume(
+        db, settings, commands, 1,
+        FakeCV().volume(1).issues(
+            1, [issue(100, "1", credits=[credit(10, "Alice", "writer")])]
+        ),
     )
-    f2 = FakeCV().volume(2).issues(
-        2, [issue(200, "1", credits=[credit(10, "Alice", "artist")])]
+    await _refresh_by_cv_volume(
+        db, settings, commands, 2,
+        FakeCV().volume(2).issues(
+            2, [issue(200, "1", credits=[credit(10, "Alice", "writer")])]
+        ),
     )
-    await _refresh_by_cv_volume(db, settings, commands, 1, f1)
-    await _refresh_by_cv_volume(db, settings, commands, 2, f2)
 
     alice = await _creator_by_cv(db, 10)
-    assert alice.followed is False
+    assert alice.followed is True
     assert alice.follow_touched is not None
 
 
 @pytest.mark.req("FRG-CRTR-004")
-async def test_touched_creditless_creator_survives_and_is_not_reseeded(
+async def test_user_unfollow_survives_prune_and_is_never_re_followed(
     db, settings, commands, root_folder_id, root_folder_path, format_profile_id
 ):
-    alice_id = await _seed_two_series_creator(
-        db, settings, commands, root_folder_path, format_profile_id
+    """A user-unfollowed creator who becomes creditless survives the prune (the
+    touched predicate spares her, preserving the unfollow memory), and a later
+    re-ingest never re-follows her — reconciliation derives no follow."""
+    alice_id = await _credit_alice_across_series(
+        db, settings, commands, root_folder_path, format_profile_id, [1, 2]
     )
     async with db.write_session() as session:
         await creators_repo.set_creator_followed(session, alice_id, False)
 
-    # Drop Alice from both series entirely -> she becomes creditless but, being
-    # user-touched, must NOT be pruned (pruning would erase the unfollow memory).
-    empty1 = FakeCV().volume(1).issues(
-        1,
-        [
-            issue(100, "1", credits=[]),
-            issue(101, "2", credits=[credit(20, "Carol", "letterer")]),
-        ],
+    # Drop Alice from both series -> creditless but touched, so prune spares her.
+    await _refresh_by_cv_volume(
+        db, settings, commands, 1,
+        FakeCV().volume(1).issues(1, [issue(100, "1", credits=[])]),
     )
-    empty2 = FakeCV().volume(2).issues(2, [issue(200, "1", credits=[])])
-    await _refresh_by_cv_volume(db, settings, commands, 1, empty1)
-    await _refresh_by_cv_volume(db, settings, commands, 2, empty2)
-
+    await _refresh_by_cv_volume(
+        db, settings, commands, 2,
+        FakeCV().volume(2).issues(2, [issue(200, "1", credits=[])]),
+    )
     alice = await _creator_by_cv(db, 10)
     assert alice is not None  # survived the creditless period
     assert alice.followed is False
+    assert alice.follow_touched is not None
 
-    # Re-ingest Alice into both series again -> because follow_touched is set,
-    # threshold seeding must NOT re-follow the deliberately-unfollowed creator.
-    f1 = FakeCV().volume(1).issues(
-        1, [issue(100, "1", credits=[credit(10, "Alice", "writer")])]
+    # Re-ingest Alice into both series -> still unfollowed; reconciliation never
+    # re-follows the deliberately-unfollowed creator.
+    await _refresh_by_cv_volume(
+        db, settings, commands, 1,
+        FakeCV().volume(1).issues(
+            1, [issue(100, "1", credits=[credit(10, "Alice", "writer")])]
+        ),
     )
-    f2 = FakeCV().volume(2).issues(
-        2, [issue(200, "1", credits=[credit(10, "Alice", "artist")])]
+    await _refresh_by_cv_volume(
+        db, settings, commands, 2,
+        FakeCV().volume(2).issues(
+            2, [issue(200, "1", credits=[credit(10, "Alice", "writer")])]
+        ),
     )
-    await _refresh_by_cv_volume(db, settings, commands, 1, f1)
-    await _refresh_by_cv_volume(db, settings, commands, 2, f2)
-
     alice = await _creator_by_cv(db, 10)
-    assert alice.followed is False  # never re-seeded
+    assert alice.followed is False
 
 
 @pytest.mark.req("FRG-CRTR-002")
-async def test_followed_creditless_creator_survives_prune(
+async def test_followed_creator_survives_prune(
     db, settings, commands, root_folder_id, root_folder_path, format_profile_id
 ):
-    """A currently-FOLLOWED creator (not user-touched) with zero remaining
-    credits survives the prune — the ``followed`` predicate spares it, so a
-    threshold-seeded follow is never silently erased by a later refresh that
-    drops all its credits (the followed-branch complement of the touched case)."""
-    await _seed_two_series_creator(
-        db, settings, commands, root_folder_path, format_profile_id
+    """A currently-FOLLOWED creator with zero remaining credits survives the
+    prune — the ``followed`` predicate spares her, so an explicit follow is never
+    silently erased by a later refresh that drops all her credits."""
+    alice_id = await _credit_alice_across_series(
+        db, settings, commands, root_folder_path, format_profile_id, [1, 2]
     )
-    alice = await _creator_by_name(db, "Alice")
-    # Seeded followed by crossing the two-series threshold; never user-touched.
-    assert alice.followed is True
-    assert alice.follow_touched is None
+    async with db.write_session() as session:
+        await creators_repo.set_creator_followed(session, alice_id, True)
 
-    # Drop Alice from BOTH series -> she becomes creditless. Because she is
-    # followed (even though follow_touched is NULL), prune must spare her.
-    empty1 = FakeCV().volume(1).issues(
-        1,
-        [
-            issue(100, "1", credits=[]),
-            issue(101, "2", credits=[credit(20, "Carol", "letterer")]),
-        ],
+    # Drop Alice from BOTH series -> creditless but followed, so prune spares her.
+    await _refresh_by_cv_volume(
+        db, settings, commands, 1,
+        FakeCV().volume(1).issues(1, [issue(100, "1", credits=[])]),
     )
-    empty2 = FakeCV().volume(2).issues(2, [issue(200, "1", credits=[])])
-    await _refresh_by_cv_volume(db, settings, commands, 1, empty1)
-    await _refresh_by_cv_volume(db, settings, commands, 2, empty2)
+    await _refresh_by_cv_volume(
+        db, settings, commands, 2,
+        FakeCV().volume(2).issues(2, [issue(200, "1", credits=[])]),
+    )
 
     alice = await _creator_by_cv(db, 10)
     assert alice is not None  # survived the creditless prune
     assert alice.followed is True
-    assert alice.follow_touched is None  # still never user-touched
+    assert alice.follow_touched is not None  # explicit follow stamped the marker

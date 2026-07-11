@@ -108,9 +108,10 @@ async def refresh_series(
 
         # Per-issue creator credits ride the same fetch + transaction
         # (FRG-CRTR-001/002/004): upsert creators, replace each fetched issue's
-        # credit set, prune orphaned creators, and threshold-seed follows. Runs
-        # after the issue reconcile so deleted issues have cascaded their credits
-        # and inserted issues have ids.
+        # credit set, and prune orphaned creators. It never sets ``followed`` —
+        # a follow is only ever explicit (owner decision 2026-07-11). Runs after
+        # the issue reconcile so deleted issues have cascaded their credits and
+        # inserted issues have ids.
         await reconcile_series_credits(session, series.id, page.items)
 
         series.publisher = record.publisher
