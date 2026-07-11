@@ -37,7 +37,9 @@ from foragerr.pull.commands import (
     PULL_REFRESH_TASK,
     PullRefreshCommand,
     _fetch_weeks,
+    _future_week_key,
     _handle_pull_refresh,
+    _week_key,
     pull_refresh_task_registration,
     register_pull_refresh_task,
 )
@@ -364,7 +366,115 @@ async def test_scheduled_tick_is_throttled_within_the_interval_but_force_run_byp
 
 
 @pytest.mark.req("FRG-PULL-006")
-def test_fetch_weeks_are_current_and_previous_iso_weeks():
-    """A run fetches the current + previous release weeks (FRG-PULL-002)."""
+@pytest.mark.req("FRG-PULL-009")
+def test_fetch_weeks_are_current_previous_and_next_iso_weeks():
+    """A run fetches the current + previous + next release weeks (FRG-PULL-002
+    widened by FRG-PULL-009)."""
     weeks = _fetch_weeks(as_of=dt.date(2026, 7, 8))  # ISO 2026-W28
-    assert weeks == [(28, 2026), (27, 2026)]
+    assert weeks == [(28, 2026), (27, 2026), (29, 2026)]
+    assert _future_week_key(as_of=dt.date(2026, 7, 8)) == "2026-W29"
+
+
+# --- FRG-PULL-009: future / solicited releases -------------------------------
+
+
+def _week_entry(week: int, year: int, series: str, issue: str):
+    """A parsed entry whose ship date falls inside ``(week, year)`` so it stores
+    (and would match) under that week's key (FRG-PULL-004 week guard)."""
+    return _entry(series, issue, day=dt.date.fromisocalendar(year, week, 3))
+
+
+@pytest.mark.req("FRG-PULL-009")
+async def test_next_week_entries_are_stored_and_refresh_is_idempotent(
+    db, tmp_path, config_dir, command_registry, monkeypatch
+):
+    """The next ISO week is fetched and stored through the standard
+    replace-on-refresh, and a repeat refresh leaves exactly one copy of that
+    week (idempotent per FRG-PULL-003)."""
+    today = dt.date.today()
+    (cur_w, cur_y), (prev_w, prev_y), (fut_w, fut_y) = _fetch_weeks(today)
+    fut_key = _future_week_key(today)
+    outcome = PullFetchOutcome(
+        weeks=(
+            PullWeekResult(week=cur_w, year=cur_y, entries=(_week_entry(cur_w, cur_y, "Spawn", "10"),)),
+            PullWeekResult(week=prev_w, year=prev_y, entries=(_week_entry(prev_w, prev_y, "Spawn", "9"),)),
+            PullWeekResult(week=fut_w, year=fut_y, entries=(_week_entry(fut_w, fut_y, "Spawn", "11"),)),
+        )
+    )
+    _install_client(monkeypatch, outcome)
+    ctx, _svc = await _ctx(db, _settings(config_dir))
+
+    await _handle_pull_refresh(PullRefreshCommand(), ctx)
+    async with db.read_session() as session:
+        first = await repo.list_week(session, fut_key)
+    assert [r.issue_number for r in first] == ["11"]
+
+    await _handle_pull_refresh(PullRefreshCommand(), ctx)
+    async with db.read_session() as session:
+        second = await repo.list_week(session, fut_key)
+    # Replace-on-refresh: still exactly one row for the future week (idempotent).
+    assert [r.issue_number for r in second] == ["11"]
+
+
+@pytest.mark.req("FRG-PULL-009")
+async def test_empty_future_week_payload_is_skipped_not_stored(
+    db, tmp_path, config_dir, command_registry, monkeypatch
+):
+    """An empty payload for the future week is a logged skip only: current and
+    previous weeks still store, the future week gets no replace_week write (so a
+    prior future week is never clobbered), and the run is not an outage."""
+    today = dt.date.today()
+    (cur_w, cur_y), (prev_w, prev_y), (fut_w, fut_y) = _fetch_weeks(today)
+    cur_key = _week_key(cur_w, cur_y)
+    fut_key = _future_week_key(today)
+    outcome = PullFetchOutcome(
+        weeks=(
+            PullWeekResult(week=cur_w, year=cur_y, entries=(_week_entry(cur_w, cur_y, "Spawn", "10"),)),
+            PullWeekResult(week=prev_w, year=prev_y, entries=(_week_entry(prev_w, prev_y, "Spawn", "9"),)),
+            PullWeekResult(week=fut_w, year=fut_y, entries=()),  # source has no future data yet
+        )
+    )
+    _install_client(monkeypatch, outcome)
+    ctx, _svc = await _ctx(db, _settings(config_dir))
+
+    summary = await _handle_pull_refresh(PullRefreshCommand(), ctx)
+
+    async with db.read_session() as session:
+        stored_current = await repo.list_week(session, cur_key)
+        stored_future = await repo.list_week(session, fut_key)
+    assert [r.issue_number for r in stored_current] == ["10"]  # current still stored
+    assert stored_future == []  # no empty week written for the future
+    assert "degraded" not in summary  # not an outage
+    assert "future week(s) skipped" in summary
+
+
+@pytest.mark.req("FRG-PULL-009")
+async def test_bad_date_on_future_week_skips_only_that_week(
+    db, tmp_path, config_dir, command_registry, monkeypatch
+):
+    """A 619 bad-date for the future week (skipped source-side) skips only that
+    week: the current and previous weeks still store, and the run is not an
+    outage."""
+    today = dt.date.today()
+    (cur_w, cur_y), (prev_w, prev_y), (fut_w, fut_y) = _fetch_weeks(today)
+    cur_key = _week_key(cur_w, cur_y)
+    prev_key = _week_key(prev_w, prev_y)
+    fut_key = _future_week_key(today)
+    outcome = PullFetchOutcome(
+        weeks=(
+            PullWeekResult(week=cur_w, year=cur_y, entries=(_week_entry(cur_w, cur_y, "Spawn", "10"),)),
+            PullWeekResult(week=prev_w, year=prev_y, entries=(_week_entry(prev_w, prev_y, "Spawn", "9"),)),
+        ),
+        skipped=((fut_w, fut_y),),
+    )
+    _install_client(monkeypatch, outcome)
+    ctx, _svc = await _ctx(db, _settings(config_dir))
+
+    summary = await _handle_pull_refresh(PullRefreshCommand(), ctx)
+
+    async with db.read_session() as session:
+        assert [r.issue_number for r in await repo.list_week(session, cur_key)] == ["10"]
+        assert [r.issue_number for r in await repo.list_week(session, prev_key)] == ["9"]
+        assert await repo.list_week(session, fut_key) == []
+    assert "degraded" not in summary  # not an outage
+    assert "skipped (bad-date)" in summary

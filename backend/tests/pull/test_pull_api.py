@@ -18,6 +18,8 @@ from foragerr.pull.projection import current_week
 WEEK = "2026-W28"
 MONDAY = dt.date(2026, 7, 6)
 IN_WEEK = MONDAY + dt.timedelta(days=2)
+NEXT_WEEK = "2026-W29"
+NEXT_IN_WEEK = dt.date.fromisocalendar(2026, 29, 3)
 
 
 @pytest.fixture
@@ -112,6 +114,58 @@ async def _seed_week(db, tmp_path) -> dict[str, int]:
     }
 
 
+async def _seed_future_week(db, tmp_path) -> dict[str, int]:
+    """A watched series with a monitored, not-yet-released issue due next ISO
+    week (library-primary row) plus a stored unmatched pull entry for that same
+    future week (FRG-PULL-009)."""
+    profile_id = await _format_profile_id(db)
+    root = tmp_path / "lib-root"
+    root.mkdir(exist_ok=True)
+    async with db.write_session() as session:
+        rf = await library_repo.create_root_folder(session, str(root))
+        series = await library_repo.create_series(
+            session,
+            cv_volume_id=1,
+            title="Saga",
+            start_year=2024,
+            format_profile_id=profile_id,
+            root_folder_id=rf.id,
+            path=str(root / "Saga"),
+            monitored=True,
+            publisher="Image",
+        )
+        await session.flush()
+        upcoming = await library_repo.create_issue(
+            session,
+            series_id=series.id,
+            cv_issue_id=201,
+            issue_number="1",
+            store_date=NEXT_IN_WEEK,
+            monitored=True,
+        )
+        await session.flush()
+        series_id, upcoming_id = series.id, upcoming.id
+    async with db.write_session() as session:
+        rows = await pull_repo.replace_week(
+            session,
+            NEXT_WEEK,
+            [
+                ParsedPullEntry(
+                    series_name="Brand New Thing",
+                    issue_number="1",
+                    release_date=NEXT_IN_WEEK,
+                    publisher="Some Press",
+                )
+            ],
+        )
+        unmatched_entry_id = rows[0].id
+    return {
+        "series_id": series_id,
+        "upcoming_id": upcoming_id,
+        "unmatched_entry_id": unmatched_entry_id,
+    }
+
+
 _ENVELOPE_KEYS = {"page", "pageSize", "sortKey", "sortDirection", "totalRecords", "records"}
 
 
@@ -150,6 +204,27 @@ def test_stored_and_matched_week_derives_fields_correctly(client, tmp_path):
     dumped = str(body).lower()
     for forbidden in ("apikey", "api_key", "token", "password", "secret"):
         assert forbidden not in dumped
+
+
+@pytest.mark.req("FRG-PULL-009")
+def test_future_week_merges_stored_entries_with_library_rows(client, tmp_path):
+    """GET /api/v1/pull?week=<next ISO week> merges the stored future-week pull
+    entries with the library-primary rows for watched issues due that week."""
+    ids = client.portal.call(_seed_future_week, client.app.state.db, tmp_path)
+    body = client.get(f"/api/v1/pull?week={NEXT_WEEK}&pageSize=200").json()
+    assert _ENVELOPE_KEYS <= body.keys()
+
+    by_issue = {
+        r["matchedIssueId"]: r
+        for r in body["records"]
+        if r["matchedIssueId"] is not None
+    }
+    assert ids["upcoming_id"] in by_issue
+    assert by_issue[ids["upcoming_id"]]["series"] == {"id": ids["series_id"], "title": "Saga"}
+
+    unmatched = [r for r in body["records"] if r["matchedIssueId"] is None]
+    assert [r["id"] for r in unmatched] == [ids["unmatched_entry_id"]]
+    assert unmatched[0]["matchType"] == "unmatched"
 
 
 @pytest.mark.req("FRG-API-019")
