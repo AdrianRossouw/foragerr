@@ -9,6 +9,16 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.5.4] — 2026-07-11
+
+calendar-discovery-default: the Calendar opens on the whole week.
+
+### Changed
+- **Calendar defaults to All releases** (FRG-UI-018, owner decision): the
+  weekly view doubles as discovery of books you don't follow yet — the
+  Mylar pull-list philosophy — so it now opens on the full week, with the
+  Following scope one click away to narrow to your library.
+
 ## [v0.5.3] — 2026-07-11
 
 m5-credits-live-fetch: creator credits now actually arrive — fixes the

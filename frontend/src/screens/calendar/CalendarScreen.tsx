@@ -153,7 +153,7 @@ export function CalendarScreen() {
     }
   }, [rawWeek, weekParamValid, setSearchParams]);
 
-  const [scope, setScope] = useState<Scope>('following');
+  const [scope, setScope] = useState<Scope>('all');
   const [publisher, setPublisher] = useState<string>('all');
 
   const { data, isLoading, isError } = useWeeklyPull(week);

@@ -131,9 +131,11 @@ given store week, not a month grid — comics land in one Wednesday drop, and th
 layout embraces that with a "New Comic Day" badge on Wednesday and a "Today"
 marker. Navigate weeks with ‹ / › and jump back with **This Week**; the week you
 are viewing is in the URL, so back/forward and reloads keep your place. The view
-defaults to **Following** — releases from series in your library, with a
-"+N more titles shipping" note for everything else — and flips to
-**All releases** to show the full week, publisher-filterable either way. Each
+defaults to **All releases** — the whole week's books, so the calendar reads as a
+discovery surface first, with an "N followed" marker on days carrying series you
+already track. Switch to **Following** to narrow to just your library, where a
+"+N more titles shipping" note stands in for everything else; either scope is
+publisher-filterable. Each
 release card carries its live state (wanted, downloading, downloaded,
 unmonitored), computed from the issue and queue exactly like everywhere else;
 nothing is stored on the calendar itself. Cards for issues in your library offer

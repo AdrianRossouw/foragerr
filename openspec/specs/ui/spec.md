@@ -606,8 +606,11 @@ handoff (§4 Calendar) — one week at a time, days as vertical groups, never a
   with the target ISO week (the server holds no navigation state). "This
   Week" SHALL return to the current store-date week from any offset.
 - **Scope toggle**: a `Following / All releases` segmented control,
-  defaulting to Following. Following shows only entries linked to library
-  series (matched or pending-refresh); All releases shows every entry.
+  **defaulting to All releases** — the weekly view doubles as discovery of
+  unfollowed books (owner decision 2026-07-11; Mylar pull-list philosophy,
+  superseding the handoff's Following default). Following shows only
+  entries linked to library series (matched or pending-refresh); All
+  releases shows every entry.
   In Following scope, a day with hidden entries SHALL show a
   "+N more titles shipping" note; in All releases scope, a day with followed
   entries SHALL show an "N followed" count.
@@ -645,13 +648,13 @@ strip are governed by FRG-PULL-007 and FRG-PULL-008.
   to 200 rows; the client aggregates pages when a week exceeds one page).
   No iCal feed (non-goal).
 
-#### Scenario: Default load shows the current week in Following scope
+#### Scenario: Default load shows the current week's ALL releases
 
 - **WHEN** the Calendar screen loads with no navigation state
-- **THEN** it requests the current store-date week (no `week` param needed),
-  renders only entries linked to library series grouped by day with the
-  range label, and marks Wednesday "New Comic Day" and the current date
-  "Today"
+- **THEN** it requests the current store-date week (no `week` param needed)
+  and renders every entry — followed and unfollowed alike — grouped by day
+  with the range label, marking Wednesday "New Comic Day" and the current
+  date "Today", so the week reads as a discovery surface first
 
 #### Scenario: Week navigation is parameterised and reversible
 
@@ -660,13 +663,13 @@ strip are governed by FRG-PULL-007 and FRG-PULL-008.
   week (+1, +2, then current), the range label follows, and no server-side
   navigation state is involved
 
-#### Scenario: All-releases scope reveals unfollowed entries
+#### Scenario: Following scope narrows to library entries
 
-- **WHEN** the user switches the scope toggle to "All releases" on a week
+- **WHEN** the user switches the scope toggle to "Following" on a week
   containing both linked and unmatched entries
-- **THEN** unmatched entries become visible in their day groups, days show
-  their "N followed" count where applicable, and switching back to Following
-  hides them again behind a "+N more titles shipping" note
+- **THEN** only entries linked to library series remain, days show the
+  "+N more titles shipping" note for what was hidden, and switching back to
+  All releases restores the full week with its "N followed" day counts
 
 #### Scenario: Derived state is projected, never stored
 
