@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from foragerr.metadata.credits import map_person_credits
 from foragerr.metadata.models import IssueRecord, IssueRef, SeriesRecord
 from foragerr.metadata.sanitize import sanitize_cv_text
 
@@ -140,6 +141,7 @@ def map_issue(payload: dict[str, Any]) -> IssueRecord:
         cover_date=_date(payload.get("cover_date")),
         store_date=_date(payload.get("store_date")),
         image_url=_image_url(payload.get("image")),
+        credits=map_person_credits(payload.get("person_credits")),
     )
 
 

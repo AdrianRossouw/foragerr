@@ -20,6 +20,7 @@ from sqlalchemy import func, select
 
 from foragerr.commands.service import CommandService, HandlerContext
 from foragerr.config import Settings
+from foragerr.creators import reconcile_series_credits
 from foragerr.db import Database, queue_event
 from foragerr.db.base import utcnow
 from foragerr.http import HttpClientFactory
@@ -104,6 +105,13 @@ async def refresh_series(
             return f"series {series_id} no longer exists; refresh skipped"
 
         stats = await _reconcile(session, series, page)
+
+        # Per-issue creator credits ride the same fetch + transaction
+        # (FRG-CRTR-001/002/004): upsert creators, replace each fetched issue's
+        # credit set, prune orphaned creators, and threshold-seed follows. Runs
+        # after the issue reconcile so deleted issues have cascaded their credits
+        # and inserted issues have ids.
+        await reconcile_series_credits(session, series.id, page.items)
 
         series.publisher = record.publisher
         series.start_year = record.start_year

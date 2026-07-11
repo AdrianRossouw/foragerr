@@ -133,11 +133,15 @@ def test_full_app_lifecycle_starts_runs_and_drains_cleanly(config_dir):
         # tracking refresh (FRG-DL-007) + DDL queue drainer (ddl area), the
         # m1-import-pipeline completed-download drain (FRG-DL-009, flows area),
         # the scheduled DB+config backup task (FRG-DB-009,
-        # m2-ops-health-backups), and the weekly pull-refresh task
-        # (FRG-PULL-006, m3-pull-backbone).
+        # m2-ops-health-backups), the weekly pull-refresh task
+        # (FRG-PULL-006, m3-pull-backbone), and the one-time credits-backfill
+        # task (FRG-CRTR-003, m5-creators-backbone — registered only so it is
+        # force-runnable via the task surface; a huge interval + stamped
+        # last_run keep the recurring tick from ever auto-firing it).
         assert app.state.scheduler.task_names() == [
             "backlog-search",
             "backup-database",
+            "creators-backfill",
             "housekeeping",
             "process-ddl-queue",
             "process-imports",
