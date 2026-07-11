@@ -162,8 +162,14 @@ def issue(
     cover_date: str | None = None,
     store_date: str | None = None,
     image_url: str | None = None,
+    credits: list[dict] | None = None,
 ) -> dict:
-    """One CV issue JSON object for :meth:`FakeCV.issues`."""
+    """One CV issue JSON object for :meth:`FakeCV.issues`.
+
+    ``credits`` populates ``person_credits`` (each item a
+    ``{"id", "name", "role"}`` CV person-credit object) so credit ingest
+    (FRG-CRTR-001) can be exercised through the real client + mapper.
+    """
     payload: dict = {"id": cv_issue_id, "issue_number": number}
     if title is not None:
         payload["name"] = title
@@ -173,4 +179,11 @@ def issue(
         payload["store_date"] = store_date
     if image_url is not None:
         payload["image"] = {"original_url": image_url}
+    if credits is not None:
+        payload["person_credits"] = credits
     return payload
+
+
+def credit(cv_person_id: int, name: str, role: str) -> dict:
+    """One CV ``person_credits`` object for :func:`issue`'s ``credits`` list."""
+    return {"id": cv_person_id, "name": name, "role": role}

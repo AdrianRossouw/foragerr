@@ -62,7 +62,7 @@ SEARCH_VOLUME_FIELDS = (
     "id,name,publisher,imprint,start_year,count_of_issues,aliases,description,"
     "site_detail_url,first_issue,image"
 )
-ISSUE_FIELDS = "id,name,issue_number,cover_date,store_date,image,volume"
+ISSUE_FIELDS = "id,name,issue_number,cover_date,store_date,image,volume,person_credits"
 
 #: JSON-response byte cap (lower than the factory ceiling; ample per page).
 JSON_MAX_BYTES = 16_000_000

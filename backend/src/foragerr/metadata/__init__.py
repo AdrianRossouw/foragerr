@@ -17,6 +17,11 @@ from foragerr.metadata.comicvine import (
     user_agent,
 )
 from foragerr.metadata.covers import cache_cover
+from foragerr.metadata.credits import (
+    ROLE_VOCABULARY,
+    map_person_credits,
+    normalize_role,
+)
 from foragerr.metadata.errors import (
     COMICVINE_CREDENTIAL_MESSAGE,
     ComicVineAuthError,
@@ -28,6 +33,7 @@ from foragerr.metadata.errors import (
 )
 from foragerr.metadata.mapping import map_issue, map_volume
 from foragerr.metadata.models import (
+    CreditRecord,
     IssueRecord,
     IssueRef,
     Page,
@@ -56,10 +62,12 @@ __all__ = [
     "ComicVineRateLimited",
     "ComicVineUnavailable",
     "CoverHostNotAllowed",
+    "CreditRecord",
     "IssueRecord",
     "IssueRef",
     "Page",
     "Plausibility",
+    "ROLE_VOCABULARY",
     "SearchResult",
     "SeriesCandidate",
     "SeriesRecord",
@@ -69,7 +77,9 @@ __all__ = [
     "comicvine_health",
     "effective_interval",
     "map_issue",
+    "map_person_credits",
     "map_volume",
+    "normalize_role",
     "plausibility",
     "sanitize_cv_text",
     "sort_by_relevance",
