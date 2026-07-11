@@ -9,6 +9,44 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.4.6] — 2026-07-11
+
+m4-add-new: the Add New screen rebuilt to the M4 design, relevance-ranked
+ComicVine search, and an add-time "Collect as" choice.
+
+### Added
+- **Relevance-ranked lookup** (FRG-META-015): ComicVine search results are
+  ordered by closest title match (publication-year proximity as the tiebreak)
+  instead of raw alphabetical order, so the volume you meant is normally at the
+  top. Nothing is filtered out — every candidate the search found is still
+  listed, ranked. Lookup and autosuggest agree on order.
+- **Redesigned Add New screen** (FRG-UI-005): expandable result cards (cover,
+  title/year, publisher, issue count, description, "In library" badge) with an
+  inline add-config panel — root folder, format profile, monitor strategy, and
+  a **Collect as** choice.
+- **Add-time collected-edition typing** (FRG-SER-018): "Collect as → Collected
+  Editions" locks the series book-type at add; left untouched, foragerr types
+  it from the title cues as before.
+
+### Changed
+- Manual §Adding a series rewritten; README tour screenshots refreshed from a
+  dedicated clean instance (the refresh tool now runs on its own port,
+  FRG-PROC-017).
+
+### Security
+- The ComicVine text sanitizer (FRG-META-014) now strips Unicode
+  bidirectional-override and zero-width/invisible characters, closing a
+  Trojan-Source-style visual-spoofing vector on wiki-sourced text
+  (RISK-011/014). No executable-XSS was reachable (output is rendered as text).
+
+### Fixed
+- An explicit `null` book-type on the add API now locks single-issues typing
+  instead of being treated as omitted.
+- A part-way-failed autosuggest surfaces its failure note instead of a silent
+  empty dropdown.
+
+No dependency changes.
+
 ## [v0.4.5] — 2026-07-10
 
 roadmap-single-source: a process CAPA — forward-looking ("planned") text kept

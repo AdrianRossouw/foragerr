@@ -44,8 +44,20 @@
 - [x] 5.1 Sync meta/ser/ui deltas into main specs (FRG-PROC-003)
 - [x] 5.2 Full suites green; matrix regenerated (no gaps); soup_check exit 0
       (FRG-PROC-004, FRG-PROC-005, FRG-PROC-012)
-- [ ] 5.3 Tiered review gate — medium change: 4–5 angles + Codex full-diff;
+- [x] 5.3 Tiered review gate — medium change: 4–5 angles + Codex full-diff;
       apply findings; re-evidence (FRG-PROC-007)
-- [ ] 5.4 Merge `--no-ff`; tag v0.4.6 with CHANGELOG entry + pyproject bump
+      Gate record: 6 read-only angles (ranking correctness, backend
+      correctness, collect-as/SER-019 invariant, two frontend passes,
+      adversarial CV-input) + Codex full-diff. Ranking/frontend/process/
+      SER-019 all CLEAN. Real findings applied: (1) [adversarial, security]
+      sanitize_cv_text passed Unicode bidi-override + zero-width chars —
+      Trojan-Source visual-spoofing vector on the new CV description; stripped,
+      RISK-011 updated, leak-closure test (XSS never reachable — React text
+      nodes). (2) [Codex high] explicit JSON null booktype conflated with
+      omission → lock silently dropped; fixed via model_fields_set + test.
+      (3) [Codex medium] degraded suggest rendered silent empty dropdown →
+      failure note surfaced, 2 tests. Docstring/comment overclaims corrected.
+      Re-evidenced: backend 1712 / frontend 322 green, matrix no gaps, SOUP 0.
+- [x] 5.4 Merge `--no-ff`; tag v0.4.6 with CHANGELOG entry + pyproject bump
       landed on-branch BEFORE merge; push; gh release; archive change
       (FRG-PROC-007, FRG-PROC-013)

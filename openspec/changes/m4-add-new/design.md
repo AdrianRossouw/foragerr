@@ -39,7 +39,13 @@ Design reference: the handoff's `screens/add-new.png` + prototype logic
    — `upstream_index` makes the sort stable and total, so equal-signal
    candidates keep CV's order and pagination/caps behave unchanged.
    Alternative rejected: client-side sorting in React (would let lookup and
-   suggest drift and leaves the API contract "unordered").
+   suggest drift and leaves the API contract "unordered"). Note the relevance
+   sort operates *within* the pre-existing ~1000-candidate `name:asc` result
+   cap: a highly-relevant volume alphabetically beyond the cap is never handed
+   to the sort and cannot surface. This is unchanged by this work (the cap
+   predates it) and the `truncated`/`complete=false` flag already tells the
+   user to narrow the term — so "preserves every candidate" means every
+   candidate in the capped window, not the uncapped upstream set.
 2. **No new response fields.** The signals already ship on candidates; order
    itself is the new information. Frontend must render API order untouched.
 3. **Collect-as maps to the existing booktype/lock model** (FRG-SER-018), not
