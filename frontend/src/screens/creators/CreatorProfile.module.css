@@ -1,8 +1,9 @@
 /*
  * Creator profile (FRG-UI-028) — design handoff §8. Colors come only from the
  * token layer; role chips use the palettes.ts data map (inline styles). The
- * header gradient reuses the page surface plus a warm-green tint token. No
- * component hardcodes a palette hex (FRG-UI-002).
+ * header gradient reuses the page surface with a warm-green accent tint at its
+ * top stop (--color-accent-tint fading into --surface-page). No component
+ * hardcodes a palette hex (FRG-UI-002).
  */
 
 .content {
@@ -19,7 +20,7 @@
   padding: var(--spacing-xl) 36px 26px;
   background: linear-gradient(
     155deg,
-    var(--surface-chrome),
+    var(--color-accent-tint),
     var(--surface-page) 72%
   );
   border-bottom: 1px solid var(--surface-row-border);

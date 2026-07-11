@@ -4,8 +4,9 @@ Like :mod:`foragerr.library.repo`, every helper takes an already-open
 :class:`~sqlalchemy.ext.asyncio.AsyncSession`; nothing here opens its own
 session, so calls compose into a larger transaction. The follow-toggle
 (:func:`set_creator_followed`) is the storage side of FRG-API-023 / FRG-CRTR-004:
-it stamps ``follow_touched`` so the reconciliation seeder never overwrites the
-user's explicit choice on a later refresh.
+it stamps ``follow_touched`` to mark the flag user-owned. A follow is only ever
+explicit — reconciliation writes credits and prunes orphans but never sets
+``followed`` — so the user's choice sticks across later refreshes.
 """
 
 from __future__ import annotations

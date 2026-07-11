@@ -1,11 +1,17 @@
 import { type CSSProperties, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { Toolbar } from '../../components/Toolbar';
 import { SegmentedControl } from '../../components/SegmentedControl';
 import { InitialsAvatar } from '../../components/InitialsAvatar';
 import { BookOpenIcon, CheckIcon, CloseIcon, PlusIcon } from '../../components/icons';
 import { useCreatorsList, useSetCreatorFollow } from '../../api/hooks';
-import type { CreatorResource, CreatorWorkRef } from '../../api/types';
+import { queryKeys } from '../../api/queryKeys';
+import type {
+  CreatorResource,
+  CreatorWorkRef,
+  SeriesResource,
+} from '../../api/types';
 import { roleList } from '../../lib/roles';
 import styles from './CreatorsScreen.module.css';
 
@@ -39,9 +45,15 @@ export function CreatorsScreen() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
 
+  const queryClient = useQueryClient();
+
+  // The backend rejects a non-positive seriesId (Query ge=1), so a `?seriesId=0`
+  // that passes the digit regex would otherwise focus on an id the list read
+  // 400s on. Treat 0 (and anything below 1) as no focus at all.
   const rawSeriesId = searchParams.get('seriesId');
-  const focusId =
+  const parsedSeriesId =
     rawSeriesId !== null && /^\d+$/.test(rawSeriesId) ? Number(rawSeriesId) : null;
+  const focusId = parsedSeriesId !== null && parsedSeriesId >= 1 ? parsedSeriesId : null;
 
   // The followed-only filter is a URL param too, so it survives back/refresh and
   // a profile round-trip (the profile's back link returns to this exact URL).
@@ -80,16 +92,24 @@ export function CreatorsScreen() {
     );
   };
 
-  // The focus chip names the series without a second request: a focused list's
-  // every row carries that series in its work refs, so the title is right there.
+  // The focus chip names the series without a second request. Prefer the
+  // client-side library index (the same ['series'] cache HeaderQuickSearch
+  // reads via useSeriesIndex): a card's work refs are capped (WORKS_CAP), so for
+  // a prolific creator the focused series can be absent from every visible row.
+  // Fall back to a work-ref scan, then the generic label.
   const focusTitle = useMemo(() => {
     if (focusId === null) return null;
+    const index = queryClient.getQueryData<SeriesResource[]>(
+      queryKeys.series.all(),
+    );
+    const fromIndex = index?.find((s) => s.id === focusId);
+    if (fromIndex) return fromIndex.title;
     for (const creator of records) {
       const work = creator.works.find((w) => w.seriesId === focusId);
       if (work) return work.title;
     }
     return null;
-  }, [focusId, records]);
+  }, [focusId, records, queryClient]);
 
   const countLine = result
     ? `${result.totalCreators} creator${result.totalCreators === 1 ? '' : 's'} · ` +
@@ -126,7 +146,7 @@ export function CreatorsScreen() {
             className={followed ? `${styles.pill} ${styles.pillOn}` : styles.pill}
             aria-pressed={followed}
             aria-label={`${followed ? 'Unfollow' : 'Follow'} ${creator.name}`}
-            disabled={follow.isPending}
+            disabled={follow.isPending && follow.variables?.creatorId === creator.id}
             onClick={() =>
               follow.mutate({ creatorId: creator.id, followed: !followed })
             }
@@ -199,9 +219,11 @@ export function CreatorsScreen() {
               <div>You&rsquo;re not following any creators yet.</div>
             ) : (
               <div>
-                Creator credits are still being gathered from your library.
+                No creator credits yet.
                 <div className={styles.emptySub}>
-                  They appear here as your issues finish refreshing.
+                  Credits arrive with metadata refreshes — new series bring them
+                  automatically; run creators-backfill under System &rsaquo; Tasks
+                  to gather them for existing series.
                 </div>
               </div>
             )}

@@ -250,7 +250,7 @@ async def list_creators(
     creators credited in that one series; it composes with the followed filter
     and with paging. An unknown ``seriesId`` matches no creator and yields an
     empty ``records`` list. ``seriesId`` is validated ``ge=1`` (a non-positive or
-    non-integer value is a 422).
+    non-integer value is a 400).
 
     The header aggregates (``totalCreators`` / ``followedCreators``) are ALWAYS
     the whole-library counts, independent of BOTH filters: per the grid-header

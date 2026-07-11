@@ -4,7 +4,9 @@ import userEvent from '@testing-library/user-event';
 import { Routes, Route } from 'react-router-dom';
 import { renderWithProviders } from '../../test/renderWithProviders';
 import { fakeFetcher } from '../../test/fakeFetcher';
-import { creatorPageOf, makeCreator } from '../../test/mockData';
+import { creatorPageOf, makeCreator, makeSeriesResource } from '../../test/mockData';
+import { createQueryClient } from '../../queryClient';
+import { queryKeys } from '../../api/queryKeys';
 import type { CreatorResource } from '../../api/types';
 import type { FetcherInit } from '../../api/fetcher';
 import { CreatorsScreen } from './CreatorsScreen';
@@ -198,17 +200,67 @@ describe('FRG-UI-027: creators grid', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('FRG-UI-027 — an empty library renders the credits-still-gathering state, not an error or a bare grid', async () => {
+  it('FRG-UI-027 — an empty library renders a neutral no-credits state, not an error or a bare grid', async () => {
     const { fetcher } = creatorsFetcher([]);
     renderCreators(fetcher);
 
     await waitFor(() =>
       expect(screen.getByTestId('creators-empty')).toBeInTheDocument(),
     );
+    // Neutral honesty — no false "still being gathered" claim for a genuinely
+    // credit-less library; points at the creators-backfill task.
+    expect(screen.getByText(/no creator credits yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/creators-backfill/i)).toBeInTheDocument();
     expect(
-      screen.getByText(/credits are still being gathered/i),
-    ).toBeInTheDocument();
+      screen.queryByText(/still being gathered/i),
+    ).not.toBeInTheDocument();
     expect(screen.queryByTestId('creators-grid')).not.toBeInTheDocument();
+  });
+
+  it('FRG-UI-027 — a ?seriesId=0 focus is ignored (backend rejects ge=1): the normal unfocused grid renders with no focus chip', async () => {
+    const { fetcher } = creatorsFetcher([
+      makeCreator({ id: 1, name: 'Robert Kirkman' }),
+      makeCreator({ id: 2, name: 'Cory Walker' }),
+    ]);
+    renderCreators(fetcher, '/creators?seriesId=0');
+
+    await waitFor(() =>
+      expect(screen.getByTestId('creators-grid')).toBeInTheDocument(),
+    );
+    // Both creators show (no series filter applied) and there is no focus chip.
+    expect(screen.getByTestId('creator-card-1')).toBeInTheDocument();
+    expect(screen.getByTestId('creator-card-2')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Clear series focus' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('FRG-UI-027 — the focus chip names the series from the cached series index when no visible row carries it in its (capped) work refs', async () => {
+    // A prolific creator credited in series 7 but whose card work refs (capped
+    // at WORKS_CAP) do not include series 7 — the old works-scan would fall back
+    // to the generic label. The title must come from the ['series'] cache.
+    const { fetcher } = creatorsFetcher([
+      makeCreator({
+        id: 1,
+        name: 'Robert Kirkman',
+        works: [{ seriesId: 999, title: 'Some Other Book', coverAvailable: false }],
+      }),
+    ]);
+    const client = createQueryClient();
+    // Seed the same library index HeaderQuickSearch populates (useSeriesIndex →
+    // queryKeys.series.all()).
+    client.setQueryData(queryKeys.series.all(), [
+      makeSeriesResource({ id: 7, title: 'Invincible' }),
+    ]);
+    renderWithProviders(
+      <Routes>
+        <Route path="/creators" element={<CreatorsScreen />} />
+      </Routes>,
+      { fetcher, route: '/creators?seriesId=7', client },
+    );
+
+    const chip = await screen.findByRole('button', { name: 'Clear series focus' });
+    expect(chip).toHaveTextContent('Invincible');
   });
 
   it('FRG-UI-027 — clicking a card opens the creator profile; a spine opens the series', async () => {

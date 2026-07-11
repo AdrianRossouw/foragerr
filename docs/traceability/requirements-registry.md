@@ -102,7 +102,7 @@ moved `M5`→`M8`.
 | FRG-CRTR-001 | Per-issue creator credits ingest | crtr | implemented | M5 |
 | FRG-CRTR-002 | Creator and credit storage/reconciliation | crtr | implemented | M5 |
 | FRG-CRTR-003 | One-time credits backfill | crtr | implemented | M5 |
-| FRG-CRTR-004 | Creator follow flag and seeding | crtr | implemented | M5 |
+| FRG-CRTR-004 | Creator follow flag (explicit-only) | crtr | implemented | M5 |
 | FRG-ARC-001 | Arc entity import by ComicVine arc ID | arc | approved | B |
 | FRG-ARC-002 | Arc-to-library linking by ComicVine ID | arc | approved | B |
 | FRG-ARC-003 | Arc progress | arc | approved | B |

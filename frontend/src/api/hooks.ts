@@ -1220,12 +1220,25 @@ export function useCreatorsList(
     queryFn: async () => {
       const pagePath = (page: number) =>
         `/api/v1/creators?page=${page}&pageSize=${MAX_PAGE_SIZE}&${paramsHash}`;
+      // Dedup by stable creator id across pages (mirrors useWeeklyPull): the
+      // page-walk is not atomic, so a projection shifting between page fetches
+      // could otherwise serve one creator on two pages and produce two cards
+      // with the same React key.
+      const records: CreatorResource[] = [];
+      const seenIds = new Set<number>();
+      const absorb = (rows: CreatorResource[]): void => {
+        for (const row of rows) {
+          if (seenIds.has(row.id)) continue;
+          seenIds.add(row.id);
+          records.push(row);
+        }
+      };
       const first = await fetcher<CreatorPage>(pagePath(1));
-      const records = [...first.records];
+      absorb(first.records);
       const totalPages = Math.max(1, Math.ceil(first.totalRecords / MAX_PAGE_SIZE));
       for (let page = 2; page <= totalPages; page += 1) {
         const next = await fetcher<CreatorPage>(pagePath(page));
-        records.push(...next.records);
+        absorb(next.records);
       }
       return {
         records,
@@ -1290,10 +1303,34 @@ export function useSetCreatorFollow(): UseMutationResult<
   CreatorResource,
   Error,
   { creatorId: number; followed: boolean },
-  { previous: [readonly unknown[], unknown][] }
+  { creatorId: number; previousFollowed: boolean }
 > {
   const fetcher = useFetcher();
   const queryClient = useQueryClient();
+  // Patch (or revert) exactly ONE creator across every loaded creators-list and
+  // profile cache entry, leaving all other creators untouched.
+  const patchCreatorEverywhere = (creatorId: number, followed: boolean): void => {
+    for (const [key, value] of queryClient.getQueriesData({
+      queryKey: queryKeys.creators.all(),
+    })) {
+      if (value && typeof value === 'object' && 'records' in value) {
+        queryClient.setQueryData(
+          key,
+          patchListFollow(value as CreatorsListResult, creatorId, followed),
+        );
+      } else if (
+        value &&
+        typeof value === 'object' &&
+        'stats' in value &&
+        (value as CreatorProfileResource).id === creatorId
+      ) {
+        queryClient.setQueryData(key, {
+          ...(value as CreatorProfileResource),
+          followed,
+        });
+      }
+    }
+  };
   return useMutation({
     mutationFn: ({ creatorId, followed }) =>
       fetcher<CreatorResource>(`/api/v1/creators/${creatorId}/follow`, {
@@ -1302,33 +1339,21 @@ export function useSetCreatorFollow(): UseMutationResult<
       }),
     onMutate: async ({ creatorId, followed }) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.creators.all() });
-      const previous = queryClient.getQueriesData({
-        queryKey: queryKeys.creators.all(),
-      });
-      for (const [key, value] of previous) {
-        if (value && typeof value === 'object' && 'records' in value) {
-          queryClient.setQueryData(
-            key,
-            patchListFollow(value as CreatorsListResult, creatorId, followed),
-          );
-        } else if (
-          value &&
-          typeof value === 'object' &&
-          'stats' in value &&
-          (value as CreatorProfileResource).id === creatorId
-        ) {
-          queryClient.setQueryData(key, {
-            ...(value as CreatorProfileResource),
-            followed,
-          });
-        }
-      }
-      return { previous };
+      // Scope the optimistic write — and its rollback — to THIS creator only. We
+      // deliberately do NOT snapshot the whole ['creators'] family: with
+      // overlapping toggles, restoring a stale whole-family snapshot on one
+      // failure would wipe a DIFFERENT creator's already-applied (or succeeded)
+      // toggle. The prior state of a single creator is just the inverse of the
+      // requested flag, so rollback re-patches exactly that creator back and the
+      // header aggregate stays consistent in both directions (patchListFollow).
+      patchCreatorEverywhere(creatorId, followed);
+      return { creatorId, previousFollowed: !followed };
     },
     onError: (_error, _vars, context) => {
-      for (const [key, value] of context?.previous ?? []) {
-        queryClient.setQueryData(key, value);
-      }
+      if (!context) return;
+      // Re-patch ONLY this creator back against the CURRENT cache; never restore
+      // a whole-family snapshot that could clobber a concurrent toggle.
+      patchCreatorEverywhere(context.creatorId, context.previousFollowed);
     },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.creators.all() });

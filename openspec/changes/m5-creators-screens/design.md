@@ -64,6 +64,20 @@ behavior of any kind; creator search; avatar images.
   rather than a new API requirement (FRG-API-023's shape is unchanged in
   kind — flag at gate if reviewers disagree).
 
+## Gate-accepted divergences
+
+Recorded at the m5-creators-screens gate (frontend-fidelity angle):
+
+- **Errored credits strip renders as absent** on series detail — an API
+  failure is visually identical to "no credits". Accepted: the strip is
+  additive and non-load-bearing; the Creators screen surfaces the same
+  failure loudly. Revisit if strip data ever drives an action.
+- **Work-card progress uses house `ProgressStrip` styling** (20px,
+  completeness-toned track) instead of the handoff's neutral 18px track —
+  shell consistency over mock parity.
+- **Grid minmax 340px / work grid 320px** vs the handoff's 362/340 —
+  denser wrapping, cosmetic.
+
 ## Migration Plan
 
 No schema migration. The unseed data fix is a one-time startup pass
