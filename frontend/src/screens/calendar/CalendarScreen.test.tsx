@@ -441,8 +441,18 @@ describe('FRG-UI-018: publisher filter + banner', () => {
     renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
 
     await screen.findByText('Saga');
-    // The publisher-scoped banner suffix is a Following-scope affordance, so this
-    // test drives the filter from Following (default is now All releases).
+    // In the DEFAULT All-releases scope, an active publisher filter must be
+    // named in the banner too (gate finding, calendar-discovery-default) —
+    // "Showing all N ... from DC", never an unqualified whole-week claim.
+    await user.selectOptions(screen.getByLabelText('Filter by publisher'), 'DC');
+    await waitFor(() =>
+      expect(
+        screen.getByText(/Showing all 1 single issue shipping this week from DC/),
+      ).toBeInTheDocument(),
+    );
+    await user.selectOptions(screen.getByLabelText('Filter by publisher'), 'all');
+    // The richer publisher-suffix arithmetic below is a Following-scope
+    // affordance, so the rest of the test drives the filter from Following.
     await user.click(screen.getByRole('radio', { name: 'Following' }));
     // Following scope: 2 followed issues (Saga + Batman), 1 unmatched → banner
     // reports "1 more titles ... across every publisher" (no filter yet).
