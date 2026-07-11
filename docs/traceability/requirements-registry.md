@@ -103,6 +103,7 @@ moved `M5`→`M8`.
 | FRG-CRTR-002 | Creator and credit storage/reconciliation | crtr | implemented | M5 |
 | FRG-CRTR-003 | One-time credits backfill | crtr | implemented | M5 |
 | FRG-CRTR-004 | Creator follow flag (explicit-only) | crtr | implemented | M5 |
+| FRG-CRTR-005 | External creator bibliography fetch and cache | crtr | approved | M5 |
 | FRG-ARC-001 | Arc entity import by ComicVine arc ID | arc | approved | B |
 | FRG-ARC-002 | Arc-to-library linking by ComicVine ID | arc | approved | B |
 | FRG-ARC-003 | Arc progress | arc | approved | B |
@@ -243,6 +244,7 @@ moved `M5`→`M8`.
 | FRG-API-021 | Log records resource | api | implemented | M4 |
 | FRG-API-022 | Containment resources | api | implemented | M4 |
 | FRG-API-023 | Creators resource and follow toggle | api | implemented | M5 |
+| FRG-API-024 | Creator bibliography resource | api | approved | M5 |
 | FRG-UI-001 | SPA architecture: server state via React Query + WS invalidation | ui | implemented | M1 |
 | FRG-UI-002 | Design token layer with ant/foraging theme | ui | implemented | M1 |
 | FRG-UI-003 | Library index screen | ui | implemented | M1 |
