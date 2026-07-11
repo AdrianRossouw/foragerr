@@ -9,6 +9,31 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.5.0] — 2026-07-11
+
+m5-creators-backbone: creator credits arrive — the data layer for M5's
+creators & follows. No new screens yet; the Creators pages build on this in
+the next releases.
+
+### Added
+- **Creator credits ingest** (FRG-CRTR-001): writers, artists, and the rest
+  of each issue's credits now come along with ComicVine metadata — on the
+  same requests foragerr already made, at no extra API cost. Names are
+  sanitized like all ComicVine text; roles are normalized to a fixed set
+  with the original spelling kept.
+- **Creators storage** (FRG-CRTR-002): new `creators` and `issue_credits`
+  tables (migration 0016), kept in sync by the normal series refresh —
+  idempotent, tolerant of partial fetches, and self-pruning.
+- **One-time backfill** (FRG-CRTR-003): existing libraries pick up credits
+  automatically via a one-shot `creators-backfill` task (visible under
+  System → Tasks, re-runnable safely).
+- **Follows** (FRG-CRTR-004): each creator carries a followed flag; anyone
+  credited across two or more of your series starts followed, and your own
+  follow/unfollow choices are never overwritten.
+- **Creators API** (FRG-API-023): `GET /api/v1/creators` (paged, with
+  library stats), creator profiles, and a follow toggle — the read surface
+  the upcoming Creators screens consume.
+
 ## [v0.4.7] — 2026-07-11
 
 m4-pull-experience: the weekly pull Calendar — the final M4 chapter.
