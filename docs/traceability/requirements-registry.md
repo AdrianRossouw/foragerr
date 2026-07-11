@@ -264,14 +264,14 @@ moved `M5`→`M8`.
 | FRG-UI-024 | System → Logs screen | ui | implemented | M4 |
 | FRG-UI-025 | Issue bulk selection and actions | ui | implemented | M4 |
 | FRG-UI-026 | Collections tab | ui | implemented | M4 |
-| FRG-UI-027 | Sources screen | ui | proposed | M6 |
-| FRG-SRC-001 | store-source model and connection lifecycle | sources | proposed | M6 |
-| FRG-SRC-002 | Humble session-cookie authentication | sources | proposed | M6 |
-| FRG-SRC-003 | entitlement sync | sources | proposed | M6 |
-| FRG-SRC-004 | review-first entitlement workflow | sources | proposed | M6 |
-| FRG-SRC-005 | session expiry as a modeled state | sources | proposed | M6 |
-| FRG-SRC-006 | entitlement download and import handoff | sources | proposed | M6 |
-| FRG-SRC-007 | collected-edition reconciliation never suppresses singles | sources | proposed | M6 |
+| FRG-UI-027 | Sources screen | ui | approved | M6 |
+| FRG-SRC-001 | store-source model and connection lifecycle | sources | approved | M6 |
+| FRG-SRC-002 | Humble session-cookie authentication | sources | approved | M6 |
+| FRG-SRC-003 | entitlement sync | sources | approved | M6 |
+| FRG-SRC-004 | review-first entitlement workflow | sources | approved | M6 |
+| FRG-SRC-005 | session expiry as a modeled state | sources | approved | M6 |
+| FRG-SRC-006 | entitlement download and import handoff | sources | approved | M6 |
+| FRG-SRC-007 | collected-edition reconciliation never suppresses singles | sources | approved | M6 |
 | FRG-OPDS-001 | OPDS 1.2 Atom catalog with navigation root | opds | implemented | M1 |
 | FRG-OPDS-002 | Acquisition feeds with per-entry metadata | opds | implemented | M1 |
 | FRG-OPDS-003 | Library-id-based file resolution only (no client-supplied paths) | opds | implemented | M1 |

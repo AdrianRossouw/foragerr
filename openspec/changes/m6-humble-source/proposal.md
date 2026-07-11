@@ -101,6 +101,8 @@ decided with the owner on 2026-07-11.
 
 ## Approval
 
-_Pending — Adrian approves before implementation begins (FRG-PROC-009 + standing-grant
-carve-out). Note the auto-sync-default divergence from the design mock flagged in
-What Changes._
+**Approved by Adrian, 2026-07-11** (planning session; satisfies FRG-PROC-009 and the
+standing-grant carve-out for the Humble importer). Divergence resolved by owner:
+**auto-sync ships OFF as spec'd** — the design mock's ON default does not apply.
+Implementation may begin at M6 after m6-keystore merges; the Humble client work
+remains gated on the task 1.1 live API capture.
