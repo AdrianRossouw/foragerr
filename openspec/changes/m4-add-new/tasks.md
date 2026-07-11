@@ -33,7 +33,7 @@
 
 - [x] 4.1 Rewrite `docs/manual/user/web-ui.md` §Adding a series (cards,
       ranked order, collect-as); check §Quick search wording (FRG-PROC-011)
-- [ ] 4.2 Refresh README tour shots via `tools/refresh-readme-shots.sh`
+- [x] 4.2 Refresh README tour shots via `tools/refresh-readme-shots.sh`
       against a dedicated clean instance (verify the tool spins its own —
       never :8790; fix here if not) (FRG-PROC-017)
 - [x] 4.3 Registry header staleness rider: "Transmission" → qBittorrent
@@ -42,7 +42,7 @@
 ## 5. Sync, gate, release
 
 - [x] 5.1 Sync meta/ser/ui deltas into main specs (FRG-PROC-003)
-- [ ] 5.2 Full suites green; matrix regenerated (no gaps); soup_check exit 0
+- [x] 5.2 Full suites green; matrix regenerated (no gaps); soup_check exit 0
       (FRG-PROC-004, FRG-PROC-005, FRG-PROC-012)
 - [ ] 5.3 Tiered review gate — medium change: 4–5 angles + Codex full-diff;
       apply findings; re-evidence (FRG-PROC-007)
