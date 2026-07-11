@@ -9,6 +9,22 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.5.5] — 2026-07-11
+
+m5-creator-suggestions: "More from" a creator — M5 complete.
+
+### Added
+- **More from <creator>** (FRG-CRTR-005, FRG-API-024, FRG-UI-028): a
+  creator's profile now shows their wider ComicVine bibliography that
+  isn't in your library — gathered on first view by a bounded background
+  fetch (newest 24 volumes, refreshed weekly, served from a local cache
+  so profile loads never wait on ComicVine), each entry carrying an
+  **Add to library** button into the normal add flow. foragerr never adds
+  a series by itself.
+
+This closes M5 (creators & follows): credits, the Creators screens,
+explicit-only follows, live ingest, and discovery suggestions.
+
 ## [v0.5.4] — 2026-07-11
 
 calendar-discovery-default: the Calendar opens on the whole week.

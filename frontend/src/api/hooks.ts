@@ -19,6 +19,7 @@ import type {
   CollectionsResponse,
   CommandResource,
   ContainmentRangeInput,
+  CreatorBibliography,
   CreatorPage,
   CreatorProfileResource,
   CreatorResource,
@@ -1265,6 +1266,30 @@ export function useCreatorProfile(
       fetcher<CreatorProfileResource>(`/api/v1/creators/${creatorId}`),
     enabled: Number.isFinite(creatorId) && creatorId > 0,
     retry: false,
+  });
+}
+
+/**
+ * GET /api/v1/creators/{id}/bibliography — a creator's cached external
+ * ComicVine bibliography (FRG-UI-028 / FRG-API-024). A plain read: the endpoint
+ * serves whatever cache rows exist (minus the live in-library anti-join) and
+ * self-reports `state` (`fresh` = within TTL; `pending` = a deduplicated fetch
+ * was enqueued because the cache is cold or stale). The client never fetches
+ * ComicVine itself — the "More from" section just re-reads this cache, and the
+ * WebSocketBridge invalidates it (`bibliographyAll`) when the fetch command
+ * completes so a pending gathering state resolves into cards without a reload.
+ */
+export function useCreatorBibliography(
+  creatorId: number,
+): UseQueryResult<CreatorBibliography> {
+  const fetcher = useFetcher();
+  return useQuery({
+    queryKey: queryKeys.creators.bibliography(creatorId),
+    queryFn: () =>
+      fetcher<CreatorBibliography>(
+        `/api/v1/creators/${creatorId}/bibliography`,
+      ),
+    enabled: Number.isFinite(creatorId) && creatorId > 0,
   });
 }
 
