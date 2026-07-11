@@ -64,16 +64,6 @@ golden-age comics (Fiction House and Fawcett titles) from the Internet Archive.
 [ui](openspec/specs/ui/spec.md), [ser](openspec/specs/ser/spec.md) · manual:
 [library](docs/manual/user/library.md)*
 
-### Creators
-
-![The Creators screen: credited writers and artists from your library as cards with roles, work covers, and follow pills](docs/readme-assets/creators-grid.png)
-
-*Creators grid and follows —
-[FRG-UI-027](docs/traceability/requirements-registry.md),
-[FRG-CRTR-001](docs/traceability/requirements-registry.md) · spec:
-[ui](openspec/specs/ui/spec.md), [crtr](openspec/specs/crtr/spec.md) · manual:
-[web-ui](docs/manual/user/web-ui.md)*
-
 ### Wanted issues
 
 ![The Wanted screen: missing monitored issues across the library with per-issue and search-all actions](docs/readme-assets/wanted.png)

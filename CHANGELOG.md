@@ -25,6 +25,13 @@ explicit-only.
 - **Series credits** (FRG-UI-004): series pages show their credited
   creators, linking into the creator pages.
 
+### Known issue
+- Real-world credit ingest is currently empty: ComicVine's issue *list*
+  API does not serve `person_credits` (only the per-issue detail endpoint
+  does), which surfaced while capturing these screens against live data.
+  The Creators pages render their honest empty state until the follow-up
+  release switches ingest to per-issue detail fetches.
+
 ### Changed
 - **Follows are explicit-only** (FRG-CRTR-004, owner decision): v0.5.0's
   "auto-follow anyone credited on 2+ of your series" seeding is removed,
