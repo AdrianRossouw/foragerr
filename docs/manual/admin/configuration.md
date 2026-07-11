@@ -63,7 +63,7 @@ under the top level of `config.yaml`.
 | `comicvine_ignored_publishers` | `FORAGERR_COMICVINE_IGNORED_PUBLISHERS` | *(empty)* | Comma-separated, case-insensitive. |
 | `comicvine_image_hosts` | `FORAGERR_COMICVINE_IMAGE_HOSTS` | `comicvine.gamespot.com,comicvine1.cbsistatic.com,static.comicvine.com` | Allowlisted cover-image hostnames. |
 | `track_downloads_interval_seconds` | `FORAGERR_TRACK_DOWNLOADS_INTERVAL_SECONDS` | `60` | Minimum 60s (download pool is serialized). |
-| `pull_enabled` | `FORAGERR_PULL_ENABLED` | `false` | Master switch for the external weekly-pull source fetch (FRG-PULL-002). **Off by default** — the weekly view works from local library metadata alone; the external source is opt-in enrichment. When false the scheduled `pull-refresh` task no-ops and no third-party traffic is issued. See "Weekly pull" below. |
+| `pull_enabled` | `FORAGERR_PULL_ENABLED` | `true` | Master switch for the external weekly-pull source fetch (FRG-PULL-002). **On by default** (owner decision 2026-07-11) so the Calendar carries the week's releases out of the box; set `false` to opt out — the weekly view then works from local library metadata alone, the scheduled `pull-refresh` task no-ops, and no third-party traffic is issued. See "Weekly pull" below. |
 | `pull_source_url` | `FORAGERR_PULL_SOURCE_URL` | `https://walksoftly.itsaninja.party/newcomics.php` | URL of the unofficial weekly-pull JSON source. Fetched only when `pull_enabled` is true, over the hardened **external** egress profile — a loopback/private/link-local host is refused per-hop and surfaced as a degraded source, never used to reach an internal host. An empty value disables the fetch. |
 | `pull_refresh_interval_seconds` | `FORAGERR_PULL_REFRESH_INTERVAL_SECONDS` | `14400` (4h) | How often the scheduled `pull-refresh` task runs. Clamped **up** to a documented 1 hour (3600s) floor to protect the unofficial source — a smaller value is raised, not rejected. A manual force-run bypasses the interval gate. |
 | `auto_redownload_failed` | `FORAGERR_AUTO_REDOWNLOAD_FAILED` | `true` | Self-healing re-search after a failed download. |
@@ -245,12 +245,18 @@ See `deployment.md` → "Restoring from a backup" for how to use these files.
 
 ## Weekly pull
 
-foragerr can enrich the weekly release view (the pull list) with an **unofficial
-external source** of what shipped each week. This is **opt-in and off by default**
-(`pull_enabled=false`): with no source configured the weekly view still works
-entirely from your local library metadata (the issues of watched series dated in
-the target week) — the external source only *cross-checks and discovers* books you
-do not already follow, and the feature keeps working when the third party is down.
+foragerr enriches the weekly release view (the pull list) with an **unofficial
+external source** of what shipped each week. This is **on by default**
+(`pull_enabled=true`, owner decision 2026-07-11) and fully optional: set
+`pull_enabled=false` to opt out, and the weekly view still works entirely from
+your local library metadata (the issues of watched series dated in the target
+week). The external source only *cross-checks and discovers* books you do not
+already follow, and the feature keeps working when the third party is down —
+an outage marks the source degraded in health and the view falls back to local
+metadata. **Installs created before v0.5.1** carry `pull_enabled: false` written
+into `config.yaml` by first-run rendering under the old default — edit it to
+`true` (or delete the line) to enable the source there; the new default applies
+as-is to fresh installs.
 
 When enabled (`pull_enabled=true`), a scheduled **`pull-refresh` task** fetches the
 current and previous release weeks from `pull_source_url`, stores them, matches them

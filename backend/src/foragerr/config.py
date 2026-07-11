@@ -437,13 +437,14 @@ class Settings(BaseSettings):
         ),
     )
     pull_enabled: bool = Field(
-        default=False,
+        default=True,
         description=(
-            "Enable the weekly-pull external source fetch (FRG-PULL-002). OFF by "
-            "default — the weekly view (FRG-PULL-001) works from local library "
-            "metadata alone, and the external walksoftly source is opt-in optional "
-            "enrichment. When false the scheduled pull-refresh task no-ops cleanly "
-            "and no third-party traffic is issued."
+            "Enable the weekly-pull external source fetch (FRG-PULL-002). ON by "
+            "default (owner decision 2026-07-11) so the Calendar shows the week's "
+            "releases out of the box; set false to opt out — the weekly view "
+            "(FRG-PULL-001) still works from local library metadata alone, the "
+            "scheduled pull-refresh task no-ops cleanly, and no third-party "
+            "traffic is issued. A source outage degrades health, never the view."
         ),
     )
     pull_source_url: str = Field(
