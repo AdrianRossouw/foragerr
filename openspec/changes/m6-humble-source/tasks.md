@@ -1,9 +1,9 @@
 # m6-humble-source — tasks
 
-## 1. Verification & fixtures (blocks everything)
+## 1. API schema & fixtures
 
-- [ ] 1.1 Owner captures live authenticated responses: order list + one order detail (comic bundle incl. a collected edition, an OGN, a non-comic item) + a signed download URL shape; redact and commit as test fixtures
-- [ ] 1.2 Confirm/adjust design.md assumptions against fixtures (endpoints, cookie name, download_struct fields, CDN hosts for the egress allowlist); finalize comic-classification rule and auto-match confidence threshold; record in design.md
+- [ ] 1.1 ~~Owner live capture~~ DONE VIA PRIOR-ART DISSECTION (owner direction 2026-07-11): schema documented in `docs/research/humble-api.md` from three OSS clients (incl. one pushed 2026-06); build synthetic fixtures from it (comic bundle w/ CBZ+PDF twins, collected edition, EPUB-only book, game item, malformed subproduct)
+- [ ] 1.2 Finalize comic-classification rule (platform=="ebook" + format/extension) and auto-match confidence threshold against the fixtures; record in design.md. LIVE VALIDATION MOVES TO UAT: first real connect+sync against the operator's account confirms schema + CDN egress allowlist (expected dl.humble.com); any drift updates client + fixtures together
 
 ## 2. Backend model & client
 

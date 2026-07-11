@@ -80,10 +80,12 @@ decided with the owner on 2026-07-11.
   registered, write-only in API responses (existing SecretStr pattern).
 - **Manual**: new `docs/manual/user/sources.md`; admin secrets/configuration notes
   (cookie handling, expiry cadence); README screenshot set gains the Sources screen.
-- **Verification constraint**: the Humble order-API shape (endpoints, JSON fields,
-  signed-URL format) is documented from prior art and MUST be verified against live
-  operator-captured responses before implementation of the client begins (task 1.1;
-  the sandbox cannot reach Humble).
+- **Verification constraint** (relaxed by owner direction 2026-07-11): the Humble
+  order-API shape is documented from dissected prior art (`docs/research/humble-api.md`;
+  three OSS clients, one actively maintained as of 2026-06) and fixtures derive from
+  that schema. Live validation moves to UAT — the first real connect + sync against
+  the operator's account (the sandbox cannot reach Humble); schema drift found there
+  updates client and fixtures together.
 
 ## Non-goals
 
@@ -104,5 +106,7 @@ decided with the owner on 2026-07-11.
 **Approved by Adrian, 2026-07-11** (planning session; satisfies FRG-PROC-009 and the
 standing-grant carve-out for the Humble importer). Divergence resolved by owner:
 **auto-sync ships OFF as spec'd** — the design mock's ON default does not apply.
-Implementation may begin at M6 after m6-keystore merges; the Humble client work
-remains gated on the task 1.1 live API capture.
+Implementation may begin at M6 after m6-keystore merges. _Amendment (same day,
+owner direction): the task 1.1 live-capture gate is removed — the API schema was
+established by prior-art dissection (`docs/research/humble-api.md`) and live
+validation moves to UAT. No other scope change; approval stands._

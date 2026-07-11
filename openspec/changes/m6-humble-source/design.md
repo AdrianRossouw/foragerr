@@ -45,10 +45,12 @@ generic webhook/push discovery (poll only).
 3. **Humble client** (`sources/humble.py`): `GET /api/v1/user/order` → gamekeys;
    `GET /api/v1/order/{gamekey}?all_tpkds=true` → subproducts → `download_struct`
    (signed time-limited `url.web`, md5, size, filename). Cookie rides as
-   `_simpleauth_sess`. **Entire shape is VERIFY-LIVE (task 1.1)**: owner captures
-   real responses (sandbox cannot reach Humble); captured JSON becomes redacted
-   test fixtures. Client honors FRG-NFR-005 politeness/backoff and FRG-NFR-006
-   bounded-verified-outbound rules.
+   `_simpleauth_sess`. **Shape confirmed by prior-art dissection** — see
+   `docs/research/humble-api.md` (three OSS clients, one actively maintained as
+   of 2026-06); fixtures are built from that schema, and live validation happens
+   at UAT against the operator's account (sandbox cannot reach Humble). Client
+   honors FRG-NFR-005 politeness/backoff and FRG-NFR-006 bounded-verified-
+   outbound rules.
 4. **Comic filtering**: classify subproducts by download format/extension (cbz/pdf/
    cbr) and bundle category hints — exact rule finalized against captured fixtures.
    Non-comic items are stored with classification `other` and shown under the
