@@ -36,8 +36,10 @@ from foragerr.metadata.errors import (
     ComicVineRateLimited,
     ComicVineUnavailable,
 )
+from foragerr.metadata.credits import map_person_credits
 from foragerr.metadata.mapping import map_issue, map_volume
 from foragerr.metadata.models import (
+    CreditRecord,
     IssueRecord,
     Page,
     SearchResult,
@@ -63,6 +65,12 @@ SEARCH_VOLUME_FIELDS = (
     "site_detail_url,first_issue,image"
 )
 ISSUE_FIELDS = "id,name,issue_number,cover_date,store_date,image,volume,person_credits"
+
+#: Minimal field list for the per-issue credit detail fetch (FRG-CRTR-001).
+#: ComicVine serves ``person_credits`` only on the issue DETAIL endpoint
+#: (``issue/4050-{id}/``) — the list endpoint returns null regardless of
+#: ``field_list`` (verified live 2026-07-11) — so this is the credit source.
+ISSUE_CREDITS_FIELDS = "id,person_credits"
 
 #: JSON-response byte cap (lower than the factory ceiling; ample per page).
 JSON_MAX_BYTES = 16_000_000
@@ -156,6 +164,31 @@ class ComicVineClient:
             "sort": "cover_date:asc",
         }
         return await self._paginate("issues/", base_params, map_issue)
+
+    async def get_issue_credits(self, issue_id: int) -> tuple[CreditRecord, ...]:
+        """Fetch ONE issue's per-issue person credits from the detail endpoint.
+
+        ComicVine serves ``person_credits`` only on ``issue/4050-{id}/`` (the
+        list endpoint returns null — verified live 2026-07-11), so this
+        per-issue detail fetch is the sole credit source (FRG-CRTR-001). Like
+        every other call it passes through the process-global rate gate, so a
+        refresh's bounded fan-out of these fetches is automatically serialized
+        to the configured min-interval. The result is mapped/sanitized exactly
+        as the opportunistic list path would map it (:func:`map_person_credits`
+        — total by contract, empty on absent/malformed credits, never raising);
+        a transport/HTTP/malformed failure raises the usual typed
+        :class:`~foragerr.metadata.errors.ComicVineError`, which the refresh
+        fetch phase degrades to retry-later.
+        """
+        data = await self._request(
+            f"issue/4050-{int(issue_id)}/", {"field_list": ISSUE_CREDITS_FIELDS}
+        )
+        results = data.get("results")
+        if not isinstance(results, dict):
+            raise ComicVineMalformedResponse(
+                "comicvine issue response missing a results object"
+            )
+        return map_person_credits(results.get("person_credits"))
 
     async def search_series(
         self, term: str, *, target_issue: str | int | None = None

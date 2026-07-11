@@ -1,10 +1,17 @@
 """Per-series credit reconciliation (FRG-CRTR-002/004).
 
 :func:`reconcile_series_credits` runs INSIDE the refresh write transaction,
-right after the issue insert/update/delete reconcile (``refresh.py``). For each
-fetched issue it upserts the credited creators (CV is authority for names) and
-replaces that issue's credit set to match the fetched state — idempotent, so a
-repeat refresh writes nothing. It then:
+right after the issue insert/update/delete reconcile (``refresh.py``). It is
+driven by the credits the refresh actually SOURCED this run — the per-issue
+detail fetches (``issue/4050-{id}/``, the only endpoint carrying
+``person_credits``, verified live 2026-07-11) plus any list rows that
+opportunistically carried credits — keyed by ComicVine issue id. For each such
+issue it upserts the credited creators (CV is authority for names) and replaces
+that issue's credit set to match the sourced state via
+:func:`reconcile_issue_credits` — idempotent, so a repeat refresh writes
+nothing. Issues NOT in the sourced map are left entirely untouched (an already
+credit-covered issue is not re-fetched, so its stored credits must survive a
+refresh whose list walk no longer carries them). It then:
 
 * **prunes** creators that now carry zero credits *and* were never user-touched
   *and* are unfollowed (design decision 4): a followed or user-touched row
@@ -30,7 +37,7 @@ or rolls back the whole refresh atomically.
 
 from __future__ import annotations
 
-from typing import Sequence
+from typing import Mapping, Sequence
 
 from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,20 +45,30 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from foragerr.creators.models import CreatorRow, IssueCreditRow
 from foragerr.db.base import utcnow
 from foragerr.library.models import IssueRow
-from foragerr.metadata.models import CreditRecord, IssueRecord
+from foragerr.metadata.models import CreditRecord
 
 
 async def reconcile_series_credits(
     session: AsyncSession,
     series_id: int,
-    records: Sequence[IssueRecord],
+    credits_by_cv: Mapping[int, Sequence[CreditRecord]],
 ) -> None:
-    """Reconcile the credits of one series' fetched issues (FRG-CRTR-002/004).
+    """Reconcile the credits the refresh sourced this run (FRG-CRTR-002/004).
 
-    ``records`` are the mapped issue records from the fetch (``Page.items``);
-    only those whose issue row currently exists for ``series_id`` are processed,
-    so issues absent from a partial fetch keep their credits untouched.
+    ``credits_by_cv`` maps a ComicVine issue id to the credit set the refresh
+    sourced for it (a detail fetch — including an empty tuple for a legitimately
+    creditless issue — or an opportunistic list row that carried credits). ONLY
+    issues present in this map, and whose row currently exists for ``series_id``,
+    are reconciled: an issue the refresh did not re-source (already credit-
+    covered, or absent from a partial walk) keeps its stored credits untouched.
+    Prunes orphaned creators once at the end.
     """
+    if not credits_by_cv:
+        # Nothing sourced this run — but still reap creators orphaned by the
+        # surrounding issue-delete reconcile (their credits cascaded away).
+        await prune_orphan_creators(session)
+        return
+
     result = await session.execute(
         select(IssueRow.id, IssueRow.cv_issue_id).where(
             IssueRow.series_id == series_id
@@ -59,16 +76,16 @@ async def reconcile_series_credits(
     )
     issue_id_by_cv = {cv_issue_id: issue_id for issue_id, cv_issue_id in result}
 
-    for record in records:
-        issue_id = issue_id_by_cv.get(record.cv_issue_id)
+    for cv_issue_id, credits in credits_by_cv.items():
+        issue_id = issue_id_by_cv.get(cv_issue_id)
         if issue_id is None:  # not persisted (e.g. deleted this reconcile)
             continue
-        await _replace_issue_credits(session, issue_id, record.credits)
+        await reconcile_issue_credits(session, issue_id, credits)
 
-    await _prune_orphan_creators(session)
+    await prune_orphan_creators(session)
 
 
-async def _replace_issue_credits(
+async def reconcile_issue_credits(
     session: AsyncSession, issue_id: int, credits: Sequence[CreditRecord]
 ) -> None:
     """Diff-replace one issue's credit rows to match ``credits`` (idempotent).
@@ -140,7 +157,7 @@ async def _upsert_creator(session: AsyncSession, cv_person_id: int, name: str) -
     return row.id
 
 
-async def _prune_orphan_creators(session: AsyncSession) -> None:
+async def prune_orphan_creators(session: AsyncSession) -> None:
     """Delete creditless creators that were never user-touched and are unfollowed.
 
     A followed or user-touched (``follow_touched`` set) creator is spared even
