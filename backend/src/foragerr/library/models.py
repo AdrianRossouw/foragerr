@@ -273,13 +273,6 @@ class IssueRow(Base):
         CheckConstraint(f"issue_type IN {ISSUE_TYPES!r}", name="issue_type_valid"),
         Index("ix_issues_series_id", "series_id"),
         Index("ix_issues_series_ordering", "series_id", "ordering_key"),
-        # Partial index mirroring migration 0017 — the credit-needing lookup
-        # (``WHERE credits_fetched_at IS NULL``) the refresh fetch phase runs.
-        Index(
-            "ix_issues_credits_needed",
-            "credits_fetched_at",
-            sqlite_where=text("credits_fetched_at IS NULL"),
-        ),
     )
 
 

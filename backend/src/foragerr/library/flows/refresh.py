@@ -117,6 +117,11 @@ async def refresh_series(
         # batch of the still-credit-needing issues sequentially through the same
         # rate gate. A failed fetch is logged and skipped (the issue stays
         # unstamped and is retried next run) — never fatal to the refresh.
+        # Accepted (gate, m5-credits-live-fetch): two overlapping refreshes of
+        # the SAME series can each spend this budget on the same unstamped
+        # issues before either commits stamps — the rate gate serializes the
+        # wire cost and the writes are idempotent, so no per-series in-flight
+        # guard is kept.
         targets = _select_credit_fetch_targets(
             page.items, stamped_cv_ids, settings.credits_fetch_per_refresh
         )

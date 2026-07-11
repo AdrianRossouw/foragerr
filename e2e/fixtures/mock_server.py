@@ -344,7 +344,9 @@ def build_app() -> FastAPI:
         # The per-issue credit DETAIL endpoint (FRG-CRTR-001): the ONLY place the
         # real ComicVine serves person_credits — the list endpoint (``/issues/``
         # below) returns null. The refresh fetch phase calls this per
-        # credit-needing issue; an unknown id returns an empty credit list.
+        # credit-needing issue. An UNKNOWN id is a 404, never an empty list —
+        # a 200 would stamp a mis-constructed target id as covered and mask the
+        # regression (gate finding, m5-credits-live-fetch).
         credits = None
         for volume in VOLUMES.values():
             for issue in volume["issues"]:
@@ -353,10 +355,10 @@ def build_app() -> FastAPI:
                     break
             if credits is not None:
                 break
+        if credits is None:
+            return JSONResponse({"error": "Object Not Found"}, status_code=404)
         return JSONResponse(
-            _single_envelope(
-                {"id": issue_id, "person_credits": credits if credits is not None else []}
-            )
+            _single_envelope({"id": issue_id, "person_credits": credits})
         )
 
     @app.get("/api/issues/")

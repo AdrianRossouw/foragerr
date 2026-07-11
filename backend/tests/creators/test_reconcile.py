@@ -150,6 +150,10 @@ async def test_credits_come_from_per_issue_detail_fetches(
         ),
     )
     assert _detail_ids(transport2) == []
+    # The all-stamped (unsourced) run must leave the stored credits intact —
+    # reconcile touches only sourced issues (gate finding: assert the rows,
+    # not just the absence of fetches).
+    assert {c.name for c in await _all_creators(db)} == {"Alice", "Bob"}
 
 
 @pytest.mark.req("FRG-CRTR-001")

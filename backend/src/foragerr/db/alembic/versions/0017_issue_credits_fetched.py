@@ -16,10 +16,11 @@ golden-age library never re-fetches the same creditless issues forever
 (FRG-CRTR-001/002).
 
 ``NULL`` = needs fetch is exactly right for every existing row, so no data
-backfill is required. A partial index filtered on ``credits_fetched_at IS NULL``
-keeps the hot "which issues still need credits" lookup cheap without indexing the
-(eventually large) stamped majority — SQLite supports partial indexes, so the
-``sqlite_where`` clause is honored here.
+backfill is required. Deliberately no index: target selection reads a series'
+STAMPED rows (``series_id = ? AND credits_fetched_at IS NOT NULL``, served by
+``ix_issues_series_id``) and diffs against the just-walked records so brand-new
+issues are eligible the same run — a partial ``IS NULL`` index could not serve
+that read (gate finding).
 
 Forward-only: no downgrade (FRG-DB-002).
 """
@@ -42,15 +43,13 @@ def upgrade() -> None:
         "issues",
         sa.Column("credits_fetched_at", sa.DateTime(), nullable=True),
     )
-    # Partial index over the credit-needing rows only (``NULL`` = needs fetch):
-    # the refresh fetch phase queries exactly this predicate every run, and the
-    # stamped majority never needs indexing. SQLite honors the partial WHERE.
-    op.create_index(
-        "ix_issues_credits_needed",
-        "issues",
-        ["credits_fetched_at"],
-        sqlite_where=sa.text("credits_fetched_at IS NULL"),
-    )
+    # Deliberately NO index on the column: the refresh fetch phase reads the
+    # STAMPED rows for one series (``WHERE series_id = ? AND credits_fetched_at
+    # IS NOT NULL``) and diffs against the just-walked issue records — brand-new
+    # issues become fetch-eligible in the same run, which an ``IS NULL`` query
+    # over stored rows would miss. That per-series read is served by the
+    # existing ``ix_issues_series_id``; a partial ``IS NULL`` index cannot
+    # serve it and would be dead weight (gate finding, m5-credits-live-fetch).
 
 
 def downgrade() -> None:

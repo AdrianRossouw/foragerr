@@ -1,7 +1,9 @@
 """issues.credits_fetched_at bookkeeping column (migration 0017): one additive
-nullable DATETIME on ``issues`` plus a partial index over the credit-needing
-(``NULL``) rows. Forward-only (FRG-DB-002); no data backfill (``NULL`` = needs
-fetch is correct for every existing row). FRG-CRTR-002."""
+nullable DATETIME on ``issues``. Deliberately NO index — target selection reads
+a series' STAMPED rows and diffs against the just-walked records (see the
+migration docstring); the per-series read rides ``ix_issues_series_id``.
+Forward-only (FRG-DB-002); no data backfill (``NULL`` = needs fetch is correct
+for every existing row). FRG-CRTR-002."""
 
 from __future__ import annotations
 
@@ -14,7 +16,7 @@ from foragerr.db.migrations import current_revision
 
 
 @pytest.mark.req("FRG-CRTR-002")
-def test_credits_fetched_at_column_and_partial_index_present(tmp_path):
+def test_credits_fetched_at_column_present_nullable_unindexed(tmp_path):
     cfg = tmp_path / "cfg"
     cfg.mkdir()
     result = prepare_database(cfg)
@@ -29,16 +31,11 @@ def test_credits_fetched_at_column_and_partial_index_present(tmp_path):
         # Nullable (no NOT NULL) and no default — a fresh issue is credit-needing.
         assert cols["credits_fetched_at"][3] == 0  # notnull flag off
 
+        # No dedicated index: a partial ``IS NULL`` index cannot serve the
+        # actual per-series ``IS NOT NULL`` read (gate finding) and would be
+        # dead weight. The series-scoped read rides ix_issues_series_id.
         indexes = {row[1] for row in conn.execute("PRAGMA index_list(issues)")}
-        assert "ix_issues_credits_needed" in indexes
-
-        # The index is partial (has a WHERE clause) — verify via the schema SQL.
-        idx_sql = conn.execute(
-            "SELECT sql FROM sqlite_master WHERE type='index' "
-            "AND name='ix_issues_credits_needed'"
-        ).fetchone()[0]
-        assert "WHERE" in idx_sql.upper()
-        assert "credits_fetched_at" in idx_sql
+        assert "ix_issues_credits_needed" not in indexes
 
         # Existing rows are legal with the column left NULL (no backfill needed).
         conn.execute("INSERT INTO root_folders (id, path) VALUES (1, '/lib')")

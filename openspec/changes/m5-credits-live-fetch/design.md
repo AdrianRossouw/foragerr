@@ -25,10 +25,13 @@ re-fetch policy.
    Newest-first because current books matter most on screens; the tail
    backfills across runs.
 2. **`credits_fetched_at` on `issues` (migration 0017)** rather than a
-   side table — it is an attribute of the issue's ingest state, queried in
-   the hot path (`WHERE credits_fetched_at IS NULL`), and cascades
-   trivially. Index on the nullable column partial-filtered where SQLite
-   allows.
+   side table — it is an attribute of the issue's ingest state and
+   cascades trivially. Target selection reads the STAMPED rows for the
+   series and diffs against the just-walked records (so brand-new issues
+   are eligible the same run); that per-series read rides
+   `ix_issues_series_id`, and no additional index is added (a partial
+   `IS NULL` index could not serve it — gate-corrected from the original
+   sketch).
 3. **Bound is config (`credits_fetch_per_refresh`, default 25, clamp
    ≥1/≤200)** — one knob, documented rendering; 25×2s ≈ 50s added to a
    refresh, tolerable for background runs and force-runs.
@@ -56,9 +59,19 @@ re-fetch policy.
 - [CV credit edits after stamping never propagate] → accepted non-goal,
   recorded in spec Notes.
 
+## Gate-accepted trade-off
+
+Overlapping refreshes of the same series (e.g. a library-import direct
+refresh racing a queued manual one) can each spend the fetch budget on the
+same unstamped issues before either commits stamps. Accepted: the global
+rate gate serializes the requests, both writes are idempotent, and the
+window requires deliberately concurrent refreshes of one series in a
+single-operator deployment — a per-series in-flight guard isn't worth the
+machinery. Documented in a code comment at the fetch phase.
+
 ## Migration Plan
 
-Migration 0017 adds the nullable column + index; forward-only. No data
+Migration 0017 adds the nullable column (no index — see Decision 2); forward-only. No data
 backfill needed (NULL = needs fetch is exactly right for existing rows).
 
 ## Open Questions
