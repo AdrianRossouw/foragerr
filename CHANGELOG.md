@@ -9,6 +9,36 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.4.5] — 2026-07-10
+
+roadmap-single-source: a process CAPA — forward-looking ("planned") text kept
+going stale inside long-lived documents, so it now lives in exactly one place.
+
+### Added
+- **`docs/roadmap.md`** (FRG-PROC-018): the single controlled document for
+  unshipped work (remaining M4 pull screen, creators, sources, torrents,
+  authentication). Other documents link to it instead of restating plans.
+- **Merge-gate roadmap checks** (FRG-PROC-018): the test suite now fails if
+  forward-milestone tokens or planned-phrasing appear in the README or manual
+  outside the roadmap, or if the roadmap advertises an already-implemented
+  requirement as planned — shipping a roadmap item forces the roadmap update
+  in the same change.
+
+### Changed
+- **README Roadmap section** (FRG-PROC-014) is now a pointer to
+  `docs/roadmap.md` rather than a list that rots.
+- **Manual sweep** (FRG-PROC-011): forward references ("before M8", "later
+  milestone", post-auth phrasing) reworded to current-state descriptions with
+  roadmap links (network, deployment, secrets, configuration, OPDS, metadata
+  pages); the manual's currency statement brought up to v0.4.x reality.
+
+### Fixed
+- The README no longer lists the largely-shipped M4 design refresh as
+  "planned, not yet shipped", and the planned torrent client is correctly
+  stated as qBittorrent (per FRG-TOR-002) instead of Transmission.
+
+No runtime behavior changes; no dependency changes.
+
 ## [v0.4.4] — 2026-07-10
 
 m4-series-detail: the series detail screen rebuilt to the M4 design, plus the
