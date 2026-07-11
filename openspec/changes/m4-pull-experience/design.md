@@ -108,6 +108,24 @@ No migrations, no config, no new endpoints. Ships as one change branch;
 rollback = revert the merge. Registry rows for FRG-UI-018/FRG-PULL-007..009
 flip `approved → implemented` in the same change.
 
+## Gate-accepted divergences from the handoff
+
+Recorded at the m4-pull-experience review gate (frontend-fidelity angle):
+
+- **Toolbar composition**: the handoff (§4, dc.html 526–542) shows one row
+  (week nav · range · spacer · publisher · scope). The implementation keeps
+  publisher/scope in the app-level Toolbar (with the screen title, matching
+  every other shipped screen) and puts week nav + range in a bar below.
+  Shell consistency wins over mock parity — accepted.
+- **Card right edge**: the handoff card carries a single state icon; linked
+  cards additionally carry want/skip + search buttons. That is FRG-PULL-007
+  extending the static mock — required behavior, accepted.
+- **Withdrawn future solicitations**: an empty future-week payload is a skip
+  (never a store), so a withdrawn entry can persist until the source next
+  returns data for that week or the week rolls current (≤ ~2 weeks). The
+  alternative (trusting empty as authoritative) reintroduces the clobber
+  risk FRG-PULL-009 exists to prevent — accepted, code-commented.
+
 ## Open Questions
 
 _None blocking. If the live source turns out to reject future-week requests
