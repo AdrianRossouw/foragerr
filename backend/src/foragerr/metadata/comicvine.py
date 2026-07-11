@@ -68,7 +68,7 @@ ISSUE_FIELDS = "id,name,issue_number,cover_date,store_date,image,volume,person_c
 
 #: Minimal field list for the per-issue credit detail fetch (FRG-CRTR-001).
 #: ComicVine serves ``person_credits`` only on the issue DETAIL endpoint
-#: (``issue/4050-{id}/``) — the list endpoint returns null regardless of
+#: (``issue/4000-{id}/``) — the list endpoint returns null regardless of
 #: ``field_list`` (verified live 2026-07-11) — so this is the credit source.
 ISSUE_CREDITS_FIELDS = "id,person_credits"
 
@@ -168,7 +168,7 @@ class ComicVineClient:
     async def get_issue_credits(self, issue_id: int) -> tuple[CreditRecord, ...]:
         """Fetch ONE issue's per-issue person credits from the detail endpoint.
 
-        ComicVine serves ``person_credits`` only on ``issue/4050-{id}/`` (the
+        ComicVine serves ``person_credits`` only on ``issue/4000-{id}/`` (the
         list endpoint returns null — verified live 2026-07-11), so this
         per-issue detail fetch is the sole credit source (FRG-CRTR-001). Like
         every other call it passes through the process-global rate gate, so a
@@ -181,7 +181,7 @@ class ComicVineClient:
         fetch phase degrades to retry-later.
         """
         data = await self._request(
-            f"issue/4050-{int(issue_id)}/", {"field_list": ISSUE_CREDITS_FIELDS}
+            f"issue/4000-{int(issue_id)}/", {"field_list": ISSUE_CREDITS_FIELDS}
         )
         results = data.get("results")
         if not isinstance(results, dict):

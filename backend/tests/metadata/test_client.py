@@ -58,7 +58,7 @@ async def test_request_carries_json_field_list_and_honest_user_agent(tmp_path):
 
 @pytest.mark.req("FRG-CRTR-001")
 async def test_get_issue_credits_hits_detail_endpoint_and_maps(tmp_path):
-    """The credit source is the issue DETAIL endpoint (``issue/4050-{id}/``)
+    """The credit source is the issue DETAIL endpoint (``issue/4000-{id}/``)
     with a minimal person_credits field list; the client maps + normalizes the
     payload exactly as the opportunistic list path would, through the gate."""
 
@@ -81,7 +81,7 @@ async def test_get_issue_credits_hits_detail_endpoint_and_maps(tmp_path):
         credits = await client.get_issue_credits(42)
 
     req = transport.requests[-1]
-    assert req.url.path.startswith("/api/issue/4050-42")
+    assert req.url.path.startswith("/api/issue/4000-42")
     assert req.url.params["field_list"] == "id,person_credits"
     assert req.url.params["api_key"] == "CV-SECRET-KEY-abc123"
     # Compound role split + normalized; verbatim retained.

@@ -6,7 +6,7 @@ Create Date: 2026-07-11
 
 One additive nullable column: ``issues.credits_fetched_at`` records that a
 series refresh successfully fetched this issue's per-issue person credits from
-the ComicVine issue detail endpoint (``issue/4050-{id}/``) — the ONLY endpoint
+the ComicVine issue detail endpoint (``issue/4000-{id}/``) — the ONLY endpoint
 that serves ``person_credits`` (the list endpoint returns null, verified live
 2026-07-11). A stamped issue is "credits covered" and is never re-fetched; an
 unstamped (``NULL``) issue is "credit-needing" and the refresh fetch phase picks

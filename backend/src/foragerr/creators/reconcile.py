@@ -3,7 +3,7 @@
 :func:`reconcile_series_credits` runs INSIDE the refresh write transaction,
 right after the issue insert/update/delete reconcile (``refresh.py``). It is
 driven by the credits the refresh actually SOURCED this run — the per-issue
-detail fetches (``issue/4050-{id}/``, the only endpoint carrying
+detail fetches (``issue/4000-{id}/``, the only endpoint carrying
 ``person_credits``, verified live 2026-07-11) plus any list rows that
 opportunistically carried credits — keyed by ComicVine issue id. For each such
 issue it upserts the credited creators (CV is authority for names) and replaces

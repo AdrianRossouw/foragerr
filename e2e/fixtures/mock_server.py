@@ -39,7 +39,7 @@ CV_START_YEAR = "2012"
 CV_PUBLISHER = "Image Comics"
 # Two issues; #1 is the one the journey wants, searches for, grabs and reads.
 # ``credits`` mirror the real API shape: they are served ONLY on the per-issue
-# DETAIL endpoint (``issue/4050-{id}/``), never on the list rows below
+# DETAIL endpoint (``issue/4000-{id}/``), never on the list rows below
 # (FRG-CRTR-001) — the list endpoint returns null credits.
 ISSUES = [
     {
@@ -339,7 +339,7 @@ def build_app() -> FastAPI:
             _single_envelope(_volume_object(known, with_issue_stubs=True))
         )
 
-    @app.get("/api/issue/4050-{issue_id}/")
+    @app.get("/api/issue/4000-{issue_id}/")
     async def cv_issue_detail(issue_id: int) -> JSONResponse:
         # The per-issue credit DETAIL endpoint (FRG-CRTR-001): the ONLY place the
         # real ComicVine serves person_credits — the list endpoint (``/issues/``

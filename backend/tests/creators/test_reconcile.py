@@ -92,14 +92,14 @@ async def _refresh_by_cv_volume(db, settings, commands, cv_volume_id, fake):
 
 
 def _detail_reqs(transport) -> list:
-    """Per-issue credit detail requests (``issue/4050-{id}/``) on a transport."""
-    return [r for r in transport.requests if "/issue/4050-" in r.url.path]
+    """Per-issue credit detail requests (``issue/4000-{id}/``) on a transport."""
+    return [r for r in transport.requests if "/issue/4000-" in r.url.path]
 
 
 def _detail_ids(transport) -> list[int]:
     """The issue ids fetched via the detail endpoint, in request order."""
     return [
-        int(r.url.path.split("4050-")[1].rstrip("/")) for r in _detail_reqs(transport)
+        int(r.url.path.split("4000-")[1].rstrip("/")) for r in _detail_reqs(transport)
     ]
 
 
@@ -122,7 +122,7 @@ async def test_credits_come_from_per_issue_detail_fetches(
     db, settings, commands, root_folder_id, root_folder_path, format_profile_id
 ):
     """Credits are sourced from the DETAIL endpoint (the list returns null on
-    the real API): one ``issue/4050-{id}/`` fetch per credit-needing issue,
+    the real API): one ``issue/4000-{id}/`` fetch per credit-needing issue,
     each through the shared rate gate (all client calls are gated)."""
     sid = await _make_series(db, root_folder_path, format_profile_id, cv_volume_id=1)
     fake = FakeCV().volume(1).issues(

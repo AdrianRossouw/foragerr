@@ -60,7 +60,7 @@ class FakeCV:
         self._issue_fail_after_offset: dict[int, tuple[int, int]] = {}
         self._images: set[str] = set()
         #: cv issue id -> person_credits served on the DETAIL endpoint
-        #: (``issue/4050-{id}/``) — the real credit source (FRG-CRTR-001). The
+        #: (``issue/4000-{id}/``) — the real credit source (FRG-CRTR-001). The
         #: real ComicVine returns person_credits: null on the LIST endpoint, so
         #: this fixture mirrors that: credits registered via ``issue(credits=)``
         #: are served on the detail endpoint, NOT the list rows (unless a test
@@ -107,7 +107,7 @@ class FakeCV:
         walk propagates).
 
         Per-issue ``person_credits`` supplied via :func:`issue`'s ``credits``
-        are split off onto the DETAIL endpoint (``issue/4050-{id}/``) — mirroring
+        are split off onto the DETAIL endpoint (``issue/4000-{id}/``) — mirroring
         the real API, whose LIST endpoint returns null credits. Pass
         ``list_credits=True`` to ALSO serve those credits on the list rows (the
         opportunistic-mapping / tripwire path). ``detail_fail`` maps a cv issue
@@ -144,10 +144,11 @@ class FakeCV:
                 if vol is None:
                     return httpx.Response(404, content=b"not found")
                 return _envelope(vol)
-            if "/issue/4050-" in path:
+            if "/issue/4000-" in path:
                 # The per-issue credit DETAIL endpoint (FRG-CRTR-001) — the only
-                # place the real API serves person_credits.
-                iid = int(path.split("4050-")[1].rstrip("/"))
+                # place the real API serves person_credits. Type prefix 4000 =
+                # issue (4050 = volume); the real API 102s a wrong prefix.
+                iid = int(path.split("4000-")[1].rstrip("/"))
                 fail = self._issue_detail_fail.get(iid)
                 if fail is not None:
                     return httpx.Response(fail, content=b"boom")
@@ -209,7 +210,7 @@ def issue(
 
     ``credits`` are CV person-credit objects (``{"id", "name", "role"}``). They
     are NOT embedded in the returned list row — :meth:`FakeCV.issues` splits them
-    onto the DETAIL endpoint (``issue/4050-{id}/``), mirroring the real API whose
+    onto the DETAIL endpoint (``issue/4000-{id}/``), mirroring the real API whose
     LIST endpoint returns null credits; credit ingest (FRG-CRTR-001) is then
     exercised through the real client's detail fetch + mapper. ``credits=[]``
     registers a legitimately creditless issue (detail returns an empty list).
