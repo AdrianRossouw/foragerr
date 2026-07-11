@@ -255,6 +255,25 @@ test('FRG-PROC-010 FRG-UI-003 FRG-SER-009: the library browse shows the series w
   await expect(page.locator('[data-testid^="issue-row-"]').first()).toBeVisible();
 });
 
+test('FRG-PROC-010 FRG-CRTR-001 FRG-UI-027: creator credits ingest end-to-end and render on the grid', async ({ page }) => {
+  // The added Saga series' refresh fetches per-issue credit DETAILS from the
+  // fixture CV (the list endpoint serves none — the real API shape), so the
+  // creators grid must show its credited creators. Poll the API first: the
+  // bounded detail fetches ride the rate gate and land shortly after refresh.
+  await until(
+    async () => {
+      const r = await api.get('/api/v1/creators?page=1&pageSize=5');
+      if (!r.ok()) return false;
+      const d = await r.json();
+      return d.totalCreators > 0 ? d : false;
+    },
+    { timeoutMs: 120_000, intervalMs: 2_000, label: 'ingested creator credits' },
+  );
+  await page.goto('/creators');
+  await expect(page.locator('[data-testid^="creator-card-"]').first()).toBeVisible();
+  await expect(page.getByText(/Brian K\. Vaughan|Fiona Staples/).first()).toBeVisible();
+});
+
 test('FRG-PROC-010 FRG-UI-018: the calendar renders an unconfigured-source week without error', async ({ page }) => {
   // No pull source is configured in this environment and the fixture series
   // ships nothing in the current week, so the honest render is the empty

@@ -56,6 +56,57 @@ async def test_request_carries_json_field_list_and_honest_user_agent(tmp_path):
     assert "xml" not in req.url.query.decode().lower()
 
 
+@pytest.mark.req("FRG-CRTR-001")
+async def test_get_issue_credits_hits_detail_endpoint_and_maps(tmp_path):
+    """The credit source is the issue DETAIL endpoint (``issue/4000-{id}/``)
+    with a minimal person_credits field list; the client maps + normalizes the
+    payload exactly as the opportunistic list path would, through the gate."""
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        return json_response(
+            {
+                "status_code": 1,
+                "results": {
+                    "id": 42,
+                    "person_credits": [
+                        {"id": 10, "name": "Alice", "role": "writer, penciller"},
+                        {"id": 11, "name": "Bob", "role": "inker"},
+                    ],
+                },
+            }
+        )
+
+    client, transport = make_client(tmp_path, _handler)
+    async with client:
+        credits = await client.get_issue_credits(42)
+
+    req = transport.requests[-1]
+    assert req.url.path.startswith("/api/issue/4000-42")
+    assert req.url.params["field_list"] == "id,person_credits"
+    assert req.url.params["api_key"] == "CV-SECRET-KEY-abc123"
+    # Compound role split + normalized; verbatim retained.
+    got = {(c.cv_person_id, c.role_normalized) for c in credits}
+    assert got == {(10, "writer"), (10, "penciler"), (11, "inker")}
+
+
+@pytest.mark.req("FRG-CRTR-001")
+async def test_get_issue_credits_missing_results_is_malformed(tmp_path):
+    client, _ = make_client(
+        tmp_path, lambda r: json_response({"status_code": 1, "results": None})
+    )
+    async with client:
+        with pytest.raises(ComicVineMalformedResponse):
+            await client.get_issue_credits(1)
+
+
+@pytest.mark.req("FRG-CRTR-001")
+async def test_get_issue_credits_5xx_raises_unavailable(tmp_path):
+    client, _ = make_client(tmp_path, lambda r: httpx.Response(503))
+    async with client:
+        with pytest.raises(ComicVineUnavailable):
+            await client.get_issue_credits(1)
+
+
 @pytest.mark.req("FRG-META-001")
 async def test_hung_connection_fails_within_read_timeout(tmp_path):
     async def hang(reader, writer):

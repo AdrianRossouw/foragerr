@@ -38,9 +38,27 @@ CV_VOLUME_NAME = "Saga"
 CV_START_YEAR = "2012"
 CV_PUBLISHER = "Image Comics"
 # Two issues; #1 is the one the journey wants, searches for, grabs and reads.
+# ``credits`` mirror the real API shape: they are served ONLY on the per-issue
+# DETAIL endpoint (``issue/4000-{id}/``), never on the list rows below
+# (FRG-CRTR-001) — the list endpoint returns null credits.
 ISSUES = [
-    {"id": 340001, "number": "1", "cover_date": "2012-03-14"},
-    {"id": 340002, "number": "2", "cover_date": "2012-04-11"},
+    {
+        "id": 340001,
+        "number": "1",
+        "cover_date": "2012-03-14",
+        "credits": [
+            {"id": 900001, "name": "Brian K. Vaughan", "role": "writer"},
+            {"id": 900002, "name": "Fiona Staples", "role": "artist, cover"},
+        ],
+    },
+    {
+        "id": 340002,
+        "number": "2",
+        "cover_date": "2012-04-11",
+        "credits": [
+            {"id": 900001, "name": "Brian K. Vaughan", "role": "writer"},
+        ],
+    },
 ]
 
 # A SECOND volume for the library-import scenario (y-library-import.spec.ts):
@@ -52,7 +70,14 @@ LI_VOLUME_NAME = "Fables"
 LI_START_YEAR = "2002"
 LI_PUBLISHER = "Vertigo"
 LI_ISSUES = [
-    {"id": 350001, "number": "1", "cover_date": "2002-07-10"},
+    {
+        "id": 350001,
+        "number": "1",
+        "cover_date": "2002-07-10",
+        "credits": [
+            {"id": 900010, "name": "Bill Willingham", "role": "writer"},
+        ],
+    },
     {"id": 350002, "number": "2", "cover_date": "2002-08-14"},
 ]
 
@@ -312,6 +337,28 @@ def build_app() -> FastAPI:
         known = volume_id if volume_id in VOLUMES else CV_VOLUME_ID
         return JSONResponse(
             _single_envelope(_volume_object(known, with_issue_stubs=True))
+        )
+
+    @app.get("/api/issue/4000-{issue_id}/")
+    async def cv_issue_detail(issue_id: int) -> JSONResponse:
+        # The per-issue credit DETAIL endpoint (FRG-CRTR-001): the ONLY place the
+        # real ComicVine serves person_credits — the list endpoint (``/issues/``
+        # below) returns null. The refresh fetch phase calls this per
+        # credit-needing issue. An UNKNOWN id is a 404, never an empty list —
+        # a 200 would stamp a mis-constructed target id as covered and mask the
+        # regression (gate finding, m5-credits-live-fetch).
+        credits = None
+        for volume in VOLUMES.values():
+            for issue in volume["issues"]:
+                if issue["id"] == issue_id:
+                    credits = issue.get("credits", [])
+                    break
+            if credits is not None:
+                break
+        if credits is None:
+            return JSONResponse({"error": "Object Not Found"}, status_code=404)
+        return JSONResponse(
+            _single_envelope({"id": issue_id, "person_credits": credits})
         )
 
     @app.get("/api/issues/")

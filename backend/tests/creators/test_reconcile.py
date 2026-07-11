@@ -16,11 +16,13 @@ from sqlalchemy import select
 
 from foragerr.creators import repo as creators_repo
 from foragerr.creators.models import CreatorRow, IssueCreditRow
+from foragerr.creators.reconcile import reconcile_issue_credits
 from foragerr.library import repo
 from foragerr.library.flows import refresh_series
 from foragerr.library.models import IssueRow
+from foragerr.metadata.models import CreditRecord
 
-from flows_support import FakeCV, build_factory, credit, issue
+from flows_support import FakeCV, build_factory, credit, flows_settings, issue
 
 
 async def _make_series(
@@ -89,37 +91,220 @@ async def _refresh_by_cv_volume(db, settings, commands, cv_volume_id, fake):
     await _run_refresh(db, settings, series_id, commands, fake)
 
 
-# --- FRG-CRTR-001: credits ride the existing walk ---------------------------
+def _detail_reqs(transport) -> list:
+    """Per-issue credit detail requests (``issue/4000-{id}/``) on a transport."""
+    return [r for r in transport.requests if "/issue/4000-" in r.url.path]
+
+
+def _detail_ids(transport) -> list[int]:
+    """The issue ids fetched via the detail endpoint, in request order."""
+    return [
+        int(r.url.path.split("4000-")[1].rstrip("/")) for r in _detail_reqs(transport)
+    ]
+
+
+async def _stamped_cv_ids(db, series_id: int) -> set[int]:
+    async with db.read_session() as session:
+        rows = await session.execute(
+            select(IssueRow.cv_issue_id).where(
+                IssueRow.series_id == series_id,
+                IssueRow.credits_fetched_at.is_not(None),
+            )
+        )
+        return set(rows.scalars().all())
+
+
+# --- FRG-CRTR-001: credits come from bounded, rate-gated detail fetches -------
 
 
 @pytest.mark.req("FRG-CRTR-001")
-async def test_credits_ride_existing_walk_no_extra_requests(
+async def test_credits_come_from_per_issue_detail_fetches(
     db, settings, commands, root_folder_id, root_folder_path, format_profile_id
 ):
-    sid_a = await _make_series(db, root_folder_path, format_profile_id, cv_volume_id=1)
-    sid_b = await _make_series(db, root_folder_path, format_profile_id, cv_volume_id=2)
-
-    with_credits = FakeCV().volume(1).issues(
+    """Credits are sourced from the DETAIL endpoint (the list returns null on
+    the real API): one ``issue/4000-{id}/`` fetch per credit-needing issue,
+    each through the shared rate gate (all client calls are gated)."""
+    sid = await _make_series(db, root_folder_path, format_profile_id, cv_volume_id=1)
+    fake = FakeCV().volume(1).issues(
         1,
         [
             issue(100, "1", credits=[credit(10, "Alice", "writer, penciler")]),
             issue(101, "2", credits=[credit(11, "Bob", "artist")]),
         ],
     )
-    without = FakeCV().volume(2).issues(2, [issue(200, "1"), issue(201, "2")])
+    transport = await _run_refresh(db, settings, sid, commands, fake)
 
-    t_with = await _run_refresh(db, settings, sid_a, commands, with_credits)
-    t_without = await _run_refresh(db, settings, sid_b, commands, without)
+    # One detail fetch per issue — that is the credit source now.
+    assert sorted(_detail_ids(transport)) == [100, 101]
+    names = {c.name for c in await _all_creators(db)}
+    assert names == {"Alice", "Bob"}
+    # Both issues are now stamped, so a repeat refresh issues NO detail fetches.
+    assert await _stamped_cv_ids(db, sid) == {100, 101}
+    transport2 = await _run_refresh(
+        db, settings, sid, commands, FakeCV().volume(1).issues(
+            1,
+            [
+                issue(100, "1", credits=[credit(10, "Alice", "writer, penciler")]),
+                issue(101, "2", credits=[credit(11, "Bob", "artist")]),
+            ],
+        ),
+    )
+    assert _detail_ids(transport2) == []
+    # The all-stamped (unsourced) run must leave the stored credits intact —
+    # reconcile touches only sourced issues (gate finding: assert the rows,
+    # not just the absence of fetches).
+    assert {c.name for c in await _all_creators(db)} == {"Alice", "Bob"}
 
-    def issues_reqs(t):
-        return [r for r in t.requests if r.url.path.endswith("/issues/")]
 
-    # Same number of ComicVine requests with and without credits, and NOT a
-    # single per-issue detail fetch (singular ``/issue/4050-`` endpoint).
-    assert len(issues_reqs(t_with)) == len(issues_reqs(t_without))
-    assert [r for r in t_with.requests if "/issue/4050-" in r.url.path] == []
-    # ...and the batch walk actually requested the field.
-    assert "person_credits" in issues_reqs(t_with)[0].url.params.get("field_list")
+@pytest.mark.req("FRG-CRTR-001")
+async def test_detail_fetches_are_bounded_newest_first(
+    db, settings, commands, root_folder_id, root_folder_path, format_profile_id
+):
+    """With more credit-needing issues than the per-run bound, exactly the
+    bound's worth of detail fetches go out, targeting the NEWEST issues first
+    (store_date DESC, then cover_date, then id); the tail is left for later."""
+    bounded = flows_settings(settings.config_dir, credits_fetch_per_refresh=2)
+    sid = await _make_series(db, root_folder_path, format_profile_id, cv_volume_id=1)
+    fake = FakeCV().volume(1).issues(
+        1,
+        [
+            issue(100, "1", store_date="2012-01-01",
+                  credits=[credit(10, "A", "writer")]),
+            issue(101, "2", store_date="2012-06-01",
+                  credits=[credit(11, "B", "writer")]),
+            issue(102, "3", store_date="2012-09-01",
+                  credits=[credit(12, "C", "writer")]),
+        ],
+    )
+    transport = await _run_refresh(db, bounded, sid, commands, fake)
+
+    # Exactly the bound; the two NEWEST (102 = Sep, 101 = Jun) fetched first.
+    assert _detail_ids(transport) == [102, 101]
+    assert await _stamped_cv_ids(db, sid) == {101, 102}
+    assert {c.name for c in await _all_creators(db)} == {"B", "C"}
+
+    # A second run fetches the remaining tail (100) and nothing past the bound.
+    transport2 = await _run_refresh(db, bounded, sid, commands, fake)
+    assert _detail_ids(transport2) == [100]
+    assert await _stamped_cv_ids(db, sid) == {100, 101, 102}
+    assert {c.name for c in await _all_creators(db)} == {"A", "B", "C"}
+
+
+@pytest.mark.req("FRG-CRTR-001")
+async def test_zero_credit_issue_is_stamped_and_not_refetched(
+    db, settings, commands, root_folder_id, root_folder_path, format_profile_id
+):
+    """A detail fetch that returns no credits still stamps the issue (no rows
+    written) so subsequent refreshes never re-fetch it (design decision 6)."""
+    sid = await _make_series(db, root_folder_path, format_profile_id, cv_volume_id=1)
+    fake = FakeCV().volume(1).issues(1, [issue(100, "1", credits=[])])
+    transport = await _run_refresh(db, settings, sid, commands, fake)
+
+    assert _detail_ids(transport) == [100]  # fetched once
+    assert await _credits_for_series(db, sid) == []  # no credit rows
+    assert await _stamped_cv_ids(db, sid) == {100}  # but stamped
+
+    transport2 = await _run_refresh(db, settings, sid, commands, fake)
+    assert _detail_ids(transport2) == []  # never re-fetched
+
+
+@pytest.mark.req("FRG-CRTR-001")
+async def test_failed_detail_fetch_is_unstamped_and_retried_next_run(
+    db, settings, commands, root_folder_id, root_folder_path, format_profile_id
+):
+    """A failed detail fetch (5xx) leaves the issue unstamped and does not fail
+    the refresh; the next run retries it and lands the credit."""
+    sid = await _make_series(db, root_folder_path, format_profile_id, cv_volume_id=1)
+    # Issue 100 succeeds, issue 101's detail fetch 500s this run.
+    failing = FakeCV().volume(1).issues(
+        1,
+        [
+            issue(100, "1", credits=[credit(10, "Alice", "writer")]),
+            issue(101, "2", credits=[credit(11, "Bob", "artist")]),
+        ],
+        detail_fail={101: 500},
+    )
+    # Refresh completes normally (returns a summary, does not raise).
+    result = await refresh_series(
+        db, settings, sid, commands=commands,
+        factory=build_factory(settings, failing.handler()),
+    )
+    assert "inserted=" in result
+    assert await _stamped_cv_ids(db, sid) == {100}  # only the success stamped
+    assert {c.name for c in await _all_creators(db)} == {"Alice"}
+
+    # Next run: 101 is still credit-needing and now its detail fetch succeeds.
+    healthy = FakeCV().volume(1).issues(
+        1,
+        [
+            issue(100, "1", credits=[credit(10, "Alice", "writer")]),
+            issue(101, "2", credits=[credit(11, "Bob", "artist")]),
+        ],
+    )
+    transport = await _run_refresh(db, settings, sid, commands, healthy)
+    assert _detail_ids(transport) == [101]  # only the previously-failed issue
+    assert {c.name for c in await _all_creators(db)} == {"Alice", "Bob"}
+
+
+# --- Anti-masking tripwire (design decision 5) ------------------------------
+
+
+@pytest.mark.req("FRG-CRTR-001")
+async def test_tripwire_list_null_detail_full_is_the_canonical_shape(
+    db, settings, commands, root_folder_id, root_folder_path, format_profile_id
+):
+    """Canonical fixture shape: the LIST rows carry NO credits (mirroring the
+    real API's null), the DETAIL endpoint supplies them, and end-to-end ingest
+    lands the credit via the detail path. Fails if the fixture regresses to
+    serving list credits as the ingest source (the v0.5.0 masking bug)."""
+    sid = await _make_series(db, root_folder_path, format_profile_id, cv_volume_id=1)
+    fake = FakeCV().volume(1).issues(
+        1, [issue(100, "1", credits=[credit(10, "Alice", "writer")])]
+    )
+    # Fixture invariant: the credit is NOT on the list row (default routing),
+    # only on the detail endpoint — this is what pins list-null/detail-full.
+    assert "person_credits" not in fake._issues[1][0]
+    assert 100 in fake._issue_credits
+
+    transport = await _run_refresh(db, settings, sid, commands, fake)
+
+    # The list walk requested person_credits but the rows carried none...
+    list_reqs = [r for r in transport.requests if r.url.path.endswith("/issues/")]
+    assert list_reqs and "person_credits" in list_reqs[0].url.params.get("field_list")
+    # ...and the credit was sourced through the detail endpoint end-to-end.
+    assert _detail_ids(transport) == [100]
+    assert {c.name for c in await _all_creators(db)} == {"Alice"}
+
+
+@pytest.mark.req("FRG-CRTR-001")
+async def test_tripwire_opportunistic_list_credits_still_map(
+    db, settings, commands, root_folder_id, root_folder_path, format_profile_id
+):
+    """Opportunistic path kept: a list row carrying credits for an issue the run
+    does NOT detail-fetch (here, beyond the per-run bound) still maps at zero
+    extra cost. Guards against silently dropping list-supplied credits should CV
+    ever serve them."""
+    bounded = flows_settings(settings.config_dir, credits_fetch_per_refresh=1)
+    sid = await _make_series(db, root_folder_path, format_profile_id, cv_volume_id=1)
+    # ``list_credits=True`` also serves credits on the list rows. With bound=1
+    # only the NEWEST issue (200) is detail-fetched; issue 100 is beyond the
+    # bound, so its LIST credit is the only possible source this run.
+    fake = FakeCV().volume(1).issues(
+        1,
+        [
+            issue(100, "1", store_date="2012-01-01",
+                  credits=[credit(10, "Alice", "writer")]),
+            issue(200, "2", store_date="2012-09-01",
+                  credits=[credit(11, "Bob", "writer")]),
+        ],
+        list_credits=True,
+    )
+    transport = await _run_refresh(db, bounded, sid, commands, fake)
+
+    # Only the newest issue is detail-fetched (bound=1)...
+    assert _detail_ids(transport) == [200]
+    # ...yet Alice (issue 100, beyond the bound) lands via the list mapping.
+    assert {c.name for c in await _all_creators(db)} == {"Alice", "Bob"}
 
 
 # --- FRG-CRTR-002: storage + idempotent reconciliation ----------------------
@@ -166,23 +351,63 @@ async def test_repeat_refresh_is_a_no_op(
     assert {c.id for c in await _all_creators(db)} == creators_first
 
 
+async def _issue_id_for_cv(db, series_id: int, cv_issue_id: int) -> int:
+    async with db.read_session() as session:
+        return (
+            await session.execute(
+                select(IssueRow.id).where(
+                    IssueRow.series_id == series_id,
+                    IssueRow.cv_issue_id == cv_issue_id,
+                )
+            )
+        ).scalar_one()
+
+
+async def _persist_zero_credit_issue(
+    db, settings, commands, root_folder_path, format_profile_id, *, cv_issue_id=100
+) -> tuple[int, int]:
+    """Persist one issue (via a zero-credit refresh) and return (series_id,
+    issue_id) so a test can drive :func:`reconcile_issue_credits` directly."""
+    sid = await _make_series(db, root_folder_path, format_profile_id, cv_volume_id=1)
+    await _run_refresh(
+        db, settings, sid, commands,
+        FakeCV().volume(1).issues(1, [issue(cv_issue_id, "1", credits=[])]),
+    )
+    return sid, await _issue_id_for_cv(db, sid, cv_issue_id)
+
+
 @pytest.mark.req("FRG-CRTR-002")
-async def test_dropped_credit_is_removed(
+async def test_idempotent_re_reconcile_and_drop_via_detail_path(
     db, settings, commands, root_folder_id, root_folder_path, format_profile_id
 ):
-    sid = await _make_series(db, root_folder_path, format_profile_id, cv_volume_id=1)
-    fake = FakeCV().volume(1).issues(
-        1, [issue(100, "1", credits=[credit(10, "Alice", "writer, penciler")])]
+    """The per-issue reconcile the detail path reuses is idempotent and applies
+    drops (spec: refreshed twice with identical data changes no rows; a run that
+    drops one credit removes exactly that association)."""
+    sid, issue_id = await _persist_zero_credit_issue(
+        db, settings, commands, root_folder_path, format_profile_id
     )
-    await _run_refresh(db, settings, sid, commands, fake)
+    two = (
+        CreditRecord(10, "Alice", "writer", "writer"),
+        CreditRecord(10, "Alice", "penciler", "penciler"),
+    )
+    async with db.write_session() as session:
+        await reconcile_issue_credits(session, issue_id, two)
+    first = {c.id for c in await _credits_for_series(db, sid)}
     assert {c.role_normalized for c in await _credits_for_series(db, sid)} == {
         "writer",
         "penciler",
     }
 
-    # CV drops the penciler role -> exactly that association is removed.
-    fake.issues(1, [issue(100, "1", credits=[credit(10, "Alice", "writer")])])
-    await _run_refresh(db, settings, sid, commands, fake)
+    # Identical detail credits again -> no row churn (stable ids).
+    async with db.write_session() as session:
+        await reconcile_issue_credits(session, issue_id, two)
+    assert {c.id for c in await _credits_for_series(db, sid)} == first
+
+    # Drop the penciler credit -> exactly that association is removed.
+    async with db.write_session() as session:
+        await reconcile_issue_credits(
+            session, issue_id, (CreditRecord(10, "Alice", "writer", "writer"),)
+        )
     assert {c.role_normalized for c in await _credits_for_series(db, sid)} == {"writer"}
 
 
@@ -192,13 +417,15 @@ async def test_verbatim_only_change_updates_row_in_place(
 ):
     """A verbatim-only role change (same normalized slot) refreshes the stored
     verbatim in place — CV is authority for that column too — without churning
-    the row identity, and an identical repeat still writes nothing."""
-    sid = await _make_series(db, root_folder_path, format_profile_id, cv_volume_id=1)
-    # "penciller" normalizes to "penciler" but is retained verbatim.
-    fake = FakeCV().volume(1).issues(
-        1, [issue(100, "1", credits=[credit(10, "Alice", "penciller")])]
+    the row identity, and an identical repeat writes nothing."""
+    sid, issue_id = await _persist_zero_credit_issue(
+        db, settings, commands, root_folder_path, format_profile_id
     )
-    await _run_refresh(db, settings, sid, commands, fake)
+    # "penciller" normalizes to "penciler" but is retained verbatim.
+    async with db.write_session() as session:
+        await reconcile_issue_credits(
+            session, issue_id, (CreditRecord(10, "Alice", "penciller", "penciler"),)
+        )
     rows = await _credits_for_series(db, sid)
     assert len(rows) == 1
     original_id = rows[0].id
@@ -207,8 +434,10 @@ async def test_verbatim_only_change_updates_row_in_place(
 
     # Only the verbatim spelling changes; the normalized key ("penciler") is
     # unchanged, so the SAME row must be updated (stable id), not deleted+re-added.
-    fake.issues(1, [issue(100, "1", credits=[credit(10, "Alice", "penciler")])])
-    await _run_refresh(db, settings, sid, commands, fake)
+    async with db.write_session() as session:
+        await reconcile_issue_credits(
+            session, issue_id, (CreditRecord(10, "Alice", "penciler", "penciler"),)
+        )
     rows = await _credits_for_series(db, sid)
     assert len(rows) == 1
     assert rows[0].id == original_id  # row identity preserved
@@ -219,8 +448,6 @@ async def test_verbatim_only_change_updates_row_in_place(
 async def test_partial_fetch_never_deletes_credits(
     db, settings, commands, root_folder_id, root_folder_path, format_profile_id
 ):
-    from flows_support import flows_settings
-
     sid = await _make_series(db, root_folder_path, format_profile_id, cv_volume_id=1)
     # First, a complete refresh giving both issues their credits.
     fake = FakeCV().volume(1).issues(
@@ -355,15 +582,12 @@ async def test_user_unfollow_survives_prune_and_is_never_re_followed(
     async with db.write_session() as session:
         await creators_repo.set_creator_followed(session, alice_id, False)
 
-    # Drop Alice from both series -> creditless but touched, so prune spares her.
-    await _refresh_by_cv_volume(
-        db, settings, commands, 1,
-        FakeCV().volume(1).issues(1, [issue(100, "1", credits=[])]),
-    )
-    await _refresh_by_cv_volume(
-        db, settings, commands, 2,
-        FakeCV().volume(2).issues(2, [issue(200, "1", credits=[])]),
-    )
+    # Drop Alice's issues entirely (a complete walk with the issue gone) so her
+    # credits cascade and she becomes creditless — but touched, so prune spares
+    # her. (Re-fetching stamped issues to observe an emptied credit list is an
+    # explicit non-goal, so credits are dropped by deleting the issue instead.)
+    await _refresh_by_cv_volume(db, settings, commands, 1, FakeCV().volume(1))
+    await _refresh_by_cv_volume(db, settings, commands, 2, FakeCV().volume(2))
     alice = await _creator_by_cv(db, 10)
     assert alice is not None  # survived the creditless period
     assert alice.followed is False
@@ -400,15 +624,10 @@ async def test_followed_creator_survives_prune(
     async with db.write_session() as session:
         await creators_repo.set_creator_followed(session, alice_id, True)
 
-    # Drop Alice from BOTH series -> creditless but followed, so prune spares her.
-    await _refresh_by_cv_volume(
-        db, settings, commands, 1,
-        FakeCV().volume(1).issues(1, [issue(100, "1", credits=[])]),
-    )
-    await _refresh_by_cv_volume(
-        db, settings, commands, 2,
-        FakeCV().volume(2).issues(2, [issue(200, "1", credits=[])]),
-    )
+    # Drop Alice's issues entirely (complete walk, issue gone) so her credits
+    # cascade and she becomes creditless -> followed, so prune spares her.
+    await _refresh_by_cv_volume(db, settings, commands, 1, FakeCV().volume(1))
+    await _refresh_by_cv_volume(db, settings, commands, 2, FakeCV().volume(2))
 
     alice = await _creator_by_cv(db, 10)
     assert alice is not None  # survived the creditless prune

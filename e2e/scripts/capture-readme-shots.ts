@@ -125,6 +125,40 @@ const shots: Shot[] = [
     },
   },
   {
+    id: 'creators-grid',
+    run: async (page) => {
+      // Credits arrive via bounded, rate-gated per-issue DETAIL fetches during
+      // the import-chained refreshes (FRG-CRTR-001), so poll the API until at
+      // least one creator exists before shooting — capturing the empty state
+      // would mislabel the feature. Fail loudly if none arrive: the demo
+      // library includes credit-bearing series (Fables), so zero creators
+      // after the wait means ingest regressed.
+      if (!page.url().startsWith(BASE_URL)) {
+        await page.goto(`${BASE_URL}/`, { waitUntil: 'domcontentloaded' }).catch(() => {});
+      }
+      const deadline = Date.now() + 360_000;
+      let total = 0;
+      while (Date.now() < deadline) {
+        total = await page.evaluate(async (base) => {
+          const r = await fetch(`${base}/api/v1/creators?page=1&pageSize=1`);
+          if (!r.ok) return 0;
+          return ((await r.json()).totalCreators as number) ?? 0;
+        }, BASE_URL);
+        if (total > 0) break;
+        await page.waitForTimeout(5_000);
+      }
+      if (total === 0) {
+        throw new Error('creators-grid: no creator credits ingested within the wait budget');
+      }
+      await page.goto(`${BASE_URL}/creators`, { waitUntil: 'domcontentloaded' });
+      await page.waitForSelector('[data-testid^="creator-card-"]', {
+        timeout: 30_000,
+      });
+      await settle(page);
+      await shoot(page, 'creators-grid');
+    },
+  },
+  {
     id: 'wanted',
     run: async (page) => {
       // The interactive-search results view requires configured indexers; with

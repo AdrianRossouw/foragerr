@@ -41,6 +41,7 @@ from sqlalchemy import (
     Index,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -251,6 +252,17 @@ class IssueRow(Base):
     issue_type: Mapped[str] = mapped_column(Text, nullable=False, default="regular")
     monitored: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     added_at: Mapped[dt.datetime] = mapped_column(StrictDateTime, nullable=False)
+    #: When a series refresh last fetched this issue's per-issue person credits
+    #: from the ComicVine issue detail endpoint (FRG-CRTR-001/002). ``None`` =
+    #: credit-needing (never fetched, or a legacy row predating migration 0017);
+    #: the refresh fetch phase fetches unstamped issues newest-first up to the
+    #: ``credits_fetch_per_refresh`` bound and stamps this — INCLUDING when the
+    #: issue legitimately has zero credits — so a covered issue is never
+    #: re-fetched. Re-fetching a stamped issue to pick up later CV credit edits
+    #: is an explicit non-goal (a future mechanism may clear the stamp).
+    credits_fetched_at: Mapped[dt.datetime | None] = mapped_column(
+        StrictDateTime, nullable=True
+    )
 
     series: Mapped[SeriesRow] = relationship(back_populates="issues")
     files: Mapped[list["IssueFileRow"]] = relationship(

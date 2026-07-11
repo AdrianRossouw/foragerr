@@ -11,7 +11,11 @@ the follow flag.
 from __future__ import annotations
 
 from foragerr.creators.models import CreatorRow, IssueCreditRow
-from foragerr.creators.reconcile import reconcile_series_credits
+from foragerr.creators.reconcile import (
+    prune_orphan_creators,
+    reconcile_issue_credits,
+    reconcile_series_credits,
+)
 from foragerr.creators.repo import (
     distinct_series_count,
     get_creator,
@@ -27,6 +31,8 @@ __all__ = [
     "get_creator",
     "get_creator_by_cv",
     "list_issue_credits",
+    "prune_orphan_creators",
+    "reconcile_issue_credits",
     "reconcile_series_credits",
     "set_creator_followed",
 ]

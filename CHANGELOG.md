@@ -9,6 +9,27 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.5.3] — 2026-07-11
+
+m5-credits-live-fetch: creator credits now actually arrive — fixes the
+v0.5.2 known issue.
+
+### Fixed
+- **Live credit ingest** (FRG-CRTR-001/002): ComicVine only serves credits
+  on per-issue detail requests (its list API returns none — the cause of
+  the v0.5.2 known issue), so series refresh now fetches a bounded batch
+  of issue details per run (newest first, 25 by default via
+  `credits_fetch_per_refresh`, through the normal rate limit). Issues are
+  marked once covered — including issues with genuinely no credits — so
+  nothing refetches forever, and a failed fetch simply retries on a later
+  run. Repeated refreshes (or force-running `creators-backfill`) walk the
+  whole library over time.
+- Test fixtures now mirror the real ComicVine shape (no credits on list
+  responses) with a tripwire so this class of masking can't recur; the
+  end-to-end suite proves credits render on the Creators screen.
+- The README tour regains the Creators screen, captured from real
+  ingested credits.
+
 ## [v0.5.2] — 2026-07-11
 
 m5-creators-screens: the Creators pages arrive, and follows become

@@ -59,6 +59,16 @@ class FakeCV:
         #: volume id -> (offset threshold, HTTP status) for a mid-walk failure.
         self._issue_fail_after_offset: dict[int, tuple[int, int]] = {}
         self._images: set[str] = set()
+        #: cv issue id -> person_credits served on the DETAIL endpoint
+        #: (``issue/4000-{id}/``) — the real credit source (FRG-CRTR-001). The
+        #: real ComicVine returns person_credits: null on the LIST endpoint, so
+        #: this fixture mirrors that: credits registered via ``issue(credits=)``
+        #: are served on the detail endpoint, NOT the list rows (unless a test
+        #: opts in via ``issues(..., list_credits=True)`` to exercise the
+        #: opportunistic list-mapping path).
+        self._issue_credits: dict[int, list[dict]] = {}
+        #: cv issue id -> (HTTP status) for a failing detail fetch.
+        self._issue_detail_fail: dict[int, int] = {}
 
     def volume(
         self,
@@ -88,14 +98,35 @@ class FakeCV:
         *,
         fail_after_offset: int | None = None,
         fail_status: int = 500,
+        list_credits: bool = False,
+        detail_fail: dict[int, int] | None = None,
     ) -> "FakeCV":
         """Register a volume's issues; ``fail_after_offset`` makes every page
         at or past that offset fail with ``fail_status`` (500 = a transient
         mid-walk failure the walk degrades on; 401 = an auth rejection the
-        walk propagates)."""
-        self._issues[volume_id] = issues
+        walk propagates).
+
+        Per-issue ``person_credits`` supplied via :func:`issue`'s ``credits``
+        are split off onto the DETAIL endpoint (``issue/4000-{id}/``) — mirroring
+        the real API, whose LIST endpoint returns null credits. Pass
+        ``list_credits=True`` to ALSO serve those credits on the list rows (the
+        opportunistic-mapping / tripwire path). ``detail_fail`` maps a cv issue
+        id to an HTTP status its detail fetch should fail with (retry-later).
+        """
+        rows: list[dict] = []
+        for raw in issues:
+            row = dict(raw)
+            creds = row.pop("person_credits", None)
+            if creds is not None:
+                self._issue_credits[row["id"]] = creds
+                if list_credits:
+                    row["person_credits"] = creds
+            rows.append(row)
+        self._issues[volume_id] = rows
         if fail_after_offset is not None:
             self._issue_fail_after_offset[volume_id] = (fail_after_offset, fail_status)
+        if detail_fail:
+            self._issue_detail_fail.update(detail_fail)
         return self
 
     # -- handler -----------------------------------------------------------
@@ -113,6 +144,17 @@ class FakeCV:
                 if vol is None:
                     return httpx.Response(404, content=b"not found")
                 return _envelope(vol)
+            if "/issue/4000-" in path:
+                # The per-issue credit DETAIL endpoint (FRG-CRTR-001) — the only
+                # place the real API serves person_credits. Type prefix 4000 =
+                # issue (4050 = volume); the real API 102s a wrong prefix.
+                iid = int(path.split("4000-")[1].rstrip("/"))
+                fail = self._issue_detail_fail.get(iid)
+                if fail is not None:
+                    return httpx.Response(fail, content=b"boom")
+                return _envelope(
+                    {"id": iid, "person_credits": self._issue_credits.get(iid, [])}
+                )
             if path.endswith("/volumes/"):
                 return self._search_response(query)
             if path.endswith("/issues/"):
@@ -166,9 +208,12 @@ def issue(
 ) -> dict:
     """One CV issue JSON object for :meth:`FakeCV.issues`.
 
-    ``credits`` populates ``person_credits`` (each item a
-    ``{"id", "name", "role"}`` CV person-credit object) so credit ingest
-    (FRG-CRTR-001) can be exercised through the real client + mapper.
+    ``credits`` are CV person-credit objects (``{"id", "name", "role"}``). They
+    are NOT embedded in the returned list row — :meth:`FakeCV.issues` splits them
+    onto the DETAIL endpoint (``issue/4000-{id}/``), mirroring the real API whose
+    LIST endpoint returns null credits; credit ingest (FRG-CRTR-001) is then
+    exercised through the real client's detail fetch + mapper. ``credits=[]``
+    registers a legitimately creditless issue (detail returns an empty list).
     """
     payload: dict = {"id": cv_issue_id, "issue_number": number}
     if title is not None:
