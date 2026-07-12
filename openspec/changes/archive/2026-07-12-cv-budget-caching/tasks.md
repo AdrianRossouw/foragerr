@@ -69,8 +69,8 @@
 - [x] 5.1 Manual: `docs/manual/user/metadata.md` (deferral + skip-unchanged
       refresh behavior + cover repaint), `docs/manual/admin/configuration.md`
       (two new settings + ComicVine health states section).
-- [ ] 5.2 Registry rows → `implemented` with the merge; regenerate matrix
+- [x] 5.2 Registry rows → `implemented` with the merge; regenerate matrix
       (`tools/trace.py`). — orchestrator owns at merge.
-- [ ] 5.3 Merge-gate checklist (commit-standard): full suites, trace, soup
+- [x] 5.3 Merge-gate checklist (commit-standard): full suites, trace, soup
       (no SOUP delta expected), manual sync, tiered review (small fleet +
       Codex), `--no-ff` merge, tag v0.6.0 + release notes. — orchestrator owns.
