@@ -41,8 +41,10 @@ def test_no_deployment_example_publishes_the_port_on_all_interfaces():
 def test_network_manual_states_the_exposure_rule():
     text = (_DOCS / "network.md").read_text()
     assert "Do not" in text and "public internet" in text, (
-        "network.md must carry the explicit do-not-publish warning — it is "
-        "the RISK-020 compensating-control statement"
+        "network.md must carry the explicit do-not-publish warning — since "
+        "m8-auth-core it is defense-in-depth (no TLS termination, rate "
+        "limiting pending m8-rate-audit), not the RISK-020 compensating "
+        "control it originated as"
     )
     assert "Tailscale" in text or "tailnet" in text
 

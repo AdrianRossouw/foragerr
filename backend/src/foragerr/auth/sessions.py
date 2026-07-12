@@ -14,8 +14,9 @@ does not write the row on every call.
   pre-existing cookie never survives a new login).
 - :func:`authenticate` resolves a raw token to its principal, rejecting expired
   rows and sliding a live one forward.
-- :func:`logout` deletes one row; :func:`invalidate_all` /
-  :func:`invalidate_others` delete on password change / re-seed.
+- :func:`logout` deletes one row; :func:`invalidate_all` deletes every row on
+  a credential re-seed (user-initiated password change, with acting-session
+  preservation, arrives with the m8-keys-opds lifecycle change).
 - :func:`prune_expired` is the scheduler's housekeeping delete.
 """
 
@@ -162,18 +163,6 @@ async def invalidate_all(db, principal_id: int) -> int:
     return result.rowcount or 0
 
 
-async def invalidate_others(db, principal_id: int, keep_token: str) -> int:
-    """Delete a principal's sessions except the acting one (user password change)."""
-    keep = token_hash(keep_token)
-    async with db.write_session() as session:
-        result = await session.execute(
-            delete(SessionRow).where(
-                SessionRow.principal_id == principal_id,
-                SessionRow.token_sha256 != keep,
-            )
-        )
-    return result.rowcount or 0
-
 
 async def prune_expired(db, *, now: dt.datetime | None = None) -> int:
     """Delete expired session rows (scheduler housekeeping, FRG-AUTH-004)."""
@@ -196,7 +185,6 @@ __all__ = [
     "authenticate",
     "create_session",
     "invalidate_all",
-    "invalidate_others",
     "logout",
     "new_token",
     "prune_expired",
