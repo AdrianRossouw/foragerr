@@ -58,12 +58,12 @@ Repo-specific gotchas for future syncs. Companion to `config.json`.
 
 ## Font warns (triaged)
 
-- `[FONT_MISSING] "Font Awesome 6 Brands", "Roboto Mono" (--font-family-mono)`:
-  **the real app doesn't ship these either** — tokens.css references a mono
-  stack the SPA never vendors, and FA core mentions the Brands family while
-  only Solid is imported. The sync mirrors actual app behavior. Flagged to
-  Adrian at first-sync close-out; if he wants Roboto Mono for real, vendor it
-  in the app first, then re-sync picks it up via preview-theme.js.
+- ~~Roboto Mono~~ RESOLVED 2026-07-12: `@fontsource/roboto-mono` latin-400 is
+  now vendored in the app (main.tsx) and mirrored in preview-theme.js — the
+  `--font-family-mono` token renders its real face.
+- `[FONT_MISSING] "Font Awesome 6 Brands"`: **accepted, expected on every
+  sync** — FA core CSS mentions the Brands family but the app imports only
+  Solid and nothing uses `fa-brands` classes. Purely latent; do not chase.
 
 ## Preview-authoring facts (folded from the first-sync waves)
 

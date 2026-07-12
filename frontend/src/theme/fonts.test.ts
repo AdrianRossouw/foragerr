@@ -54,10 +54,15 @@ describe('FRG-UI-002: fonts and icons are self-hosted (no CDN)', () => {
   it('FRG-UI-002 — the self-hosted Roboto + Font Awesome 6 packages are imported', () => {
     const main = readFileSync(join(SRC_ROOT, 'main.tsx'), 'utf8');
     expect(main).toContain('@fontsource/roboto');
+    // Roboto Mono backs --font-family-mono; without this import the token's
+    // first family never loads and mono text silently falls back to the
+    // platform default.
+    expect(main).toContain('@fontsource/roboto-mono/latin-400.css');
     expect(main).toContain('@fortawesome/fontawesome-free');
     // Font Awesome pinned to the 6.x family the design specifies.
     const pkg = JSON.parse(readFileSync(join(SRC_ROOT, '..', 'package.json'), 'utf8'));
     expect(pkg.dependencies['@fortawesome/fontawesome-free']).toMatch(/\^?6/);
     expect(pkg.dependencies['@fontsource/roboto']).toBeTruthy();
+    expect(pkg.dependencies['@fontsource/roboto-mono']).toBeTruthy();
   });
 });

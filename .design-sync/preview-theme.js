@@ -12,6 +12,7 @@ import '@fontsource/roboto/latin-400.css';
 import '@fontsource/roboto/latin-500.css';
 import '@fontsource/roboto/latin-700.css';
 import '@fontsource/roboto/latin-900.css';
+import '@fontsource/roboto-mono/latin-400.css';
 import '@fortawesome/fontawesome-free/css/fontawesome.min.css';
 // solid.min.css swapped for a local woff2-only copy of its rules — the shipped
 // file's .ttf fallback src has no esbuild loader here (see fa-solid.css).
