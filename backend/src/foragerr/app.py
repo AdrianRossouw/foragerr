@@ -146,6 +146,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     #     shutdown (registered BEFORE sched so shutdown runs after drain) ---
     register_database(app)
 
+    # --- keystore area (m6-keystore, FRG-AUTH-008/012/013): derive the at-rest
+    #     encryption key from FORAGERR_SECRET_KEY, install the process keystore,
+    #     and eagerly encrypt any pre-existing plaintext provider secret. Appended
+    #     immediately after the db area so `keystore_meta` exists and
+    #     `app.state.db` is live, and BEFORE first-run seeding / any secret
+    #     persistence below. The FRG-AUTH-011 key-present gate already ran at
+    #     config load. ---
+    from foragerr.keystore import keystore_startup_hook
+
+    app.state.startup_hooks.append(keystore_startup_hook)
+
     # Startup integrity quick_check (FRG-DB-012) runs AFTER the db area above
     # has prepared/opened the database, so it checks the live file.
     app.state.startup_hooks.append(quick_check_startup_hook)

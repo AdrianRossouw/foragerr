@@ -58,13 +58,22 @@ def _create_body(**overrides):
 
 
 async def _stored_settings(app, indexer_id: int) -> dict | None:
-    """Read the RAW persisted settings JSON (secrets revealed) for assertions
-    that a write-only secret survived an edit — it can never be observed via the
-    API by design."""
+    """Read the persisted settings JSON with secret fields DECRYPTED, for
+    assertions that a write-only secret survived an edit — it can never be
+    observed via the API by design. Secrets are encrypted at rest
+    (``enc:v1:``, FRG-AUTH-008); ``decrypt_secret`` reveals them here (and
+    passes plaintext through), so the survival assertions compare against the
+    original value while at-rest encryption is proven separately."""
     from foragerr.indexers.repo import get_indexer
+    from foragerr.keystore import decrypt_secret
 
     row = await get_indexer(app.state.db, indexer_id)
-    return json.loads(row.settings) if row is not None else None
+    if row is None:
+        return None
+    return {
+        key: (decrypt_secret(value) if isinstance(value, str) else value)
+        for key, value in json.loads(row.settings).items()
+    }
 
 
 # --- create / list round-trip ------------------------------------------------

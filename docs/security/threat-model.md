@@ -310,7 +310,11 @@ allocated yet).
   - **T-DB-2 (Information disclosure — at rest)**: secrets in the DB file (and backups) readable
     if the volume/backup leaks. Coverage: PF `AUTH — at-rest secret encryption` (key from env, so
     a stolen DB file alone does not expose secrets), PF `DB — pre-migration…`/`scheduled backups`
-    (backup handling). RISK-013 (shared).
+    (backup handling). RISK-013/RISK-041 (shared). **Implemented (m6-keystore, 2026-07-12,
+    FRG-AUTH-008/011/012/013)**: UI-entered provider secrets are stored `enc:v1:` (Fernet/MultiFernet)
+    under a scrypt-derived key from the mandatory env-only `FORAGERR_SECRET_KEY`; only the non-secret
+    salt + sentinel are persisted (`keystore_meta`). A decrypt failure fails soft per integration
+    (health warning + re-entry), never crashing startup or the library/OPDS surfaces.
   - **T-DB-3 (DoS — corruption/lock)**: Coverage: PF `DB — WAL journal mode with busy timeout`,
     `DB — single-writer discipline`, `DB — integrity verification`, `DB — transactional
     multi-step operations`. Low residual.
@@ -331,7 +335,12 @@ allocated yet).
     redaction in logs and errors`, PF `DEP — secrets-stripped diagnostic bundle`. RISK-013.
   - **T-CFG-3 (Tampering/Elevation — weak at-rest obfuscation)**: Mylar's salted-base64 `^~$z$`
     obfuscation is reversible. Coverage: PF `AUTH — at-rest secret encryption` (AEAD, not
-    obfuscation), PF `AUTH — password storage with modern KDF`. RISK-013.
+    obfuscation), PF `AUTH — password storage with modern KDF`. RISK-013/RISK-041.
+    **Implemented (m6-keystore, 2026-07-12)**: the divergence-from-Mylar is now live — authenticated
+    encryption (Fernet AES-128-CBC+HMAC), not obfuscation, with the key derived from the
+    `FORAGERR_SECRET_KEY` passphrase via scrypt. Tampered ciphertext is rejected (HMAC), not silently
+    decoded. Residual: a weak operator passphrase (mitigated by scrypt cost + a generated-value
+    recommendation in `secrets.md`).
   - **T-CFG-4 (DoS — bad config)**: Coverage: PF `NFR — configuration validation at startup`,
     PF `DEP — versioned config-file migration`. Low residual.
 

@@ -28,6 +28,7 @@ under the top level of `config.yaml`.
 | Setting | Env var | Default | Notes |
 |---|---|---|---|
 | `config_dir` | `FORAGERR_CONFIG_DIR` | `/config` | Environment-only; not read from `config.yaml` itself. |
+| `secret_key` | `FORAGERR_SECRET_KEY` | *(none — REQUIRED)* | **Mandatory** at-rest encryption passphrase; environment-only, never read from or written to `config.yaml`. foragerr refuses to start without it. Encrypts stored provider secrets at rest (`FRG-AUTH-008`). Generate with `openssl rand -base64 32` and keep it stable. See `secrets.md`. |
 | `host` | `FORAGERR_HOST` | `0.0.0.0` | Interface the HTTP listener binds to. |
 | `port` | `FORAGERR_PORT` | `8789` | TCP port for the HTTP listener. |
 | `log_level` | `FORAGERR_LOG_LEVEL` | `INFO` | One of DEBUG/INFO/WARNING/ERROR/CRITICAL. |
@@ -229,17 +230,20 @@ the System → Tasks screen with its interval and last/next run, and its
 prominent **"Back up now"** button force-runs it on demand (the same
 force-run mechanism every other task uses — see `../user/web-ui.md`).
 
-**A backup is a plaintext-credential artifact.** Both the database and
-`config.yaml` store the ComicVine, indexer (DogNZB, NZB.su), and SABnzbd API
-keys in plaintext today — foragerr has no encryption-at-rest or secret store
-yet — so every file under `/config/backups/` carries the same secrets as the
-live configuration. This is a deliberately accepted risk
-(`docs/security/risk-register.md` RISK-041), on the same footing as the
-no-auth posture (RISK-020): backups never leave the container-private
-`/config` volume (there is no cloud/remote/download-backup feature), they
-inherit `/config`'s non-root PUID/PGID ownership, and secret values are never
-logged. Treat `/config/backups/` with the same care as `/config` itself if you
-ever copy it off the host.
+**What a backup contains.** Provider secrets (indexer DogNZB/NZB.su and SABnzbd
+API keys) stored in the database are **encrypted at rest** (`FRG-AUTH-008`), so a
+copy of the database — including any file under `/config/backups/` — does not
+expose them without the `FORAGERR_SECRET_KEY` passphrase (which is never written
+to `/config`; see `secrets.md`). Restoring a backup into a deployment with a
+different passphrase degrades the affected integrations to re-entry, never data
+loss (`FRG-AUTH-012`). The `config.yaml` value `comicvine_api_key`, if you set it
+there rather than via the environment, is still stored in the file as you wrote
+it — it belongs to the operator-file trust class, like your `.env`. This closes
+the previously-accepted RISK-041 (now **Mitigated**). Backups still hold your
+library database, never leave the container-private `/config` volume, inherit
+its non-root PUID/PGID ownership, and secret values are never logged — treat
+`/config/backups/` with the same care as `/config` itself if you copy it off the
+host.
 
 See `deployment.md` → "Restoring from a backup" for how to use these files.
 

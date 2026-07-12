@@ -84,6 +84,16 @@ The `/comics` and `/downloads` mounts above are examples — they hold your medi
 downloads, not application state, and their paths are whatever you configure. Only
 `/config` must persist.
 
+> **BREAKING — set `FORAGERR_SECRET_KEY` before upgrading.** From this release
+> foragerr requires the `FORAGERR_SECRET_KEY` environment variable (an
+> operator-chosen passphrase) and will refuse to start without it. It encrypts your
+> stored provider secrets at rest. When you first upgrade, foragerr transparently
+> encrypts any existing plaintext provider secrets in the database under this
+> passphrase. Generate a strong value once (`openssl rand -base64 32`), add it to
+> your container's environment, and keep it stable across restarts. A changed or
+> lost passphrase costs re-entry of your provider secrets (never data) — see
+> `secrets.md` → "At-rest encryption of stored provider secrets".
+
 ### Health and shutdown
 
 The image declares a Docker `HEALTHCHECK` that probes the unauthenticated
@@ -201,6 +211,10 @@ services:
       PGID: "1000"
       TZ: "Europe/Amsterdam"
       # Secrets come from the host environment / an env_file — never commit them.
+      # REQUIRED: the at-rest encryption passphrase. foragerr refuses to start
+      # without it. Generate a strong value once (openssl rand -base64 32) and
+      # keep it stable across restarts. See secrets.md.
+      FORAGERR_SECRET_KEY: "${FORAGERR_SECRET_KEY}"
       FORAGERR_COMICVINE_API_KEY: "${FORAGERR_COMICVINE_API_KEY}"
       # Download-client and indexer credentials (SABnzbd, DogNZB, NZB.su, …) are
       # per-provider settings entered in the UI, not app-wide env vars.

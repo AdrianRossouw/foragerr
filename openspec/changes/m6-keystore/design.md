@@ -80,7 +80,13 @@ importer (follow-up change).
   migration re-runs by prefix check and encrypts the restored plaintext rows —
   covered by an explicit test.
 - [scrypt at every boot adds latency] → parameters chosen ≤ ~100 ms on target
-  hardware; measured against FRG-NFR-001 startup budget.
+  hardware; measured against FRG-NFR-001 startup budget. **Measured (task 3.3,
+  2026-07-12):** the single boot-time `scrypt(n=2**15, r=8, p=1, dklen=32)`
+  derivation runs ~42–68 ms (avg ~50 ms) on the development host — a one-shot
+  cost well inside the startup budget. Guarded by
+  `test_scrypt_boot_latency_within_budget` (a generous 2.0 s ceiling to stay
+  CI-stable). The suite otherwise lowers `SCRYPT_N` for speed; the check pins the
+  production `n=2**15` explicitly so it measures the real cost.
 - [enc:v1 values leak into logs] → tokens are non-sensitive without the key, but
   redaction still registers decrypted values as today; no change to FRG-NFR-008
   guarantees.
@@ -96,6 +102,27 @@ importer (follow-up change).
    fail-soft class; old releases treat the unparseable value as an invalid key and
    the integration shows unconfigured/test-fails, not a crash — verified before
    release).
+
+   **Downgrade behaviour verified (task 3.4, 2026-07-12) by reasoning from the
+   pre-change code path** (an old binary cannot be run here, so this is a
+   code-evidence argument, not an execution): a pre-keystore release loads
+   provider settings through the *old* `indexers/repo.load_settings` /
+   `downloads/repo.load_settings`, which do `json.loads(...)` →
+   `validate_settings(...)` → `register_row_secrets(...)` with **no decrypt
+   step**. The secret fields are `SecretStr`, and pydantic accepts any string, so
+   an `enc:v1:<token>` value is validated successfully and stored back into the
+   model as the literal API key — `load_indexers`/`load_download_clients` do NOT
+   raise, so the row loads "healthy" but carries a garbage credential. At use
+   time the provider authenticates with that literal string and the upstream
+   rejects it (a 401/invalid-key), which the existing provider back-off + health
+   path already handles as a degraded/test-failing integration, never a crash.
+   Net: an operator who downgrades sees affected integrations report bad
+   credentials and re-enters them (they are then stored as plaintext again under
+   the old binary) — exactly the documented "re-enter secrets after downgrade"
+   outcome, in the same fail-soft class as FRG-AUTH-012. Evidence: the pre-change
+   `load_settings` implementations contain no `enc:`/decrypt handling, and
+   `NewznabSettings.api_key` / `SabnzbdSettings.api_key` are plain `SecretStr`
+   with no format validator that would reject the token.
 
 ## Open Questions
 

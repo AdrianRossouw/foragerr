@@ -50,15 +50,59 @@ loaded, its value self-registers with foragerr's log-redaction filter
   logged, the key parameter is masked with a redaction placeholder rather than
   appearing in the traceback.
 
-## What is not yet covered
+## At-rest encryption of stored provider secrets
 
-At-rest encryption of secrets stored in the database (as opposed to environment/config
-file) is not yet implemented (`FRG-AUTH-008`); it is tracked in
-[the roadmap](../../roadmap.md). This gap is **live today**:
-provider secrets entered through the UI — an indexer API key or download-client
-credential saved in Settings → Indexers / Download Clients — are stored unencrypted
-in the SQLite database. It does not affect the environment-sourced values above.
-Until then, treat the
-`/config` volume itself as sensitive: anyone who can read the SQLite database or
-`config.yaml` on disk can read any secret stored there in plaintext. Restrict
-filesystem access to the config volume accordingly.
+Provider secrets you enter through the UI — an indexer API key or a download-client
+credential saved in Settings → Indexers / Download Clients — are **encrypted at rest**
+in the SQLite database (`FRG-AUTH-008`). Each secret is stored as an
+`enc:v1:<token>` value using authenticated encryption (Fernet: AES-128-CBC +
+HMAC-SHA256); the encryption key is derived from a passphrase **you** supply, so the
+database file alone — including any backup of it — does not expose your provider
+secrets.
+
+### `FORAGERR_SECRET_KEY` — the mandatory encryption passphrase
+
+foragerr **requires** the `FORAGERR_SECRET_KEY` environment variable at startup and
+refuses to start without it, naming the variable in the error. It is an
+operator-chosen passphrase (any non-empty string) and is supplied through the
+environment **only** — it is never read from, or written to, any file under `/config`
+(unlike other settings, it has no `config.yaml` line). foragerr derives the actual
+encryption key from it with scrypt and a random per-deployment salt; only the
+non-secret salt and a sentinel check-value are persisted (in the database's
+`keystore_meta` table). The passphrase itself never touches disk.
+
+Choose a strong, random value and keep it stable across restarts. A good way to
+generate one:
+
+```bash
+FORAGERR_SECRET_KEY="$(openssl rand -base64 32)"
+```
+
+Set it the same way as any other environment variable — directly, via your process
+manager, or in the `environment:` block of your Docker Compose service (see
+`deployment.md`). Never hardcode it in a Dockerfile or committed file.
+
+### If the passphrase is lost or changed (recovery)
+
+Losing or changing `FORAGERR_SECRET_KEY` costs **re-entry of your stored provider
+secrets, never data**. Every stored provider secret is something you can re-obtain
+and re-enter. If foragerr boots with a passphrase that does not match the one that
+encrypted the stored secrets (for example, you restored the database into a
+deployment with a different passphrase):
+
+- foragerr **still starts normally**, and library browsing and OPDS are unaffected.
+- Each affected integration reports **"credential unavailable — encryption key
+  missing or changed; re-enter the secret"** on the health screen and behaves as
+  unconfigured (it does not retry against the provider).
+- **To recover:** either restore the original `FORAGERR_SECRET_KEY` value, or open
+  Settings → Indexers / Download Clients and re-enter the affected secret. A saved
+  secret is always re-encrypted under the current passphrase, which clears the
+  warning for that integration.
+
+### Backups
+
+A backup taken after this release requires the **same** `FORAGERR_SECRET_KEY` to
+yield usable provider credentials on restore. Restoring a backup without the matching
+passphrase degrades to the re-entry path above (never data loss). The `/config`
+volume no longer exposes provider secrets on its own, but still holds your library
+database — continue to restrict filesystem access to it.

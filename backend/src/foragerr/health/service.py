@@ -46,6 +46,7 @@ from foragerr.db.backup import latest_scheduled_backup
 from foragerr.downloads.models import DownloadClientRow
 from foragerr.health.state import current_integrity
 from foragerr.indexers.models import IndexerRow
+from foragerr.keystore import current_keystore, secret_state
 from foragerr.library.models import RootFolderRow
 from foragerr.metadata.ratelimit import comicvine_health
 from foragerr.providers.backoff import (
@@ -279,11 +280,19 @@ class HealthService:
 
         components: list[ComponentHealth] = []
         for row in indexers:
+            component = f"indexer:{row.id}"
+            label = f"Indexer: {row.name}"
+            credential = self._credential_component(
+                row.settings, kind="indexer", label=label, component=component
+            )
+            if credential is not None:
+                components.append(credential)
+                continue
             components.append(
                 self._provider_component(
                     kind="indexer",
-                    label=f"Indexer: {row.name}",
-                    component=f"indexer:{row.id}",
+                    label=label,
+                    component=component,
                     status=by_key.get((PROVIDER_INDEXER, row.id)),
                     remediation=(
                         f"Indexer '{row.name}' is in failure back-off; verify its "
@@ -294,11 +303,22 @@ class HealthService:
         for row in clients:
             is_ddl = row.implementation == "ddl"
             provider_type = PROVIDER_DDL if is_ddl else PROVIDER_DOWNLOAD_CLIENT
+            kind = "ddl" if is_ddl else "download_client"
+            component = f"{'ddl' if is_ddl else 'download-client'}:{row.id}"
+            label = (
+                f"DDL provider: {row.name}" if is_ddl else f"Download client: {row.name}"
+            )
+            credential = self._credential_component(
+                row.settings, kind=kind, label=label, component=component
+            )
+            if credential is not None:
+                components.append(credential)
+                continue
             components.append(
                 self._provider_component(
-                    kind="ddl" if is_ddl else "download_client",
-                    label=(f"DDL provider: {row.name}" if is_ddl else f"Download client: {row.name}"),
-                    component=f"{'ddl' if is_ddl else 'download-client'}:{row.id}",
+                    kind=kind,
+                    label=label,
+                    component=component,
                     status=by_key.get((provider_type, row.id)),
                     remediation=(
                         f"'{row.name}' is in failure back-off; verify its host, "
@@ -307,6 +327,42 @@ class HealthService:
                 )
             )
         return components
+
+    def _credential_component(
+        self, settings_json: str, *, kind: str, label: str, component: str
+    ) -> ComponentHealth | None:
+        """A credential-unavailable component when a row's stored secret cannot be
+        decrypted (FRG-AUTH-012), else ``None``.
+
+        Takes precedence over the back-off overlay: an integration whose secret
+        is unreadable behaves as unconfigured, so a failure back-off is moot until
+        the secret is re-entered. Wording distinguishes a changed/missing key
+        (sentinel mismatch) from an isolated corrupt value."""
+        if secret_state(settings_json) != "unavailable":
+            return None
+        keystore = current_keystore()
+        if keystore is not None and not keystore.available:
+            message = (
+                f"{label}: credential unavailable — encryption key missing or "
+                "changed; re-enter the secret"
+            )
+        else:
+            message = (
+                f"{label}: credential unavailable — the stored secret is corrupt "
+                "or unreadable; re-enter the secret"
+            )
+        return ComponentHealth(
+            component=component,
+            kind=kind,
+            label=label,
+            state=_STATE_DEGRADED,
+            message=message,
+            remediation=(
+                "Re-enter this integration's secret in Settings; it will be "
+                "re-encrypted under the current FORAGERR_SECRET_KEY and the "
+                "warning clears. Existing library browsing and OPDS are unaffected."
+            ),
+        )
 
     def _provider_component(
         self,

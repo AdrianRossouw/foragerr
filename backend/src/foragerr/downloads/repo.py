@@ -22,6 +22,7 @@ from foragerr.downloads.models import DownloadClientRow, RemotePathMappingRow
 from foragerr.downloads.pathmap import RemotePathMapping
 from foragerr.downloads.registry import get_implementation, validate_settings
 from foragerr.indexers.repo import (  # generic reuse — do not fork
+    _decrypt_payload,
     public_settings,
     register_row_secrets,
     serialize_settings,
@@ -33,9 +34,10 @@ logger = logging.getLogger("foragerr.downloads.repo")
 
 
 def load_settings(implementation: str, settings_json: str) -> BaseModel:
-    """Parse + validate a row's settings JSON, registering its secrets for
-    redaction. Raises on unknown implementation or an invalid payload."""
-    payload = json.loads(settings_json)
+    """Parse + validate a row's settings JSON, decrypting secrets and registering
+    them for redaction. Raises on unknown implementation, an invalid payload, or
+    a secret that fails to decrypt (wrong key / corrupt — FRG-AUTH-012)."""
+    payload = _decrypt_payload(json.loads(settings_json))
     model = validate_settings(implementation, payload)
     register_row_secrets(model)
     return model
