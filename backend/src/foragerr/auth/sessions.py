@@ -15,8 +15,8 @@ does not write the row on every call.
 - :func:`authenticate` resolves a raw token to its principal, rejecting expired
   rows and sliding a live one forward.
 - :func:`logout` deletes one row; :func:`invalidate_all` deletes every row on
-  a credential re-seed (user-initiated password change, with acting-session
-  preservation, arrives with the m8-keys-opds lifecycle change).
+  a credential re-seed; :func:`invalidate_others` deletes every row EXCEPT the
+  acting one on an in-app password change (the operator keeps their session).
 - :func:`prune_expired` is the scheduler's housekeeping delete.
 """
 
@@ -163,6 +163,26 @@ async def invalidate_all(db, principal_id: int) -> int:
     return result.rowcount or 0
 
 
+async def invalidate_others(db, principal_id: int, acting_token: str) -> int:
+    """Delete every session for a principal EXCEPT the acting one (FRG-AUTH-004).
+
+    The credential-lifecycle counterpart to :func:`invalidate_all`: an in-app web
+    password change revokes every OTHER session (a second device, a lingering
+    remember-me cookie) while the operator who made the change keeps their
+    current session — no self-logout on a routine rotation. The acting session is
+    named by its RAW token (from ``request.state.session_token``); only its
+    SHA-256 is compared, never stored anew. An empty/absent ``acting_token``
+    (e.g. an API-key-authed caller with no session to preserve) degrades to
+    "delete all". Returns the number of rows deleted."""
+    keep = token_hash(acting_token) if acting_token else None
+    async with db.write_session() as session:
+        stmt = delete(SessionRow).where(SessionRow.principal_id == principal_id)
+        if keep is not None:
+            stmt = stmt.where(SessionRow.token_sha256 != keep)
+        result = await session.execute(stmt)
+    return result.rowcount or 0
+
+
 
 async def prune_expired(db, *, now: dt.datetime | None = None) -> int:
     """Delete expired session rows (scheduler housekeeping, FRG-AUTH-004)."""
@@ -185,6 +205,7 @@ __all__ = [
     "authenticate",
     "create_session",
     "invalidate_all",
+    "invalidate_others",
     "logout",
     "new_token",
     "prune_expired",
