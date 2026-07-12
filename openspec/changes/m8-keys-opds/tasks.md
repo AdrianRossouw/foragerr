@@ -44,7 +44,7 @@
 
 ## 7. Gate + merge
 
-- [ ] 7.1 Full suite green (pytest + vitest + tsc + e2e via run.sh)
+- [x] 7.1 Full suite green (pytest + vitest + tsc + e2e via run.sh)
 - [ ] 7.2 Security-touching gate: full fleet + Codex, adversarial angles on credential-change authz, session preservation, cache invalidation
 - [ ] 7.3 Apply gate findings; acceptance report refresh
 - [ ] 7.4 Merge --no-ff to main, tag v0.8.0, gh release, archive change, delete branch
