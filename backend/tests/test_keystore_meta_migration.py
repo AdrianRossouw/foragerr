@@ -20,7 +20,7 @@ def test_keystore_meta_table_present_and_empty(tmp_path):
     result = prepare_database(cfg)
     db_path = cfg / DB_FILENAME
 
-    assert "0019_keystore_meta" in result.applied
+    assert "0020_keystore_meta" in result.applied
     assert current_revision(db_path) == result.head_revision
 
     with sqlite3.connect(db_path) as conn:

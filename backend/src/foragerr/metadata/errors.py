@@ -45,6 +45,29 @@ class ComicVineRateLimited(ComicVineError):
         self.retry_after = retry_after
 
 
+class ComicVineBudgetExhausted(ComicVineError):
+    """A per-path hourly request budget is exhausted (FRG-META-016).
+
+    Raised by the shared rate gate BEFORE a request reaches the wire when the
+    resource path's soft hourly ceiling (default 150, configurable, ≤200) has
+    been consumed over the rolling one-hour window. This is a LOCAL decision —
+    ComicVine saw nothing — so unlike :class:`ComicVineRateLimited` it does NOT
+    flip the degraded/back-off state and never blocks the caller waiting for
+    capacity. It carries the ``bucket`` (the normalized first path segment) and
+    ``retry_after_seconds`` (a duration until the oldest admission ages out of
+    the window), so a call site can defer cleanly and surface an honest resume
+    time. Every raise is logged by the caller — a deferral is never silent.
+    """
+
+    def __init__(self, bucket: str, *, retry_after_seconds: float) -> None:
+        super().__init__(
+            f"comicvine hourly budget exhausted for path {bucket!r}; "
+            f"resumes in ~{retry_after_seconds:.0f}s"
+        )
+        self.bucket = bucket
+        self.retry_after_seconds = retry_after_seconds
+
+
 class ComicVineMalformedResponse(ComicVineError):
     """The response was not the expected JSON shape (non-JSON body, wrong
     top-level type, or an unexpected CV error status)."""

@@ -168,8 +168,21 @@ class SeriesRow(Base):
     path: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     cover_cached_at: Mapped[dt.datetime | None] = mapped_column(StrictDateTime, nullable=True)
     added_at: Mapped[dt.datetime] = mapped_column(StrictDateTime, nullable=False)
-    #: "last-metadata-sync timestamp" (FRG-SER-001).
+    #: "last-metadata-sync timestamp" (FRG-SER-001). On the refresh path this is
+    #: the time of the last COMPLETE (or attempted-full) issue walk — an
+    #: unchanged-volume short-circuit (FRG-META-017) deliberately does NOT bump it,
+    #: so the staleness bound measures time since the last real walk and still
+    #: forces a periodic full walk as the correctness backstop.
     refreshed_at: Mapped[dt.datetime | None] = mapped_column(StrictDateTime, nullable=True)
+    #: The ComicVine ``date_last_updated`` served on the volume detail of the last
+    #: COMPLETE issue walk (FRG-META-017). Stored VERBATIM and compared by equality
+    #: only — never parsed or timezone-converted. A refresh short-circuits the issue
+    #: walk when the freshly fetched value equals this AND ``refreshed_at`` is within
+    #: the staleness bound. Stored only after a complete walk, cleared (NULL) on a
+    #: partial walk, so a non-NULL value implies the last walk was complete. Plain
+    #: ``Text``: an opaque upstream token used only for equality, ``None`` = no
+    #: complete walk recorded yet (forces a full walk).
+    cv_date_last_updated: Mapped[str | None] = mapped_column(Text, nullable=True)
     description_sanitized: Mapped[str | None] = mapped_column(SentinelFreeText, nullable=True)
     #: Add-time options (monitor strategy, search_on_add, ...) as canonical
     #: JSON; cleared once the add chain completes (decision 3, change 3).

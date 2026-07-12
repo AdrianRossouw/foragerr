@@ -1,7 +1,7 @@
 """keystore_meta single-row table (m6-keystore FRG-AUTH-008)
 
-Revision ID: 0019_keystore_meta
-Revises: 0018_creator_bibliography
+Revision ID: 0020_keystore_meta
+Revises: 0019_series_cv_date_last_updated
 Create Date: 2026-07-12
 
 Creates the single-row ``keystore_meta`` table holding the non-secret keystore
@@ -24,8 +24,8 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0019_keystore_meta"
-down_revision = "0018_creator_bibliography"
+revision = "0020_keystore_meta"
+down_revision = "0019_series_cv_date_last_updated"
 branch_labels = None
 depends_on = None
 

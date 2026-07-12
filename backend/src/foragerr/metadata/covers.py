@@ -21,9 +21,15 @@ from foragerr.metadata.errors import (
     ComicVineUnavailable,
     CoverHostNotAllowed,
 )
-from foragerr.metadata.ratelimit import effective_interval, gate
+from foragerr.metadata.ratelimit import effective_budget, effective_interval, gate
 
 logger = logging.getLogger("foragerr.metadata.covers")
+
+#: Budget bucket for cover-image fetches (FRG-META-016). Covers hit ComicVine's
+#: image CDN rather than an API resource path, so they get their own named
+#: bucket — but they STILL pass through the one budgeted acquire (no bypass path,
+#: covers included: FRG-META-003), consuming one unit of this bucket per fetch.
+COVER_BUDGET_BUCKET = "covers"
 
 
 def _allowed_hosts(settings) -> frozenset[str]:
@@ -59,7 +65,11 @@ async def cache_cover(
             f"cover image host {parsed.hostname!r} is not in the configured allowlist"
         )
 
-    await gate().acquire(effective_interval(settings))
+    await gate().acquire(
+        effective_interval(settings),
+        bucket=COVER_BUDGET_BUCKET,
+        budget=effective_budget(settings),
+    )
     async with factory.external() as client:
         try:
             result = await client.get(

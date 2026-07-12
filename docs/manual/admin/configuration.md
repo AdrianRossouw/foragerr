@@ -58,6 +58,8 @@ under the top level of `config.yaml`.
 | `comicvine_base_url` | `FORAGERR_COMICVINE_BASE_URL` | `https://comicvine.gamespot.com/api` | ComicVine API base. Leave at the default; overridden only to point the metadata client at a fixture server (the e2e harness). Every request carries your API key, so the scheme **must be https** — a plain-http value is refused at startup unless `comicvine_insecure_base` opts in. The egress policy additionally applies to the resolved host. |
 | `comicvine_insecure_base` | `FORAGERR_COMICVINE_INSECURE_BASE` | `false` | Test affordance only: permits a plain-http `comicvine_base_url` on a fixture network. Never set in production. |
 | `comicvine_min_interval_seconds` | `FORAGERR_COMICVINE_MIN_INTERVAL_SECONDS` | `2.0` | Minimum seconds between any two ComicVine requests, process-wide. |
+| `comicvine_hourly_path_budget` | `FORAGERR_COMICVINE_HOURLY_PATH_BUDGET` | `150` | Soft per-resource-path hourly request ceiling. ComicVine limits each API key to 200 requests/hour **per path** (volume, issue, search, …); spacing alone can still exhaust that over an hour. When a path reaches this ceiling over a rolling hour foragerr defers further requests on it locally (a logged, health-visible deferral with a resume time — **not** a server-visible rate-limit signal) and resumes as the window rolls. The default 150 leaves headroom under ComicVine's limit for other tools sharing the key. Clamped to `10..200` (never above 200) with a warning if set outside it. |
+| `comicvine_refresh_max_skip_days` | `FORAGERR_COMICVINE_REFRESH_MAX_SKIP_DAYS` | `7` | Maximum age of the last complete issue walk for which a refresh may skip the issue walk when ComicVine reports the volume unchanged. A full walk always runs at least this often as a correctness backstop. Clamped up to a floor of 1 day. |
 | `comicvine_page_size` | `FORAGERR_COMICVINE_PAGE_SIZE` | `100` | ComicVine's own page-size cap. |
 | `comicvine_max_pages` | `FORAGERR_COMICVINE_MAX_PAGES` | `200` | Hard cap on pages walked per list endpoint. |
 | `comicvine_search_result_cap` | `FORAGERR_COMICVINE_SEARCH_RESULT_CAP` | `1000` | Series-search candidates cap; truncation is visible. |
@@ -140,6 +142,26 @@ download happens until an operator enables the pair in Settings → Indexers /
 Download Clients (`ddl-optin-seeding`, amending `m2-first-run-defaults`). Newznab
 indexers and SABnzbd are never seeded. See `docs/manual/user/downloads.md` for
 the enable steps and RISK-015/RISK-016 in `docs/security/risk-register.md`.
+
+## ComicVine health states
+
+The **ComicVine** component on System → Health reports two distinct non-OK states,
+both of which clear on their own without a restart:
+
+- **Rate-limited / backed off** — ComicVine returned a rate-limit signal (HTTP
+  420/429) or an abnormal-traffic page, so foragerr backed off for a cool-down
+  window. The message shows roughly how long remains. If it persists, verify the
+  API key and connectivity.
+- **Hourly request budget exhausted** — a resource path reached its local
+  `comicvine_hourly_path_budget` ceiling, so foragerr is deferring requests on
+  that path rather than risking a ComicVine block. The message names the affected
+  path(s) and roughly how long until requests resume. This is a purely local
+  decision (ComicVine saw nothing) and is expected under heavy refresh/credit
+  activity; it resumes automatically as the rolling hour clears. Only raise the
+  budget up to ComicVine's documented 200/hour/path limit — never higher.
+
+Paths approaching (but not yet at) their ceiling appear in the health payload's
+per-path budget detail before any deferral happens, so a build-up is visible early.
 
 ## Listener resource limits
 
