@@ -99,8 +99,11 @@ class RateLimiter:
         self._prune(dq, now)
         if not dq:
             # All failures aged out — reclaim the slot now rather than leaving an
-            # empty deque to occupy registry capacity until eviction.
-            del self._windows[key]
+            # empty deque to occupy registry capacity until eviction. pop(...,
+            # None) not del: a re-entrant clock or threaded host could remove the
+            # key between the get() above and here, and reclamation must never
+            # turn a throttle check into a 500 (gate finding).
+            self._windows.pop(key, None)
             return None
         self._windows.move_to_end(key)  # touch: least-idle
         if len(dq) < self._threshold:
