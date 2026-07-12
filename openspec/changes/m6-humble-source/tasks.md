@@ -2,17 +2,17 @@
 
 ## 1. API schema & fixtures
 
-- [ ] 1.1 ~~Owner live capture~~ DONE VIA PRIOR-ART DISSECTION (owner direction 2026-07-11): schema documented in `docs/research/humble-api.md` from three OSS clients (incl. one pushed 2026-06); build synthetic fixtures from it (comic bundle w/ CBZ+PDF twins, collected edition, EPUB-only book, game item, malformed subproduct)
-- [ ] 1.2 Finalize comic-classification rule (platform=="ebook" + format/extension) and auto-match confidence threshold against the fixtures; record in design.md. LIVE VALIDATION MOVES TO UAT: first real connect+sync against the operator's account confirms schema + CDN egress allowlist (expected dl.humble.com); any drift updates client + fixtures together
+- [x] 1.1 ~~Owner live capture~~ DONE VIA PRIOR-ART DISSECTION (owner direction 2026-07-11): schema documented in `docs/research/humble-api.md` from three OSS clients (incl. one pushed 2026-06); build synthetic fixtures from it (comic bundle w/ CBZ+PDF twins, collected edition, EPUB-only book, game item, malformed subproduct) — `backend/tests/sources/fixtures/order_list.json` + `order_comics.json` (+ a PDF-only artbook and a PDF+EPUB prose book to pin both PDF branches)
+- [x] 1.2 Finalize comic-classification rule (platform=="ebook" + format/extension) and auto-match confidence threshold against the fixtures; record in design.md. LIVE VALIDATION MOVES TO UAT: first real connect+sync against the operator's account confirms schema + CDN egress allowlist (expected dl.humble.com); any drift updates client + fixtures together — rule finalized in `sources/classify.py` + recorded in design.md; auto-match confidence threshold deferred to worker A2 (proposed-match seam columns are NULL)
 
 ## 2. Backend model & client
 
-- [ ] 2.1 Alembic migration: `sources` + `source_entitlements` tables; SQLAlchemy models (`FRG-SRC-001`)
-- [ ] 2.2 Humble client module: order list/detail, fixture-driven tests, politeness/backoff (NFR-005), bounded requests (NFR-006); cookie as SecretStr through the keystore path (`FRG-SRC-002`)
-- [ ] 2.2b Live-gated tests behind `FORAGERR_TEST_HUMBLE_COOKIE` (.env, operator-provided; skipped when absent, per the existing usenet live-test pattern): real order-list/detail round-trip; capture responses and commit them as fixtures ONLY after redacting gamekeys, signature/expiry params, and account email; confirm the CDN egress allowlist. Operator invalidates the session (browser logout) after merge
-- [ ] 2.3 Connect/validate/disconnect service + API routes; cookie write-only in responses; disconnect deletes credential, keeps data (`FRG-SRC-001`, `FRG-SRC-002`)
-- [ ] 2.4 Sync command on the scheduler (default daily) + Sync-now endpoint: store-native-key diff, comic/other classification, skip-and-log malformed entries, idempotent re-sync (`FRG-SRC-003`)
-- [ ] 2.5 Expiry handling: 401 → `expired`, pause, health contribution, reconnect resumes (`FRG-SRC-005`)
+- [x] 2.1 Alembic migration: `sources` + `source_entitlements` tables; SQLAlchemy models (`FRG-SRC-001`) — migration `0021_sources_entitlements`, models in `sources/models.py`
+- [x] 2.2 Humble client module: order list/detail, fixture-driven tests, politeness/backoff (NFR-005), bounded requests (NFR-006); cookie as SecretStr through the keystore path (`FRG-SRC-002`) — `sources/humble.py` over the shared external factory; per-source spacing gate `sources/ratelimit.py`
+- [x] 2.2b Live-gated tests behind `FORAGERR_TEST_HUMBLE_COOKIE` (.env, operator-provided; skipped when absent, per the existing usenet live-test pattern): real order-list/detail round-trip; capture responses and commit them as fixtures ONLY after redacting gamekeys, signature/expiry params, and account email; confirm the CDN egress allowlist. Operator invalidates the session (browser logout) after merge — `tests/sources/test_live_humble.py` (no responses captured; fixtures are synthetic)
+- [x] 2.3 Connect/validate/disconnect service + API routes; cookie write-only in responses; disconnect deletes credential, keeps data (`FRG-SRC-001`, `FRG-SRC-002`) — `sources/service.py` + `api/sources.py`
+- [x] 2.4 Sync command on the scheduler (default daily) + Sync-now endpoint: store-native-key diff, comic/other classification, skip-and-log malformed entries, idempotent re-sync (`FRG-SRC-003`) — `sources/commands.py` (source-sync task, 1 h floor) + `POST /sources/{id}/sync`
+- [x] 2.5 Expiry handling: 401 → `expired`, pause, health contribution, reconnect resumes (`FRG-SRC-005`) — state flip in `sources/commands._sync_one`; health `_sources_component`; reconnect via `service.reconnect_source`
 
 ## 3. Review workflow & reconciliation
 

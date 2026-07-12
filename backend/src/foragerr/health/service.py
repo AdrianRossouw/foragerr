@@ -163,6 +163,12 @@ class HealthService:
             label="Weekly pull source",
         )
         components += await self._safe(
+            lambda: self._sources_component(),
+            component="sources",
+            kind="source",
+            label="Store sources",
+        )
+        components += await self._safe(
             lambda: self._scheduler_component(),
             component="scheduler",
             kind="scheduler",
@@ -478,6 +484,43 @@ class HealthService:
                 disabled_until=disabled_until,
             )
         ]
+
+    async def _sources_component(self) -> list[ComponentHealth]:
+        """Expired store sources surface as degraded with reconnect guidance
+        (FRG-SRC-005 / FRG-NFR-011). A connected or intentionally-disconnected
+        source contributes nothing — only an ``expired`` session is a warning
+        the operator must act on (re-paste the cookie)."""
+        from foragerr.sources.models import SourceRow
+
+        async with self._db.read_session() as session:
+            rows = (
+                (await session.execute(select(SourceRow).order_by(SourceRow.id)))
+                .scalars()
+                .all()
+            )
+        components: list[ComponentHealth] = []
+        for row in rows:
+            if row.connection_state != "expired":
+                continue
+            components.append(
+                ComponentHealth(
+                    component=f"source:{row.id}",
+                    kind="source",
+                    label=f"Source: {row.name}",
+                    state=_STATE_DEGRADED,
+                    message=(
+                        f"'{row.name}' session has expired; sync is paused until "
+                        "you reconnect"
+                    ),
+                    remediation=(
+                        "Open Sources and re-paste the store session cookie to "
+                        "resume syncing; already-synced and imported items are "
+                        "unaffected."
+                    ),
+                    last_failure=row.last_sync_at,
+                )
+            )
+        return components
 
     async def _scheduler_component(self) -> ComponentHealth:
         label = "Scheduler"

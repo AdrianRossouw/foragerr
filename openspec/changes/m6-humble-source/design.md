@@ -111,11 +111,36 @@ Additive only: one alembic migration (sources + source_entitlements), no changes
 existing tables. Feature is invisible until a source is connected. Rollback = drop
 the nav route; tables are inert.
 
+## Resolved: comic-classification rule (task 1.2, finalized against fixtures)
+
+The comic-vs-other rule, applied to a subproduct's parsed download options
+(implemented in `backend/src/foragerr/sources/classify.py`, exercised by the
+synthetic fixtures in `backend/tests/sources/fixtures/`):
+
+1. Consider only download options whose Humble `platform == "ebook"` (excludes
+   games, audio, software).
+2. Collect each option's uppercased **format token** from its label (`name`) and
+   the file extension of its signed `url.web`.
+3. Any **comic-archive format** present — `CBZ` / `CBR` / `CB7` / `CBT` →
+   `comic` (unambiguous signal).
+4. Else a `PDF` with **no** prose format (`EPUB` / `MOBI` / `AZW3`) alongside it
+   → `comic` (PDF-only OGNs / artbooks). A `PDF` shipping *with* a prose format
+   → `other` (prose ebook that merely offers a PDF).
+5. Everything else → `other`.
+
+Non-comic items are stored as `other`, hidden by default and shown on demand,
+never dropped — a misclassification is discoverable and reclassifiable
+(FRG-SRC-003). **Preferred grabbable format** (interim: prefer CBZ, per the
+format-preference direction 2026-07-11): `CBZ` → `CBR` → `CB7` → `CBT` → `PDF`;
+its md5/size/filename ride on the entitlement row for the grab, with the full
+option list retained in `formats_json`.
+
+The **auto-match confidence threshold** (task 3.2) is deferred to worker A2's
+match-computation change — the entitlement row already carries the
+`proposed_series_id` / `proposed_match_json` columns (NULL until A2 fills them).
+
 ## Open Questions
 
-- Exact comic-classification rule and auto-match confidence threshold — finalized
-  against operator-captured fixtures during task 1.x (not owner decisions; recorded
-  in design at implementation).
 - Whether the sources hub shows a Humble "library sync" for previously-imported
   files matching entitlements (nice-to-have; default: out, revisit post-v1 of the
   screen).

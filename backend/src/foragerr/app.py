@@ -412,6 +412,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.state.startup_hooks.append(_register_ddl_tasks)
 
+    # --- sources area (m6-humble-source): importing the package maps the two
+    #     store-source ORM models onto Base.metadata; importing the commands
+    #     module registers the source-sync command + handler (FRG-SRC-003).
+    #     Mount the connect/manage router under /api/v1 and register the daily
+    #     sync task (clamped to a 1 h floor). Runs after register_scheduler
+    #     above (which creates app.state.scheduler). ---
+    import foragerr.sources  # noqa: F401 — ORM model registration
+    import foragerr.sources.commands  # noqa: F401 — command/handler registration
+    from foragerr.api.sources import router as sources_router
+    from foragerr.sources.commands import register_source_sync_task
+
+    app.include_router(sources_router, prefix="/api/v1")
+
+    async def _register_source_sync_task(app: FastAPI) -> None:
+        await register_source_sync_task(app.state.scheduler, app.state.settings)
+
+    app.state.startup_hooks.append(_register_source_sync_task)
+
     # --- first-run seeding (m2-first-run-defaults, area B): seed the default
     #     keyless GetComics indexer + built-in DDL client once per database,
     #     gated on a persisted marker (FRG-DEP-013). Appended as a startup hook

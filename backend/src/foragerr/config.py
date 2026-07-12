@@ -553,6 +553,27 @@ class Settings(BaseSettings):
             "interval gate and runs immediately."
         ),
     )
+    source_sync_interval_seconds: int = Field(
+        default=86400,
+        ge=1,
+        description=(
+            "How often the scheduled store-source sync task polls connected "
+            "sources (e.g. Humble Bundle) for new entitlements (FRG-SRC-003). "
+            "Default daily (86400 s); clamped UP to a documented 1 hour (3600 s) "
+            "floor at task registration to stay polite to the store API "
+            "(FRG-NFR-005). A manual 'Sync now' (POST /api/v1/sources/{id}/sync) "
+            "runs immediately regardless of this interval."
+        ),
+    )
+    source_min_request_interval_seconds: float = Field(
+        default=2.0,
+        ge=0.1,
+        description=(
+            "Minimum seconds between two consecutive HTTP requests to one store "
+            "source, enforced across the order-list → order-detail fan "
+            "(FRG-NFR-005). Default 2 s; floored at 0.1 s."
+        ),
+    )
     opds_base_path: str = Field(
         default="/opds",
         description=(

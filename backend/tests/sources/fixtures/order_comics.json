@@ -1,0 +1,168 @@
+{
+  "gamekey": "aBcD1234synthetic",
+  "created": "2021-04-05T20:01:30.481166",
+  "claimed": true,
+  "amount_spent": 15.0,
+  "currency": "USD",
+  "product": {
+    "machine_name": "synthetic_comics_bundle",
+    "human_name": "Synthetic Comics Bundle"
+  },
+  "tpkd_dict": {"all_tpks": []},
+  "subproducts": [
+    {
+      "machine_name": "synth_singleissue_01",
+      "human_name": "Synthetic Hero #1",
+      "publisher": "Synthetic Comics",
+      "url": "https://www.humblebundle.com/downloads?key=REDACTED",
+      "downloads": [
+        {
+          "platform": "ebook",
+          "download_struct": [
+            {
+              "name": "CBZ",
+              "md5": "0123456789abcdef0123456789abcdef",
+              "file_size": 41943040,
+              "url": {
+                "web": "https://dl.humble.com/synth_hero_01.cbz?gamekey=REDACTED&ttl=REDACTED&t=REDACTED",
+                "bittorrent": "https://dl.humble.com/torrents/synth_hero_01.cbz.torrent?gamekey=REDACTED"
+              }
+            },
+            {
+              "name": "PDF",
+              "md5": "fedcba9876543210fedcba9876543210",
+              "file_size": 62914560,
+              "url": {
+                "web": "https://dl.humble.com/synth_hero_01.pdf?gamekey=REDACTED&ttl=REDACTED&t=REDACTED"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "machine_name": "synth_collected_edition_vol1",
+      "human_name": "Synthetic Hero: The Collected Edition Vol. 1 (collects #1-6)",
+      "publisher": "Synthetic Comics",
+      "url": "https://www.humblebundle.com/downloads?key=REDACTED",
+      "downloads": [
+        {
+          "platform": "ebook",
+          "download_struct": [
+            {
+              "name": "CBZ",
+              "md5": "11112222333344445555666677778888",
+              "file_size": 251658240,
+              "url": {
+                "web": "https://dl.humble.com/synth_hero_collected_v1.cbz?gamekey=REDACTED&ttl=REDACTED&t=REDACTED"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "machine_name": "synth_prose_novel_epub_only",
+      "human_name": "A Synthetic Prose Novel",
+      "publisher": "Synthetic Press",
+      "url": "https://www.humblebundle.com/downloads?key=REDACTED",
+      "downloads": [
+        {
+          "platform": "ebook",
+          "download_struct": [
+            {
+              "name": "EPUB",
+              "md5": "aaaabbbbccccddddeeeeffff00001111",
+              "file_size": 1048576,
+              "url": {
+                "web": "https://dl.humble.com/synth_prose_novel.epub?gamekey=REDACTED&ttl=REDACTED&t=REDACTED"
+              }
+            },
+            {
+              "name": "MOBI",
+              "md5": "22223333444455556666777788889999",
+              "file_size": 1310720,
+              "url": {
+                "web": "https://dl.humble.com/synth_prose_novel.mobi?gamekey=REDACTED&ttl=REDACTED&t=REDACTED"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "machine_name": "synth_video_game_title",
+      "human_name": "A Synthetic Video Game",
+      "url": "https://www.humblebundle.com/downloads?key=REDACTED",
+      "downloads": [
+        {
+          "platform": "windows",
+          "download_struct": [
+            {
+              "name": "Download",
+              "md5": "abcdefabcdefabcdefabcdefabcdef00",
+              "file_size": 2147483648,
+              "url": {
+                "web": "https://dl.humble.com/synth_game_win.zip?gamekey=REDACTED&ttl=REDACTED&t=REDACTED"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "machine_name": "synth_artbook_pdf_only",
+      "human_name": "The Art of Synthetic (Artbook)",
+      "publisher": "Synthetic Comics",
+      "url": "https://www.humblebundle.com/downloads?key=REDACTED",
+      "downloads": [
+        {
+          "platform": "ebook",
+          "download_struct": [
+            {
+              "name": "PDF",
+              "md5": "99998888777766665555444433332222",
+              "file_size": 524288000,
+              "url": {
+                "web": "https://dl.humble.com/synth_artbook.pdf?gamekey=REDACTED&ttl=REDACTED&t=REDACTED"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "machine_name": "synth_prose_with_pdf_twin",
+      "human_name": "A Synthetic Reference Book",
+      "publisher": "Synthetic Press",
+      "url": "https://www.humblebundle.com/downloads?key=REDACTED",
+      "downloads": [
+        {
+          "platform": "ebook",
+          "download_struct": [
+            {
+              "name": "PDF",
+              "md5": "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+              "file_size": 3145728,
+              "url": {
+                "web": "https://dl.humble.com/synth_reference.pdf?gamekey=REDACTED&ttl=REDACTED&t=REDACTED"
+              }
+            },
+            {
+              "name": "EPUB",
+              "md5": "1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f",
+              "file_size": 2097152,
+              "url": {
+                "web": "https://dl.humble.com/synth_reference.epub?gamekey=REDACTED&ttl=REDACTED&t=REDACTED"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "human_name": "A malformed subproduct with no machine_name",
+      "downloads": "this is not a list"
+    }
+  ]
+}
