@@ -197,6 +197,75 @@ left unlocked) is not enough to change a credential or mint a new key.
   remember-me session left on a shared or lost device. It needs no password
   confirmation: it can only ever sign people out.
 
+## Failed-attempt throttling and the audit trail
+
+Every credential-bearing surface — the login form, the `X-Api-Key` header, and
+the OPDS Basic realm — throttles repeated failures instead of trusting scrypt
+alone to slow down guessing. The rule is the same on all three: **5 failed
+attempts within 15 minutes from one address, on one surface**, and further
+attempts on that specific (address, surface) pair are refused with `429 Too
+Many Requests` and a `Retry-After` header, starting at 30 seconds and doubling
+with each additional failure, capped at 15 minutes. A wrong password from your
+browser never throttles your API key or your OPDS reader — each surface is
+counted separately, and so is each source address.
+
+This is **never a permanent lockout**. Once the `Retry-After` deadline passes,
+the next attempt is let through normally, and correct credentials succeed —
+there is no state where a right password stops working. A successful
+authentication also immediately clears that address's counter. Env re-seed
+(see "Lost password / lockout recovery" above) remains the recovery path of
+last resort for an actually-forgotten credential; it has nothing to do with
+this throttle and is never required just to get past it.
+
+What this looks like for each surface:
+
+- **Web login** — the login form gets a `429` response instead of the usual
+  `401`; wait for the deadline (or try again later) rather than retrying
+  immediately.
+- **Programmatic API (`X-Api-Key`)** — a script hammering the API with a stale
+  or wrong key starts getting `429` back instead of `401`; fix the key rather
+  than retrying in a tight loop.
+- **OPDS readers** — a reader with the wrong saved password gets `429`, not
+  another `401`/Basic challenge. This matters because some reader apps treat a
+  `401` as "ask again" and will re-prompt in a loop; a `429` breaks that loop
+  instead of hammering the server, and the growing `Retry-After` gives the
+  reader (or you, re-entering credentials) breathing room before the next try.
+
+**Counters reset on restart.** They live in memory, not the database — there is
+no migration and nothing to inspect after a container restart via this
+mechanism specifically (see the audit trail below for what survives a
+restart). This is an accepted trade-off for a single-operator, home-server
+deployment: restarts are infrequent enough relative to the 15-minute window
+that it doesn't meaningfully weaken the throttle.
+
+### Audit trail: what's logged and where
+
+Every authentication-relevant event — successful and failed logins, logout,
+OPDS verification, API-key failures, throttling itself, and every
+credential-lifecycle action from the Settings → Security page above — is
+recorded as a structured `auth.*` event (for example `auth.login.failure`,
+`auth.backoff_triggered`, `auth.password_changed`, `auth.apikey_rotated`).
+These flow through the normal logging pipeline, so you see them in the in-app
+**System → Logs** screen (filter by the `foragerr.auth` logger) and in the
+rotated log file under `logs/foragerr.log`, exactly like any other log record
+— see `configuration.md` → "Logs and diagnostics" for how that screen and file
+work, including the in-memory buffer's restart-clears-it caveat. No event ever
+contains a password, API key, or OPDS credential; the one thing an attacker
+controls that can appear — the submitted username — is stripped of control
+characters and length-capped first, so a hostile username can't forge or
+corrupt a log line.
+
+One event is worth calling out specifically: **`auth.apikey_source_seen`**.
+Rather than logging every single successful API-key request (which would
+flood the log for any script that polls regularly), foragerr logs the *first*
+successful use of the key from a given source address within the 15-minute
+window, then stays quiet about repeats from that same address. If your key
+ever leaks, this is how you'd notice: a new source address showing up in
+`auth.apikey_source_seen` that you don't recognize is worth investigating.
+Rotating the API key (Settings → Security) resets this baseline, so the new
+key's first use from any address — including your own scripts, the next time
+they run — is logged again from scratch.
+
 ## Reverse proxies and the WebSocket Origin check
 
 Every state-changing request authenticated by the session cookie, and every

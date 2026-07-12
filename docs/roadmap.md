@@ -39,17 +39,17 @@ import pipeline. Still planned:
 
 This milestone replaces the original no-authentication posture (the accepted
 risk `RISK-020`, Tailscale-only) with a single-user login, session and API-key
-handling, and uniform coverage of the UI, API, and OPDS surfaces. **In
-progress**: the first change (`m8-auth-core`, v0.7.0) shipped the default-deny
-perimeter, mandatory login, two-tier sessions, scrypt password hashing, env
-bootstrap, the CSRF stance, and WebSocket origin validation, mitigating
-`RISK-020`; the second (`m8-keys-opds`, v0.8.0) shipped the credential
-lifecycle — Settings → Security password changes, API-key rotation with
-display-once, independent OPDS credentials, sign-out-everywhere, and the
-env re-seed fingerprint semantics.
-
-- Remaining requirements: `FRG-AUTH-009` (login rate limiting and audit) —
-  planned for `m8-rate-audit`.
+handling, and uniform coverage of the UI, API, and OPDS surfaces. **Complete**:
+the first change (`m8-auth-core`, v0.7.0) shipped the default-deny perimeter,
+mandatory login, two-tier sessions, scrypt password hashing, env bootstrap,
+the CSRF stance, and WebSocket origin validation, mitigating `RISK-020`; the
+second (`m8-keys-opds`, v0.8.0) shipped the credential lifecycle — Settings →
+Security password changes, API-key rotation with display-once, independent
+OPDS credentials, sign-out-everywhere, and the env re-seed fingerprint
+semantics; the third and last (`m8-rate-audit`, v0.9.0) shipped failed-auth
+throttling (429 + growing `Retry-After`, never a lockout) and a unified
+`auth.*` structured audit vocabulary across every surface, including
+`auth.apikey_source_seen` leaked-key visibility.
 
 ## M9 — UI refinement
 

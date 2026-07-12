@@ -9,6 +9,53 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.9.0] — 2026-07-12
+
+m8-rate-audit: failed-auth rate limiting and structured audit events — the
+third and last M8 authentication change. M8 is complete.
+
+### Added
+- **Failed-attempt throttling** (FRG-AUTH-009): 5 failed attempts within 15
+  minutes from one address, on one surface (login form, `X-Api-Key`, OPDS
+  Basic), and further attempts on that (address, surface) pair get `429 Too
+  Many Requests` with a `Retry-After` deadline that starts at 30 s and doubles
+  per additional failure, capped at the window length. **Never a lockout**:
+  once the deadline passes, correct credentials succeed normally, and a
+  success resets the counter immediately — env re-seed remains the only
+  recovery path, unrelated to this throttle. OPDS readers get the `429`
+  instead of a repeating `401`/Basic-challenge re-prompt loop. Counters are
+  in-process and reset on restart.
+- **Unified structured audit events** (FRG-AUTH-009): every authentication-
+  relevant event — login success/failure, logout, OPDS verification,
+  API-key failure, throttling, and every credential-lifecycle action — is now
+  a structured `auth.*` event on the standard logging pipeline, visible in
+  **System → Logs** (filter by the `foragerr.auth` logger) and the rotated
+  log file. The ad-hoc lines from `m8-auth-core`/`m8-keys-opds` migrate into
+  the same shape. No event ever carries credential material; the submitted
+  username (the one attacker-controlled field) is control-character-stripped
+  and length-capped before it's logged.
+- **Leaked-key visibility** (`auth.apikey_source_seen`): rather than logging
+  every API-key request, foragerr logs the first successful use of the key
+  from a given source address within the window, then stays quiet about
+  repeats — so a leaked key surfaces in the audit trail the moment it's used
+  from a new address. Key rotation resets the baseline.
+
+### Security
+- FRG-AUTH-009 flips to implemented; RISK-020's rate-limit/audit residual
+  closes. The limiter check runs before any scrypt verification on all three
+  credential-bearing surfaces, shielding the deliberately constant-work KDF
+  from failure-flood CPU exhaustion. A per-surface global counter observes
+  distributed failure patterns (`auth.backoff_triggered`) without ever
+  blocking, by design — it must never become a vector for locking the
+  operator out via spoofed-source spraying. Threat-model notes added for the
+  brute-force mitigation (backoff, not lockout), the client-IP trust boundary
+  (`X-Forwarded-For` is not trusted — no reverse proxy in the deployment
+  model), and log-injection hardening.
+
+### Notes
+- No migration, no configuration change (thresholds are module constants).
+  No dependency changes — stdlib only (`tools/soup_check.py` unaffected).
+
 ## [v0.8.0] — 2026-07-12
 
 m8-keys-opds: credential lifecycle — the second M8 authentication change.
