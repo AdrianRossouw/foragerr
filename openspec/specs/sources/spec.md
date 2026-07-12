@@ -91,6 +91,11 @@ new items and SHALL default to OFF.
 - **WHEN** the operator ignores an entitlement and later restores it
 - **THEN** ignored items are excluded from pending-review counts and default views but remain listed under their filter; restore returns the item to `new` with its proposed match recomputed
 
+#### Scenario: Ignore cancels in-flight acquisition
+
+- **WHEN** the operator ignores an accepted entitlement whose download has not yet durably imported (queued, fetching, verifying, or awaiting/undergoing import)
+- **THEN** nothing lands in the library for it — the grab aborts at its re-read guard or the completed download is withdrawn before any file moves — and a later restore + re-accept downloads afresh
+
 ### Requirement: FRG-SRC-005 — session expiry as a modeled state
 
 The system SHALL treat an authentication failure during sync as source state
