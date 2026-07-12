@@ -68,6 +68,20 @@ async def apply_source_import(
     row = await session.get(SourceEntitlementRow, ent_id)
     if row is None:
         return
+    if row.review_status != "matched":
+        # Re-read guard mirroring the grab's (FRG-SRC-004): the operator
+        # ignored/un-matched this entitlement while its completed download sat in
+        # the drain. Never claim ownership or fill owned-via-edition singles for
+        # an item no longer accepted — and leave the download axis exactly as the
+        # review action reset it (a blocked/failed mirror would resurrect it).
+        logger.info(
+            "source-import: entitlement %s is %r, no longer matched; "
+            "skipping entitlement mirror + edition reconcile for %s",
+            ent_id,
+            row.review_status,
+            download_id,
+        )
+        return
     if final_state is TrackedDownloadState.IMPORTED:
         row.download_state = "imported"
         row.download_error = None

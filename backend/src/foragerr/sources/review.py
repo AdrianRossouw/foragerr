@@ -205,10 +205,19 @@ async def ignore_entitlement(db, entitlement_id: int) -> SourceEntitlementRow:
     Ignoring also RESETS the download axis (FRG-SRC-004/006): a queued/in-flight
     grab is cancelled by clearing ``download_state`` — the in-flight ``run_grab``
     re-reads the entitlement before the irreversible import and aborts once it is
-    no longer ``matched``. An already-imported collected edition has its
-    owned-via-edition fills reverted so the singles it provided return to wanted
-    (real single files are never touched).
+    no longer ``matched``. A grab already handed off to the import pipeline has
+    its not-yet-claimed ``humble:{id}`` tracked row deleted so the drain never
+    imports the ignored item; a row the drain has already claimed is instead
+    discarded by the import hook's own ``review_status`` re-read guard. An
+    already-imported collected edition has its owned-via-edition fills reverted
+    so the singles it provided return to wanted (real single files are never
+    touched).
     """
+    from sqlalchemy import delete
+
+    from foragerr.downloads.models import TrackedDownloadRow
+    from foragerr.downloads.state import TrackedDownloadState
+    from foragerr.sources.import_hook import HUMBLE_DOWNLOAD_PREFIX
     from foragerr.sources.reconcile import revert_owned_via_edition_for_series
 
     async with db.write_session() as session:
@@ -221,6 +230,23 @@ async def ignore_entitlement(db, entitlement_id: int) -> SourceEntitlementRow:
             await revert_owned_via_edition_for_series(
                 session, series_id=row.matched_series_id
             )
+        # Cancel a completed download awaiting the import drain (FRG-SRC-004/006):
+        # state-guarded so a row the drain has already claimed (``importing``) is
+        # left for the import hook's guard, and DELETED (not re-stated) so the
+        # handoff's download-id dedup can re-create it on a later restore +
+        # re-accept.
+        await session.execute(
+            delete(TrackedDownloadRow).where(
+                TrackedDownloadRow.download_id
+                == f"{HUMBLE_DOWNLOAD_PREFIX}{entitlement_id}",
+                TrackedDownloadRow.state.in_(
+                    (
+                        TrackedDownloadState.IMPORT_PENDING.value,
+                        TrackedDownloadState.IMPORT_BLOCKED.value,
+                    )
+                ),
+            )
+        )
         row.review_status = "ignored"
         # Cancel any queued / in-flight / completed grab on the download axis so
         # the item is fully excluded; an in-flight grab aborts at its re-read guard.

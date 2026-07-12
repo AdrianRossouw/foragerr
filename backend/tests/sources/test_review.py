@@ -291,3 +291,117 @@ async def test_auto_sync_accepts_only_confident_matches(
     assert commands.enqueued == [
         ("source-grab", {"entitlement_id": single.id}, "accept")
     ]
+
+
+# --- ignore-mid-import race: cancel the pending completed-download row -------
+
+
+@pytest.mark.req("FRG-SRC-004")
+async def test_ignore_cancels_pending_import_row(
+    db, config_dir, root_folder_id, format_profile_id
+):
+    """Ignoring after the grab handed off to import deletes the unclaimed
+    ``humble:{id}`` tracked row, so the drain never imports the ignored item
+    (and the handoff's download-id dedup can re-create it on restore+re-accept).
+    """
+    from pathlib import Path
+
+    from foragerr.downloads.models import TrackedDownloadRow
+    from foragerr.downloads.state import TrackedDownloadState
+    from foragerr.sources.grab import _handoff_to_import
+
+    source = await _synced_source(db, config_dir)
+    series_id = await _mk_series(
+        db, root_folder_id, format_profile_id, cvid=555, title="Synthetic Hero"
+    )
+    ent = await review.match_entitlement(
+        db,
+        (await _comic(db, source.id, "synth_singleissue_01")).id,
+        series_id=series_id,
+        commands=FakeCommands(),
+    )
+    # The grab's real import handoff: a humble:{id} row in import_pending.
+    await _handoff_to_import(db, ent, Path("/tmp/staging/x/file.cbz"))
+    async with db.read_session() as session:
+        row = (
+            await session.execute(
+                select(TrackedDownloadRow).where(
+                    TrackedDownloadRow.download_id == f"humble:{ent.id}"
+                )
+            )
+        ).scalar_one()
+    assert row.state == TrackedDownloadState.IMPORT_PENDING.value
+
+    await review.ignore_entitlement(db, ent.id)
+
+    async with db.read_session() as session:
+        remaining = (
+            (
+                await session.execute(
+                    select(TrackedDownloadRow).where(
+                        TrackedDownloadRow.download_id == f"humble:{ent.id}"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert remaining == []  # the unclaimed completed download is cancelled
+    fresh = await repo.get_entitlement(db, ent.id)
+    assert fresh.review_status == "ignored"
+    assert fresh.download_state is None
+
+
+@pytest.mark.req("FRG-SRC-004")
+async def test_ignore_leaves_claimed_import_row_to_the_hook_guard(
+    db, config_dir, root_folder_id, format_profile_id
+):
+    """A row the drain has already claimed (``importing``) is NOT deleted by
+    ignore — the import hook's ``review_status`` re-read guard discards that
+    import's entitlement effects instead."""
+    from foragerr.db.base import utcnow
+    from foragerr.downloads.models import TrackedDownloadRow
+    from foragerr.downloads.state import TRACKED_STATUS_OK, TrackedDownloadState
+
+    source = await _synced_source(db, config_dir)
+    series_id = await _mk_series(
+        db, root_folder_id, format_profile_id, cvid=556, title="Synthetic Hero"
+    )
+    ent = await review.match_entitlement(
+        db,
+        (await _comic(db, source.id, "synth_singleissue_01")).id,
+        series_id=series_id,
+        commands=FakeCommands(),
+    )
+    now = utcnow()
+    async with db.write_session() as session:
+        session.add(
+            TrackedDownloadRow(
+                download_id=f"humble:{ent.id}",
+                client_id=None,
+                client_name="Humble Bundle",
+                protocol="humble",
+                source="store",
+                state=TrackedDownloadState.IMPORTING.value,
+                status=TRACKED_STATUS_OK,
+                series_id=series_id,
+                issue_id=None,
+                title=ent.human_name,
+                output_path="/tmp/staging/x",
+                encrypted=False,
+                added_at=now,
+                updated_at=now,
+            )
+        )
+
+    await review.ignore_entitlement(db, ent.id)
+
+    async with db.read_session() as session:
+        row = (
+            await session.execute(
+                select(TrackedDownloadRow).where(
+                    TrackedDownloadRow.download_id == f"humble:{ent.id}"
+                )
+            )
+        ).scalar_one()
+    assert row.state == TrackedDownloadState.IMPORTING.value

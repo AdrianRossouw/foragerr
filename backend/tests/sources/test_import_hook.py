@@ -284,3 +284,119 @@ async def test_import_hook_mirrors_blocked_and_failed(db, config_dir):
     failed = await repo.get_entitlement(db, eid_failed)
     assert failed.download_state == "failed"
     assert failed.download_error
+
+
+# --- ignore-mid-import race: the hook's review_status re-read guard ----------
+
+
+@pytest.mark.req("FRG-SRC-007")
+async def test_ignored_mid_import_claims_no_ownership(
+    db, config_dir, root_folder_id, format_profile_id
+):
+    """Ignore lands while the drain already claimed the completed download: the
+    hook re-reads ``review_status`` and discards the entitlement mirror + edition
+    reconcile — the ignored trade never claims ownership, its covered singles
+    stay wanted, and the download axis stays as the ignore reset it."""
+    async with db.write_session() as session:
+        run = await library_repo.create_series(
+            session,
+            cv_volume_id=300,
+            title="Synthetic Hero",
+            format_profile_id=format_profile_id,
+            root_folder_id=root_folder_id,
+            path="/tmp/comics/run-ignored",
+        )
+        single_ids = []
+        for i in range(1, 4):
+            iss = await library_repo.create_issue(
+                session,
+                series_id=run.id,
+                cv_issue_id=300 * 10 + i,
+                issue_number=str(i),
+                monitored=True,
+            )
+            single_ids.append(iss.id)
+        trade = await library_repo.create_series(
+            session,
+            cv_volume_id=400,
+            title="Synthetic Hero HC",
+            format_profile_id=format_profile_id,
+            root_folder_id=root_folder_id,
+            path="/tmp/comics/trade-ignored",
+        )
+        trade.booktype = "tpb"
+        trade_issue = await library_repo.create_issue(
+            session,
+            series_id=trade.id,
+            cv_issue_id=400 * 10 + 1,
+            issue_number="1",
+            monitored=True,
+        )
+        run_id, trade_id, trade_issue_id = run.id, trade.id, trade_issue.id
+    async with db.write_session() as session:
+        await replace_issue_collections(
+            session,
+            trade_issue_id,
+            [
+                RangeInput(
+                    target_series_id=run_id,
+                    start_issue_id=single_ids[0],
+                    end_issue_id=single_ids[2],
+                )
+            ],
+        )
+
+    eid = await _entitlement(
+        db, matched_series_id=trade_id, download_state="import_pending"
+    )
+    # The operator's ignore landed first: review reset the download axis.
+    async with db.write_session() as session:
+        row = await session.get(SourceEntitlementRow, eid)
+        row.review_status = "ignored"
+        row.download_state = None
+
+    # The already-claimed import still terminates; the hook must discard it.
+    async with db.write_session() as session:
+        await library_repo.add_issue_file(
+            session,
+            issue_id=trade_issue_id,
+            path="/tmp/comics/trade-ignored/hc.cbz",
+            size=250_000,
+        )
+        await apply_source_import(
+            session,
+            download_id=f"humble:{eid}",
+            final_state=TrackedDownloadState.IMPORTED,
+            imported_issues=[(trade_issue_id, "/tmp/comics/trade-ignored/hc.cbz")],
+            now=_NOW,
+        )
+
+    ent = await repo.get_entitlement(db, eid)
+    assert ent.review_status == "ignored"
+    assert ent.download_state is None  # never resurrected to "imported"
+    # No owned-via-edition fills: all three covered singles remain wanted.
+    async with db.read_session() as session:
+        wanted = set(await library_repo.wanted_issue_ids(session))
+    assert set(single_ids) <= wanted
+
+
+@pytest.mark.req("FRG-SRC-006")
+async def test_blocked_or_failed_import_never_resurrects_ignored_axis(db, config_dir):
+    """The guard covers the non-success mirrors too: a block/fail terminal for an
+    ignored entitlement must not push it back onto the download axis."""
+    eid = await _entitlement(db, matched_series_id=None, download_state="import_pending")
+    async with db.write_session() as session:
+        row = await session.get(SourceEntitlementRow, eid)
+        row.review_status = "ignored"
+        row.download_state = None
+    async with db.write_session() as session:
+        await apply_source_import(
+            session,
+            download_id=f"humble:{eid}",
+            final_state=TrackedDownloadState.IMPORT_BLOCKED,
+            imported_issues=[],
+            now=_NOW,
+        )
+    ent = await repo.get_entitlement(db, eid)
+    assert ent.download_state is None
+    assert ent.review_status == "ignored"
