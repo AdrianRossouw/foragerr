@@ -410,6 +410,35 @@ class Settings(BaseSettings):
             "range 1..200 with a warning if set outside it."
         ),
     )
+    comicvine_hourly_path_budget: int = Field(
+        default=150,
+        description=(
+            "Soft per-path hourly ComicVine request ceiling (FRG-META-016). "
+            "ComicVine limits an API key to 200 requests/hour PER resource path "
+            "(/volume, /issues, /issue, /volumes, /person, ...) on top of the "
+            "velocity spacing, and request spacing alone can exhaust that in "
+            "minutes. When a path reaches this ceiling over a rolling hour the "
+            "client refuses further requests on that path locally (a typed, "
+            "logged deferral with a resume time; NOT a server-visible rate-limit "
+            "signal) and resumes automatically as the window rolls. The default "
+            "150 leaves ~25% headroom under ComicVine's limit for other tools "
+            "sharing the key and for clock skew. Clamped to the documented "
+            "10..200 range with a warning if set outside it — never above 200."
+        ),
+    )
+    comicvine_refresh_max_skip_days: int = Field(
+        default=7,
+        description=(
+            "Maximum age (days) of the last COMPLETE issue walk for which a "
+            "series refresh may short-circuit (FRG-META-017). When ComicVine's "
+            "volume ``date_last_updated`` is unchanged since the last complete "
+            "walk AND that walk is newer than this bound, the refresh skips the "
+            "issue pagination walk entirely (ComicVine's own caching guidance). "
+            "The bound guarantees a full walk runs at least this often as a "
+            "correctness backstop even when the volume stamp never changes. "
+            "Clamped up to a floor of 1 day."
+        ),
+    )
     comicvine_ignored_publishers: str = Field(
         default="",
         description=(

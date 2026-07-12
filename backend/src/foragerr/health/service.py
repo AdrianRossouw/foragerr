@@ -251,6 +251,37 @@ class HealthService:
                     "persists, verify the ComicVine API key and connectivity."
                 ),
             )
+        # A per-path hourly budget refusal (FRG-META-016) is a LOCAL deferral,
+        # not a server-side rate-limit — the gate's degraded flag stays off — but
+        # it is surfaced here so a deferral is never silent. Report the exhausted
+        # bucket(s) and the longest resume time as a degraded component.
+        if health.get("budget_exhausted"):
+            budgets = health.get("path_budgets") or {}
+            exhausted = {
+                bucket: info
+                for bucket, info in budgets.items()
+                if int(info.get("used", 0)) >= int(info.get("ceiling", 0))
+            }
+            names = ", ".join(sorted(exhausted)) or "one or more paths"
+            resume = max(
+                (float(info.get("resumes_in_seconds", 0.0)) for info in exhausted.values()),
+                default=0.0,
+            )
+            return ComponentHealth(
+                component="comicvine",
+                kind="comicvine",
+                label="ComicVine",
+                state=_STATE_DEGRADED,
+                message=(
+                    f"ComicVine hourly request budget exhausted for "
+                    f"path(s): {names} (~{resume:.0f}s until requests resume)"
+                ),
+                remediation=(
+                    "Deferred requests resume automatically as the rolling hour "
+                    "clears; raise comicvine_hourly_path_budget only up to "
+                    "ComicVine's documented 200/hour/path limit."
+                ),
+            )
         return ComponentHealth(
             component="comicvine", kind="comicvine", label="ComicVine", state=_STATE_OK
         )

@@ -68,11 +68,11 @@ With a library of a few thousand issues (reference: 5,000), interactive read API
 
 ### Requirement: FRG-NFR-004 — ComicVine rate limiting
 
-The system SHALL enforce a client-side ComicVine rate limit shared across ALL concurrent operations (default: max 1 request per 2 s, configurable with a floor), and on rate-limit/ban signals SHALL back off, mark the ComicVine backend degraded, and NOT retry in a tight loop.
+The system SHALL enforce a client-side ComicVine rate limit shared across ALL concurrent operations (default: max 1 request per 2 s, configurable with a floor), and on rate-limit/ban signals SHALL back off, mark the ComicVine backend degraded, and NOT retry in a tight loop. The politeness budget SHALL additionally bound hour-scale volume per ComicVine resource path (FRG-META-016): request spacing alone must never be able to exhaust ComicVine's documented per-path hourly allowance.
 
 - **Milestone**: M1
-- **Source**: mylar-comicvine.md §1.3 and §3.1 (fixed sleep, unlocked concurrency, no Retry-After handling — weaknesses to fix), §5 (candidate requirement).
-- **Notes**: Divergence from Mylar: a real shared limiter (async token/lock), not a per-call sleep. CV client behavior (endpoints, pagination) is META's; NFR owns the politeness budget.
+- **Source**: mylar-comicvine.md §1.3 and §3.1 (fixed sleep, unlocked concurrency, no Retry-After handling — weaknesses to fix), §5 (candidate requirement); ComicVine rate-limit documentation + owner live usage data (2026-07-12).
+- **Notes**: Divergence from Mylar: a real shared limiter (async token/lock), not a per-call sleep. CV client behavior (endpoints, pagination) is META's; NFR owns the politeness budget. Amended by cv-budget-caching: the budget is two-dimensional (velocity + hourly per path); FRG-META-016 owns the budget mechanics, this requirement owns the politeness posture.
 
 #### Scenario: Limiter is process-global across all call sites
 
@@ -93,6 +93,11 @@ The system SHALL enforce a client-side ComicVine rate limit shared across ALL co
 
 - **WHEN** the limiter interval is configured below the documented floor
 - **THEN** the effective interval is clamped to the floor (with a warning) and enforced spacing never drops below that documented minimum
+
+#### Scenario: Sustained-rate traffic cannot exhaust a per-path hourly allowance
+
+- **WHEN** a workload issues requests on one resource path at the full velocity the spacing gate permits for over an hour
+- **THEN** admissions on that path stop at the configured soft ceiling (≤200) with typed local refusals and health visibility, so ComicVine's server-side per-path limit is never reached from inside foragerr
 
 ### Requirement: FRG-NFR-005 — indexer and DDL politeness with failure backoff
 

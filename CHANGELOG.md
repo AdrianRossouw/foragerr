@@ -9,6 +9,35 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.6.0] — 2026-07-12
+
+cv-budget-caching: ComicVine politeness grows an hourly dimension — M6 opens.
+
+### Added
+- **Per-path hourly ComicVine budget** (FRG-META-016): foragerr now
+  accounts its ComicVine requests per resource path over a rolling hour
+  (soft ceiling 150/path/hour, configurable via
+  `comicvine_hourly_path_budget`, never above ComicVine's documented 200)
+  and defers work locally instead of running into ComicVine's server-side
+  block. Deferrals are visible in health (per-path usage once a path
+  passes 80%, plus an exhausted flag with time-to-resume) and resume by
+  themselves: credit backfill continues on later refreshes, background
+  fetches retry via their normal staleness paths, and interactive
+  searches show an honest "retries in about N minutes" message.
+- **Unchanged-series refresh short-circuit** (FRG-META-017): a series
+  refresh now skips the full issue walk when ComicVine reports the volume
+  unchanged since the last complete walk (and that walk is under
+  `comicvine_refresh_max_skip_days` old, default 7) — refreshing a stable
+  library costs about one request per series instead of a full page walk
+  each. Credit backfill, cover maintenance, and change notifications
+  still run; the periodic full walk remains the correctness backstop.
+
+### Fixed
+- **Covers appear without a reload** (FRG-META-013): the cover-cache
+  write now announces itself on the event stream, so an open series page
+  repaints the cover when it arrives instead of waiting for a manual
+  refresh.
+
 ## [v0.5.5] — 2026-07-11
 
 m5-creator-suggestions: "More from" a creator — M5 complete.
