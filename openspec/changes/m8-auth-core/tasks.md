@@ -86,9 +86,9 @@ per FRG-PROC-008 when fanned out.
 
 ## 7. Gate
 
-- [ ] 7.1 Full suites green (backend, frontend, e2e) on the branch
-- [ ] 7.2 Security-touching gate: full eight-angle fleet + Codex full-diff,
+- [x] 7.1 Full suites green (backend, frontend, e2e) on the branch
+- [x] 7.2 Security-touching gate: full eight-angle fleet + Codex full-diff,
       adversarial angles on perimeter bypass and session/CSRF handling with
       executed abuse scenarios (tiered-gates standard)
-- [ ] 7.3 Merge-gate checklist → merge --no-ff → tag v0.7.0 + gh release →
+- [x] 7.3 Merge-gate checklist → merge --no-ff → tag v0.7.0 + gh release →
       archive change → delete branch
