@@ -27,14 +27,20 @@ event. This is the third and final M8 change.
 - **Uniform structured audit events**: one event vocabulary
   (`auth.login.success`, `auth.login.failure`, `auth.logout`,
   `auth.password_changed`, `auth.opds_password_changed`, `auth.opds_failure`,
-  `auth.apikey_failure`, `auth.apikey_rotated`, `auth.reauth_failed`,
-  `auth.backoff_triggered`, `auth.reseed`) carrying source IP and surface,
+  `auth.apikey_failure`, `auth.apikey_source_seen`, `auth.apikey_rotated`,
+  `auth.reauth_failed`, `auth.backoff_triggered`, `auth.reseed`) carrying source IP and surface,
   never credential material and never unsanitized client-controlled strings
   (log-injection hardening on the submitted username). The existing ad-hoc
   lines from core/keys-opds are migrated into this vocabulary.
 - **Visibility in System → Logs**: audit events flow through the standard
   logging pipeline, so the existing logs viewer shows them with no frontend
   work beyond verifying filterability by the `foragerr.auth` logger.
+- **Leaked-key visibility** (owner decision 2026-07-12): per-request API-key
+  success events would be spam, so successful key use is audited *per
+  source* — `auth.apikey_source_seen` fires on the first successful key use
+  from a source IP within the window, and rotation resets the seen state. A
+  stolen key surfaces in the audit trail on its first use from a new
+  address.
 
 ## Capabilities
 
@@ -87,7 +93,9 @@ event. This is the third and final M8 change.
 Persistent/banning rate limits or fail2ban-style IP blocking (backoff only);
 rate limiting of authenticated traffic (this is failed-auth only — API
 throttling is a different concern); audit-event persistence beyond the
-standard log pipeline (no audit table; System → Logs is the viewer); trusting
+standard log pipeline (no audit table; System → Logs is the viewer — a
+durable, queryable audit store is queued as an owner-approved follow-up
+change, 2026-07-12); trusting
 `X-Forwarded-For` (no reverse proxy in the deployment model; revisit with
 DEP's TLS story); frontend surfaces (M9); `/health` trimming (DEP triage).
 

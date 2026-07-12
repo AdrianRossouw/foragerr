@@ -111,6 +111,15 @@ request — a reader sends Basic on every request and per-request success
 events would drown the log; one event per TTL window per reader preserves
 the "successes are logged" requirement without the spam.
 
+API-key **successes** are audited per *source*, not per request
+(`auth.apikey_source_seen`, owner decision 2026-07-12): a TTL'd seen-set of
+source IPs (window-length TTL, bounded like the counter registry, cleared on
+key rotation so a new key gets a fresh baseline) — the first successful key
+use from an IP inside the window emits the event, repeats are silent. This
+closes the observability hole where a leaked key used successfully would
+appear only as anonymous access lines: it now surfaces in the audit trail on
+first use from any new address, at near-zero log volume.
+
 ### 6. Testing
 
 Unit: window arithmetic, exponential deadline growth + cap, key isolation,

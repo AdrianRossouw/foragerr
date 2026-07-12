@@ -9,6 +9,7 @@
 
 - [ ] 2.1 `auth/audit.py`: `audit_event(event, request, surface, **fields)` → `foragerr.auth` logger, fixed `<event> key=value` shape, username sanitizer (control-strip + length cap), never credential material
 - [ ] 2.2 Migrate existing ad-hoc lines (`auth.reauth_failed`, `auth.password_changed`, `auth.opds_password_changed`, `auth.apikey_rotated`, bootstrap re-seed line) into the vocabulary; add `auth.login.success/.failure`, `auth.logout`, `auth.opds_failure`, `auth.apikey_failure`, `auth.backoff_triggered`
+- [ ] 2.4 `auth.apikey_source_seen`: TTL'd seen-set of source IPs for successful key use (window TTL, bounded, cleared on rotation) — first use from an IP audits, repeats silent; tests incl. rotation-resets-baseline (tag FRG-AUTH-009)
 - [ ] 2.3 Tests: every event fires where specified; log-injection (newline/ANSI/oversize username); negative scan — no password/key material in any captured record (tag FRG-AUTH-009)
 
 ## 3. Enforcement wiring
