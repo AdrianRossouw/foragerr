@@ -132,6 +132,7 @@ function WebPasswordCard() {
           setNewPassword('');
           setConfirmPassword('');
           setSuccess(true);
+          changePassword.reset(); // drop the submitted password from the cache
         },
         onError: (error) => {
           const mapped = mapCredentialError(error);
@@ -281,6 +282,7 @@ function OpdsPasswordCard() {
           setNewOpdsPassword('');
           setConfirmOpdsPassword('');
           setSuccess(true);
+          changeOpdsPassword.reset(); // drop the submitted admin password
         },
         onError: (error) => {
           const mapped = mapCredentialError(error);
@@ -435,6 +437,12 @@ function ApiKeyCard() {
           setConfirming(false);
           setRotatePassword('');
           setRawKey(res.api_key);
+          // Lift the key into local display state, then immediately drop the
+          // mutation's cached copy of both the raw key (state.data) and the
+          // admin password (state.variables) — display-once means the only
+          // surviving reference is `rawKey`, cleared when the modal closes
+          // (FRG-AUTH-007 confinement; gate finding).
+          rotateApiKey.reset();
         },
         onError: (error) => {
           const mapped = mapCredentialError(error);

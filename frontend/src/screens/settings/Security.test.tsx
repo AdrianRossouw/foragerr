@@ -1,10 +1,12 @@
 import { describe, it, expect } from 'vitest';
+import { Route, Routes } from 'react-router-dom';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../../test/renderWithProviders';
 import { fakeFetcher } from '../../test/fakeFetcher';
 import { ApiRequestError, type FetcherInit } from '../../api/fetcher';
 import type { AuthCredentialsResponse } from '../../api/authHooks';
+import { useAuthStore } from '../../store/authStore';
 import { Security } from './Security';
 
 /*
@@ -196,6 +198,15 @@ describe('Settings -> Security', () => {
       .getAll()
       .map((q) => JSON.stringify(q.state.data));
     expect(cachedValues.join('')).not.toMatch(/raw-key-abc123/);
+    // The MutationCache is the place React Query actually retains a mutation's
+    // data + variables — assert the raw key AND the submitted admin password are
+    // both gone from it (the gate-finding fix: gcTime:0 + .reset()).
+    const mutationState = client
+      .getMutationCache()
+      .getAll()
+      .map((m) => JSON.stringify(m.state));
+    expect(mutationState.join('')).not.toMatch(/raw-key-abc123/);
+    expect(mutationState.join('')).not.toMatch(/admin-pass/);
     expect(Object.keys(window.localStorage)).toHaveLength(0);
 
     // The rotate trigger is back to its normal state — the only way to see a
@@ -208,10 +219,20 @@ describe('Settings -> Security', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('FRG-AUTH-004: logout-all confirm fires request', async () => {
+  it('FRG-AUTH-004: logout-all fires the request, clears auth state, and redirects to /login', async () => {
     const user = userEvent.setup();
     const { spy, fetcher } = fakeFetcher(resolver());
-    renderWithProviders(<Security />, { fetcher, route: '/settings/security' });
+    useAuthStore.setState({ status: 'authenticated', username: 'adrian' });
+    renderWithProviders(
+      <Routes>
+        <Route path="/settings/security" element={<Security />} />
+        <Route
+          path="/login"
+          element={<div data-testid="login-stub">LOGIN</div>}
+        />
+      </Routes>,
+      { fetcher, route: '/settings/security' },
+    );
 
     await screen.findByText('adrian');
     await user.click(
@@ -230,6 +251,12 @@ describe('Settings -> Security', () => {
         '/api/v1/auth/logout-all',
         expect.objectContaining({ method: 'POST' }),
       ),
+    );
+    // The shell is actually torn down: auth state flips and the SPA lands on
+    // the login screen (not just the request fired).
+    expect(await screen.findByTestId('login-stub')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(useAuthStore.getState().status).toBe('unauthenticated'),
     );
   });
 

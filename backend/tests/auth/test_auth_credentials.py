@@ -254,3 +254,43 @@ def test_empty_new_password_is_rejected(tmp_path):
             json={"current_password": TEST_ADMIN_PASSWORD, "new_password": ""},
         )
         assert resp.status_code == 422
+
+
+@pytest.mark.req("FRG-AUTH-004")
+def test_oversized_current_password_is_generic_403_not_a_kdf_amplifier(tmp_path):
+    """An oversized current_password is refused with the same generic 403 as a
+    wrong one — capped BEFORE the scrypt call so it cannot inflate the re-auth
+    KDF cost (gate hardening)."""
+    app = make_app(tmp_path)
+    with TestClient(app) as client:  # seeded X-Api-Key attached by default
+        resp = client.post(
+            "/api/v1/auth/password",
+            json={"current_password": "x" * 5000, "new_password": "whatever-1"},
+        )
+        assert resp.status_code == 403
+        assert resp.json()["message"] == "re-authentication failed"
+        # The real password still works — nothing changed.
+        assert client.post(
+            "/api/v1/auth/password",
+            json={"current_password": TEST_ADMIN_PASSWORD, "new_password": "new-pw-1"},
+        ).status_code == 204
+
+
+@pytest.mark.req("FRG-AUTH-007")
+def test_rotation_drops_the_stale_bootstrap_key(tmp_path):
+    """After rotation the never-retrieved bootstrap key is cleared: the one-shot
+    handout would only ever return a dead key, so it is dropped rather than left
+    as a dangling affordance."""
+    app = make_app(tmp_path)
+    with TestClient(app) as client:  # seeded X-Api-Key attached by default
+        rotated = client.post(
+            "/api/v1/auth/api-key/rotate",
+            json={"current_password": TEST_ADMIN_PASSWORD},
+        )
+        new_key = rotated.json()["api_key"]
+        # The bootstrap one-shot no longer hands out anything (404).
+        assert client.post(
+            "/api/v1/auth/bootstrap-key",
+            headers={"X-Api-Key": new_key, **_ORIGIN},
+        ).status_code == 404
+        assert getattr(app.state, "bootstrap_api_key", None) is None

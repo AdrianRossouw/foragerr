@@ -100,12 +100,26 @@ class OpdsVerifyCache:
         self._capacity = capacity
         self._clock = clock
         self._entries: OrderedDict[bytes, tuple[int, float]] = OrderedDict()
+        #: Bumped on every clear(). A verify that begins under one generation and
+        #: finishes after a clear (the KDF awaits, so a credential write can land
+        #: mid-verify) must NOT write its now-stale positive — put() rejects it.
+        self._generation = 0
 
     @staticmethod
     def _key(username: str, password: str) -> bytes:
-        return hashlib.sha256(
-            username.encode("utf-8") + b"\0" + password.encode("utf-8")
-        ).digest()
+        # Length-unambiguous: hash each field, then hash the two digests. A plain
+        # ``user + NUL + password`` join is ambiguous in principle (("a\0b","c")
+        # and ("a","b\0c") collide); env/login inputs cannot contain NUL so it is
+        # not exploitable today, but the fixed-width digest join removes the class
+        # entirely (defense-in-depth, gate finding).
+        u = hashlib.sha256(username.encode("utf-8")).digest()
+        p = hashlib.sha256(password.encode("utf-8")).digest()
+        return hashlib.sha256(u + p).digest()
+
+    def generation(self) -> int:
+        """The current clear-generation. Capture BEFORE reading the credential a
+        verify will validate, then pass it to :meth:`put`."""
+        return self._generation
 
     def get(self, username: str, password: str) -> int | None:
         """The cached principal id for these exact creds if still fresh, else None."""
@@ -119,8 +133,17 @@ class OpdsVerifyCache:
             return None
         return principal_id
 
-    def put(self, username: str, password: str, principal_id: int) -> None:
-        """Cache a SUCCESSFUL verify (never call this for a failed one)."""
+    def put(
+        self, username: str, password: str, principal_id: int, *, generation: int
+    ) -> None:
+        """Cache a SUCCESSFUL verify (never call this for a failed one).
+
+        ``generation`` is the value :meth:`generation` returned before the verify
+        read its credentials; if a :meth:`clear` has intervened since, the write
+        is dropped — the positive is stale (the credential may have just been
+        rotated) and must not be resurrected into the freshly-cleared cache."""
+        if generation != self._generation:
+            return
         key = self._key(username, password)
         self._entries[key] = (principal_id, self._clock() + self._ttl)
         self._entries.move_to_end(key)
@@ -128,7 +151,9 @@ class OpdsVerifyCache:
             self._entries.popitem(last=False)  # drop oldest
 
     def clear(self) -> None:
-        """Drop every entry — called on any principal credential write."""
+        """Drop every entry and advance the generation — called on any principal
+        credential write, so an in-flight verify cannot re-seed a stale positive."""
+        self._generation += 1
         self._entries.clear()
 
 
@@ -212,7 +237,13 @@ async def _authenticate(request: HTTPConnection) -> tuple[int, str] | None:
         creds = _decode_basic(request.headers.get("authorization", ""))
         if creds is not None:
             cache = getattr(app.state, "opds_verify_cache", None)
+            generation = 0
             if cache is not None:
+                # Capture the generation BEFORE reading the principal, so a
+                # credential write (clear) landing during the KDF below causes the
+                # eventual put() to be dropped rather than resurrect a stale
+                # positive (TOCTOU gate finding).
+                generation = cache.generation()
                 cached_id = cache.get(creds[0], creds[1])
                 if cached_id is not None:
                     # A prior verify of these EXACT creds succeeded within the
@@ -232,7 +263,9 @@ async def _authenticate(request: HTTPConnection) -> tuple[int, str] | None:
                 )
                 if user_ok and password_ok:
                     if cache is not None:
-                        cache.put(creds[0], creds[1], principal.id)
+                        cache.put(
+                            creds[0], creds[1], principal.id, generation=generation
+                        )
                     return principal.id, "basic"
 
     return None

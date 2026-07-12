@@ -1541,8 +1541,42 @@ deltas on the shipped model:
   timing uniformity shipped in core.
 - **Display-once API key.** The raw key exists only in the bootstrap one-shot
   and the rotate response; at rest only its SHA-256. The frontend confines the
-  rotate response to component state (verified by a tagged test that the key is
-  absent from DOM, query cache, and localStorage after the dialog closes).
+  rotate response to component state (`gcTime: 0` + `.reset()` on the mutation so
+  neither the raw key nor the submitted admin password survives in React Query's
+  MutationCache), verified by a tagged test that the key is absent from the DOM,
+  the query cache, the mutation cache, and localStorage after the dialog closes.
+
+**Gate-round findings fixed in-branch (full 10-angle fleet + Codex, 2026-07-12):**
+
+- **OPDS verify-cache TOCTOU (LOW–MED, fixed).** The KDF awaits, so a credential
+  write could land mid-verify; a verify that captured the old credential could
+  then re-seed its now-stale positive *after* the clear, keeping an old OPDS
+  password valid for up to the 60 s TTL. Fixed with a generation counter: `clear`
+  advances it, the verify captures it before reading the principal, and `put`
+  drops the write if a clear intervened. Concurrency test added.
+- **Frontend MutationCache retention (MED, fixed).** See the display-once note
+  above — the raw key and admin passwords lingered in the MutationCache for the
+  default 5 min; `gcTime: 0` + `.reset()` close it.
+- **Hardening:** `current_password` is length-capped before the re-auth KDF (was
+  an unbounded self-inflicted amplifier); the verify-cache key is now a
+  length-unambiguous digest-of-digests (removes a theoretical field-boundary
+  collision class); a rotation drops any never-retrieved bootstrap key.
+
+**Accepted residuals (owned by `m8-rate-audit` / documented):**
+
+- **Auth-gated scrypt CPU/RAM pressure (→ AUTH-009).** An *already-authenticated*
+  caller firing parallel wrong-password credential writes drives ~40 concurrent
+  memory-hard KDFs (anyio's default limiter). No rate limit exists yet on the
+  `/api/v1/auth/*` re-auth path; the exempt `POST /auth/login` has the same,
+  worse, profile. This is the login-throttle/backoff work explicitly scoped to
+  `m8-rate-audit` (FRG-AUTH-009); the length cap above removes the per-request
+  amplifier in the meantime. Not a remote-unauthenticated DoS.
+- **Verify-cache is per-process.** Clearing it on a credential write clears one
+  worker's cache. The reference deployment runs a single uvicorn process, so this
+  is a non-issue today; were the image ever run with `>1` worker, an OPDS
+  password rotation would leave a stale positive live for ≤60 s in workers that
+  did not serve the write. Sessions are DB-backed and unaffected. A one-line
+  caveat for any future multi-worker mode.
 
 ## Coverage summary
 

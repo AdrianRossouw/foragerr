@@ -123,6 +123,10 @@ export function useChangePassword(): UseMutationResult<
 > {
   const fetcher = useFetcher();
   return useMutation({
+    // gcTime: 0 so the submitted current password does not linger in the
+    // MutationCache (state.variables) after the observer unmounts — a secret in
+    // memory outliving its use (gate finding). Cards also .reset() on success.
+    gcTime: 0,
     mutationFn: (payload) =>
       fetcher<void>('/api/v1/auth/password', { method: 'POST', body: payload }),
   });
@@ -136,6 +140,9 @@ export function useChangeOpdsPassword(): UseMutationResult<
 > {
   const fetcher = useFetcher();
   return useMutation({
+    // gcTime: 0 — see useChangePassword; keeps the admin password out of the
+    // MutationCache after unmount.
+    gcTime: 0,
     mutationFn: (payload) =>
       fetcher<void>('/api/v1/auth/opds-password', {
         method: 'POST',
@@ -152,6 +159,12 @@ export function useRotateApiKey(): UseMutationResult<
 > {
   const fetcher = useFetcher();
   return useMutation({
+    // gcTime: 0 is critical here: without it the MutationCache retains BOTH the
+    // submitted admin password (state.variables) AND the raw rotated key
+    // (state.data) for the default 5 min after the modal closes — defeating the
+    // display-once guarantee (FRG-AUTH-007). The card also calls .reset() the
+    // moment it lifts the key into local display state.
+    gcTime: 0,
     mutationFn: (payload) =>
       fetcher<RotateApiKeyResponse>('/api/v1/auth/api-key/rotate', {
         method: 'POST',

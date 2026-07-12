@@ -136,7 +136,7 @@ def test_cache_ttl_and_capacity_and_isolation():
     clock = {"t": 1000.0}
     cache = OpdsVerifyCache(ttl_seconds=60.0, capacity=2, clock=lambda: clock["t"])
 
-    cache.put("admin", "pw", 1)
+    cache.put("admin", "pw", 1, generation=cache.generation())
     assert cache.get("admin", "pw") == 1
     # Distinct presented creds get distinct keys (no cross-user hit).
     assert cache.get("admin", "other") is None
@@ -148,12 +148,45 @@ def test_cache_ttl_and_capacity_and_isolation():
 
     # Capacity: a third insert evicts the oldest.
     clock["t"] = 2000.0
-    cache.put("a", "1", 1)
-    cache.put("b", "2", 2)
-    cache.put("c", "3", 3)  # evicts "a"
+    g = cache.generation()
+    cache.put("a", "1", 1, generation=g)
+    cache.put("b", "2", 2, generation=g)
+    cache.put("c", "3", 3, generation=g)  # evicts "a"
     assert cache.get("a", "1") is None
     assert cache.get("b", "2") == 2
     assert cache.get("c", "3") == 3
 
     cache.clear()
     assert cache.get("b", "2") is None
+
+
+@pytest.mark.req("FRG-AUTH-005")
+def test_put_is_dropped_when_a_clear_intervenes_toctou():
+    """A verify that captured its generation BEFORE a concurrent credential write
+    (clear) must not re-seed its now-stale positive: put() with the old
+    generation is a no-op, so the old creds cannot linger for the TTL."""
+    cache = OpdsVerifyCache(ttl_seconds=60.0, capacity=8)
+
+    # Reader captures the generation, then its KDF "awaits" — during which a
+    # credential change clears the cache (advancing the generation).
+    gen = cache.generation()
+    cache.clear()  # the OPDS/admin password just changed mid-verify
+
+    # The reader resumes and tries to cache its (now stale) positive.
+    cache.put("admin", "old-pw", 1, generation=gen)
+    assert cache.get("admin", "old-pw") is None  # dropped — not resurrected
+
+    # A verify that starts AFTER the clear caches normally.
+    cache.put("admin", "new-pw", 1, generation=cache.generation())
+    assert cache.get("admin", "new-pw") == 1
+
+
+@pytest.mark.req("FRG-AUTH-005")
+def test_cache_key_is_length_unambiguous():
+    """Field-boundary shifts never collide onto another entry's slot: ("a\\0b","c")
+    and ("a","b\\0c") are distinct keys (the digest-of-digests join, not a raw
+    NUL join)."""
+    cache = OpdsVerifyCache(ttl_seconds=60.0, capacity=8)
+    cache.put("a\x00b", "c", 1, generation=cache.generation())
+    assert cache.get("a", "b\x00c") is None
+    assert cache.get("a\x00b", "c") == 1

@@ -181,7 +181,12 @@ async def _reauth_admin(request: Request, current_password: str, *, field: str) 
     principal = await get_principal(db)
     if principal is None:  # pragma: no cover - perimeter already refused
         raise HTTPException(status_code=403, detail="re-authentication failed")
-    if not await verify_password_async(current_password, principal.password_hash):
+    # Cap the re-auth input BEFORE the scrypt call: an oversized current_password
+    # would otherwise inflate this request's memory-hard KDF cost (a real password
+    # never approaches the cap). Same generic 403 as a wrong password — no oracle.
+    if len(current_password) > MAX_PASSWORD_LENGTH or not await verify_password_async(
+        current_password, principal.password_hash
+    ):
         logger.warning("auth.reauth_failed: re-authentication refused for %s", field)
         raise HTTPException(status_code=403, detail="re-authentication failed")
     return principal
@@ -267,6 +272,10 @@ async def rotate_api_key(body: ApiKeyRotateBody, request: Request) -> dict:
         row = await session.get(PrincipalRow, principal.id)
         row.api_key_sha256 = api_key_hash(raw_key)
         row.updated_at = utcnow()
+    # Drop any never-retrieved bootstrap key: its hash is gone from the DB now, so
+    # the one-shot handout would only ever return a dead key. Clearing it avoids
+    # that confusing dangling affordance after a rotation.
+    request.app.state.bootstrap_api_key = None
     logger.info("auth.apikey_rotated: API key rotated")
     return {"api_key": raw_key}
 
