@@ -21,7 +21,7 @@
 
 ## 5. Verify + gate + release
 
-- [ ] 5.1 Full suite green (pytest + vitest + tsc + e2e via run.sh) — the refactors are proven behavior-preserving by the existing FRG-AUTH-009 suites
-- [ ] 5.2 Focused security/correctness review of the delta + Codex (login-429 path, refactor-preserves-behavior)
-- [ ] 5.3 CHANGELOG v0.9.1; `pyproject`/`uv.lock` bump; gitleaks re-scan appended
+- [x] 5.1 Full suite green (pytest + vitest + tsc + e2e via run.sh) — the refactors are proven behavior-preserving by the existing FRG-AUTH-009 suites
+- [x] 5.2 Focused security/correctness review of the delta + Codex (login-429 path, refactor-preserves-behavior)
+- [x] 5.3 CHANGELOG v0.9.1; `pyproject`/`uv.lock` bump; gitleaks re-scan appended
 - [ ] 5.4 Merge --no-ff, tag v0.9.1, gh release, archive, delete branch
