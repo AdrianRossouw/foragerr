@@ -85,7 +85,7 @@ new items and SHALL default to OFF.
 
 The system SHALL treat an authentication failure during sync as source state
 `expired`: sync pauses with no automatic retries against the dead session, the
-failure surfaces through the health system and UI (FRG-UI-027), and re-pasting a
+failure surfaces through the health system and UI (FRG-UI-029), and re-pasting a
 valid cookie resumes sync. Expiry SHALL NOT remove or degrade any synced or imported
 data.
 

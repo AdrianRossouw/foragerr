@@ -17,12 +17,12 @@ backbone, volume grouping, trade typing, OPDS page streaming) · `M4` design
 refresh (new app shell/tokens, library views, series detail + trade
 containment, add-new, the pull experience [FRG-UI-018, FRG-PULL-007..009],
 screenshot-refresh tooling) · `M5` creators & follows (CRTR ids allocated at
-proposal time) · `M6` sources (FRG-AUTH-008 credential store first, then
-Humble Bundle importer, then archive.org importer) · `M7` torrents
-(qBittorrent, Torznab-only indexing, seeding etiquette) · `M8`
-authentication (**implementation requires fresh owner approval — the
-2026-07-10 grant ends after M7 merges**) · `B` backlog · `—` process
-(not milestone-bound).
+proposal time; closed 2026-07-11, shipped v0.5.0–v0.5.5) · `M6` sources
+(FRG-AUTH-008 credential store first, then Humble Bundle importer +
+companion extension) · `M7` torrents (post-1.0; label kept — ids are never
+renumbered) · `M8` authentication (**implementation requires fresh owner
+approval**) · `M9` UI refinement · `M10` go-live, ends in the 1.0 release ·
+`B` backlog · `—` process (not milestone-bound).
 
 Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 `M3` authentication). Torrents (FRG-TOR-*, FRG-IDX-012) and notifications
@@ -34,6 +34,14 @@ FRG-PULL-007..009 moved `M3`→`M4`; FRG-AUTH-008 moved `M5`→`M6` (sources
 store real account credentials); FRG-TOR-001..006 + FRG-IDX-012 promoted
 `B`→`M7`; remaining auth cluster (FRG-AUTH-002..007/009/010, FRG-SEC-005)
 moved `M5`→`M8`.
+
+1.0 cut decided 2026-07-11 with owner approval (recorded at the M6 kickoff,
+2026-07-12): 1.0 = M6 → M8 → M9 (UI refinement, new) → M10 (go-live, new).
+Torrents move past 1.0 in sequence; `M7` rows keep their milestone label and
+no id is renumbered. The archive.org importer leaves M6 — when picked up
+post-1.0 it is shaped as an indexer + direct-download capability, not a store
+source. Compatibility: pre-1.0 releases may break with migration notes; from
+1.0, strict SemVer on public surfaces (REST, OPDS, config, env vars).
 
 | ID | Title | Spec | Status | Milestone |
 |----|-------|------|--------|-----------|
@@ -99,6 +107,11 @@ moved `M5`→`M8`.
 | FRG-PULL-007 | Pull view actions | pull | implemented | M4 |
 | FRG-PULL-008 | New-series surfacing (no auto-add) | pull | implemented | M4 |
 | FRG-PULL-009 | Future/solicited releases | pull | implemented | M4 |
+| FRG-CRTR-001 | Per-issue creator credits ingest | crtr | implemented | M5 |
+| FRG-CRTR-002 | Creator and credit storage/reconciliation | crtr | implemented | M5 |
+| FRG-CRTR-003 | One-time credits backfill | crtr | implemented | M5 |
+| FRG-CRTR-004 | Creator follow flag (explicit-only) | crtr | implemented | M5 |
+| FRG-CRTR-005 | External creator bibliography fetch and cache | crtr | implemented | M5 |
 | FRG-ARC-001 | Arc entity import by ComicVine arc ID | arc | approved | B |
 | FRG-ARC-002 | Arc-to-library linking by ComicVine ID | arc | approved | B |
 | FRG-ARC-003 | Arc progress | arc | approved | B |
@@ -238,6 +251,8 @@ moved `M5`→`M8`.
 | FRG-API-020 | Series grouping projection | api | implemented | M3 |
 | FRG-API-021 | Log records resource | api | implemented | M4 |
 | FRG-API-022 | Containment resources | api | implemented | M4 |
+| FRG-API-023 | Creators resource and follow toggle | api | implemented | M5 |
+| FRG-API-024 | Creator bibliography resource | api | implemented | M5 |
 | FRG-UI-001 | SPA architecture: server state via React Query + WS invalidation | ui | implemented | M1 |
 | FRG-UI-002 | Design token layer with ant/foraging theme | ui | implemented | M1 |
 | FRG-UI-003 | Library index screen | ui | implemented | M1 |
@@ -264,7 +279,9 @@ moved `M5`→`M8`.
 | FRG-UI-024 | System → Logs screen | ui | implemented | M4 |
 | FRG-UI-025 | Issue bulk selection and actions | ui | implemented | M4 |
 | FRG-UI-026 | Collections tab | ui | implemented | M4 |
-| FRG-UI-027 | Sources screen | ui | approved | M6 |
+| FRG-UI-027 | Creators grid screen | ui | implemented | M5 |
+| FRG-UI-028 | Creator profile screen | ui | implemented | M5 |
+| FRG-UI-029 | Sources screen | ui | approved | M6 |
 | FRG-SRC-001 | store-source model and connection lifecycle | sources | approved | M6 |
 | FRG-SRC-002 | Humble session-cookie authentication | sources | approved | M6 |
 | FRG-SRC-003 | entitlement sync | sources | approved | M6 |

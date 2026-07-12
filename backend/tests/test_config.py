@@ -333,6 +333,28 @@ def test_out_of_range_interval_clamped_with_warning(config_dir, caplog):
     assert "1" in text and "5" in text  # names key, supplied and clamped values
 
 
+@pytest.mark.req("FRG-CRTR-001")
+def test_credits_fetch_per_refresh_clamped_with_warning(config_dir, caplog):
+    """The detail-fetch bound clamps to 1..200 with a warning (design D3,
+    m5-credits-live-fetch) — never rejected, never unbounded."""
+    (config_dir / CONFIG_FILENAME).write_text(
+        "credits_fetch_per_refresh: 0\n", encoding="utf-8"
+    )
+    with caplog.at_level(logging.WARNING, logger="foragerr.config"):
+        settings = load_settings()
+    assert settings.credits_fetch_per_refresh == 1  # documented floor
+
+    (config_dir / CONFIG_FILENAME).write_text(
+        "credits_fetch_per_refresh: 1000\n", encoding="utf-8"
+    )
+    with caplog.at_level(logging.WARNING, logger="foragerr.config"):
+        settings = load_settings()
+    assert settings.credits_fetch_per_refresh == 200  # documented ceiling
+    assert any(
+        "credits_fetch_per_refresh" in rec.getMessage() for rec in caplog.records
+    )
+
+
 @pytest.mark.req("FRG-SCHED-005")
 def test_settings_worker_defaults_match_default_pool_sizes(config_dir):
     """The settings-driven pool mapping and the DEFAULT_POOL_SIZES fallback are

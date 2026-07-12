@@ -27,16 +27,16 @@
 
 ## 5. Frontend
 
-- [ ] 5.1 Sources route + nav item with badge states; store rail with placeholder tab (`FRG-UI-027`)
-- [ ] 5.2 Connect card (paste field, helper with extension-coming-soon chip + DevTools steps, live-validated Connect, privacy note) (`FRG-UI-027`)
-- [ ] 5.3 Manage view: account bar, count line, filter segments, entitlement rows + expand detail with issue chips per edge rules; bulk + shift-range select (`FRG-UI-027`)
-- [ ] 5.4 Global banner + amber header/footer health wiring over the health WS; e2e covering connect, review, expiry (negative path per UAT policy: unconfigured + expired states) (`FRG-UI-027`)
+- [ ] 5.1 Sources route + nav item with badge states; store rail with placeholder tab (`FRG-UI-029`)
+- [ ] 5.2 Connect card (paste field, helper with extension-coming-soon chip + DevTools steps, live-validated Connect, privacy note) (`FRG-UI-029`)
+- [ ] 5.3 Manage view: account bar, count line, filter segments, entitlement rows + expand detail with issue chips per edge rules; bulk + shift-range select (`FRG-UI-029`)
+- [ ] 5.4 Global banner + amber header/footer health wiring over the health WS; e2e covering connect, review, expiry (negative path per UAT policy: unconfigured + expired states) (`FRG-UI-029`)
 
 ## 6. Security, docs, traceability
 
 - [ ] 6.1 STRIDE rows: cookie credential (at rest/in transit/clipboard residual), Humble JSON parsing, signed-URL egress; risk-register entries; threat-model update (FRG-PROC-006)
 - [ ] 6.2 Manual: `docs/manual/user/sources.md` (connect, review, expiry, auto-sync semantics); admin notes; README labelling + screenshot set gains Sources
-- [ ] 6.3 Registry: SRC AREA row in commit-standard table; FRG-SRC-001..007 + FRG-UI-027 → implemented; matrix regen; SOUP check green (no new deps expected)
+- [ ] 6.3 Registry: SRC AREA row in commit-standard table; FRG-SRC-001..007 + FRG-UI-029 → implemented; matrix regen; SOUP check green (no new deps expected)
 - [ ] 6.4 CHANGELOG + release notes; version bump
 
 ## 7. Gate

@@ -59,6 +59,25 @@ class FakeCV:
         #: volume id -> (offset threshold, HTTP status) for a mid-walk failure.
         self._issue_fail_after_offset: dict[int, tuple[int, int]] = {}
         self._images: set[str] = set()
+        #: cv issue id -> person_credits served on the DETAIL endpoint
+        #: (``issue/4000-{id}/``) — the real credit source (FRG-CRTR-001). The
+        #: real ComicVine returns person_credits: null on the LIST endpoint, so
+        #: this fixture mirrors that: credits registered via ``issue(credits=)``
+        #: are served on the detail endpoint, NOT the list rows (unless a test
+        #: opts in via ``issues(..., list_credits=True)`` to exercise the
+        #: opportunistic list-mapping path).
+        self._issue_credits: dict[int, list[dict]] = {}
+        #: cv issue id -> (HTTP status) for a failing detail fetch.
+        self._issue_detail_fail: dict[int, int] = {}
+        #: cv person id -> volume_credits STUBS served on the person DETAIL
+        #: endpoint (``person/4040-{id}/``) — id+name only, mirroring the real
+        #: shape (FRG-CRTR-005). Full rows come from the volumes id-filter route.
+        self._person_volume_credits: dict[int, list[dict]] = {}
+        #: cv person id -> HTTP status for a failing person detail fetch.
+        self._person_fail: dict[int, int] = {}
+        #: filter substring that, when present on a ``volumes/?filter=id:...``
+        #: request, makes it fail with the given HTTP status (hydration failure).
+        self._volumes_filter_fail_status: int | None = None
 
     def volume(
         self,
@@ -67,18 +86,59 @@ class FakeCV:
         name: str = "Saga",
         publisher: str | None = "Image",
         start_year: int | None = 2012,
+        count_of_issues: int | None = None,
         description: str | None = "A space opera.",
         image_url: str | None = None,
     ) -> "FakeCV":
         vol: dict = {"id": volume_id, "name": name, "start_year": start_year}
         if publisher is not None:
             vol["publisher"] = {"name": publisher}
+        if count_of_issues is not None:
+            vol["count_of_issues"] = count_of_issues
         if description is not None:
             vol["description"] = description
         if image_url is not None:
             vol["image"] = {"original_url": image_url}
             self._images.add(image_url.split("?")[0])
         self._volumes[volume_id] = vol
+        return self
+
+    def person(
+        self,
+        cv_person_id: int,
+        volume_ids: list[int] | None = None,
+        *,
+        volume_credits: list[dict] | None = None,
+        fail_status: int | None = None,
+    ) -> "FakeCV":
+        """Register a person's ``volume_credits`` STUBS for the person DETAIL
+        endpoint (``person/4040-{id}/``) — the real bibliography source shape:
+        id+name stubs only, NOT the full rows (FRG-CRTR-005). Pass ``volume_ids``
+        for the common case (stub name defaults to ``Volume <id>``), or
+        ``volume_credits`` to supply raw stub dicts (e.g. malformed entries).
+        ``fail_status`` makes the person detail fetch fail with that HTTP status.
+        """
+        if fail_status is not None:
+            self._person_fail[cv_person_id] = fail_status
+        if volume_credits is None:
+            volume_credits = [
+                {
+                    "id": vid,
+                    "name": f"Volume {vid}",
+                    "api_detail_url": (
+                        f"https://comicvine.gamespot.com/api/volume/4050-{vid}/"
+                    ),
+                    "site_detail_url": f"https://comicvine.gamespot.com/v/4050-{vid}/",
+                }
+                for vid in (volume_ids or [])
+            ]
+        self._person_volume_credits[cv_person_id] = volume_credits
+        return self
+
+    def fail_volumes_filter(self, status: int = 500) -> "FakeCV":
+        """Make every ``volumes/?filter=id:...`` hydration request fail (used to
+        exercise the bibliography fetch's cache-preserving failure path)."""
+        self._volumes_filter_fail_status = status
         return self
 
     def issues(
@@ -88,14 +148,35 @@ class FakeCV:
         *,
         fail_after_offset: int | None = None,
         fail_status: int = 500,
+        list_credits: bool = False,
+        detail_fail: dict[int, int] | None = None,
     ) -> "FakeCV":
         """Register a volume's issues; ``fail_after_offset`` makes every page
         at or past that offset fail with ``fail_status`` (500 = a transient
         mid-walk failure the walk degrades on; 401 = an auth rejection the
-        walk propagates)."""
-        self._issues[volume_id] = issues
+        walk propagates).
+
+        Per-issue ``person_credits`` supplied via :func:`issue`'s ``credits``
+        are split off onto the DETAIL endpoint (``issue/4000-{id}/``) — mirroring
+        the real API, whose LIST endpoint returns null credits. Pass
+        ``list_credits=True`` to ALSO serve those credits on the list rows (the
+        opportunistic-mapping / tripwire path). ``detail_fail`` maps a cv issue
+        id to an HTTP status its detail fetch should fail with (retry-later).
+        """
+        rows: list[dict] = []
+        for raw in issues:
+            row = dict(raw)
+            creds = row.pop("person_credits", None)
+            if creds is not None:
+                self._issue_credits[row["id"]] = creds
+                if list_credits:
+                    row["person_credits"] = creds
+            rows.append(row)
+        self._issues[volume_id] = rows
         if fail_after_offset is not None:
             self._issue_fail_after_offset[volume_id] = (fail_after_offset, fail_status)
+        if detail_fail:
+            self._issue_detail_fail.update(detail_fail)
         return self
 
     # -- handler -----------------------------------------------------------
@@ -113,7 +194,37 @@ class FakeCV:
                 if vol is None:
                     return httpx.Response(404, content=b"not found")
                 return _envelope(vol)
+            if "/issue/4000-" in path:
+                # The per-issue credit DETAIL endpoint (FRG-CRTR-001) — the only
+                # place the real API serves person_credits. Type prefix 4000 =
+                # issue (4050 = volume); the real API 102s a wrong prefix.
+                iid = int(path.split("4000-")[1].rstrip("/"))
+                fail = self._issue_detail_fail.get(iid)
+                if fail is not None:
+                    return httpx.Response(fail, content=b"boom")
+                return _envelope(
+                    {"id": iid, "person_credits": self._issue_credits.get(iid, [])}
+                )
+            if "/person/4040-" in path:
+                # The person DETAIL endpoint (FRG-CRTR-005) — serves volume_credit
+                # STUBS. Type prefix 4040 = person (4050 = volume); the real API
+                # 102s a wrong prefix.
+                pid = int(path.split("4040-")[1].rstrip("/"))
+                fail = self._person_fail.get(pid)
+                if fail is not None:
+                    return httpx.Response(fail, content=b"boom")
+                if pid not in self._person_volume_credits:
+                    return httpx.Response(404, content=b"not found")
+                return _envelope(
+                    {
+                        "id": pid,
+                        "name": f"Person {pid}",
+                        "volume_credits": self._person_volume_credits[pid],
+                    }
+                )
             if path.endswith("/volumes/"):
+                if query.get("filter", "").startswith("id:"):
+                    return self._volumes_by_ids_response(query)
                 return self._search_response(query)
             if path.endswith("/issues/"):
                 return self._issues_response(query)
@@ -141,6 +252,21 @@ class FakeCV:
         window = matches if offset == 0 else []
         return _envelope(window, number_of_total_results=len(matches))
 
+    def _volumes_by_ids_response(self, query: dict[str, str]) -> httpx.Response:
+        """Answer the batched ``volumes/?filter=id:a|b|c`` hydration endpoint
+        (``get_volumes_by_ids``) from the registered FULL volume rows, mirroring
+        the real pipe-filter shape (FRG-CRTR-005)."""
+        if self._volumes_filter_fail_status is not None:
+            return httpx.Response(self._volumes_filter_fail_status, content=b"boom")
+        filter_value = query.get("filter", "")
+        ids_part = filter_value.split("id:", 1)[1] if "id:" in filter_value else ""
+        ids = [int(tok) for tok in ids_part.split("|") if tok.strip().isdigit()]
+        rows = [self._volumes[i] for i in ids if i in self._volumes]
+        offset = int(query.get("offset", "0"))
+        limit = int(query.get("limit", "100"))
+        window = rows[offset : offset + limit]
+        return _envelope(window, number_of_total_results=len(rows))
+
     def _issues_response(self, query: dict[str, str]) -> httpx.Response:
         filter_value = query.get("filter", "")
         vid = int(filter_value.split("volume:")[1]) if "volume:" in filter_value else 0
@@ -162,8 +288,17 @@ def issue(
     cover_date: str | None = None,
     store_date: str | None = None,
     image_url: str | None = None,
+    credits: list[dict] | None = None,
 ) -> dict:
-    """One CV issue JSON object for :meth:`FakeCV.issues`."""
+    """One CV issue JSON object for :meth:`FakeCV.issues`.
+
+    ``credits`` are CV person-credit objects (``{"id", "name", "role"}``). They
+    are NOT embedded in the returned list row — :meth:`FakeCV.issues` splits them
+    onto the DETAIL endpoint (``issue/4000-{id}/``), mirroring the real API whose
+    LIST endpoint returns null credits; credit ingest (FRG-CRTR-001) is then
+    exercised through the real client's detail fetch + mapper. ``credits=[]``
+    registers a legitimately creditless issue (detail returns an empty list).
+    """
     payload: dict = {"id": cv_issue_id, "issue_number": number}
     if title is not None:
         payload["name"] = title
@@ -173,4 +308,11 @@ def issue(
         payload["store_date"] = store_date
     if image_url is not None:
         payload["image"] = {"original_url": image_url}
+    if credits is not None:
+        payload["person_credits"] = credits
     return payload
+
+
+def credit(cv_person_id: int, name: str, role: str) -> dict:
+    """One CV ``person_credits`` object for :func:`issue`'s ``credits`` list."""
+    return {"id": cv_person_id, "name": name, "role": role}

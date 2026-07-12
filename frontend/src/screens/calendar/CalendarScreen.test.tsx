@@ -21,9 +21,9 @@ import { CalendarScreen } from './CalendarScreen';
 
 /**
  * FRG-UI-018 / FRG-PULL-007..009 — the Calendar screen: a date-grouped agenda
- * over the weekly pull projection, Following-scoped by default, with per-entry
- * want/skip/search (linked rows only), a new-series strip, and future-week
- * "not yet released" marking.
+ * over the weekly pull projection, All-releases-scoped by default (discovery
+ * first — owner decision 2026-07-11), with per-entry want/skip/search (linked
+ * rows only), a new-series strip, and future-week "not yet released" marking.
  */
 
 function makePullRecord(
@@ -64,7 +64,7 @@ function linkedRow(name: string, releaseDate: string, over: Partial<PullEntryRec
 }
 
 describe('FRG-UI-018: Calendar agenda', () => {
-  it('FRG-UI-018 — default load requests the current week in Following scope and marks New Comic Day + Today', async () => {
+  it('FRG-UI-018 — default load requests the current week in All-releases scope (unmatched included) and marks New Comic Day + Today', async () => {
     const week = currentIsoWeek();
     const days = weekDates(week);
     const wedKey = isoDateKey(days[2]); // Wednesday
@@ -76,12 +76,24 @@ describe('FRG-UI-018: Calendar agenda', () => {
     const records = [
       linkedRow('Saga', wedKey),
       linkedRow('Bone', todayKey, { matchedIssueId: 501, series: { id: 8, title: 'Bone' } }),
+      // An unfollowed, unmatched book — the default view is a discovery surface,
+      // so it must render without any scope change (owner decision 2026-07-11).
+      makePullRecord({
+        id: 999,
+        seriesName: 'Ghost Machine',
+        publisher: 'Image',
+        releaseDate: wedKey,
+        matchType: 'unmatched',
+      }),
     ];
     const { spy, fetcher } = fakeFetcher(() => pageOf(records, { pageSize: 200 }));
     renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar' });
 
     await screen.findByText('Saga');
     expect(spy).toHaveBeenCalledWith(pullPath(week));
+    // The full week shows by default — followed and unfollowed alike.
+    expect(screen.getByText('Bone')).toBeInTheDocument();
+    expect(screen.getByText('Ghost Machine')).toBeInTheDocument();
     expect(screen.getByText('New Comic Day')).toBeInTheDocument();
     expect(screen.getByText('Today')).toBeInTheDocument();
     expect(screen.getByTestId('week-range')).toHaveTextContent(weekRangeLabel(week));
@@ -115,7 +127,7 @@ describe('FRG-UI-018: Calendar agenda', () => {
     );
   });
 
-  it('FRG-UI-018 — the All-releases scope reveals unmatched entries with followed/hidden counts', async () => {
+  it('FRG-UI-018 — the Following scope narrows to library entries and All releases restores the full week', async () => {
     // Fixed week (2026-W27, Wed = Jul 1) so "today" never interferes.
     const records = [
       linkedRow('Saga', '2026-07-01'),
@@ -131,20 +143,24 @@ describe('FRG-UI-018: Calendar agenda', () => {
     const user = userEvent.setup();
     renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
 
-    await screen.findByText('Saga');
-    // Following scope hides the unmatched row behind a hidden-count note.
-    expect(screen.queryByText('Ghost Machine')).not.toBeInTheDocument();
-    expect(screen.getByText(/\+1 more title shipping/)).toBeInTheDocument();
-
-    await user.click(screen.getByRole('radio', { name: 'All releases' }));
+    // Default All-releases scope: the unmatched row shows, with the "N followed"
+    // day count alongside it (discovery first — owner decision 2026-07-11).
     expect(await screen.findByText('Ghost Machine')).toBeInTheDocument();
+    expect(screen.getByText('Saga')).toBeInTheDocument();
     expect(screen.getByText('1 followed')).toBeInTheDocument();
 
-    // Switching back hides it again.
+    // Following narrows to library entries, hiding the unmatched row behind the
+    // "+N more titles shipping" note.
     await user.click(screen.getByRole('radio', { name: 'Following' }));
     await waitFor(() =>
       expect(screen.queryByText('Ghost Machine')).not.toBeInTheDocument(),
     );
+    expect(screen.getByText(/\+1 more title shipping/)).toBeInTheDocument();
+
+    // Back to All releases restores the full week with its followed count.
+    await user.click(screen.getByRole('radio', { name: 'All releases' }));
+    expect(await screen.findByText('Ghost Machine')).toBeInTheDocument();
+    expect(screen.getByText('1 followed')).toBeInTheDocument();
   });
 
   it('FRG-UI-018 — a degraded/empty pull source still renders the library-primary rows', async () => {
@@ -263,13 +279,10 @@ describe('FRG-PULL-007: Calendar per-entry actions', () => {
       }),
     ];
     const { fetcher } = fakeFetcher(() => pageOf(records, { pageSize: 200 }));
-    const user = userEvent.setup();
     renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
 
-    // The lone unmatched row is hidden in the default Following scope; switch to
-    // All releases to reveal it, then assert its card offers no action buttons.
-    await screen.findByTestId('week-range');
-    await user.click(screen.getByRole('radio', { name: 'All releases' }));
+    // The lone unmatched row shows in the default All-releases scope; assert its
+    // card offers no action buttons.
     const card = await screen.findByTestId('calendar-card-999');
     expect(within(card).queryAllByRole('button')).toHaveLength(0);
   });
@@ -412,7 +425,7 @@ describe('FRG-UI-018: publisher filter + banner', () => {
         matchedIssueId: 501,
         series: { id: 8, title: 'Batman' },
       }),
-      // An unmatched Image row so the default banner shows a nonzero "more".
+      // An unmatched Image row so the Following banner shows a nonzero "more".
       makePullRecord({
         id: 999,
         seriesName: 'Ghost Machine',
@@ -428,7 +441,20 @@ describe('FRG-UI-018: publisher filter + banner', () => {
     renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
 
     await screen.findByText('Saga');
-    // Default scope: 2 followed issues (Saga + Batman), 1 unmatched → banner
+    // In the DEFAULT All-releases scope, an active publisher filter must be
+    // named in the banner too (gate finding, calendar-discovery-default) —
+    // "Showing all N ... from DC", never an unqualified whole-week claim.
+    await user.selectOptions(screen.getByLabelText('Filter by publisher'), 'DC');
+    await waitFor(() =>
+      expect(
+        screen.getByText(/Showing all 1 single issue shipping this week from DC/),
+      ).toBeInTheDocument(),
+    );
+    await user.selectOptions(screen.getByLabelText('Filter by publisher'), 'all');
+    // The richer publisher-suffix arithmetic below is a Following-scope
+    // affordance, so the rest of the test drives the filter from Following.
+    await user.click(screen.getByRole('radio', { name: 'Following' }));
+    // Following scope: 2 followed issues (Saga + Batman), 1 unmatched → banner
     // reports "1 more titles ... across every publisher" (no filter yet).
     const banner = () => screen.getByText(/Comics ship in one big weekly drop/);
     expect(banner()).toHaveTextContent('the 2 issues from series you follow');

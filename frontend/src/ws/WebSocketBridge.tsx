@@ -9,6 +9,7 @@ import {
   type SocketLike,
 } from './socket';
 import {
+  isBibliographyFetchComplete,
   isPullRefreshComplete,
   isQueueProgress,
   parseWsMessage,
@@ -47,7 +48,9 @@ export interface WebSocketBridgeProps {
  *     presence changes, `blocklist` on blocklist writes) invalidate their family;
  *   - a `command` message invalidates the ['command'] prefix (status pushes),
  *     and ONLY when it is the pull-refresh command reaching `completed` also
- *     invalidates ['pull'] — the backend emits a `command` push on every
+ *     invalidates ['pull'] (and likewise the creator-bibliography fetch reaching
+ *     `completed` invalidates the bibliography sub-family) — the backend emits a
+ *     `command` push on every
  *     lifecycle transition of every command, so invalidating the whole-week
  *     pull projection on all of them would refetch the Calendar repeatedly
  *     whenever any background command cycles.
@@ -176,6 +179,17 @@ export function WebSocketBridge({
         // refetches the whole week each time any background command cycles.
         if (isPullRefreshComplete(msg)) {
           void queryClient.invalidateQueries({ queryKey: queryKeys.pull.all() });
+        }
+        // A finished creator-bibliography fetch replaced a creator's cached
+        // suggestions (FRG-UI-028): sweep every loaded bibliography query so a
+        // pending "More from" gathering state resolves into cards without a
+        // reload. Narrowed to EXACTLY this command reaching `completed` (same
+        // reasoning as pull-refresh); the WS payload carries no creator id, so
+        // the whole bibliography sub-family is invalidated, not one row.
+        if (isBibliographyFetchComplete(msg)) {
+          void queryClient.invalidateQueries({
+            queryKey: queryKeys.creators.bibliographyAll(),
+          });
         }
       }
     };

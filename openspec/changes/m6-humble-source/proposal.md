@@ -51,7 +51,7 @@ decided with the owner on 2026-07-11.
   rest [mitigated by keystore], SSRF/egress on signed URLs, store-JSON parsing),
   threat-model update.
 - **New AREA `SRC`** added to the commit-standard AREA table; requirement IDs
-  FRG-SRC-001..007 + FRG-UI-027 allocated in the registry.
+  FRG-SRC-001..007 + FRG-UI-029 allocated in the registry.
 
 ## Capabilities
 
@@ -63,7 +63,7 @@ decided with the owner on 2026-07-11.
 
 ### Modified Capabilities
 
-- `ui`: new requirement FRG-UI-027 — Sources screen (rail, connect card, manage/review
+- `ui`: new requirement FRG-UI-029 — Sources screen (rail, connect card, manage/review
   list, expiry banner + health wiring) per the v2 handoff. (Additive; no existing UI
   requirement's behavior changes.)
 
@@ -110,3 +110,10 @@ Implementation may begin at M6 after m6-keystore merges. _Amendment (same day,
 owner direction): the task 1.1 live-capture gate is removed — the API schema was
 established by prior-art dissection (`docs/research/humble-api.md`) and live
 validation moves to UAT. No other scope change; approval stands._
+
+_Amendment (2026-07-12, M6 integration): the Sources-screen requirement id is
+renumbered FRG-UI-027 → **FRG-UI-029** — this proposal was drafted from post-M4
+main, and M5 subsequently allocated FRG-UI-027/028 (creators screens) on main;
+ids are never reused (FRG-PROC-002), and main is authoritative. Mechanical
+renumber across this change's artifacts + registry; no scope change; approval
+stands._

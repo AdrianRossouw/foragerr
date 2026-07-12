@@ -396,6 +396,20 @@ class Settings(BaseSettings):
             "beyond this are truncated with a visible warning."
         ),
     )
+    credits_fetch_per_refresh: int = Field(
+        default=25,
+        description=(
+            "Maximum per-issue ComicVine credit detail fetches a single series "
+            "refresh performs (FRG-CRTR-001). ComicVine serves person_credits "
+            "ONLY on the issue detail endpoint (the list endpoint returns null), "
+            "so every credit-needing issue costs one extra rate-gated request. "
+            "At the default comicvine_min_interval_seconds of 2 s that is ~2 s "
+            "per issue — the default 25 adds up to ~50 s to a refresh. The "
+            "newest credit-needing issues are fetched first; the tail backfills "
+            "across subsequent scheduled/force refreshes. Clamped to the safe "
+            "range 1..200 with a warning if set outside it."
+        ),
+    )
     comicvine_ignored_publishers: str = Field(
         default="",
         description=(
@@ -437,13 +451,14 @@ class Settings(BaseSettings):
         ),
     )
     pull_enabled: bool = Field(
-        default=False,
+        default=True,
         description=(
-            "Enable the weekly-pull external source fetch (FRG-PULL-002). OFF by "
-            "default — the weekly view (FRG-PULL-001) works from local library "
-            "metadata alone, and the external walksoftly source is opt-in optional "
-            "enrichment. When false the scheduled pull-refresh task no-ops cleanly "
-            "and no third-party traffic is issued."
+            "Enable the weekly-pull external source fetch (FRG-PULL-002). ON by "
+            "default (owner decision 2026-07-11) so the Calendar shows the week's "
+            "releases out of the box; set false to opt out — the weekly view "
+            "(FRG-PULL-001) still works from local library metadata alone, the "
+            "scheduled pull-refresh task no-ops cleanly, and no third-party "
+            "traffic is issued. A source outage degrades health, never the view."
         ),
     )
     pull_source_url: str = Field(
@@ -821,6 +836,23 @@ class Settings(BaseSettings):
                 "comicvine_insecure_base=true if this is a test fixture"
             )
         return self
+
+    @field_validator("credits_fetch_per_refresh")
+    @classmethod
+    def _clamp_credits_fetch_per_refresh(cls, value: int) -> int:
+        """Clamp the per-refresh credit-fetch bound to a documented 1..200 range
+        with a warning, rather than fail startup (FRG-CRTR-001, decision 3). A
+        value below 1 would stall the credit backfill entirely; above 200 would
+        let one refresh spend many minutes under the 2 s gate."""
+        clamped = min(max(value, 1), 200)
+        if clamped != value:
+            logger.warning(
+                "config: credits_fetch_per_refresh=%s is outside the safe range "
+                "1..200; clamped to %s",
+                value,
+                clamped,
+            )
+        return clamped
 
     @field_validator("log_level")
     @classmethod

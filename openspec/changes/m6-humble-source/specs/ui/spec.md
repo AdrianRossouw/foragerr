@@ -2,7 +2,7 @@
 
 ## ADDED Requirements
 
-### Requirement: FRG-UI-027 — Sources screen
+### Requirement: FRG-UI-029 — Sources screen
 
 The web UI SHALL provide a top-level Sources screen per the v2 design handoff: a
 Sources nav item (badge = unreviewed-new count, amber `!` on expiry); a store rail

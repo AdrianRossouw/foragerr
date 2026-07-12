@@ -889,3 +889,85 @@ export interface LogRecordResource {
   logger: string;
   message: string;
 }
+
+/*
+ * Creators surface (FRG-API-023 / FRG-UI-027 / FRG-UI-028). Read + follow-toggle
+ * over the stored-credits backbone. Field spellings mirror the wire exactly
+ * (backend/src/foragerr/api/creators.py) — camelCase there, so camelCase here.
+ */
+
+/** One library work reference on a creators-grid card spine (FRG-API-023). */
+export interface CreatorWorkRef {
+  seriesId: number;
+  title: string;
+  coverAvailable: boolean;
+}
+
+/** One creators-grid row (FRG-API-023). */
+export interface CreatorResource {
+  id: number;
+  name: string;
+  /** Normalized-role vocabulary tokens (writer/artist/…/other), sorted. */
+  roles: string[];
+  seriesCount: number;
+  followed: boolean;
+  works: CreatorWorkRef[];
+}
+
+/**
+ * GET /api/v1/creators paging envelope (FRG-API-023): the standard page fields
+ * plus the whole-library grid-header aggregates (independent of the followed
+ * filter).
+ */
+export interface CreatorPage extends ApiPage<CreatorResource> {
+  totalCreators: number;
+  followedCreators: number;
+}
+
+/** One per-series row on a creator profile (FRG-API-023). */
+export interface CreatorSeriesStat {
+  seriesId: number;
+  title: string;
+  publisher: string | null;
+  roles: string[];
+  ownedIssues: number;
+  totalIssues: number;
+}
+
+/** Roll-up stats on a creator profile (FRG-API-023). */
+export interface CreatorStats {
+  seriesCount: number;
+  ownedIssues: number;
+  totalIssues: number;
+  publisherCount: number;
+}
+
+/** GET /api/v1/creators/{id} profile response (FRG-API-023). */
+export interface CreatorProfileResource {
+  id: number;
+  name: string;
+  roles: string[];
+  followed: boolean;
+  stats: CreatorStats;
+  series: CreatorSeriesStat[];
+}
+
+/** One cached external-bibliography volume on a creator (FRG-API-024). */
+export interface BibliographyEntry {
+  cvVolumeId: number;
+  title: string;
+  publisher: string | null;
+  startYear: number | null;
+  countOfIssues: number | null;
+}
+
+/**
+ * GET /api/v1/creators/{id}/bibliography response (FRG-API-024). `state` is
+ * `fresh` when the cache is within TTL (served as-is) or `pending` when a
+ * deduplicated fetch was enqueued (unstamped or stale) — whatever rows exist,
+ * minus the live in-library anti-join, are always served even while pending.
+ */
+export interface CreatorBibliography {
+  state: 'fresh' | 'pending';
+  records: BibliographyEntry[];
+}

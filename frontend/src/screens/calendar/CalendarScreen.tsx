@@ -153,7 +153,7 @@ export function CalendarScreen() {
     }
   }, [rawWeek, weekParamValid, setSearchParams]);
 
-  const [scope, setScope] = useState<Scope>('following');
+  const [scope, setScope] = useState<Scope>('all');
   const [publisher, setPublisher] = useState<string>('all');
 
   const { data, isLoading, isError } = useWeeklyPull(week);
@@ -264,7 +264,8 @@ export function CalendarScreen() {
       ? `Comics ship in one big weekly drop. You're seeing the ${view.weekFollowed} ` +
         `issue${view.weekFollowed === 1 ? '' : 's'} from series you follow — ` +
         `${view.weekAll - view.weekFollowed} more titles ship this week ${publisherScope}.`
-      : `Showing all ${view.weekAll} single issues shipping this week — ` +
+      : `Showing all ${view.weekAll} single issue${view.weekAll === 1 ? '' : 's'} ` +
+        `shipping this week${publisher === 'all' ? '' : ` from ${publisher}`} — ` +
         `${view.weekFollowed} from series you already follow.`;
 
   const dispatchSearch = (r: PullEntryRecord) => {

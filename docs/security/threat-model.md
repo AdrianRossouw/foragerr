@@ -1141,9 +1141,14 @@ new risk id (RISK-039 already reserved this integration).
   source **degraded** on the health surface via the shared provider back-off ladder,
   with a remediation hint. The weekly view still renders from local metadata, so the
   third party being down or hostile cannot break the feature.
-- **Opt-in by default** (defence-in-depth): `pull_enabled` defaults **off** — no
-  third-party traffic is issued at all until the operator opts in, and the scheduled
-  `pull-refresh` task no-ops cleanly when disabled.
+- **Opt-out preserved** (defence-in-depth): `pull_enabled` originally defaulted
+  **off**; since pull-enabled-default (2026-07-11, owner decision) it defaults
+  **on** so the Calendar carries release data out of the box. Setting it false
+  still issues zero third-party traffic (the scheduled `pull-refresh` task
+  no-ops cleanly). Distinct from the RISK-015/016 DDL lesson (ddl-optin-seeding):
+  the pull source is metadata-only enrichment — it never downloads content; any
+  acquisition still flows exclusively through the operator's own monitor
+  policies, seeded-disabled indexers, and the ordinary search pipeline.
 - **Storage adds no network surface** (COMP 10): the new `pull_entries` table rides
   the existing WAL-SQLite + guarded-migration discipline (FRG-DB-002/008); entries
   carry only a nullable **link** to a library issue and a `match_type`, never their

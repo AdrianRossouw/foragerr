@@ -25,6 +25,7 @@ import { useMediaManagementConfig } from '../settings/naming/namingHooks';
 import {
   useBulkSetIssuesMonitored,
   useCollections,
+  useCreatorsList,
   useDeleteIssueFile,
   useDeleteSeries,
   useIssues,
@@ -37,6 +38,7 @@ import {
 import { queryKeys } from '../../api/queryKeys';
 import { coverUrl } from '../../api/urls';
 import { FORMAT_CHIP } from '../../theme/palettes';
+import { roleList } from '../../lib/roles';
 import { useUiStore } from '../../store/uiStore';
 import { InteractiveSearchOverlay } from '../search/InteractiveSearchOverlay';
 import { fileFormat, formatBytes, formatDate } from '../../lib/format';
@@ -355,6 +357,11 @@ export function SeriesDetail() {
   const seriesQuery = useSeriesDetail(seriesId);
   const issuesQuery = useIssues(seriesId);
   const collectionsQuery = useCollections(seriesId);
+  // Compact creators strip (FRG-UI-004 amendment / FRG-UI-027): the credited
+  // creators for THIS series, read as the focused creators list. It stays absent
+  // (and silent) when the series has no ingested credits, and simply doesn't
+  // render if the read fails — the strip is additive, never load-bearing.
+  const seriesCreators = useCreatorsList({ seriesId, sortKey: 'name' });
   const updateSeries = useUpdateSeries(seriesId);
   const deleteSeries = useDeleteSeries();
   const setIssueMonitored = useSetIssueMonitored(seriesId);
@@ -708,6 +715,48 @@ export function SeriesDetail() {
             </div>
           </div>
         </section>
+
+        {(() => {
+          const creators = seriesCreators.data?.records ?? [];
+          if (creators.length === 0) return null;
+          const CAP = 8;
+          const shown = creators.slice(0, CAP);
+          return (
+            <section
+              className={styles.creatorsStrip}
+              aria-label="Credited creators"
+              data-testid="creators-strip"
+            >
+              <span className={styles.creatorsLabel}>Creators</span>
+              <div className={styles.creatorsList}>
+                {shown.map((creator) => (
+                  <button
+                    key={creator.id}
+                    type="button"
+                    className={styles.creatorEntry}
+                    onClick={() => navigate(`/creators/${creator.id}`)}
+                  >
+                    <span className={styles.creatorName}>{creator.name}</span>
+                    {creator.roles.length > 0 && (
+                      <span className={styles.creatorRoles}>
+                        {roleList(creator.roles)}
+                      </span>
+                    )}
+                  </button>
+                ))}
+                {creators.length > CAP && (
+                  <button
+                    type="button"
+                    className={styles.creatorsViewAll}
+                    onClick={() => navigate(`/creators?seriesId=${seriesId}`)}
+                  >
+                    View all {creators.length}
+                  </button>
+                )}
+              </div>
+            </section>
+          );
+        })()}
 
         <div className={styles.panelWrap}>
           <div className={styles.panel}>

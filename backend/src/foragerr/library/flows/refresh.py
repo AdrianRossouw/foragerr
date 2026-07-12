@@ -16,10 +16,11 @@ import datetime as dt
 import logging
 from dataclasses import dataclass
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from foragerr.commands.service import CommandService, HandlerContext
 from foragerr.config import Settings
+from foragerr.creators import reconcile_series_credits
 from foragerr.db import Database, queue_event
 from foragerr.db.base import utcnow
 from foragerr.http import HttpClientFactory
@@ -31,6 +32,7 @@ from foragerr.commands.registry import register_handler
 from foragerr.metadata import (
     ComicVineClient,
     ComicVineError,
+    CreditRecord,
     IssueRecord,
     Page,
     SeriesRecord,
@@ -91,11 +93,50 @@ async def refresh_series(
         if series is None:
             return f"series {series_id} no longer exists; refresh skipped"
         cv_volume_id = series.cv_volume_id
+        # Which issues already have their credits (stamped) — used to pick this
+        # run's bounded credit-fetch targets. Read here so the detail fetches
+        # stay OUTSIDE the write lock (FRG-CRTR-001).
+        stamped_cv_ids = set(
+            (
+                await session.execute(
+                    select(IssueRow.cv_issue_id).where(
+                        IssueRow.series_id == series_id,
+                        IssueRow.credits_fetched_at.is_not(None),
+                    )
+                )
+            ).scalars().all()
+        )
 
     # --- ComicVine I/O: strictly OUTSIDE the write lock --------------------
     async with ComicVineClient(settings, factory) as cv:
         record: SeriesRecord = await cv.get_volume(cv_volume_id)
         page: Page[IssueRecord] = await cv.get_issues(cv_volume_id)
+
+        # Credit fetch phase (FRG-CRTR-001): ComicVine serves person_credits
+        # only on the issue DETAIL endpoint, so fetch a bounded, newest-first
+        # batch of the still-credit-needing issues sequentially through the same
+        # rate gate. A failed fetch is logged and skipped (the issue stays
+        # unstamped and is retried next run) — never fatal to the refresh.
+        # Accepted (gate, m5-credits-live-fetch): two overlapping refreshes of
+        # the SAME series can each spend this budget on the same unstamped
+        # issues before either commits stamps — the rate gate serializes the
+        # wire cost and the writes are idempotent, so no per-series in-flight
+        # guard is kept.
+        targets = _select_credit_fetch_targets(
+            page.items, stamped_cv_ids, settings.credits_fetch_per_refresh
+        )
+        fetched_credits: dict[int, tuple[CreditRecord, ...]] = {}
+        for cv_issue_id in targets:
+            try:
+                fetched_credits[cv_issue_id] = await cv.get_issue_credits(cv_issue_id)
+            except ComicVineError as exc:
+                logger.warning(
+                    "credit detail fetch for issue %s (series %d) failed, "
+                    "left for a later run: %s",
+                    cv_issue_id,
+                    series_id,
+                    exc,
+                )
 
     # --- one write transaction: reconcile + metadata + strategy + event ----
     async with db.write_session() as session:
@@ -104,6 +145,34 @@ async def refresh_series(
             return f"series {series_id} no longer exists; refresh skipped"
 
         stats = await _reconcile(session, series, page)
+
+        # Per-issue creator credits ride the same transaction
+        # (FRG-CRTR-001/002/004): reconcile the credits this run SOURCED —
+        # the detail fetches above plus any list rows that opportunistically
+        # carried credits (detail wins on overlap) — then stamp the fetched
+        # issues (INCLUDING zero-credit ones, so they are never re-fetched).
+        # Reconciliation upserts creators, replaces each sourced issue's credit
+        # set, and prunes orphans; it never sets ``followed`` — a follow is only
+        # ever explicit (owner decision 2026-07-11). Runs after the issue
+        # reconcile so deleted issues have cascaded their credits and inserted
+        # issues have ids.
+        credits_by_cv: dict[int, tuple[CreditRecord, ...]] = {
+            rec.cv_issue_id: rec.credits
+            for rec in page.items
+            if rec.credits and rec.cv_issue_id not in fetched_credits
+        }
+        credits_by_cv.update(fetched_credits)
+        await reconcile_series_credits(session, series.id, credits_by_cv)
+
+        if fetched_credits:
+            await session.execute(
+                update(IssueRow)
+                .where(
+                    IssueRow.series_id == series.id,
+                    IssueRow.cv_issue_id.in_(fetched_credits.keys()),
+                )
+                .values(credits_fetched_at=utcnow())
+            )
 
         series.publisher = record.publisher
         series.start_year = record.start_year
@@ -143,6 +212,38 @@ async def refresh_series(
 
     logger.info("refresh series %d: %s", series_id, result.summary())
     return result.summary()
+
+
+# --- credit fetch targeting (FRG-CRTR-001) ----------------------------------
+
+
+def _select_credit_fetch_targets(
+    records: "tuple[IssueRecord, ...]",
+    stamped_cv_ids: set[int],
+    bound: int,
+) -> list[int]:
+    """Pick this run's bounded, newest-first credit-fetch targets.
+
+    From the walk's issue records, drop those already credit-covered (a stamped
+    ``cv_issue_id``), order the rest newest-first — ``store_date`` DESC with
+    NULLs last, then ``cover_date`` DESC, then ``cv_issue_id`` DESC — and take
+    at most ``bound`` (design decision 1: current books matter most on screens;
+    the tail backfills across subsequent runs). ISO date strings sort
+    chronologically; a missing date becomes ``""`` which, under ``reverse=True``,
+    sorts last — giving the NULLS-LAST ordering. Fetching by ``cv_issue_id``
+    (available straight from the walk) means brand-new issues are eligible the
+    same run without needing their local ids yet.
+    """
+    needing = [rec for rec in records if rec.cv_issue_id not in stamped_cv_ids]
+    needing.sort(
+        key=lambda rec: (
+            rec.store_date or "",
+            rec.cover_date or "",
+            rec.cv_issue_id,
+        ),
+        reverse=True,
+    )
+    return [rec.cv_issue_id for rec in needing[:bound]]
 
 
 # --- reconciliation (FRG-META-008) ------------------------------------------

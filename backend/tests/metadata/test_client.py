@@ -56,6 +56,180 @@ async def test_request_carries_json_field_list_and_honest_user_agent(tmp_path):
     assert "xml" not in req.url.query.decode().lower()
 
 
+@pytest.mark.req("FRG-CRTR-001")
+async def test_get_issue_credits_hits_detail_endpoint_and_maps(tmp_path):
+    """The credit source is the issue DETAIL endpoint (``issue/4000-{id}/``)
+    with a minimal person_credits field list; the client maps + normalizes the
+    payload exactly as the opportunistic list path would, through the gate."""
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        return json_response(
+            {
+                "status_code": 1,
+                "results": {
+                    "id": 42,
+                    "person_credits": [
+                        {"id": 10, "name": "Alice", "role": "writer, penciller"},
+                        {"id": 11, "name": "Bob", "role": "inker"},
+                    ],
+                },
+            }
+        )
+
+    client, transport = make_client(tmp_path, _handler)
+    async with client:
+        credits = await client.get_issue_credits(42)
+
+    req = transport.requests[-1]
+    assert req.url.path.startswith("/api/issue/4000-42")
+    assert req.url.params["field_list"] == "id,person_credits"
+    assert req.url.params["api_key"] == "CV-SECRET-KEY-abc123"
+    # Compound role split + normalized; verbatim retained.
+    got = {(c.cv_person_id, c.role_normalized) for c in credits}
+    assert got == {(10, "writer"), (10, "penciler"), (11, "inker")}
+
+
+@pytest.mark.req("FRG-CRTR-005")
+async def test_get_person_volumes_hits_person_endpoint_and_maps_stubs(tmp_path):
+    """The bibliography probe is the PERSON detail endpoint (``person/4040-{id}/``,
+    type prefix 4040) with an id,name,volume_credits field list; the client maps
+    ``volume_credits`` to sanitized id+name stubs and drops malformed entries."""
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        return json_response(
+            {
+                "status_code": 1,
+                "results": {
+                    "id": 4040,
+                    "name": "Bill Willingham",
+                    "volume_credits": [
+                        {"id": 3289, "name": "Fables"},
+                        {"id": 3194, "name": "Jack of Fables"},
+                        {"id": "not-an-int", "name": "junk"},  # dropped
+                        {"id": 3289, "name": "dup"},  # collapsed
+                    ],
+                },
+            }
+        )
+
+    client, transport = make_client(tmp_path, _handler)
+    async with client:
+        stubs = await client.get_person_volumes(4040)
+
+    req = transport.requests[-1]
+    assert req.url.path.startswith("/api/person/4040-4040")
+    assert req.url.params["field_list"] == "id,name,volume_credits"
+    assert req.url.params["api_key"] == "CV-SECRET-KEY-abc123"
+    assert [(s.cv_volume_id, s.name) for s in stubs] == [
+        (3289, "Fables"),
+        (3194, "Jack of Fables"),
+    ]
+
+
+@pytest.mark.req("FRG-CRTR-005")
+async def test_get_person_volumes_absent_credits_is_empty(tmp_path):
+    """A person with no (or a malformed) ``volume_credits`` maps to () — total."""
+    client, _ = make_client(
+        tmp_path,
+        lambda r: json_response(
+            {"status_code": 1, "results": {"id": 1, "volume_credits": None}}
+        ),
+    )
+    async with client:
+        assert await client.get_person_volumes(1) == ()
+
+
+@pytest.mark.req("FRG-CRTR-005")
+async def test_get_person_volumes_missing_results_is_malformed(tmp_path):
+    client, _ = make_client(
+        tmp_path, lambda r: json_response({"status_code": 1, "results": None})
+    )
+    async with client:
+        with pytest.raises(ComicVineMalformedResponse):
+            await client.get_person_volumes(1)
+
+
+@pytest.mark.req("FRG-CRTR-005")
+async def test_get_volumes_by_ids_uses_pipe_filter_and_hydrates(tmp_path):
+    """Batch hydration hits ``volumes/?filter=id:a|b|c`` (the pipe-joined id
+    filter) and maps each row to a full SeriesRecord with publisher/start_year."""
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        return json_response(
+            {
+                "status_code": 1,
+                "number_of_total_results": 2,
+                "results": [
+                    {
+                        "id": 3289,
+                        "name": "Fables",
+                        "publisher": {"name": "Vertigo"},
+                        "start_year": "2002",
+                        "count_of_issues": 150,
+                    },
+                    {
+                        "id": 3194,
+                        "name": "Jack of Fables",
+                        "publisher": {"name": "Vertigo"},
+                        "start_year": "2006",
+                        "count_of_issues": 50,
+                    },
+                ],
+            }
+        )
+
+    client, transport = make_client(tmp_path, _handler)
+    async with client:
+        records = await client.get_volumes_by_ids([3289, 3194, 3289])  # dup collapsed
+
+    req = transport.requests[-1]
+    assert req.url.path.endswith("/volumes/")
+    assert req.url.params["filter"] == "id:3289|3194"
+    assert req.url.params["limit"] == "2"
+    by_id = {r.cv_volume_id: r for r in records}
+    assert by_id[3289].publisher == "Vertigo"
+    assert by_id[3289].start_year == 2002
+    assert by_id[3194].count_of_issues == 50
+
+
+@pytest.mark.req("FRG-CRTR-005")
+async def test_get_volumes_by_ids_empty_makes_no_request(tmp_path):
+    client, transport = make_client(
+        tmp_path, lambda r: json_response({"status_code": 1, "results": []})
+    )
+    async with client:
+        assert await client.get_volumes_by_ids([]) == ()
+    assert transport.requests == []
+
+
+@pytest.mark.req("FRG-CRTR-005")
+async def test_get_volumes_by_ids_5xx_raises_unavailable(tmp_path):
+    """A hydration failure PROPAGATES (not degraded to partial) so the caller can
+    preserve its cache rather than store a silently-incomplete result."""
+    client, _ = make_client(tmp_path, lambda r: httpx.Response(503))
+    async with client:
+        with pytest.raises(ComicVineUnavailable):
+            await client.get_volumes_by_ids([1, 2, 3])
+
+
+@pytest.mark.req("FRG-CRTR-001")
+async def test_get_issue_credits_missing_results_is_malformed(tmp_path):
+    client, _ = make_client(
+        tmp_path, lambda r: json_response({"status_code": 1, "results": None})
+    )
+    async with client:
+        with pytest.raises(ComicVineMalformedResponse):
+            await client.get_issue_credits(1)
+
+
+@pytest.mark.req("FRG-CRTR-001")
+async def test_get_issue_credits_5xx_raises_unavailable(tmp_path):
+    client, _ = make_client(tmp_path, lambda r: httpx.Response(503))
+    async with client:
+        with pytest.raises(ComicVineUnavailable):
+            await client.get_issue_credits(1)
+
+
 @pytest.mark.req("FRG-META-001")
 async def test_hung_connection_fails_within_read_timeout(tmp_path):
     async def hang(reader, writer):
