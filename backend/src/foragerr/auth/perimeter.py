@@ -436,7 +436,15 @@ async def authenticate_ws(websocket) -> int | None:
     if api_key:
         principal = await find_by_api_key(db, api_key)
         if principal is not None:
+            # Same leaked-key observability as the HTTP api-key path: a valid but
+            # leaked key used from a new source surfaces once per window
+            # (auth.apikey_source_seen). Guessing is infeasible (256-bit key) so
+            # the socket is not throttled, but a failure is still audited.
+            sources = getattr(app.state, "auth_apikey_sources", None)
+            if sources is not None and sources.observe(_client_ip(websocket)):
+                audit_event("auth.apikey_source_seen", websocket, SURFACE_API_KEY)
             return principal.id
+        audit_event("auth.apikey_failure", websocket, SURFACE_API_KEY, level=logging.WARNING)
     return None
 
 

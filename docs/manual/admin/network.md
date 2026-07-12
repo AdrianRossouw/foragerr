@@ -26,9 +26,12 @@ network exposure** (`FRG-DEP-011`) as the default deployment posture:
   the tailnet's job (or a reverse proxy's, if you run one in front). Exposing
   the listener beyond the tailnet without TLS in front of it means the login
   cookie and OPDS Basic credential travel in the clear.
-- Login rate limiting / lockout backoff and structured auth audit events are
-  planned for a follow-up release; until then, brute-force resistance rests
-  on the tailnet boundary as well as the credential itself.
+- Failed-attempt throttling and structured auth audit events ship as of
+  v0.9.0 (see `authentication.md` → "Failed-attempt throttling and the audit
+  trail"), but brute-force resistance still leans on the tailnet boundary and
+  the credential itself — the throttle is a temporary backoff, not a hard
+  lockout, and its per-attacker isolation depends on foragerr seeing real
+  client IPs (see the note below).
 - This is a single-operator tool: there is no reason to widen its public
   surface, and doing so is a deliberate deployment decision, not an
   incidental config change.
@@ -36,7 +39,26 @@ network exposure** (`FRG-DEP-011`) as the default deployment posture:
 **Do not port-forward or otherwise publish the listener to the
 public internet.** Authentication reduces what an internet-facing listener would
 expose, but without TLS in front of it your credentials would still travel in
-the clear, and login rate limiting has not shipped yet.
+the clear.
+
+### Failed-attempt throttling needs real client IPs
+
+foragerr's failed-login throttling keys on the **direct TCP peer address**
+(`request.client.host`); it never trusts `X-Forwarded-For`. That keeps an
+attacker from impersonating many source IPs, but it means the isolation
+between clients is only as good as the address foragerr actually sees:
+
+- **Docker bridge networking with the userland proxy** (the default for a
+  plain `ports:` mapping) can make *every* external client appear to come from
+  the bridge gateway address (e.g. `172.17.0.1`). All clients then share one
+  throttle key, so a burst of failed logins from anyone on the tailnet can
+  temporarily 429 your own login until the backoff deadline passes. It is
+  never a permanent lockout (a restart or the deadline clears it, and the
+  OPDS/API surfaces stay independent), but the per-attacker isolation is lost.
+- To keep the isolation real, run the container so it observes genuine peer
+  IPs: `network_mode: host`, Tailscale *inside* the container, or a
+  source-preserving DNAT (Docker daemon `userland-proxy: false`). On a
+  single-host tailnet deployment `network_mode: host` is the simplest.
 
 ### What this means operationally
 

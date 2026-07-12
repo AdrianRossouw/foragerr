@@ -234,6 +234,7 @@ async def _maybe_reseed_admin(app, db, principal, user, admin_password, now) -> 
     audit_event(
         "auth.reseed",
         None,
+        "startup",
         level=logging.WARNING,
         credential="admin",
         old_username=old_username,
@@ -282,7 +283,7 @@ async def _maybe_reseed_opds(app, db, principal, opds_env, now) -> None:
         row.env_opds_password_hash = hash_password(opds_env)
         row.updated_at = now
     clear_opds_verify_cache(app)
-    audit_event("auth.reseed", None, level=logging.WARNING, credential="opds")
+    audit_event("auth.reseed", None, "startup", level=logging.WARNING, credential="opds")
 
 
 __all__ = [

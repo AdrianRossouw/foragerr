@@ -37,9 +37,31 @@ def sanitize(value: str) -> str:
     Removes every C0/C1 control character (newlines, carriage returns, ANSI
     escape introducers, NUL, …) so the value cannot inject a line break or a
     forged event into the fixed ``key=value`` line, then truncates to
-    :data:`MAX_FIELD_LENGTH`."""
+    :data:`MAX_FIELD_LENGTH`. This alone does NOT stop *intra-line* field
+    forgery — a value like ``bob surface=login`` survives here and would look
+    like two fields to a whitespace/``=`` splitter; :func:`_field` closes that by
+    quoting (logfmt-style) whenever the sanitized value carries a space or
+    ``=``."""
     stripped = "".join(ch for ch in value if ch.isprintable() or ch == " ")
     return stripped[:MAX_FIELD_LENGTH]
+
+
+def _field(key: str, value: Any) -> str:
+    """Render one ``key=value`` token, logfmt-quoting a forgery-capable value.
+
+    Client-controlled strings are sanitized (control chars stripped, capped) and
+    then, if the result contains a space, ``=`` or ``"``, wrapped in double
+    quotes with ``\\`` and ``"`` backslash-escaped — so an attacker-supplied
+    ``username`` can never introduce a second bare ``surface=``/``ip=`` field into
+    the line that a key=value parser would read as real. Non-string values
+    (counts, booleans) are safe by construction and rendered bare."""
+    if not isinstance(value, str):
+        return f"{key}={value}"
+    rendered = sanitize(value)
+    if any(c in rendered for c in ' ="'):
+        escaped = rendered.replace("\\", "\\\\").replace('"', '\\"')
+        return f'{key}="{escaped}"'
+    return f"{key}={rendered}"
 
 
 def _client_ip(request: HTTPConnection | None) -> str:
@@ -48,12 +70,6 @@ def _client_ip(request: HTTPConnection | None) -> str:
         return "unknown"
     client = request.client
     return client.host if client is not None else "unknown"
-
-
-def _render(value: Any) -> str:
-    if isinstance(value, str):
-        return sanitize(value)
-    return str(value)
 
 
 def audit_event(
@@ -66,16 +82,24 @@ def audit_event(
 ) -> None:
     """Emit one structured audit event on the ``foragerr.auth`` logger.
 
-    ``surface`` and the source IP are always included; ``fields`` carry
-    event-specifics. Every string value is sanitized — never pass password or key
+    ``surface`` and the source IP are always included; when ``surface`` is not
+    passed explicitly it is derived from ``request.state.auth_via`` (the
+    credential the acting request authenticated with) so credential-lifecycle
+    events still record which surface performed them. ``fields`` carry
+    event-specifics. Every string value is sanitized AND logfmt-quoted when it
+    could otherwise forge a field (:func:`_field`) — never pass password or key
     material. The message is pre-rendered (no ``%`` args) so a ``%`` inside a
     username cannot trigger interpolation."""
+    resolved_surface = surface
+    if resolved_surface is None and request is not None:
+        resolved_surface = getattr(request.state, "auth_via", None)
     parts = [f"ip={_client_ip(request)}"]
-    if surface is not None:
-        parts.append(f"surface={surface}")
+    if resolved_surface is not None:
+        parts.append(f"surface={resolved_surface}")
     for key, value in fields.items():
-        parts.append(f"{key}={_render(value)}")
+        parts.append(_field(key, value))
     logger.log(level, f"{event} {' '.join(parts)}")
 
 
 __all__ = ["MAX_FIELD_LENGTH", "audit_event", "sanitize"]
+# _field is intentionally module-private (tested via audit_event output).

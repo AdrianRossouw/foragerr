@@ -77,6 +77,35 @@ def test_deadline_grows_exponentially_and_caps_at_the_window():
 
 
 @pytest.mark.req("FRG-AUTH-009")
+def test_deadline_escalates_per_recorded_failure_not_per_refused_attempt():
+    """Escalation is driven by RECORDED failures (ones that reached the credential
+    check), not by attempts refused during an active deadline.
+
+    The wiring 429s a throttled attempt BEFORE calling record_failure, so a
+    caller hammering during a live deadline records nothing and the deadline does
+    not grow. It grows only when the caller waits the deadline out and fails
+    again. This pins the clarified spec semantics (Codex gate finding 1)."""
+    clock = {"t": 0.0}
+    rl = _limiter(clock, threshold=2, window_seconds=1000, backoff_base_seconds=10)
+
+    rl.record_failure("ip", SURFACE_LOGIN)
+    rl.record_failure("ip", SURFACE_LOGIN)  # at threshold → first deadline
+    assert rl.retry_after("ip", SURFACE_LOGIN) == pytest.approx(10.0)
+
+    # Hammering during the deadline: the caller only ever calls retry_after (the
+    # wiring refuses before recording). The deadline must NOT move.
+    clock["t"] = 5.0
+    for _ in range(20):
+        assert rl.retry_after("ip", SURFACE_LOGIN) == pytest.approx(5.0)  # 10 - 5 elapsed
+
+    # Wait the deadline out, then fail once more — NOW it escalates (excess=1).
+    clock["t"] = 10.0
+    assert rl.retry_after("ip", SURFACE_LOGIN) is None  # one fresh attempt allowed
+    rl.record_failure("ip", SURFACE_LOGIN)
+    assert rl.retry_after("ip", SURFACE_LOGIN) == pytest.approx(20.0)
+
+
+@pytest.mark.req("FRG-AUTH-009")
 def test_keys_are_isolated_by_ip_and_surface():
     """Throttling one (IP, surface) leaves other IPs and other surfaces open."""
     clock = {"t": 0.0}

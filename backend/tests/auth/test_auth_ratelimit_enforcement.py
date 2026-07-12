@@ -327,6 +327,14 @@ def test_lifecycle_events_are_audited(tmp_path, caplog):
         "auth.opds_success",
     ):
         assert expected in events, f"missing audit event {expected}"
+    # Lifecycle events carry a surface derived from the acting request's
+    # auth_via (gate finding Codex-F2): the api-key-authed password change
+    # records surface=api_key, not a bare event with only ip=.
+    pw_changed = next(
+        r.getMessage() for r in _auth_records(caplog)
+        if r.getMessage().startswith("auth.password_changed")
+    )
+    assert "surface=api_key" in pw_changed
 
 
 @pytest.mark.req("FRG-AUTH-009")
@@ -398,6 +406,35 @@ def test_login_username_cannot_forge_a_log_line(tmp_path, caplog):
 
 
 @pytest.mark.req("FRG-AUTH-009")
+def test_login_username_cannot_forge_an_extra_field(tmp_path, caplog):
+    """A username crafted to look like extra key=value fields cannot inject a
+    real field: the value is logfmt-quoted, so the genuine surface=/ip= appear
+    exactly once and the injected tokens stay inside the quoted username value
+    (gate finding S2 — intra-line forgery, not just newline forgery)."""
+    caplog.set_level(logging.DEBUG, logger="foragerr.auth")
+    app = make_app(tmp_path)
+    with TestClient(app) as client:
+        client.headers.pop("X-Api-Key", None)
+        forge = "bob surface=api_key ip=9.9.9.9 forged=yes"
+        assert client.post(
+            "/api/v1/auth/login", json={"username": forge, "password": "wrong"}
+        ).status_code == 401
+    msg = next(
+        r.getMessage() for r in _auth_records(caplog)
+        if r.getMessage().startswith("auth.login.failure")
+    )
+    # The whole username lands as ONE logfmt-quoted field value, so its
+    # look-alike tokens are inert. The genuine structured fields — everything
+    # up to the quoted username — carry exactly one surface= and one ip=; the
+    # injected tokens live only inside the quotes, where a key=value parser
+    # reads them as the username's content, not as new fields.
+    prefix, _, username = msg.partition(' username="')
+    assert prefix == "auth.login.failure ip=testclient surface=login"
+    assert prefix.count("surface=") == 1 and prefix.count("ip=") == 1
+    assert username == 'bob surface=api_key ip=9.9.9.9 forged=yes"'  # quoted value
+
+
+@pytest.mark.req("FRG-AUTH-009")
 def test_no_credential_material_in_any_audit_record(tmp_path, caplog):
     """A representative auth exercise leaks no password or key material into any
     captured log record."""
@@ -425,3 +462,39 @@ def test_no_credential_material_in_any_audit_record(tmp_path, caplog):
         "secret-wrong-key",
     ):
         assert secret not in blob, f"credential material {secret!r} leaked to logs"
+
+
+@pytest.mark.req("FRG-AUTH-009")
+def test_ws_apikey_success_audits_source_seen(tmp_path, caplog):
+    """The WebSocket handshake's api-key success emits ``auth.apikey_source_seen``
+    like the HTTP api-key path, so the leaked-key-visibility guarantee holds on
+    the socket too (gate finding S3)."""
+    caplog.set_level(logging.DEBUG, logger="foragerr.auth")
+    app = make_app(tmp_path)
+    with TestClient(app) as client:
+        client.headers.pop("X-Api-Key", None)
+        with client.websocket_connect(
+            "/api/v1/ws",
+            headers={"X-Api-Key": TEST_API_KEY, "Origin": "http://testserver"},
+        ) as ws:
+            assert ws is not None
+    assert "auth.apikey_source_seen" in _events(caplog)
+
+
+@pytest.mark.req("FRG-AUTH-009")
+def test_ws_apikey_failure_is_audited(tmp_path, caplog):
+    """A WS handshake with a wrong api key emits ``auth.apikey_failure`` — WS auth
+    failures are no longer invisible to the audit trail (gate finding S3)."""
+    from starlette.websockets import WebSocketDisconnect
+
+    caplog.set_level(logging.DEBUG, logger="foragerr.auth")
+    app = make_app(tmp_path)
+    with TestClient(app) as client:
+        client.headers.pop("X-Api-Key", None)
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect(
+                "/api/v1/ws",
+                headers={"X-Api-Key": "wrong-key", "Origin": "http://testserver"},
+            ):
+                pass
+    assert "auth.apikey_failure" in _events(caplog)

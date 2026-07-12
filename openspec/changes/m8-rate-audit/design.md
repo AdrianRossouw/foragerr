@@ -47,9 +47,16 @@ Two sliding-window counter families in one in-process registry:
   {`login`, `api_key`, `basic`}. After N failures (default 5) within the
   window (default 15 min), further attempts from that key are refused
   **before any KDF work** with 429 + `Retry-After`, the refusal deadline
-  growing exponentially (base 30 s, doubling per excess failure, capped at
-  the window length). Correct credentials after the deadline succeed — a
-  temporary per-key refusal, never a lockout.
+  growing exponentially (base 30 s, doubling per excess *recorded* failure,
+  capped at the window length). A refused (429'd) attempt does no KDF work and
+  is therefore not recorded — so hammering during an active deadline is cheap
+  and does not itself escalate; the deadline grows only when a caller waits it
+  out and fails again. This is deliberate: it is self-limiting (`2**excess`
+  can only climb once per elapsed deadline, and a capped deadline that expires
+  prunes its whole window, resetting the key) *and* it still throttles
+  sustained guessing to at most one credential check per escalating deadline.
+  Correct credentials after the deadline succeed — a temporary per-key
+  refusal, never a lockout.
 - **(surface,) global** — an observability counter (single principal, so
   per-principal ≡ global-per-surface). It never blocks (an attacker must not
   be able to lock the operator out by spraying failures from many spoofed
@@ -60,7 +67,15 @@ Two sliding-window counter families in one in-process registry:
 Client IP = `request.client.host` (direct connection only). No
 `X-Forwarded-For` parsing — the deployment model is direct uvicorn on a
 tailnet; this trust boundary goes in the threat model, revisited with DEP's
-TLS/proxy story.
+TLS/proxy story. **Caveat (documented, not code):** the per-IP isolation that
+keeps an attacker from throttling the operator only holds when the container
+actually observes real peer IPs. Under Docker bridge networking with the
+userland proxy, every external client can appear as the bridge gateway IP,
+collapsing all clients onto one key — an in-tailnet attacker could then
+throttle the operator's *login* surface (the refusal is still temporary, and
+the surface split still isolates login from OPDS/API). The manual's network
+section recommends `network_mode: host` / source-preserving DNAT so the
+isolation is real; noted in the threat model.
 
 A success resets the counters for its (IP, surface) key.
 
@@ -84,11 +99,28 @@ avoids a migration; documented in the manual.
   succeeds and before cache/KDF; increment on verify failure. The 429 (not
   the realm challenge) is returned for a throttled key so readers surface the
   error rather than re-prompting in a loop.
+- WS handshake (`authenticate_ws`): *not* throttled — its only credential
+  paths are the session cookie and the 256-bit `X-Api-Key` (no password-hash,
+  guessing infeasible), so a rate limit buys nothing. It does emit the same
+  `auth.apikey_source_seen` / `auth.apikey_failure` audit events as the HTTP
+  api-key path, so the leaked-key-visibility guarantee holds on the socket too
+  (gate finding S3).
 
 429 refusal (no tarpit `asyncio.sleep`): holding connections open to delay is
 itself a connection-exhaustion vector; an immediate refusal with
 `Retry-After` gives the same guessing economics without tying up the loop.
 The spec's "backoff or temporary lockout" language covers this shape.
+
+Check-then-act note: on the perimeter paths the `retry_after` check and the
+`record_failure` mutation straddle the `await` for the credential lookup/KDF.
+On the single event loop the mutation itself is atomic, but N concurrent
+same-IP failures can each pass the check before any records — admitting up to
+~concurrency-width extra attempts past the threshold in one window. This fails
+*open* by a bounded slack (never closed), each admitted request still pays
+exactly one KDF (so throughput is KDF-bound regardless), and every failure is
+eventually recorded so the throttle still engages. Accepted, not mitigated —
+tightening it (optimistic pre-record) would over-count the rare
+cookie-then-key race for no real gain.
 
 ### 5. Audit vocabulary
 
@@ -101,10 +133,18 @@ the same shape): `auth.login.success`, `auth.login.failure`, `auth.logout`,
 `auth.apikey_failure`, `auth.apikey_rotated`, `auth.reauth_failed`,
 `auth.backoff_triggered`, `auth.reseed` (bootstrap already logs the re-seed;
 it adopts the shape). Fields: `surface`, `ip`, plus event-specifics — never
-password/key material, never raw client strings: the submitted username is
-the one attacker-controlled string that appears, and it is
-control-character-stripped and length-capped before logging (log-injection
-hardening; newline/ANSI injection gets a dedicated test).
+password/key material, never raw client strings. `surface` is passed
+explicitly on the credential-bearing paths and, for credential-lifecycle
+events (password change, key rotation, logout), derived from
+`request.state.auth_via` (the credential the acting request authenticated
+with); startup/re-seed events, which have no request, pass an explicit
+`startup` surface. The one attacker-controlled string that appears is the
+submitted username: `sanitize()` strips control characters and length-caps it
+(so no newline can start a second log line / forge a second event), and the
+`key=value` renderer logfmt-**quotes** any value carrying a space or `=` (so
+an embedded `surface=…`/`ip=…` token cannot forge an extra field *inside* the
+line — the intra-line half of the injection defence). Both halves get a
+dedicated test.
 
 OPDS Basic **successes** are logged per *verification* (cache fill), not per
 request — a reader sends Basic on every request and per-request success
@@ -122,11 +162,21 @@ first use from any new address, at near-zero log volume.
 
 ### 6. Testing
 
-Unit: window arithmetic, exponential deadline growth + cap, key isolation,
-success-reset, registry eviction bound. Route/perimeter: per-surface 429
-behavior incl. KDF-not-run-when-throttled (assert via call counting),
-throttled-then-correct-credentials-succeeds-after-deadline, cookie-failure
-exemption. Audit: every event fires where specified; log-injection; negative
+Unit: window arithmetic, exponential deadline growth + cap, escalation
+per-recorded-failure (not per refused attempt), key isolation, success-reset,
+registry eviction bound, and the global counter that never blocks (N distinct
+IPs, none crossing the per-key threshold, the global one crossing once). That
+last case is **unit-proven by design**: both `TestClient` and the e2e harness
+originate from a single peer IP, so the "distributed failures visible without
+blocking" scenario cannot be driven with multiple source addresses at the
+route level — the route path (`record_failure` → global counter →
+`auth.backoff_triggered`) is exercised by the single-IP backoff test, and the
+distributed shape by the unit test. Route/perimeter: per-surface 429 incl.
+KDF-not-run-when-throttled (call counting),
+throttled-then-correct-credentials-succeeds-after-deadline, cookie-failure /
+credential-less exemptions, WS api-key source-seen + failure audit. Audit:
+every event fires where specified, surface derived on lifecycle events;
+log-injection (newline forgery AND intra-line `key=value` forgery); negative
 scan that no credential material reaches any handler's records. e2e: scripted
 bad-login burst → 429 + `auth.backoff_triggered` visible; recovery after
 deadline. All tagged FRG-AUTH-009.

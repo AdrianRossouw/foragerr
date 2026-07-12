@@ -1605,6 +1605,19 @@ shipped model:
   `X-Forwarded-For` would let a single attacker spray failures under forged
   identities to dodge the per-key counter entirely. Revisit if the deployment
   model ever adds a documented reverse-proxy story (DEP's TLS/proxy work).
+  **Deployment caveat (gate finding S1, m8-rate-audit):** the per-IP isolation
+  that stops an attacker from throttling the operator only holds when foragerr
+  observes *real* peer addresses. Under Docker bridge networking with the
+  userland proxy enabled, the container can see the bridge gateway IP as the
+  source for every external client — collapsing operator and attacker onto one
+  `(gateway-IP, login)` key, so an in-tailnet attacker's login-failure burst
+  can 429 the operator's own login until the deadline expires. The surface
+  split still isolates login from OPDS/API, and the refusal is temporary (no
+  hard lockout; restart or deadline expiry recovers), so this is a
+  defence-in-depth degradation, not an authentication bypass. Mitigation is
+  operational and documented in `docs/manual/admin/network.md`: run with
+  `network_mode: host`, Tailscale inside the container, or a source-preserving
+  DNAT (`userland-proxy=false`) so the limiter keys on genuine client IPs.
 - **Log-injection hardening.** The one attacker-controlled string that reaches
   an audit event — the submitted username — is stripped of every C0/C1 control
   character (newlines, carriage returns, ANSI escape introducers) and length-
