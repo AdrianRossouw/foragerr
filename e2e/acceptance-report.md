@@ -3,9 +3,9 @@
 _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.mjs` — do not edit by hand (FRG-PROC-010)._
 
 - **Verdict:** GREEN
-- **Scenarios:** 32 (31 pass, 0 fail, 1 skipped, 0 flaky, 0 not run)
-- **Run started:** 2026-07-12T17:46:08.314Z
-- **Duration:** 81.2s
+- **Scenarios:** 36 (35 pass, 0 fail, 1 skipped, 0 flaky, 0 not run)
+- **Run started:** 2026-07-12T19:09:54.190Z
+- **Duration:** 115.7s
 
 ## Scenario → requirement coverage
 
@@ -43,6 +43,10 @@ _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.m
 | PASS | FRG-AUTH-007 FRG-AUTH-006: key rotation kills the old key immediately; re-auth required | FRG-AUTH-006, FRG-AUTH-007 |
 | PASS | FRG-AUTH-004: password change preserves the acting session and kills every other | FRG-AUTH-004 |
 | PASS | FRG-AUTH-004: logout-all destroys every session including the acting one | FRG-AUTH-004 |
+| PASS | FRG-AUTH-009: a bad-login burst is throttled with 429 and a Retry-After deadline | FRG-AUTH-009 |
+| PASS | FRG-AUTH-009: the audit trail records the failures and the backoff escalation, with no credential material | FRG-AUTH-009 |
+| PASS | FRG-AUTH-009: no hard lockout — after the Retry-After deadline, correct credentials succeed and reset the counter | FRG-AUTH-009 |
+| PASS | FRG-AUTH-009: OPDS Basic is throttled and isolated from the login surface (key isolation) | FRG-AUTH-009 |
 
 ## Requirement roll-up
 
@@ -55,6 +59,7 @@ _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.m
 | FRG-AUTH-005 | PASS |
 | FRG-AUTH-006 | PASS |
 | FRG-AUTH-007 | PASS |
+| FRG-AUTH-009 | PASS |
 | FRG-AUTH-010 | PASS |
 | FRG-CRTR-001 | PASS |
 | FRG-DDL-010 | PASS |

@@ -21,15 +21,15 @@
 
 ## 4. e2e
 
-- [ ] 4.1 Scripted bad-login burst → 429 + `auth.backoff_triggered` visible in logs; recovery after deadline; no credential material in captured logs; refresh acceptance report
+- [x] 4.1 Scripted bad-login burst → 429 + `auth.backoff_triggered` visible in logs; recovery after deadline; no credential material in captured logs; refresh acceptance report
 
 ## 5. Docs + traceability
 
-- [ ] 5.1 `docs/manual/admin/authentication.md`: throttling behavior, reader-visible 429, restart-resets-counters, no-lockout recovery story
-- [ ] 5.2 `docs/security/`: threat-model — brute-force mitigation, client-IP trust boundary (no XFF), log-injection hardening, scrypt CPU-burn shielding; risk-register touch
-- [ ] 5.3 Registry: FRG-AUTH-009 → implemented; matrix regen; roadmap M8 section update (consistency test)
-- [ ] 5.4 CHANGELOG v0.9.0 + `pyproject`/`package.json`/`uv.lock` version bumps
-- [ ] 5.5 SOUP: no dep changes — `tools/soup_check.py` exits 0
+- [x] 5.1 `docs/manual/admin/authentication.md`: throttling behavior, reader-visible 429, restart-resets-counters, no-lockout recovery story
+- [x] 5.2 `docs/security/`: threat-model — brute-force mitigation, client-IP trust boundary (no XFF), log-injection hardening, scrypt CPU-burn shielding; risk-register touch
+- [x] 5.3 Registry: FRG-AUTH-009 → implemented; matrix regen; roadmap M8 section update (consistency test)
+- [x] 5.4 CHANGELOG v0.9.0 + `pyproject`/`package.json`/`uv.lock` version bumps
+- [x] 5.5 SOUP: no dep changes — `tools/soup_check.py` exits 0
 
 ## 6. Gate + merge
 

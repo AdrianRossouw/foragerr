@@ -12,13 +12,23 @@ import { ADMIN_USER, ADMIN_PASSWORD, EMPTY_STORAGE_STATE } from './helpers';
  * all against the REAL container over the network, per the UAT
  * negative-paths rule (every re-auth miss is asserted generic).
  *
- * Named `zzz-*` so it runs ABSOLUTELY LAST: it burns the credentials every
- * other spec depends on — rotating the key kills `E2E_API_KEY`, and the
- * admin password change invalidates the saved storage-state session. Nothing
- * runs after it, so no restore is attempted (run.sh tears down with
- * `compose down`; a retry re-runs against whatever credentials the previous
- * attempt left, so every step derives its inputs from the LIVE state it
- * creates rather than assuming the bootstrap values — see `currentAdminPw`).
+ * Named `zzz-*` so it runs near the very end: it burns the credentials every
+ * earlier spec depends on — rotating the key kills the bootstrap `E2E_API_KEY`,
+ * and the admin password change invalidates the saved storage-state session.
+ * No restore is attempted here (run.sh tears down with `compose down`; a retry
+ * re-runs against whatever credentials the previous attempt left, so every
+ * step derives its inputs from the LIVE state it creates rather than assuming
+ * the bootstrap values — see `currentAdminPw`).
+ *
+ * One file now runs after this one — `zzzz-rate-audit.spec.ts` (FRG-AUTH-009) —
+ * because its login-failure burst would throttle the `login` surface for every
+ * other spec if it ran anywhere else (every request in this suite shares one
+ * client IP). That file cannot use the bootstrap `ADMIN_PASSWORD`/OPDS-password
+ * constants for "correct credential" checks once this file has rotated them, so
+ * this file threads the LIVE final values through `process.env` at the point
+ * each rotation is confirmed (`E2E_CURRENT_ADMIN_PASSWORD`,
+ * `E2E_CURRENT_OPDS_PASSWORD`) — same pattern as the existing `E2E_API_KEY`
+ * threading for key rotation, just two more env vars.
  *
  * zz-unconfigured recreated the app container (new ephemeral host port), so
  * like the zz specs this one re-discovers the mapping first and never trusts
@@ -117,6 +127,12 @@ test.describe.serial('credential lifecycle', () => {
     // Immediately — no TTL grace: the cache was cleared on the write.
     expect(await opdsStatus(base, currentAdminPw), 'old OPDS creds are dead').toBe(401);
     expect(await opdsStatus(base, NEW_OPDS_PW), 'new OPDS creds serve').toBe(200);
+    // Threaded for zzzz-rate-audit.spec.ts (the ONE file that now runs after
+    // this one): the OPDS password no longer matches ADMIN_PASSWORD past this
+    // point, so any later spec needing a CORRECT OPDS credential must read the
+    // live value rather than the bootstrap constant. Mirrors the existing
+    // E2E_API_KEY threading below for key rotation.
+    process.env.E2E_CURRENT_OPDS_PASSWORD = NEW_OPDS_PW;
 
     // Independence: the WEB session and admin password are untouched.
     expect((await acting.get('/api/v1/auth/me')).status(), 'web session unaffected').toBe(200);
@@ -169,6 +185,10 @@ test.describe.serial('credential lifecycle', () => {
     expect(changed.status(), 'password change accepted').toBe(204);
     const oldAdminPw = currentAdminPw;
     currentAdminPw = NEW_ADMIN_PW;
+    // Threaded for zzzz-rate-audit.spec.ts, same reasoning as
+    // E2E_CURRENT_OPDS_PASSWORD above: the admin/login password no longer
+    // matches ADMIN_PASSWORD past this point.
+    process.env.E2E_CURRENT_ADMIN_PASSWORD = NEW_ADMIN_PW;
 
     // Acting session sails on; the other (remember-me!) session is dead.
     expect((await acting.get('/api/v1/auth/me')).status(), 'acting session preserved').toBe(200);
