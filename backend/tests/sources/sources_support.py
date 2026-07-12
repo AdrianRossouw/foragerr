@@ -10,10 +10,42 @@ from __future__ import annotations
 from pathlib import Path
 
 import httpx
+import pytest
 
 from foragerr.http import HttpClientFactory
 from foragerr.sources.humble import HUMBLE_API_BASE
 from http_support import PUBLIC_V4, StubResolver, make_settings
+
+
+@pytest.fixture
+async def format_profile_id(db) -> int:
+    """The seeded default format profile id (imported as a fixture by the
+    review/reconcile tests; kept here rather than a tests/sources conftest.py,
+    which would shadow the top-level ``conftest`` module for bare-import tests)."""
+    from sqlalchemy import select
+
+    from foragerr.quality.models import DEFAULT_PROFILE_NAME, FormatProfileRow
+
+    async with db.read_session() as session:
+        return (
+            await session.execute(
+                select(FormatProfileRow.id).where(
+                    FormatProfileRow.name == DEFAULT_PROFILE_NAME
+                )
+            )
+        ).scalar_one()
+
+
+@pytest.fixture
+async def root_folder_id(db, tmp_path: Path) -> int:
+    """A real root folder for building library series in the sources tests."""
+    from foragerr.library import repo as library_repo
+
+    root = tmp_path / "library-root"
+    root.mkdir()
+    async with db.write_session() as session:
+        row = await library_repo.create_root_folder(session, str(root))
+        return row.id
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 

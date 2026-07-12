@@ -97,9 +97,14 @@ class SourceEntitlementRow(Base):
     review_status: Mapped[str] = mapped_column(
         Text, nullable=False, default="new"
     )
-    #: Download/import-progress axis, separate from review status; ``None`` until
-    #: a later worker queues a grab.
+    #: Download/import-progress axis, separate from review status (design
+    #: decision 2): ``None`` (never grabbed) → ``queued`` → ``fetching`` →
+    #: ``verifying`` → ``imported`` | ``failed`` (FRG-SRC-006).
     download_state: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: The last grab failure reason (FRG-SRC-006) — the per-entitlement
+    #: failed-download surface. Set alongside ``download_state = "failed"``;
+    #: cleared when a retry re-queues the grab. ``None`` when not failed.
+    download_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     #: The preferred grabbable copy's API metadata (never the signed URL —
     #: re-fetched fresh at grab time, design decision 8).
     preferred_format: Mapped[str | None] = mapped_column(Text, nullable=True)

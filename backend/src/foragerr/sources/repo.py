@@ -34,7 +34,9 @@ logger = logging.getLogger("foragerr.sources.repo")
 __all__ = [
     "create_source",
     "delete_source",
+    "get_entitlement",
     "get_source",
+    "list_entitlements",
     "list_sources",
     "load_source_settings",
     "public_settings",
@@ -42,6 +44,39 @@ __all__ = [
     "set_connection_state",
     "update_source_settings",
 ]
+
+
+async def get_entitlement(db, entitlement_id: int) -> SourceEntitlementRow | None:
+    """Load one entitlement row by id (detached), or ``None`` (FRG-SRC-004)."""
+    async with db.read_session() as session:
+        row = await session.get(SourceEntitlementRow, entitlement_id)
+        if row is not None:
+            session.expunge(row)
+        return row
+
+
+async def list_entitlements(
+    db,
+    source_id: int,
+    *,
+    classification: str | None = None,
+    review_status: str | None = None,
+) -> list[SourceEntitlementRow]:
+    """Entitlements of one source (detached), optionally filtered by the
+    classification and/or review-status axes (FRG-SRC-004), oldest-first."""
+    stmt = select(SourceEntitlementRow).where(
+        SourceEntitlementRow.source_id == source_id
+    )
+    if classification is not None:
+        stmt = stmt.where(SourceEntitlementRow.classification == classification)
+    if review_status is not None:
+        stmt = stmt.where(SourceEntitlementRow.review_status == review_status)
+    stmt = stmt.order_by(SourceEntitlementRow.id)
+    async with db.read_session() as session:
+        rows = (await session.execute(stmt)).scalars().all()
+        for row in rows:
+            session.expunge(row)
+        return list(rows)
 
 
 def load_source_settings(source_type: str, settings_json: str) -> BaseModel:

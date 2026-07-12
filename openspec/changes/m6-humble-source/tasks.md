@@ -16,14 +16,14 @@
 
 ## 3. Review workflow & reconciliation
 
-- [ ] 3.1 Entitlement review actions (match/add/ignore/restore, single + bulk) with proposed-match computation via existing ranking + booktype/containment (`FRG-SRC-004`)
-- [ ] 3.2 Auto-sync toggle, default OFF; confident-match auto-accept path when ON (`FRG-SRC-004`)
-- [ ] 3.3 Reconciliation module: fills-range computation, owned-single preservation, OGN/artbook standalone path; three-way invariant proof tests mirroring FRG-SER-019 (`FRG-SRC-007`)
+- [x] 3.1 Entitlement review actions (match/add/ignore/restore, single + bulk) with proposed-match computation via existing ranking + booktype/containment (`FRG-SRC-004`) — proposed match `sources/matching.py` (reuses `metadata.search.name_similarity`, library-first then CV `suggest_series`, budget-aware); actions `sources/review.py` + `api/sources.py` entitlement endpoints; survives-resync proven (`test_review.py`, `test_entitlements_api.py`)
+- [x] 3.2 Auto-sync toggle, default OFF; confident-match auto-accept path when ON (`FRG-SRC-004`) — `sources/enrich.py` post-sync pass; `AUTO_MATCH_THRESHOLD = 0.85` decided + recorded in design.md; OFF-default pins nothing downloads without operator action (`test_review.py`)
+- [x] 3.3 Reconciliation module: fills-range computation, owned-single preservation, OGN/artbook standalone path; three-way invariant proof tests mirroring FRG-SER-019 (`FRG-SRC-007`) — `sources/reconcile.py` (owned-via-edition via `issue_files.edition_issue_id` size-0 rows, migration 0022 partial unique index); fill-set on the entitlement-detail API; three-way proof `test_reconcile.py`
 
 ## 4. Download & import
 
-- [ ] 4.1 Grab path: fresh signed URL at grab time, HTTPS + CDN allowlist enforcement, size/timeout bounds, md5 verify, staging handoff to import pipeline (`FRG-SRC-006`)
-- [ ] 4.2 Failure paths into the existing failed-download surface with retry; checksum-mismatch quarantine test (`FRG-SRC-006`)
+- [x] 4.1 Grab path: fresh signed URL at grab time, HTTPS + CDN allowlist enforcement, size/timeout bounds, md5 verify, staging handoff to import pipeline (`FRG-SRC-006`) — `sources/grab.py` (`source-grab` command); `HumbleClient.fetch_download_url` re-fetches the URL; reuses DDL `AllowList`/`download_link` + factory `external`; hands off via `import_pending` `tracked_downloads` + `grab_history` (`test_grab.py`)
+- [x] 4.2 Failure paths into the existing failed-download surface with retry; checksum-mismatch quarantine test (`FRG-SRC-006`) — per-entitlement `download_state="failed"` + `download_error` (deviation from usenet blocklist/re-search loop, flagged in design.md); checksum mismatch quarantines + egress-confinement refusal proven (`test_grab.py`)
 
 ## 5. Frontend
 

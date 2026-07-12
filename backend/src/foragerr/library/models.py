@@ -305,8 +305,12 @@ class IssueFileRow(Base):
         StrictInteger, ForeignKey("issues.id", ondelete="CASCADE"), nullable=False
     )
     #: Internally-constructed on-disk path (scan-discovered or import-
-    #: written) — plain `Text`, one row per physical file.
-    path: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    #: written) — plain `Text`, one row per physical file. Uniqueness is enforced
+    #: by a PARTIAL unique index over rows where ``edition_issue_id IS NULL``
+    #: (the ordinary single-file case, behaviour-identical to the old column
+    #: `unique=True`); an owned-via-edition row (see below) is deliberately
+    #: exempt, so one collected-edition file may back several filled singles.
+    path: Mapped[str] = mapped_column(Text, nullable=False)
     size: Mapped[int] = mapped_column(StrictInteger, nullable=False)
     added_at: Mapped[dt.datetime] = mapped_column(StrictDateTime, nullable=False)
     #: The file's `(fN)` fixed-release marker revision as parsed at import
@@ -323,10 +327,42 @@ class IssueFileRow(Base):
     #: A ``None`` value is resolved lazily on first OPDS access and written back;
     #: a size-mismatch against the on-disk file forces a recompute.
     page_count: Mapped[int | None] = mapped_column(StrictInteger, nullable=True)
+    #: Owned-via-edition provenance (FRG-SRC-007): when set, this ownership is
+    #: PROVIDED BY a collected-edition trade issue (this column's value is that
+    #: trade ``issues.id``), not a standalone single file. Such a row carries
+    #: ``size = 0`` so the collected file's bytes are counted once (on the
+    #: trade's own file), never multiplied across the singles it fills — the
+    #: "no double-counting" guarantee. ``None`` for every ordinary file. Because
+    #: ownership is still "an ``issue_files`` row exists", ``wanted_issues()`` /
+    #: ``series_statistics`` need NO new predicate (the FRG-SER-019 three-way
+    #: proof is unchanged); reconciliation deletes these rows to restore wanted.
+    edition_issue_id: Mapped[int | None] = mapped_column(
+        StrictInteger, nullable=True
+    )
 
     issue: Mapped[IssueRow] = relationship(back_populates="files")
 
-    __table_args__ = (Index("ix_issue_files_issue_id", "issue_id"),)
+    __table_args__ = (
+        Index("ix_issue_files_issue_id", "issue_id"),
+        # The ordinary-file path-uniqueness invariant, preserved as a partial
+        # unique index (identical to the old column-level `unique=True` for every
+        # scan/import-written single file); owned-via-edition rows are exempt so a
+        # shared collected-edition path may cover several filled singles.
+        Index(
+            "uq_issue_files_path_single",
+            "path",
+            unique=True,
+            sqlite_where=text("edition_issue_id IS NULL"),
+        ),
+        # A single may be filled by at most one edition (dedupe re-reconcile).
+        Index(
+            "uq_issue_files_edition",
+            "issue_id",
+            "edition_issue_id",
+            unique=True,
+            sqlite_where=text("edition_issue_id IS NOT NULL"),
+        ),
+    )
 
 
 class LibraryImportGroupRow(Base):

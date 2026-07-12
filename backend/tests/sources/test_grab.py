@@ -1,0 +1,210 @@
+"""Entitlement download + import handoff (FRG-SRC-006): fresh-signed-URL fetch,
+HTTPS + CDN egress confinement, md5 verify → import-pending handoff, and a
+checksum-mismatch quarantine on the per-entitlement failed surface.
+"""
+
+from __future__ import annotations
+
+import hashlib
+
+import httpx
+import pytest
+from sqlalchemy import select
+
+from foragerr.http import HttpClientFactory
+from foragerr.sources import ratelimit, repo
+from foragerr.sources.grab import run_grab, sources_staging_dir
+from foragerr.sources.models import SourceEntitlementRow
+from foragerr.sources.registry import TYPE_HUMBLE
+from foragerr.sources.service import run_sync
+from foragerr.sources.settings import HumbleSettings
+from http_support import PUBLIC_V4, StubResolver, make_settings
+from sources_support import fixture_bytes, json_response
+
+GAMEKEY = "aBcD1234synthetic"
+FILE_BYTES = b"SYNTHETIC-COMIC-ARCHIVE-PAYLOAD" * 512
+FILE_MD5 = hashlib.md5(FILE_BYTES).hexdigest()  # noqa: S324 — test integrity check
+
+
+@pytest.fixture(autouse=True)
+def _reset_gates():
+    ratelimit.reset_gates()
+    yield
+    ratelimit.reset_gates()
+
+
+def _grab_factory(config_dir, handler) -> HttpClientFactory:
+    """A factory resolving BOTH the Humble API host and the CDN host to a
+    policy-acceptable public IP, over an injected mock transport."""
+    settings = make_settings(config_dir)
+    resolver = StubResolver(
+        {"www.humblebundle.com": [PUBLIC_V4], "dl.humble.com": [PUBLIC_V4]}
+    )
+    return HttpClientFactory(
+        settings, resolver=resolver, transport=httpx.MockTransport(handler)
+    )
+
+
+def _order_body(machine_name: str, web_url: str) -> bytes:
+    import json
+
+    return json.dumps(
+        {
+            "gamekey": GAMEKEY,
+            "subproducts": [
+                {
+                    "machine_name": machine_name,
+                    "human_name": "Synthetic Hero #1",
+                    "downloads": [
+                        {
+                            "platform": "ebook",
+                            "download_struct": [
+                                {
+                                    "name": "CBZ",
+                                    "md5": FILE_MD5,
+                                    "file_size": len(FILE_BYTES),
+                                    "url": {"web": web_url},
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    ).encode()
+
+
+def _handler(*, order_body: bytes, serve_file: bool = True, file_status: int = 200):
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.startswith("/api/v1/order/"):
+            return json_response(200, order_body)
+        if serve_file and path.endswith(".cbz"):
+            return httpx.Response(file_status, content=FILE_BYTES)
+        return json_response(404, b"{}")
+
+    return handler
+
+
+async def _matched_entitlement(db, config_dir, *, md5: str) -> SourceEntitlementRow:
+    """Sync, then mark the single-issue comic matched with the given expected md5."""
+    source = await repo.create_source(
+        db,
+        source_type=TYPE_HUMBLE,
+        name="Humble Bundle",
+        settings=HumbleSettings(session_cookie="SYNTH-COOKIE"),
+        connection_state="connected",
+    )
+    from sources_support import make_factory, order_handler
+
+    sync_factory = make_factory(
+        config_dir,
+        httpx.MockTransport(
+            order_handler(
+                list_body=b'[{"gamekey":"%s"}]' % GAMEKEY.encode(),
+                order_bodies={GAMEKEY: fixture_bytes("order_comics.json")},
+            )
+        ),
+    )
+    await run_sync(db, sync_factory, source, min_interval=0.0)
+    async with db.write_session() as session:
+        row = (
+            await session.execute(
+                select(SourceEntitlementRow).where(
+                    SourceEntitlementRow.machine_name == "synth_singleissue_01"
+                )
+            )
+        ).scalar_one()
+        row.review_status = "matched"
+        row.matched_series_id = 4321
+        row.md5 = md5
+        row.download_state = "queued"
+        eid = row.id
+    return await repo.get_entitlement(db, eid)
+
+
+@pytest.mark.req("FRG-SRC-006")
+async def test_happy_path_verifies_and_hands_off_to_import(db, config_dir):
+    ent = await _matched_entitlement(db, config_dir, md5=FILE_MD5)
+    settings = make_settings(config_dir)
+    handler = _handler(
+        order_body=_order_body(
+            "synth_singleissue_01", "https://dl.humble.com/synth_hero_01.cbz?t=x"
+        )
+    )
+    summary = await run_grab(
+        db, _grab_factory(config_dir, handler), settings, ent.id, min_interval=0.0
+    )
+    assert "imported" in summary
+
+    after = await repo.get_entitlement(db, ent.id)
+    assert after.download_state == "imported"
+    assert after.download_error is None
+
+    # Handed to the existing import pipeline as a normal completed download:
+    # a tracked_downloads row sits in import_pending pointing at the staged file.
+    from foragerr.downloads.models import TrackedDownloadRow
+
+    async with db.read_session() as session:
+        tracked = (
+            await session.execute(
+                select(TrackedDownloadRow).where(
+                    TrackedDownloadRow.download_id == f"humble:{ent.id}"
+                )
+            )
+        ).scalar_one()
+    assert tracked.state == "import_pending"
+    assert tracked.series_id == 4321
+    assert tracked.output_path.endswith(".cbz")
+
+
+@pytest.mark.req("FRG-SRC-006")
+async def test_checksum_mismatch_quarantines_and_fails(db, config_dir):
+    # Expected md5 deliberately disagrees with the served bytes.
+    ent = await _matched_entitlement(db, config_dir, md5="f" * 32)
+    settings = make_settings(config_dir)
+    handler = _handler(
+        order_body=_order_body(
+            "synth_singleissue_01", "https://dl.humble.com/synth_hero_01.cbz?t=x"
+        )
+    )
+    summary = await run_grab(
+        db, _grab_factory(config_dir, handler), settings, ent.id, min_interval=0.0
+    )
+    assert "md5 mismatch" in summary
+
+    after = await repo.get_entitlement(db, ent.id)
+    assert after.download_state == "failed"
+    assert "md5 mismatch" in after.download_error
+
+    # The bad file is quarantined (never imported) and no import row is created.
+    quarantine = sources_staging_dir(config_dir) / "quarantine"
+    assert (quarantine / f"{ent.id}.partial").exists()
+    from foragerr.downloads.models import TrackedDownloadRow
+
+    async with db.read_session() as session:
+        rows = (
+            await session.execute(select(TrackedDownloadRow))
+        ).scalars().all()
+    assert rows == []
+
+
+@pytest.mark.req("FRG-SRC-006")
+async def test_egress_off_allowlist_is_refused(db, config_dir):
+    ent = await _matched_entitlement(db, config_dir, md5=FILE_MD5)
+    settings = make_settings(config_dir)
+    # The order returns a download URL on a NON-Humble host.
+    handler = _handler(
+        order_body=_order_body(
+            "synth_singleissue_01", "https://evil.example.com/x.cbz"
+        ),
+        serve_file=False,
+    )
+    summary = await run_grab(
+        db, _grab_factory(config_dir, handler), settings, ent.id, min_interval=0.0
+    )
+    assert "download failed" in summary
+
+    after = await repo.get_entitlement(db, ent.id)
+    assert after.download_state == "failed"
+    assert "allowlist" in after.download_error or "refused" in after.download_error

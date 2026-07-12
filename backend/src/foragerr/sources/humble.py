@@ -285,6 +285,58 @@ def parse_order(gamekey: str, content: bytes) -> list[ParsedEntitlement]:
     return entitlements
 
 
+def find_download_url(
+    content: bytes, machine_name: str, *, md5: str | None = None
+) -> str | None:
+    """Extract one subproduct's *fresh signed* download URL from an order body.
+
+    Used at grab time (design decision 8): the signed ``url.web`` is time-limited
+    and NEVER stored, so it is re-read from a freshly fetched order. Locates the
+    subproduct by ``machine_name`` and returns the ``url.web`` of the
+    ``download_struct`` whose ``md5`` matches ``md5`` (the preferred copy pinned
+    on the entitlement row); when ``md5`` is ``None`` or unmatched, the first
+    struct carrying a web URL is returned. Returns ``None`` when the order no
+    longer contains a usable link. Never raises on a malformed body (returns
+    ``None``) — the caller treats that as an unavailable grab.
+    """
+    want_md5 = _clean_md5(md5) if md5 is not None else None
+    try:
+        data = json.loads(content)
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    subs = data.get("subproducts")
+    if not isinstance(subs, list):
+        return None
+    fallback: str | None = None
+    for raw in subs[:MAX_SUBPRODUCTS]:
+        if not isinstance(raw, dict) or raw.get("machine_name") != machine_name:
+            continue
+        downloads = raw.get("downloads")
+        if not isinstance(downloads, list):
+            return None
+        for download in downloads:
+            if not isinstance(download, dict):
+                continue
+            for struct in (download.get("download_struct") or [])[
+                :MAX_DOWNLOAD_STRUCTS
+            ]:
+                if not isinstance(struct, dict):
+                    continue
+                url = struct.get("url")
+                web = url.get("web") if isinstance(url, dict) else None
+                if not isinstance(web, str) or not web:
+                    continue
+                if want_md5 is not None and _clean_md5(struct.get("md5")) == want_md5:
+                    return web
+                if fallback is None:
+                    fallback = web
+        # Matched the subproduct but no md5-exact struct → the first web link.
+        return fallback
+    return fallback
+
+
 def parse_gamekeys(content: bytes) -> list[str]:
     """Parse the order-list body into gamekeys (FRG-SRC-003).
 
@@ -350,6 +402,22 @@ class HumbleClient:
         )
         return parse_order(gamekey, content)
 
+    async def fetch_download_url(
+        self, gamekey: str, machine_name: str, *, md5: str | None = None
+    ) -> str | None:
+        """Re-fetch a subproduct's FRESH signed download URL at grab time.
+
+        Fetches the order and returns the matching ``download_struct``'s
+        ``url.web`` (design decision 8 — the signed URL is never stored). Returns
+        ``None`` when the order no longer carries the link. An auth failure
+        raises :class:`HumbleAuthError` (drives the ``expired`` state)."""
+        content = await self._get(
+            f"/api/v1/order/{gamekey}",
+            ORDER_DETAIL_MAX_BYTES,
+            params={"all_tpkds": "true"},
+        )
+        return find_download_url(content, machine_name, md5=md5)
+
     async def _get(
         self, path: str, max_bytes: int, *, params: dict[str, str] | None = None
     ) -> bytes:
@@ -411,6 +479,7 @@ __all__ = [
     "ORDER_DETAIL_MAX_BYTES",
     "ORDER_LIST_MAX_BYTES",
     "ParsedEntitlement",
+    "find_download_url",
     "parse_gamekeys",
     "parse_order",
     "user_agent",

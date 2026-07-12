@@ -37,12 +37,25 @@ from foragerr.sources.registry import (
     implementations,
     validate_settings,
 )
+from foragerr.sources.models import SourceEntitlementRow
 from foragerr.sources.repo import (
     delete_source,
+    get_entitlement,
     get_source,
+    list_entitlements,
     list_sources,
     load_source_settings,
     public_settings,
+)
+from foragerr.sources.review import (
+    EntitlementActionError,
+    add_entitlement,
+    bulk_ignore,
+    bulk_match,
+    bulk_restore,
+    ignore_entitlement,
+    match_entitlement,
+    restore_entitlement,
 )
 from foragerr.sources.service import (
     SourceConnectError,
@@ -261,6 +274,238 @@ async def delete_source_endpoint(source_id: int, request: Request) -> None:
     if not await delete_source(db, source_id):
         raise ApiError(404, f"source {source_id} not found")
     return None
+
+
+# --- entitlement review surface (FRG-SRC-004/007) ---------------------------
+
+
+class EntitlementResource(BaseModel):
+    """One reviewable entitlement as returned by the surface (FRG-SRC-004)."""
+
+    id: int
+    source_id: int
+    machine_name: str
+    human_name: str
+    publisher: str | None
+    classification: str
+    review_status: str
+    download_state: str | None
+    download_error: str | None
+    preferred_format: str | None
+    file_size: int | None
+    filename: str | None
+    proposed_series_id: int | None
+    matched_series_id: int | None
+    proposed_match: dict[str, Any] | None
+
+    @classmethod
+    def from_row(cls, row: SourceEntitlementRow) -> "EntitlementResource":
+        import json
+
+        proposed = None
+        if row.proposed_match_json:
+            try:
+                proposed = json.loads(row.proposed_match_json)
+            except ValueError:
+                proposed = None
+        return cls(
+            id=row.id,
+            source_id=row.source_id,
+            machine_name=row.machine_name,
+            human_name=row.human_name,
+            publisher=row.publisher,
+            classification=row.classification,
+            review_status=row.review_status,
+            download_state=row.download_state,
+            download_error=row.download_error,
+            preferred_format=row.preferred_format,
+            file_size=row.file_size,
+            filename=row.filename,
+            proposed_series_id=row.proposed_series_id,
+            matched_series_id=row.matched_series_id,
+            proposed_match=proposed,
+        )
+
+
+class EntitlementDetail(EntitlementResource):
+    """An entitlement plus its collected-edition fill-sets (FRG-SRC-007)."""
+
+    fill_sets: list[dict[str, Any]] = []
+
+
+class MatchBody(BaseModel):
+    series_id: int
+
+
+class AddBody(BaseModel):
+    cv_volume_id: int | None = None
+    root_folder_id: int | None = None
+
+
+class BulkBody(BaseModel):
+    action: str
+    entitlement_ids: list[int]
+    series_id: int | None = None
+
+
+@router.get("/{source_id}/entitlements", response_model=list[EntitlementResource])
+async def list_entitlements_endpoint(
+    source_id: int,
+    request: Request,
+    classification: str | None = None,
+    review_status: str | None = None,
+) -> list[EntitlementResource]:
+    """List a source's entitlements, filterable by classification/review status."""
+    db = request.app.state.db
+    if await get_source(db, source_id) is None:
+        raise ApiError(404, f"source {source_id} not found")
+    rows = await list_entitlements(
+        db, source_id, classification=classification, review_status=review_status
+    )
+    return [EntitlementResource.from_row(r) for r in rows]
+
+
+@router.get("/entitlements/{entitlement_id}", response_model=EntitlementDetail)
+async def entitlement_detail_endpoint(
+    entitlement_id: int, request: Request
+) -> EntitlementDetail:
+    """One entitlement with its collected-edition fill-sets for the UI chips."""
+    db = request.app.state.db
+    row = await get_entitlement(db, entitlement_id)
+    if row is None:
+        raise ApiError(404, f"entitlement {entitlement_id} not found")
+    fill_sets = await _fill_sets(db, row.matched_series_id)
+    detail = EntitlementDetail(**EntitlementResource.from_row(row).model_dump())
+    detail.fill_sets = fill_sets
+    return detail
+
+
+@router.post("/entitlements/{entitlement_id}/match", response_model=EntitlementResource)
+async def match_entitlement_endpoint(
+    entitlement_id: int, body: MatchBody, request: Request
+) -> EntitlementResource:
+    """Link an entitlement to an existing series and accept it (FRG-SRC-004)."""
+    return await _run_action(
+        request,
+        lambda db, commands: match_entitlement(
+            db, entitlement_id, series_id=body.series_id, commands=commands
+        ),
+    )
+
+
+@router.post("/entitlements/{entitlement_id}/add", response_model=EntitlementResource)
+async def add_entitlement_endpoint(
+    entitlement_id: int, body: AddBody, request: Request
+) -> EntitlementResource:
+    """Add a brand-new series for an entitlement, then link it (FRG-SRC-004)."""
+    db = request.app.state.db
+    settings = request.app.state.settings
+    commands = getattr(request.app.state, "commands", None)
+    try:
+        row = await add_entitlement(
+            db,
+            settings,
+            entitlement_id,
+            commands=commands,
+            cv_volume_id=body.cv_volume_id,
+            root_folder_id=body.root_folder_id,
+        )
+    except EntitlementActionError as exc:
+        raise ApiError(exc.status, str(exc)) from exc
+    return EntitlementResource.from_row(row)
+
+
+@router.post(
+    "/entitlements/{entitlement_id}/ignore", response_model=EntitlementResource
+)
+async def ignore_entitlement_endpoint(
+    entitlement_id: int, request: Request
+) -> EntitlementResource:
+    """Ignore an entitlement (excluded from pending review) (FRG-SRC-004)."""
+    return await _run_action(
+        request, lambda db, commands: ignore_entitlement(db, entitlement_id)
+    )
+
+
+@router.post(
+    "/entitlements/{entitlement_id}/restore", response_model=EntitlementResource
+)
+async def restore_entitlement_endpoint(
+    entitlement_id: int, request: Request
+) -> EntitlementResource:
+    """Restore an ignored entitlement to ``new`` with a recomputed proposal."""
+    return await _run_action(
+        request, lambda db, commands: restore_entitlement(db, entitlement_id)
+    )
+
+
+@router.post("/entitlements/bulk")
+async def bulk_entitlements_endpoint(
+    body: BulkBody, request: Request
+) -> dict[str, Any]:
+    """Apply one review action to several entitlements (FRG-SRC-004)."""
+    db = request.app.state.db
+    commands = getattr(request.app.state, "commands", None)
+    if body.action == "ignore":
+        result = await bulk_ignore(db, body.entitlement_ids)
+    elif body.action == "restore":
+        result = await bulk_restore(db, body.entitlement_ids)
+    elif body.action == "match":
+        if body.series_id is None:
+            raise ApiError(422, "match requires series_id", field="series_id")
+        result = await bulk_match(
+            db, body.entitlement_ids, series_id=body.series_id, commands=commands
+        )
+    else:
+        raise ApiError(
+            400,
+            f"unknown bulk action {body.action!r}; expected ignore|restore|match",
+            field="action",
+        )
+    return {"applied": result.applied, "skipped": result.skipped, "errors": result.errors}
+
+
+async def _run_action(request: Request, action) -> EntitlementResource:
+    """Run a single-entitlement action, mapping its error to an ApiError."""
+    db = request.app.state.db
+    commands = getattr(request.app.state, "commands", None)
+    try:
+        row = await action(db, commands)
+    except EntitlementActionError as exc:
+        raise ApiError(exc.status, str(exc)) from exc
+    return EntitlementResource.from_row(row)
+
+
+async def _fill_sets(db, series_id: int | None) -> list[dict[str, Any]]:
+    """The matched series' collected-edition fill-sets as plain dicts."""
+    if series_id is None:
+        return []
+    from foragerr.sources.reconcile import fill_sets_for_series
+
+    async with db.read_session() as session:
+        sets = await fill_sets_for_series(session, series_id=series_id)
+    return [
+        {
+            "trade_issue_id": fs.trade_issue_id,
+            "standalone": fs.standalone,
+            "ranges": [
+                {
+                    "target_series_id": r.target_series_id,
+                    "range_label": r.range_label,
+                    "issues": [
+                        {
+                            "issue_id": i.issue_id,
+                            "issue_number": i.issue_number,
+                            "ownership": i.ownership,
+                        }
+                        for i in r.issues
+                    ],
+                }
+                for r in fs.ranges
+            ],
+        }
+        for fs in sets
+    ]
 
 
 def _reject_reserved_secret_prefix(source_type: str, supplied: dict[str, Any]) -> None:

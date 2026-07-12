@@ -420,6 +420,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     #     above (which creates app.state.scheduler). ---
     import foragerr.sources  # noqa: F401 — ORM model registration
     import foragerr.sources.commands  # noqa: F401 — command/handler registration
+    import foragerr.sources.grab  # noqa: F401 — source-grab command registration
     from foragerr.api.sources import router as sources_router
     from foragerr.sources.commands import register_source_sync_task
 

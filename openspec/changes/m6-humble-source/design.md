@@ -135,9 +135,73 @@ format-preference direction 2026-07-11): `CBZ` → `CBR` → `CB7` → `CBT` →
 its md5/size/filename ride on the entitlement row for the grab, with the full
 option list retained in `formats_json`.
 
-The **auto-match confidence threshold** (task 3.2) is deferred to worker A2's
-match-computation change — the entitlement row already carries the
-`proposed_series_id` / `proposed_match_json` columns (NULL until A2 fills them).
+## Resolved: proposed-match ranking + auto-match threshold (worker A2)
+
+The proposed match is computed server-side (`sources/matching.py`) by reusing
+the existing relevance primitive `metadata.search.name_similarity`
+(SequenceMatcher over the shared `parser.normalize.matching_key` folding,
+FRG-META-015) — the same score the ComicVine search/suggest ranking sorts by.
+Two candidate pools, **library-first**: the store title (issue-token and
+trailing parenthetical trimmed) is ranked against the library's series; only
+when no library series clears the propose floor is ComicVine consulted once
+(`suggest_series`) and its top candidate proposed as an *add*. A CV budget
+exhaustion (`ComicVineBudgetExhausted`, FRG-META-016) propagates so the item is
+left `new` with a NULL proposal and retried next sync; CV is consulted at all
+only when an api key is configured, so a batch of purchases cannot burn a path
+budget. Proposals are computed in a **post-sync enrichment pass** (the
+`source-sync` handler), not inside `run_sync` — keeping the diff CV-free.
+
+The **auto-match confidence threshold** (task 3.2) is **`AUTO_MATCH_THRESHOLD =
+0.85`** — the `name_similarity` value (a normalized-title SequenceMatcher ratio
+in `[0,1]`) at/above which the opt-in auto-sync path may accept-and-download
+without operator review. Chosen from the fixtures: `"Synthetic Hero #1"` folds
+to `synthetic hero 1` and scores ~0.93 against a `"Synthetic Hero"` library
+series (clears the bar), while `"...The Collected Edition Vol. 1 (collects
+#1-6)"` folds to a long token run scoring well under 0.85 against the same
+series (correctly withheld — a trade must never silently auto-file into the
+singles run). 0.85 sits in that gap: high enough that a merely word-overlapping
+different series never clears it, low enough that punctuation/casing/spacing
+noise on the true title does. A separate floor `PROPOSE_MIN_SIMILARITY = 0.5`
+gates whether *any* proposal is stored (a guess weaker than that is noise; the
+item stays `new` with a NULL proposal, surfaced as unmatched). Below the auto
+bar an item still gets a proposed match for the UI but waits for the operator.
+
+## Resolved: owned-via-edition ownership channel (FRG-SRC-007, worker A2)
+
+Reconciliation of a matched collected edition (`sources/reconcile.py`) makes the
+singles it fills leave `wanted` through the ONLY invariant-safe channel — the
+presence of an `issue_files` row (FRG-SER-019: ownership is a row's existence,
+never a status/predicate). Each fillable single (one with no file of its own)
+gets a `size = 0` `issue_files` row tagged with the trade `issues.id` in a new
+`issue_files.edition_issue_id` column (migration 0022); an issue already owned
+as a single is skipped (never replaced), and `size = 0` means the collected
+file's bytes are counted once, on its own file (no double-counting). Because
+ownership stays "an `issue_files` row exists", `wanted_issues()` /
+`series_statistics` / the pull matcher gain NO predicate and their FRG-SER-019
+absence proof is unchanged (extended by a sources-side three-way proof). Path
+uniqueness moves from the column-level `UNIQUE(path)` to a **partial** unique
+index over ordinary files (`edition_issue_id IS NULL`, behaviour-identical for
+every scan/import file) so one collected-edition path may back several filled
+singles. A trade with no declared containment (OGN/artbook) is `standalone` —
+no singles are fabricated. `revert` deletes the edition rows, returning unfilled
+singles to `wanted`.
+
+## Resolved: download + failed surface (FRG-SRC-006, worker A2)
+
+Grab (`sources/grab.py`, the `source-grab` command) re-fetches a FRESH signed
+URL at grab time (`HumbleClient.fetch_download_url` — the URL is never stored),
+enforces HTTPS + the `dl.humble.com` CDN host allowlist by reusing the DDL
+area's `AllowList` + per-hop `hop_check` over the shared factory's `external`
+profile (FRG-NFR-006), streams to `<config>/sources-staging` with the DDL
+streamer's byte/size bounds, md5-verifies against the API metadata, and hands a
+verified file to the EXISTING import pipeline as a normal completed download (a
+`grab_history` + `import_pending` `tracked_downloads` row that
+`ProcessImportsCommand` drains). *Deviation (flagged):* a grab FAILURE surfaces
+on the entitlement's own `download_state = "failed"` + `download_error` axis
+(retry re-queues the grab), NOT the usenet `tracked_downloads` failure loop —
+that loop writes a blocklist row and auto-enqueues an indexer re-search, which
+is meaningless for an account-owned store item. A checksum mismatch quarantines
+the file under `sources-staging/quarantine/` (never imported).
 
 ## Open Questions
 

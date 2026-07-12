@@ -95,6 +95,19 @@ async def _handle_source_sync(command: SourceSyncCommand, ctx: HandlerContext) -
         synced += 1
         if outcome.expired:
             expired += 1
+            continue
+        # Post-sync enrichment: compute proposed matches for newly discovered
+        # comics and (only when the source's auto_sync toggle is ON) auto-accept
+        # the confidently matched ones (FRG-SRC-004). Isolated so a proposal/CV
+        # hiccup never fails the sync itself.
+        try:
+            await _enrich(ctx, source)
+        except Exception:  # noqa: BLE001 — enrichment is best-effort
+            logger.warning(
+                "source-sync: enrichment failed for source %s (sync kept)",
+                source.id,
+                exc_info=True,
+            )
 
     summary = (
         f"source-sync: {synced} source(s) synced, {expired} expired, "
@@ -102,6 +115,13 @@ async def _handle_source_sync(command: SourceSyncCommand, ctx: HandlerContext) -
     )
     logger.info(summary)
     return summary
+
+
+async def _enrich(ctx: HandlerContext, source: SourceRow) -> None:
+    """Compute proposals + run the auto-sync path for one synced source."""
+    from foragerr.sources.enrich import enrich_source
+
+    await enrich_source(ctx.db, ctx.settings, source, commands=ctx.commands)
 
 
 async def _sync_one(
