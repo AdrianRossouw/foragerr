@@ -34,7 +34,13 @@ def register_auth(app: FastAPI) -> None:
     import foragerr.auth.commands  # noqa: F401 — command/handler registration
     from foragerr.auth.bootstrap import seed_principal_startup_hook
     from foragerr.auth.commands import register_prune_sessions_task
+    from foragerr.auth.perimeter import OpdsVerifyCache
     from foragerr.auth.routes import router as auth_router
+
+    # Per-app OPDS Basic verify-cache (FRG-AUTH-005): stashed on app.state (not a
+    # module global) so concurrent test apps never share it; the perimeter reads
+    # it and every credential write clears it.
+    app.state.opds_verify_cache = OpdsVerifyCache()
 
     app.include_router(auth_router, prefix="/api/v1")
 
