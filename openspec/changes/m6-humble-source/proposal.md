@@ -117,3 +117,16 @@ main, and M5 subsequently allocated FRG-UI-027/028 (creators screens) on main;
 ids are never reused (FRG-PROC-002), and main is authoritative. Mechanical
 renumber across this change's artifacts + registry; no scope change; approval
 stands._
+
+_Amendment (2026-07-12, implementation finding): FRG-SRC-006's failure surface
+is the ENTITLEMENT's download state (with reason + retry on the Sources
+screen), not the usenet failed-download loop — that loop turned out to be
+fused with blocklist-row writing and automatic indexer re-search
+(`downloads/tracking.py`), both meaningless for account-owned store content.
+The success path still rides the real import seam (tracked import_pending →
+ProcessImports). Spec delta and design decision 8 amended to match; flagged
+for owner review at the next breakpoint. Additionally, FRG-SRC-007's
+owned-via-edition channel required a small library-schema touch
+(`issue_files.edition_issue_id`, migration 0022, path uniqueness now a partial
+index over ordinary files) — the invariant-safe way for filled singles to
+leave wanted, with the FRG-SER-019 absence proofs unchanged and extended._

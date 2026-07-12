@@ -76,7 +76,10 @@ generic webhook/push discovery (poll only).
 8. **Download path**: accepted entitlement → fetch signed URL (fresh from the order
    API at grab time — stored URLs expire) → stream to the existing download
    staging area → md5 verify → hand to the import pipeline as a normal completed
-   download. Failures land in the existing failed-download surface with retry.
+   download. Failures land on the entitlement's download state (reason + retry
+   on the Sources screen) — NOT the usenet failed-download loop, which is fused
+   with blocklist writing and automatic indexer re-search, both meaningless for
+   account-owned store content (implementation amendment 2026-07-12).
 9. **API**: `/api/v1/sources` CRUD + `/sources/{id}/sync` + entitlement list/action
    endpoints (match/add/ignore/restore, bulk). Cookie is write-only in responses
    (existing SecretStr pattern); connect performs a live validation call before

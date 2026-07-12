@@ -106,8 +106,11 @@ the order API at grab time, streaming over HTTPS to the existing download stagin
 area with bounded size and timeout (FRG-NFR-006), restricting destinations to the
 Humble CDN host allowlist, verifying the response against the API-provided md5, and
 handing the verified file to the existing import pipeline as a normal completed
-download. Verification or download failures SHALL surface in the existing
-failed-download flow with retry.
+download. Verification or download failures SHALL surface on the entitlement's
+download state with the failure reason and a retry action; grab failures
+deliberately do NOT enter the usenet failed-download loop, whose fused
+blocklist-plus-automatic-indexer-re-search semantics are meaningless for
+account-owned store content (there is nothing to blocklist or re-search).
 
 #### Scenario: Happy path to library
 
@@ -117,7 +120,7 @@ failed-download flow with retry.
 #### Scenario: Checksum mismatch quarantined
 
 - **WHEN** a downloaded file's md5 does not match the API metadata
-- **THEN** the file is not imported, the failure is recorded on the entitlement and in the failed-download surface, and retry is available
+- **THEN** the file is not imported (quarantined aside), the failure is recorded on the entitlement's download state with its reason, and retry is available
 
 #### Scenario: Egress confinement
 
