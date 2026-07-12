@@ -1,4 +1,4 @@
-import { test, expect, request as pwRequest } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 import {
   copyFileSync,
   mkdirSync,
@@ -7,7 +7,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
-import { until } from './helpers';
+import { newApiContext, until } from './helpers';
 
 /**
  * Existing-library import flow (FRG-PROC-010, FRG-UI-015, FRG-IMP-022/023):
@@ -67,7 +67,7 @@ function seedFixtureTree(): void {
 test('FRG-PROC-010 FRG-UI-015 FRG-IMP-022 FRG-IMP-023: library import scans a root, reviews matches and imports existing files in place without a download', async ({ page }) => {
   test.skip(!RUN_DIR, 'no compose run dir provided (run via e2e/run.sh)');
 
-  const api = await pwRequest.newContext({ baseURL: BASE_URL, ignoreHTTPSErrors: true });
+  const api = await newApiContext(BASE_URL);
 
   // Serial-retry guard (spine convention): if a previous attempt already
   // executed the import, the staged group is gone (its files are tracked), so

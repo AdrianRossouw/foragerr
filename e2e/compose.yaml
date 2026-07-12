@@ -36,6 +36,15 @@ services:
       # start without it. A fixed non-secret value is fine for the hermetic e2e
       # stack — it only derives the key that encrypts provider secrets at rest.
       FORAGERR_SECRET_KEY: e2e-keystore-passphrase
+      # Mandatory auth bootstrap (FRG-AUTH-002): the app now refuses to start
+      # without an operator account, seeding the single principal from these on
+      # first boot. FIXED non-secret test fixtures (a throwaway hermetic admin,
+      # never real credentials) — the same defaults run.sh uses to log in and to
+      # retrieve the bootstrap API key. FORAGERR_OPDS_PASSWORD is deliberately
+      # left unset so the OPDS reader password equals the admin password at seed,
+      # which the auth negative-path spec's Basic check relies on.
+      FORAGERR_ADMIN_USER: ${FORAGERR_ADMIN_USER:-e2e-admin}
+      FORAGERR_ADMIN_PASSWORD: ${FORAGERR_ADMIN_PASSWORD:-e2e-admin-pw-9c3f2a1b}
       # Point the metadata client at the fixture ComicVine (the one sanctioned
       # e2e-only override; defaults to the real API in production).
       # Fixture-network plaintext is explicitly opted into (test affordance;

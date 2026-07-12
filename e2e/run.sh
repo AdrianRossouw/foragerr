@@ -28,6 +28,14 @@ export FORAGERR_E2E_RUN="${RUN_DIR}"
 export FORAGERR_PUID="$(id -u)"
 export FORAGERR_PGID="$(id -g)"
 
+# Mandatory-auth bootstrap fixtures (FRG-AUTH-002). FIXED non-secret test
+# credentials — a throwaway hermetic admin account, never real secrets. compose
+# interpolates the same defaults into the app's env; the Playwright specs read
+# these to drive the login form and Basic checks. Exported so both see one
+# source of truth.
+export FORAGERR_ADMIN_USER="${FORAGERR_ADMIN_USER:-e2e-admin}"
+export FORAGERR_ADMIN_PASSWORD="${FORAGERR_ADMIN_PASSWORD:-e2e-admin-pw-9c3f2a1b}"
+
 cleanup() {
   local code=$?
   if [ "${E2E_KEEP_UP:-0}" != "1" ]; then
@@ -113,15 +121,55 @@ if [ "${healthy}" != "1" ]; then
   exit 3
 fi
 
+# --- 4b. authenticate: log in, then retrieve the bootstrap API key ONCE ------
+# The stack now enforces mandatory auth (FRG-AUTH-010): every API call needs a
+# credential. Log in with the fixture admin (the one perimeter-exempt door) to a
+# cookie jar, then read the seeded API key exactly once via the authenticated
+# GET /api/v1/auth/bootstrap-key (a safe method — no Origin needed). The key is
+# stored SHA-256 in the DB and stays valid for the whole run, so the setup
+# script + every spec reach the app with the CSRF-immune X-Api-Key header; the
+# browser projects log in separately (auth.setup.ts) for their session cookie.
+echo "==> logging in and retrieving the bootstrap API key"
+COOKIE_JAR="${RUN_DIR}/cookies.txt"
+login_status="$(curl -sS -o "${RUN_DIR}/login.json" -w '%{http_code}' \
+  -c "${COOKIE_JAR}" \
+  -X POST "${FORAGERR_BASE_URL}/api/v1/auth/login" \
+  -H 'Content-Type: application/json' \
+  -d "{\"username\": \"${FORAGERR_ADMIN_USER}\", \"password\": \"${FORAGERR_ADMIN_PASSWORD}\", \"remember\": false}")"
+if [ "${login_status}" != "200" ]; then
+  echo "!! admin login failed (HTTP ${login_status}):" >&2
+  cat "${RUN_DIR}/login.json" >&2 || true
+  "${COMPOSE[@]}" logs foragerr || true
+  exit 3
+fi
+key_status="$(curl -sS -o "${RUN_DIR}/bootstrap-key.json" -w '%{http_code}' \
+  -b "${COOKIE_JAR}" \
+  "${FORAGERR_BASE_URL}/api/v1/auth/bootstrap-key")"
+if [ "${key_status}" != "200" ]; then
+  echo "!! bootstrap-key retrieval failed (HTTP ${key_status}):" >&2
+  cat "${RUN_DIR}/bootstrap-key.json" >&2 || true
+  exit 3
+fi
+E2E_API_KEY="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["api_key"])' "${RUN_DIR}/bootstrap-key.json")"
+if [ -z "${E2E_API_KEY}" ]; then
+  echo "!! bootstrap-key response carried no api_key" >&2
+  exit 3
+fi
+export E2E_API_KEY
+echo "bootstrap API key retrieved (used via X-Api-Key for the rest of the run)"
+
 # --- 5. register the root folder through the real API (FRG-SER-008) ---------
 # First-run registration end-to-end: POST /api/v1/rootfolder replaces the old
 # direct sqlite INSERT (there was no create API in M1). Idempotent across
 # re-runs against a kept-up stack: a duplicate registration is a 400 naming
-# "already registered" — tolerated, anything else is fatal.
+# "already registered" — tolerated, anything else is fatal. Authenticated with
+# the API key: the X-Api-Key surface is exempt from the CSRF Origin check, so no
+# Origin header is needed on this unsafe method.
 echo "==> registering root folder /library via POST /api/v1/rootfolder"
 seed_status="$(curl -sS -o "${RUN_DIR}/rootfolder-seed.json" -w '%{http_code}' \
   -X POST "${FORAGERR_BASE_URL}/api/v1/rootfolder" \
   -H 'Content-Type: application/json' \
+  -H "X-Api-Key: ${E2E_API_KEY}" \
   -d '{"path": "/library"}')"
 case "${seed_status}" in
   201)

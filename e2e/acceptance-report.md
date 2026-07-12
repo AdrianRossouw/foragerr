@@ -3,14 +3,15 @@
 _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.mjs` — do not edit by hand (FRG-PROC-010)._
 
 - **Verdict:** GREEN
-- **Scenarios:** 19 (18 pass, 0 fail, 1 skipped, 0 flaky, 0 not run)
-- **Run started:** 2026-07-12T13:56:48.868Z
-- **Duration:** 83.8s
+- **Scenarios:** 28 (27 pass, 0 fail, 1 skipped, 0 flaky, 0 not run)
+- **Run started:** 2026-07-12T15:33:41.593Z
+- **Duration:** 86.8s
 
 ## Scenario → requirement coverage
 
 | Result | Scenario | FRG requirement ids |
 | --- | --- | --- |
+| PASS | authenticate: log in through the UI and save the session | — |
 | PASS | FRG-PROC-010 FRG-DEP-007 FRG-DEP-001: first run is healthy and the SPA loads | FRG-DEP-001, FRG-DEP-007, FRG-PROC-010 |
 | PASS | FRG-PROC-010 FRG-DEP-013: the seeded DDL pair ships disabled and is enabled as an explicit opt-in | FRG-DEP-013, FRG-PROC-010 |
 | PASS | FRG-PROC-010 FRG-SER-005 FRG-UI-005: add a series from the ComicVine fixture lands issues | FRG-PROC-010, FRG-SER-005, FRG-UI-005 |
@@ -23,6 +24,14 @@ _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.m
 | PASS | FRG-PROC-010 FRG-OPDS-001 FRG-OPDS-002 FRG-OPDS-003 FRG-OPDS-005: OPDS navigates to a byte-identical comic download | FRG-OPDS-001, FRG-OPDS-002, FRG-OPDS-003, FRG-OPDS-005, FRG-PROC-010 |
 | SKIPPED | FRG-PROC-010: live SABnzbd tier (skipped — no credentials) | FRG-PROC-010 |
 | PASS | FRG-PROC-010 FRG-UI-015 FRG-IMP-022 FRG-IMP-023: library import scans a root, reviews matches and imports existing files in place without a download | FRG-IMP-022, FRG-IMP-023, FRG-PROC-010, FRG-UI-015 |
+| PASS | FRG-AUTH-010 FRG-PROC-010: a bare API request (no credential) is refused 401 | FRG-AUTH-010, FRG-PROC-010 |
+| PASS | FRG-AUTH-010 FRG-PROC-010: OPDS answers a bare request with a Basic realm challenge, then serves with Basic creds | FRG-AUTH-010, FRG-PROC-010 |
+| PASS | FRG-SEC-005 FRG-PROC-010: a cookie-authed unsafe method with a foreign Origin is refused 403, and the X-Api-Key surface is immune | FRG-PROC-010, FRG-SEC-005 |
+| PASS | FRG-AUTH-010 FRG-PROC-010: a logged-out UI visit to a protected route lands on the login screen | FRG-AUTH-010, FRG-PROC-010 |
+| PASS | FRG-AUTH-002 FRG-PROC-010: a wrong password yields a generic error and establishes no session | FRG-AUTH-002, FRG-PROC-010 |
+| PASS | FRG-AUTH-010 FRG-PROC-010: logging in returns the operator to the intended (return) path | FRG-AUTH-010, FRG-PROC-010 |
+| PASS | FRG-AUTH-004 FRG-PROC-010: after logout the old session token is dead — replaying it yields 401 | FRG-AUTH-004, FRG-PROC-010 |
+| PASS | FRG-AUTH-010 FRG-SEC-005 FRG-PROC-010: a logged-in browser establishes the authenticated WebSocket (real-time connection goes live) | FRG-AUTH-010, FRG-PROC-010, FRG-SEC-005 |
 | PASS | FRG-PROC-010 FRG-API-011: History shows the grabbed and imported rows sharing a downloadId | FRG-API-011, FRG-PROC-010 |
 | PASS | FRG-PROC-010 FRG-API-012: Wanted lists a monitored, published, fileless issue | FRG-API-012, FRG-PROC-010 |
 | PASS | FRG-PROC-010 FRG-OPDS-013: OPDS Recent serves the imported issue file bytes | FRG-OPDS-013, FRG-PROC-010 |
@@ -37,6 +46,9 @@ _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.m
 | --- | --- |
 | FRG-API-011 | PASS |
 | FRG-API-012 | PASS |
+| FRG-AUTH-002 | PASS |
+| FRG-AUTH-004 | PASS |
+| FRG-AUTH-010 | PASS |
 | FRG-CRTR-001 | PASS |
 | FRG-DDL-010 | PASS |
 | FRG-DEP-001 | PASS |
@@ -54,6 +66,7 @@ _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.m
 | FRG-PP-010 | PASS |
 | FRG-PROC-010 | PASS |
 | FRG-SCHED-002 | PASS |
+| FRG-SEC-005 | PASS |
 | FRG-SER-005 | PASS |
 | FRG-SER-009 | PASS |
 | FRG-SRCH-001 | PASS |

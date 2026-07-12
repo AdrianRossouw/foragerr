@@ -20,6 +20,30 @@ failure. Traces/screenshots for failures land under `e2e/results/`.
 Useful env: `E2E_KEEP_UP=1` leaves the stack running for debugging;
 `E2E_SKIP_BUILD=1` reuses an already-built `FORAGERR_IMAGE`.
 
+## Authentication (mandatory login)
+
+The app enforces mandatory authentication (m8-auth-core): every surface refuses
+a credential-free request, so the harness authenticates on both sides.
+
+- **Bootstrap.** `compose.yaml` seeds a throwaway admin account from
+  `FORAGERR_ADMIN_USER` / `FORAGERR_ADMIN_PASSWORD` (fixed, non-secret test
+  fixtures; `run.sh` and compose share the same defaults). No
+  `FORAGERR_OPDS_PASSWORD` is set, so the OPDS reader password equals the admin
+  password.
+- **run.sh** logs in once (the perimeter-exempt `POST /api/v1/auth/login`),
+  retrieves the bootstrap API key once via `GET /api/v1/auth/bootstrap-key`,
+  exports it as `E2E_API_KEY`, and uses `X-Api-Key` for its setup calls (the
+  key surface is exempt from the CSRF Origin check).
+- **Browser scenarios** run authenticated via a Playwright **setup project**
+  (`tests/auth.setup.ts`) that drives the real login form once and saves the
+  session to `.auth/state.json` (gitignored); every other project loads that
+  `storageState`. The session cookie is host-only, so it survives the ephemeral
+  host-port reassignment the `zz-*` restart/recreate specs cause.
+- **Programmatic API contexts** in specs use `newApiContext()` (helpers.ts),
+  which authenticates with `X-Api-Key`. It pins an EMPTY `storageState` so the
+  context does not inherit the project login cookie (which would otherwise make
+  it cookie-authed and trip the CSRF Origin check on unsafe methods).
+
 ## What it covers
 
 The spine (`tests/spine.spec.ts`, serial — the library grows across steps):
@@ -48,7 +72,17 @@ The spine (`tests/spine.spec.ts`, serial — the library grows across steps):
    involved (`FRG-UI-015`, `FRG-IMP-023`).
 9. **restart resilience** — `docker restart` mid-flight; library + persisted
    command queue survive (`FRG-SCHED-002`).
-10. **unconfigured key** (`tests/zz-unconfigured.spec.ts`, runs last) — the app
+10. **mandatory-auth negative paths** (`tests/z-auth-negative.spec.ts`) — the
+   (c) leg of the three-way FRG-AUTH-010 proof, end-to-end per surface: a bare
+   API GET is refused 401; OPDS answers a bare request with the
+   `Basic realm="foragerr-opds"` challenge then serves with Basic creds; a
+   foreign-Origin cookie POST is CSRF-blocked 403 while the `X-Api-Key` surface
+   is immune (FRG-SEC-005); a logged-out UI visit lands on the login screen; a
+   wrong password yields a generic error and no session (FRG-AUTH-002); login
+   returns to the intended path; a logged-out session token replays to 401
+   (FRG-AUTH-004); and a logged-in browser brings the authenticated WebSocket
+   live (proving the socket perimeter admits the good path).
+11. **unconfigured key** (`tests/zz-unconfigured.spec.ts`, runs last) — the app
    container is recreated with an explicitly **empty** ComicVine key
    (`E2E_CV_API_KEY=` against compose's `${E2E_CV_API_KEY-e2e-example-key}`);
    an Add Series search renders the actionable credential error pointing at

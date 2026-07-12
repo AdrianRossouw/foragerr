@@ -1,4 +1,72 @@
-import type { APIRequestContext } from '@playwright/test';
+import { request as pwRequest, type APIRequestContext } from '@playwright/test';
+
+/**
+ * Auth fixtures (m8-auth-core, FRG-AUTH-002/010). The whole stack now enforces
+ * mandatory authentication: every surface refuses a bare request. These are the
+ * FIXED, non-secret test credentials the hermetic stack bootstraps with — a
+ * throwaway admin account seeded from compose env, never real secrets. run.sh
+ * and compose.yaml carry the same defaults; the browser projects reach the app
+ * with a saved session (see auth.setup.ts / playwright.config.ts), and the
+ * programmatic API contexts below reach it with the bootstrap API key.
+ */
+export const ADMIN_USER = process.env.FORAGERR_ADMIN_USER ?? 'e2e-admin';
+export const ADMIN_PASSWORD =
+  process.env.FORAGERR_ADMIN_PASSWORD ?? 'e2e-admin-pw-9c3f2a1b';
+
+/** Where auth.setup.ts writes the authenticated browser session (gitignored). */
+export const STORAGE_STATE = '.auth/state.json';
+
+/**
+ * A programmatic API context authenticated with the bootstrap API key.
+ *
+ * The API key surface (``X-Api-Key`` header) is the clean path for a non-browser
+ * caller: it is exempt from the cookie surface's CSRF Origin check, so an
+ * unsafe method (POST/PUT/DELETE) needs no Origin header threaded through. The
+ * raw key is surfaced ONCE at bootstrap; run.sh retrieves it and exports it as
+ * ``E2E_API_KEY`` for every spec. The key is stored SHA-256 in the DB (on the
+ * persisted /config volume), so the same value keeps working across the
+ * restart/recreate the zz-* specs perform — no per-port re-auth needed.
+ *
+ * ``storageState`` is pinned EMPTY on purpose: an ``APIRequestContext`` created
+ * inside a project inherits that project's ``use.storageState`` (the saved
+ * login cookie), which would make these contexts authenticate by COOKIE instead
+ * of the key — and a cookie-authed unsafe method then trips the CSRF Origin
+ * check (403). Forcing an empty jar guarantees the ONLY credential is the key.
+ */
+export const EMPTY_STORAGE_STATE: { cookies: []; origins: [] } = {
+  cookies: [],
+  origins: [],
+};
+
+export async function newApiContext(baseURL: string): Promise<APIRequestContext> {
+  const apiKey = process.env.E2E_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      'E2E_API_KEY is not set — the authenticated API context needs the ' +
+        'bootstrap API key that run.sh retrieves. Run the suite via e2e/run.sh.',
+    );
+  }
+  return pwRequest.newContext({
+    baseURL,
+    ignoreHTTPSErrors: true,
+    storageState: EMPTY_STORAGE_STATE,
+    extraHTTPHeaders: { 'X-Api-Key': apiKey },
+  });
+}
+
+/**
+ * A genuinely UNAUTHENTICATED API context (no cookie, no key). Same
+ * empty-storageState pin as above — without it the context would inherit the
+ * project's login cookie and stop being "bare". Used by the negative-path spec
+ * to prove the perimeter refuses credential-free requests.
+ */
+export async function newBareContext(baseURL: string): Promise<APIRequestContext> {
+  return pwRequest.newContext({
+    baseURL,
+    ignoreHTTPSErrors: true,
+    storageState: EMPTY_STORAGE_STATE,
+  });
+}
 
 /** Enabled providers pointing at mockhub (resolved inside the compose network).
  *  Idempotent: safe to call again on a serial-group retry.

@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import { STORAGE_STATE } from './tests/helpers';
 
 /**
  * Playwright configuration for the foragerr end-to-end harness (FRG-PROC-010).
@@ -40,6 +41,14 @@ export default defineConfig({
     navigationTimeout: 30_000,
   },
   projects: [
-    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    // Mandatory-auth setup (FRG-AUTH-010): logs in once via the real UI and
+    // saves the session to STORAGE_STATE. Every browser-driven scenario depends
+    // on it and loads that state, so the whole suite runs authenticated.
+    { name: 'setup', testMatch: /auth\.setup\.ts/ },
+    {
+      name: 'chromium',
+      use: { ...devices['Desktop Chrome'], storageState: STORAGE_STATE },
+      dependencies: ['setup'],
+    },
   ],
 });

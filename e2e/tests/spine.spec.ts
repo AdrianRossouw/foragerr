@@ -1,7 +1,7 @@
-import { test, expect, request as pwRequest, type APIRequestContext } from '@playwright/test';
+import { test, expect, type APIRequestContext } from '@playwright/test';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
-import { createProviders, nudgeImport, until } from './helpers';
+import { createProviders, newApiContext, nudgeImport, until } from './helpers';
 
 /**
  * The M1 end-to-end spine (FRG-PROC-010). Each test title NAMES the FRG
@@ -38,7 +38,7 @@ let issueId = 0;
 test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async () => {
-  api = await pwRequest.newContext({ baseURL: BASE_URL, ignoreHTTPSErrors: true });
+  api = await newApiContext(BASE_URL);
   await createProviders(api);
 });
 
