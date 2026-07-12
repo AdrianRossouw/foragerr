@@ -9,6 +9,28 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.9.1] — 2026-07-12
+
+m8-rate-audit-followups: fixes and hardening from a full eight-angle + Codex
+backstop review of the v0.9.0 release. No requirement changes.
+
+### Fixed
+- **Login form now handles throttling** (FRG-AUTH-009): a 429 from the
+  failed-attempt throttle previously fell into the generic "Could not sign in.
+  Try again." message — which contradicted the documented backoff (a throttled
+  operator should *wait*, not retry). The form now shows "Too many failed
+  attempts. Please wait a moment before trying again."
+
+### Changed
+- **`audit_event` can never break the request it audits** (FRG-AUTH-009): the
+  never-raise property is now enforced by a swallow-all guard rather than
+  holding only by construction, so a future caller cannot take down the auth
+  path through a raising field value.
+- **Rate-limiter memory tightened** (FRG-AUTH-009): the global observation
+  counter is bounded by a size cap (O(threshold)) rather than the time window,
+  and emptied per-key windows are reclaimed immediately. Internal dedup of the
+  shared `client_ip` and throttle-refusal helpers; no behavior change.
+
 ## [v0.9.0] — 2026-07-12
 
 m8-rate-audit: failed-auth rate limiting and structured audit events — the

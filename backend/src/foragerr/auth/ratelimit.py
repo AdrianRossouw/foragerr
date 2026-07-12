@@ -98,6 +98,12 @@ class RateLimiter:
         now = self._clock()
         self._prune(dq, now)
         if not dq:
+            # All failures aged out — reclaim the slot now rather than leaving an
+            # empty deque to occupy registry capacity until eviction. pop(...,
+            # None) not del: a re-entrant clock or threaded host could remove the
+            # key between the get() above and here, and reclamation must never
+            # turn a throttle check into a 500 (gate finding).
+            self._windows.pop(key, None)
             return None
         self._windows.move_to_end(key)  # touch: least-idle
         if len(dq) < self._threshold:
@@ -140,6 +146,13 @@ class RateLimiter:
             self._global[surface] = dq
         dq.append(now)
         self._prune(dq, now)
+        # The rising-edge decision only needs to know whether the count reached
+        # the threshold — never the exact overshoot — so cap the deque length so
+        # its memory is O(threshold) instead of O(failures-in-window). Without
+        # this a high-volume spray could hold hundreds of thousands of
+        # timestamps for the full window before the time-prune bounds it.
+        while len(dq) > self._threshold:
+            dq.popleft()
         hot = len(dq) >= self._threshold
         was_hot = self._global_hot.get(surface, False)
         self._global_hot[surface] = hot

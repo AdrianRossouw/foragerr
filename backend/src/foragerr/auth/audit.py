@@ -64,8 +64,14 @@ def _field(key: str, value: Any) -> str:
     return f"{key}={rendered}"
 
 
-def _client_ip(request: HTTPConnection | None) -> str:
-    """The direct-connection client IP (``X-Forwarded-For`` is not trusted)."""
+def client_ip(request: HTTPConnection | None) -> str:
+    """The direct-connection client IP (``X-Forwarded-For`` is not trusted).
+
+    The one shared implementation — the perimeter and login route import this
+    rather than each keeping a copy. ``None`` request (startup/re-seed events)
+    and a request with no ``client`` both resolve to ``"unknown"``; note that a
+    server that never populates ``scope["client"]`` collapses every caller onto
+    that one bucket (documented alongside the S1 caveat in the threat model)."""
     if request is None:
         return "unknown"
     client = request.client
@@ -90,16 +96,24 @@ def audit_event(
     could otherwise forge a field (:func:`_field`) — never pass password or key
     material. The message is pre-rendered (no ``%`` args) so a ``%`` inside a
     username cannot trigger interpolation."""
-    resolved_surface = surface
-    if resolved_surface is None and request is not None:
-        resolved_surface = getattr(request.state, "auth_via", None)
-    parts = [f"ip={_client_ip(request)}"]
-    if resolved_surface is not None:
-        parts.append(f"surface={resolved_surface}")
-    for key, value in fields.items():
-        parts.append(_field(key, value))
-    logger.log(level, f"{event} {' '.join(parts)}")
+    try:
+        resolved_surface = surface
+        if resolved_surface is None and request is not None:
+            resolved_surface = getattr(request.state, "auth_via", None)
+        parts = [f"ip={client_ip(request)}"]
+        if resolved_surface is not None:
+            parts.append(f"surface={resolved_surface}")
+        for key, value in fields.items():
+            parts.append(_field(key, value))
+        logger.log(level, f"{event} {' '.join(parts)}")
+    except Exception:  # noqa: BLE001 — an audit line must NEVER break its caller
+        # This helper sits on the auth-critical path (login, OPDS verify, the
+        # re-seed DB transaction). Its contract is "must never raise": every
+        # current caller passes safe values, but a future one passing an object
+        # with a raising __str__ must not take the request down. Swallow and
+        # record the failure of the audit itself, without the event fields.
+        logger.error("auth.audit_failed event=%s", event)
 
 
-__all__ = ["MAX_FIELD_LENGTH", "audit_event", "sanitize"]
+__all__ = ["MAX_FIELD_LENGTH", "audit_event", "client_ip", "sanitize"]
 # _field is intentionally module-private (tested via audit_event output).
