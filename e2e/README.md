@@ -31,7 +31,7 @@ a credential-free request, so the harness authenticates on both sides.
   `FORAGERR_OPDS_PASSWORD` is set, so the OPDS reader password equals the admin
   password.
 - **run.sh** logs in once (the perimeter-exempt `POST /api/v1/auth/login`),
-  retrieves the bootstrap API key once via `GET /api/v1/auth/bootstrap-key`,
+  retrieves the bootstrap API key once via `POST /api/v1/auth/bootstrap-key`,
   exports it as `E2E_API_KEY`, and uses `X-Api-Key` for its setup calls (the
   key surface is exempt from the CSRF Origin check).
 - **Browser scenarios** run authenticated via a Playwright **setup project**

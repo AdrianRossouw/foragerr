@@ -37,17 +37,18 @@ import pipeline. Still planned:
 
 ## M8 — Authentication
 
-foragerr currently ships with no authentication and is operated Tailscale-only;
-that posture is an explicitly accepted risk (`RISK-020`), scheduled to be
-replaced, not kept forever. This milestone adds a single-user login, session
-and API-key handling, and uniform coverage of the UI, API, and OPDS surfaces.
-Its implementation requires fresh owner approval before work begins.
+This milestone replaces the original no-authentication posture (the accepted
+risk `RISK-020`, Tailscale-only) with a single-user login, session and API-key
+handling, and uniform coverage of the UI, API, and OPDS surfaces. **In
+progress**: the first change (`m8-auth-core`, v0.7.0) shipped the default-deny
+perimeter, mandatory login, two-tier sessions, scrypt password hashing, env
+bootstrap, the CSRF stance, and WebSocket origin validation, mitigating
+`RISK-020`. The requirements below remain planned for the follow-up changes.
 
-- Requirements: `FRG-AUTH-002` (login), `FRG-AUTH-003` (password KDF),
-  `FRG-AUTH-004` (sessions), `FRG-AUTH-005` (OPDS Basic realm), `FRG-AUTH-006`
-  (API keys), `FRG-AUTH-007` (key lifecycle), `FRG-AUTH-009` (rate
-  limiting/audit), `FRG-AUTH-010` (uniform coverage), `FRG-SEC-005` (CSRF
-  stance and WebSocket origin validation).
+- Remaining requirements: `FRG-AUTH-005` (independent OPDS Basic credential
+  lifecycle), `FRG-AUTH-006` (API keys), `FRG-AUTH-007` (key lifecycle) —
+  planned for `m8-keys-opds`; `FRG-AUTH-009` (login rate limiting and audit) —
+  planned for `m8-rate-audit`.
 
 ## M9 — UI refinement
 

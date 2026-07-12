@@ -1,11 +1,13 @@
 """Labelling-control checks for the Tailscale-only exposure posture (FRG-DEP-011).
 
-foragerr ships with no authentication in M1 (FRG-AUTH-001, accepted RISK-020);
-the ONLY compensating control is Tailscale-scoped exposure, and the deployment
-manual is the artifact that makes that control operational. These tests pin the
-manual to the posture so a docs edit cannot silently reintroduce an example
-that publishes the unauthenticated listener on every interface — the
-documentation here is a controlled artifact, and this is its regression test.
+Authentication is mandatory since m8-auth-core (FRG-AUTH-001 withdrawn,
+RISK-020 Mitigated), so Tailscale-scoped exposure is now deployment
+defense-in-depth (no TLS termination of our own, rate limiting pending
+m8-rate-audit) rather than the sole compensating control it once was. The
+deployment manual still carries the do-not-publish posture, and these tests
+pin it so a docs edit cannot silently reintroduce an example that publishes
+the listener on every interface — the documentation here is a controlled
+artifact, and this is its regression test.
 """
 
 import re

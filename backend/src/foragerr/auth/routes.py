@@ -14,7 +14,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from foragerr.auth import sessions as sessions_mod
-from foragerr.auth.passwords import hash_password, verify_password
+from foragerr.auth.passwords import hash_password_async, verify_password_async
 from foragerr.auth.repo import get_principal
 
 logger = logging.getLogger("foragerr.auth")
@@ -70,10 +70,11 @@ async def login(body: LoginBody, request: Request, response: Response) -> dict:
     principal = await get_principal(db)
 
     if principal is None:
-        hash_password(body.password)  # constant work — no user-enumeration timing
+        # constant work — no user-enumeration timing (off-loop, like verify)
+        await hash_password_async(body.password)
         raise HTTPException(status_code=401, detail="invalid credentials")
 
-    password_ok = verify_password(body.password, principal.password_hash)
+    password_ok = await verify_password_async(body.password, principal.password_hash)
     if not (principal.username == body.username and password_ok):
         raise HTTPException(status_code=401, detail="invalid credentials")
 
@@ -99,8 +100,12 @@ async def logout(request: Request, response: Response) -> Response:
     token = getattr(request.state, "session_token", None)
     if token:
         await sessions_mod.logout(db, token)
+    # Return the injected response so its Set-Cookie deletion header actually
+    # ships — a freshly constructed Response would drop it (FastAPI only merges
+    # the injected response's headers when the handler doesn't return its own).
     _clear_session_cookie(response, request)
-    return Response(status_code=204)
+    response.status_code = 204
+    return response
 
 
 @router.get("/auth/me")
@@ -112,13 +117,18 @@ async def me(request: Request) -> dict:
     return {"username": principal.username}
 
 
-@router.get("/auth/bootstrap-key")
+@router.post("/auth/bootstrap-key")
 async def bootstrap_key(request: Request) -> dict:
     """Return the seeded API key exactly ONCE (then 404; 404 after restart).
 
     Held in process memory only (never logged, never persisted plaintext); the
     first authenticated read consumes it. A tiny lifecycle affordance — the
-    Settings UI for key display/rotation lands in a later change."""
+    Settings UI for key display/rotation lands in a later change.
+
+    POST, not GET: the read is state-changing (it consumes the key), so it must
+    be an unsafe method that carries the FRG-SEC-005 CSRF Origin check — a GET
+    would let a cross-site top-level navigation burn the operator's one-time
+    retrieval under SameSite=Lax."""
     key = getattr(request.app.state, "bootstrap_api_key", None)
     if not key:
         raise HTTPException(

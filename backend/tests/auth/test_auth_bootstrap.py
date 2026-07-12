@@ -139,10 +139,10 @@ def test_bootstrap_key_endpoint_is_one_shot(tmp_path):
     app = create_app(Settings(config_dir=cfg))
     with TestClient(app) as client:
         # first authenticated read returns the key, then 404 forever
-        first = client.get("/api/v1/auth/bootstrap-key")
+        first = client.post("/api/v1/auth/bootstrap-key")
         assert first.status_code == 200
         assert first.json()["api_key"] == TEST_API_KEY
-        assert client.get("/api/v1/auth/bootstrap-key").status_code == 404
+        assert client.post("/api/v1/auth/bootstrap-key").status_code == 404
 
 
 @pytest.mark.req("FRG-AUTH-002")
@@ -156,4 +156,26 @@ def test_bootstrap_key_absent_after_restart(tmp_path):
     # Second boot over the existing principal: no key minted, endpoint 404s.
     app2 = create_app(Settings(config_dir=cfg))
     with TestClient(app2) as client:
-        assert client.get("/api/v1/auth/bootstrap-key").status_code == 404
+        assert client.post("/api/v1/auth/bootstrap-key").status_code == 404
+
+
+@pytest.mark.req("FRG-AUTH-002")
+def test_principal_table_is_a_hard_singleton(tmp_path):
+    """The schema forbids a second account: a would-be concurrent seeder that
+    inserts id=2 fails the CHECK rather than minting a second valid API key."""
+    cfg = tmp_path / "cfg"
+    cfg.mkdir()
+    with TestClient(create_app(Settings(config_dir=cfg))):
+        pass
+    con = sqlite3.connect(cfg / "foragerr.db")
+    try:
+        con.execute("PRAGMA foreign_keys = ON")
+        with pytest.raises(sqlite3.IntegrityError):
+            con.execute(
+                "INSERT INTO principal (id, username, password_hash, "
+                "opds_password_hash, api_key_sha256, created_at, updated_at) "
+                "VALUES (2, 'intruder', 'x', 'x', 'x', '2026-01-01', '2026-01-01')"
+            )
+            con.commit()
+    finally:
+        con.close()

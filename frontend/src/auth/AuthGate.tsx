@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuthMe } from '../api/authHooks';
 import { useAuthStore } from '../store/authStore';
 import { FullPageLoading } from '../components/FullPageLoading';
+import { safeReturnPath } from './returnPath';
 
 const LOGIN_PATH = '/login';
 
@@ -57,15 +58,11 @@ export function AuthGate({ children }: { children: ReactNode }) {
     }
     if (status === 'authenticated' && onLoginRoute) {
       const params = new URLSearchParams(location.search);
-      const requested = params.get('return');
-      // Only ever follow a same-origin relative path (never `//host` or an
-      // absolute URL) — the return param is attacker-controllable via a
-      // crafted /login?return= link, so it is an open-redirect surface.
-      const safe =
-        requested && requested.startsWith('/') && !requested.startsWith('//')
-          ? requested
-          : '/';
-      navigate(safe, { replace: true });
+      // safeReturnPath resolves the attacker-controllable `return` against the
+      // real origin and falls back to `/` for anything cross-origin or
+      // malformed — a substring check would let `/\evil.com` through and crash
+      // navigate() on a cross-origin history mutation.
+      navigate(safeReturnPath(params.get('return')), { replace: true });
     }
   }, [status, onLoginRoute, location, navigate]);
 

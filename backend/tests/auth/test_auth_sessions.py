@@ -160,9 +160,16 @@ def test_logout_revokes_server_side_and_replay_401(tmp_path):
         assert client.get("/api/v1/auth/me").status_code == 200
         # logout is a cookie-authed POST, so it carries the same-origin Origin
         # header the browser sends (FRG-SEC-005 CSRF check).
-        assert client.post(
+        logout = client.post(
             "/api/v1/auth/logout", headers={"Origin": "http://testserver"}
-        ).status_code == 204
+        )
+        assert logout.status_code == 204
+        # The response actually ships the cookie-deletion header (a fresh
+        # Response would silently drop it — the token is dead server-side either
+        # way, but the stale cookie must not linger client-side).
+        set_cookie = logout.headers.get("set-cookie", "")
+        assert S.COOKIE_NAME in set_cookie
+        assert 'Max-Age=0' in set_cookie or 'max-age=0' in set_cookie
         # Replay the deleted cookie (back-button) -> 401.
         client.cookies.clear()
         assert client.get(

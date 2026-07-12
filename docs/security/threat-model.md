@@ -1492,6 +1492,17 @@ CSRF rows; G-5 closed; FRG-AUTH-001 retired. Disposition:
   structured event without credential material.
 - **New dependency: none.** scrypt comes from the already-SOUP'd `cryptography`;
   sessions/principal ride SQLite; no SOUP register change.
+- **Gate-round hardenings (full 8-angle fleet + Codex, 2026-07-12)**: the KDF is
+  offloaded off the event loop (`anyio.to_thread.run_sync`) so the every-request
+  OPDS Basic verify cannot head-of-line-block the server (T-AUTH-6 amplification
+  bound); `bootstrap-key` moved GET→POST so the consuming one-shot read carries
+  the CSRF Origin check (a cross-site GET could otherwise burn the operator's
+  retrieval); the `principal` table gained a `CHECK (id = 1)` singleton so two
+  instances on one DB cannot both seed a valid account; the login-redirect
+  `?return=` guard resolves against the real origin (a substring guard let
+  `/\evil.com` through and crashed the SPA on a cross-origin history mutation);
+  logout now returns the cookie-deletion response so the stale cookie is cleared
+  client-side. All five are covered by tagged tests.
 
 RISK-020 flips **Accept → Mitigated** (rate-limit/audit residual noted on the row,
 owned by `m8-rate-audit`); RISK-022 flips to **Mitigated**; RISK-003 notes the OPDS

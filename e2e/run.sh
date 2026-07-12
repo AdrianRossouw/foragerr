@@ -125,10 +125,12 @@ fi
 # The stack now enforces mandatory auth (FRG-AUTH-010): every API call needs a
 # credential. Log in with the fixture admin (the one perimeter-exempt door) to a
 # cookie jar, then read the seeded API key exactly once via the authenticated
-# GET /api/v1/auth/bootstrap-key (a safe method — no Origin needed). The key is
-# stored SHA-256 in the DB and stays valid for the whole run, so the setup
-# script + every spec reach the app with the CSRF-immune X-Api-Key header; the
-# browser projects log in separately (auth.setup.ts) for their session cookie.
+# POST /api/v1/auth/bootstrap-key. It is a POST (the read consumes the one-time
+# key — a state change), so under cookie auth it carries the FRG-SEC-005 Origin
+# check: send a matching Origin. The key is stored SHA-256 in the DB and stays
+# valid for the whole run, so the setup script + every spec reach the app with
+# the CSRF-immune X-Api-Key header; the browser projects log in separately
+# (auth.setup.ts) for their session cookie.
 echo "==> logging in and retrieving the bootstrap API key"
 COOKIE_JAR="${RUN_DIR}/cookies.txt"
 login_status="$(curl -sS -o "${RUN_DIR}/login.json" -w '%{http_code}' \
@@ -144,6 +146,8 @@ if [ "${login_status}" != "200" ]; then
 fi
 key_status="$(curl -sS -o "${RUN_DIR}/bootstrap-key.json" -w '%{http_code}' \
   -b "${COOKIE_JAR}" \
+  -X POST \
+  -H "Origin: ${FORAGERR_BASE_URL}" \
   "${FORAGERR_BASE_URL}/api/v1/auth/bootstrap-key")"
 if [ "${key_status}" != "200" ]; then
   echo "!! bootstrap-key retrieval failed (HTTP ${key_status}):" >&2

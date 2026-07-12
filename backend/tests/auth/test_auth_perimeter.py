@@ -86,6 +86,25 @@ def test_exempt_list_is_exactly_health_and_login(tmp_path):
 
 
 @pytest.mark.req("FRG-AUTH-010")
+def test_no_unexpected_mount_serves_bytes_outside_the_perimeter(tmp_path):
+    """App-level dependencies never run for a Starlette ``Mount``, so the
+    route-inventory walk (which only covers APIRoute/APIWebSocketRoute) cannot
+    see one. Pin the invariant the perimeter actually rests on: the ONLY mount
+    is the SPA static shell (serves inert UI bytes). A future change that mounts
+    sensitive bytes (covers, the download dir, a sub-app) trips this instead of
+    silently shipping an unauthenticated surface."""
+    from starlette.routing import Mount
+
+    app = make_app(tmp_path)
+    mounts = [r for r in app.routes if isinstance(r, Mount)]
+    assert all(getattr(m, "name", None) == "spa" for m in mounts), (
+        "an unexpected Mount is present — app-level auth does not cover Mounts, "
+        "so serving bytes through one bypasses the FRG-AUTH-010 perimeter; route "
+        f"it through an APIRoute/OPDS instead. Mounts: {[m.name for m in mounts]}"
+    )
+
+
+@pytest.mark.req("FRG-AUTH-010")
 def test_newly_mounted_router_is_covered_by_construction(tmp_path):
     """A router mounted onto the factory app with NO auth annotation still
     refuses bare requests — the perimeter covers additions by construction."""

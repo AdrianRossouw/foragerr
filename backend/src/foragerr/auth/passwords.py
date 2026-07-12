@@ -34,6 +34,7 @@ import base64
 import hmac
 import os
 
+import anyio.to_thread
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 
 #: scrypt cost parameters for NEW hashes. See the module docstring for the
@@ -102,4 +103,26 @@ def verify_password(password: str, stored: str) -> bool:
     return hmac.compare_digest(candidate, expected)
 
 
-__all__ = ["hash_password", "verify_password", "SCRYPT_N", "SCRYPT_R", "SCRYPT_P"]
+async def hash_password_async(password: str) -> str:
+    """Off-loop :func:`hash_password` — scrypt is CPU/memory-bound (~170 ms at
+    production cost), so running it inline in an ``async`` handler would block
+    the event loop. Call this from async request paths."""
+    return await anyio.to_thread.run_sync(hash_password, password)
+
+
+async def verify_password_async(password: str, stored: str) -> bool:
+    """Off-loop :func:`verify_password`. The OPDS Basic path verifies on every
+    request, so keeping the KDF off the event-loop thread stops one reader from
+    head-of-line-blocking the whole server."""
+    return await anyio.to_thread.run_sync(verify_password, password, stored)
+
+
+__all__ = [
+    "hash_password",
+    "verify_password",
+    "hash_password_async",
+    "verify_password_async",
+    "SCRYPT_N",
+    "SCRYPT_R",
+    "SCRYPT_P",
+]

@@ -45,6 +45,10 @@ def upgrade() -> None:
         sa.Column("api_key_sha256", sa.Text(), nullable=False),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
+        # Single-user tool: enforce ONE account at the schema level. A second
+        # concurrent bootstrap seeder (two instances sharing an empty DB) gets
+        # id=2 and fails this CHECK rather than minting a second valid API key.
+        sa.CheckConstraint("id = 1", name="ck_principal_singleton"),
     )
     op.create_table(
         "sessions",

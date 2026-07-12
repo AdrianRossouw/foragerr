@@ -38,7 +38,7 @@ from starlette.requests import HTTPConnection
 
 from foragerr.auth import sessions as sessions_mod
 from foragerr.auth.repo import find_by_api_key, get_principal
-from foragerr.auth.passwords import verify_password
+from foragerr.auth.passwords import verify_password_async
 
 logger = logging.getLogger("foragerr.auth")
 
@@ -133,7 +133,7 @@ async def _authenticate(request: HTTPConnection) -> tuple[int, str] | None:
                 user_ok = hmac.compare_digest(
                     creds[0].encode("utf-8"), principal.username.encode("utf-8")
                 )
-                password_ok = verify_password(
+                password_ok = await verify_password_async(
                     creds[1], principal.opds_password_hash
                 )
                 if user_ok and password_ok:

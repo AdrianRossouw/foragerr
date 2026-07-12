@@ -4,12 +4,8 @@ import { useLogin } from '../../api/authHooks';
 import { ApiRequestError } from '../../api/fetcher';
 import { useAuthStore } from '../../store/authStore';
 import { LogoMarkIcon } from '../../components/icons';
+import { safeReturnPath } from '../../auth/returnPath';
 import styles from './LoginScreen.module.css';
-
-/** Only ever follow a same-origin relative path — see AuthGate's matching guard. */
-function safeReturnPath(raw: string | null): string {
-  return raw && raw.startsWith('/') && !raw.startsWith('//') ? raw : '/';
-}
 
 /**
  * Login screen (m8-auth-core, tasks 4.1/5.6). Username, password, a

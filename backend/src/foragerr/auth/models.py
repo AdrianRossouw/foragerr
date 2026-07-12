@@ -36,6 +36,13 @@ class PrincipalRow(Base):
 
     id: Mapped[int] = mapped_column(StrictInteger, primary_key=True, autoincrement=True)
     username: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # Single-user tool: the schema itself forbids a second account. The
+    # ``id = 1`` CHECK turns the bootstrap seed's check-then-insert into a hard
+    # singleton — a second concurrent seeder (two instances on one DB) inserts
+    # id=2 and fails with an IntegrityError instead of minting a second set of
+    # valid credentials.
+    __table_args__ = (CheckConstraint("id = 1", name="ck_principal_singleton"),)
     #: scrypt hash of the web login password (``scrypt$n$r$p$salt$hash``).
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
     #: scrypt hash of the OPDS HTTP-Basic password (seeded = admin password

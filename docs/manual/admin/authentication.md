@@ -125,9 +125,14 @@ curl -c cookies.txt -X POST http://<host>:8789/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username": "admin", "password": "<your-admin-password>"}'
 
-curl -b cookies.txt http://<host>:8789/api/v1/auth/bootstrap-key
+curl -b cookies.txt -X POST -H "Origin: http://<host>:8789" \
+  http://<host>:8789/api/v1/auth/bootstrap-key
 # {"api_key": "..."}
 ```
+
+Retrieving the key is a `POST` (the read consumes the one-time key), so under
+cookie authentication it needs an `Origin` header matching your deployment —
+the same cross-site-request protection every state-changing call carries.
 
 That endpoint answers **once per boot** — the key is held only in the
 running process's memory (never logged, never written to disk in plaintext),
