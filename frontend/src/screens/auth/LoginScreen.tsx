@@ -48,11 +48,17 @@ export function LoginScreen() {
         onError: (err) => {
           // The backend never distinguishes bad-user from bad-password (any
           // failure is a 401 with the same generic body) — the form doesn't
-          // either. A non-401 failure (network/5xx) gets its own message so an
-          // operator isn't told their password is wrong when the backend is
-          // simply unreachable.
+          // either. A 429 means failed-attempt throttling has kicked in
+          // (FRG-AUTH-009): the operator must WAIT, not retry — telling them to
+          // "try again" would contradict the documented backoff. A non-401/429
+          // failure (network/5xx) gets its own message so an operator isn't
+          // told their password is wrong when the backend is simply unreachable.
           if (err instanceof ApiRequestError && err.status === 401) {
             setError('Invalid username or password.');
+          } else if (err instanceof ApiRequestError && err.status === 429) {
+            setError(
+              'Too many failed attempts. Please wait a moment before trying again.',
+            );
           } else {
             setError('Could not sign in. Try again.');
           }

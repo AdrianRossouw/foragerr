@@ -1617,7 +1617,11 @@ shipped model:
   defence-in-depth degradation, not an authentication bypass. Mitigation is
   operational and documented in `docs/manual/admin/network.md`: run with
   `network_mode: host`, Tailscale inside the container, or a source-preserving
-  DNAT (`userland-proxy=false`) so the limiter keys on genuine client IPs.
+  DNAT (`userland-proxy=false`) so the limiter keys on genuine client IPs. The
+  same shared-bucket failure mode arises if the ASGI server never populates
+  `scope["client"]` (the IP resolves to the literal `"unknown"` for every
+  caller); the mitigation is identical, and in practice the direct-uvicorn
+  deployment always populates it.
 - **Log-injection hardening.** The one attacker-controlled string that reaches
   an audit event — the submitted username — is stripped of every C0/C1 control
   character (newlines, carriage returns, ANSI escape introducers) and length-

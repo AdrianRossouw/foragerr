@@ -102,6 +102,26 @@ describe('FRG-AUTH-002: login screen', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not sign in. Try again.');
   });
 
+  it('FRG-AUTH-009: a 429 tells the operator to wait, not to retry (matches the throttle contract)', async () => {
+    renderLogin('/login', () => {
+      throw new ApiRequestError(
+        429,
+        { message: 'too many failed attempts', errors: [] },
+        '/api/v1/auth/login',
+      );
+    });
+
+    await fillAndSubmit('adrian', 'wrong-password');
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(
+      'Too many failed attempts. Please wait a moment before trying again.',
+    );
+    // Must NOT tell them to retry — that would contradict the backoff.
+    expect(alert).not.toHaveTextContent('Try again');
+    expect(useAuthStore.getState().status).not.toBe('authenticated');
+  });
+
   it('FRG-AUTH-002: username and password inputs are properly labeled (a11y)', () => {
     renderLogin('/login', () => ({ username: 'adrian' }));
 

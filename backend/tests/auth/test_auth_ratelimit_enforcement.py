@@ -19,7 +19,7 @@ from conftest import TEST_ADMIN_PASSWORD, TEST_ADMIN_USER, TEST_API_KEY
 from foragerr.app import create_app
 from foragerr.auth import perimeter as P
 from foragerr.auth import routes as R
-from foragerr.auth.ratelimit import RateLimiter
+from foragerr.auth.ratelimit import RateLimiter, SURFACE_LOGIN
 from foragerr.config import Settings
 
 
@@ -462,6 +462,25 @@ def test_no_credential_material_in_any_audit_record(tmp_path, caplog):
         "secret-wrong-key",
     ):
         assert secret not in blob, f"credential material {secret!r} leaked to logs"
+
+
+@pytest.mark.req("FRG-AUTH-009")
+def test_audit_event_never_raises_into_the_caller(caplog):
+    """audit_event must never propagate an exception into the auth path it
+    audits: a field value whose str() raises is swallowed and recorded as
+    auth.audit_failed, not re-raised (structural robustness backstop)."""
+    from foragerr.auth.audit import audit_event
+
+    class _Boom:
+        def __str__(self) -> str:  # pragma: no cover - the point is it raises
+            raise RuntimeError("boom")
+
+    caplog.set_level(logging.DEBUG, logger="foragerr.auth")
+    # Must not raise even though rendering the field blows up.
+    audit_event("auth.login.failure", None, SURFACE_LOGIN, boom=_Boom())
+    events = _events(caplog)
+    assert "auth.audit_failed" in events
+    assert "auth.login.failure" not in events  # the doomed render did not emit
 
 
 @pytest.mark.req("FRG-AUTH-009")

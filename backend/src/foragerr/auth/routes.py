@@ -15,17 +15,16 @@ the refusal is logged structurally (the field, never any credential material).
 from __future__ import annotations
 
 import logging
-import math
 import secrets
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from foragerr.auth import sessions as sessions_mod
-from foragerr.auth.audit import audit_event
+from foragerr.auth.audit import audit_event, client_ip
 from foragerr.auth.models import PrincipalRow
 from foragerr.auth.passwords import hash_password_async, verify_password_async
-from foragerr.auth.perimeter import clear_opds_verify_cache
+from foragerr.auth.perimeter import clear_opds_verify_cache, raise_throttled
 from foragerr.auth.ratelimit import SURFACE_LOGIN
 from foragerr.auth.repo import api_key_hash, get_principal
 from foragerr.db.base import utcnow
@@ -98,24 +97,15 @@ def _throttle_check(request: Request) -> None:
     limiter = getattr(request.app.state, "auth_rate_limiter", None)
     if limiter is None:
         return
-    wait = limiter.retry_after(_login_ip(request), SURFACE_LOGIN)
+    wait = limiter.retry_after(client_ip(request), SURFACE_LOGIN)
     if wait is not None:
-        raise HTTPException(
-            status_code=429,
-            detail="too many failed attempts",
-            headers={"Retry-After": str(int(math.ceil(wait)))},
-        )
-
-
-def _login_ip(request: Request) -> str:
-    client = request.client
-    return client.host if client is not None else "unknown"
+        raise_throttled(wait)
 
 
 def _record_login_failure(request: Request, username: str) -> None:
     """Count a credential failure and emit the audit events (FRG-AUTH-009)."""
     limiter = getattr(request.app.state, "auth_rate_limiter", None)
-    if limiter is not None and limiter.record_failure(_login_ip(request), SURFACE_LOGIN):
+    if limiter is not None and limiter.record_failure(client_ip(request), SURFACE_LOGIN):
         audit_event("auth.backoff_triggered", request, SURFACE_LOGIN, level=logging.WARNING)
     audit_event(
         "auth.login.failure", request, SURFACE_LOGIN, level=logging.WARNING, username=username
@@ -160,7 +150,7 @@ async def login(body: LoginBody, request: Request, response: Response) -> dict:
     _set_session_cookie(response, request, token, tier, settings)
     limiter = getattr(request.app.state, "auth_rate_limiter", None)
     if limiter is not None:
-        limiter.record_success(_login_ip(request), SURFACE_LOGIN)
+        limiter.record_success(client_ip(request), SURFACE_LOGIN)
     audit_event("auth.login.success", request, SURFACE_LOGIN, username=principal.username)
     return {"username": principal.username}
 

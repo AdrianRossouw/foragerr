@@ -42,7 +42,7 @@ from fastapi import HTTPException
 from starlette.requests import HTTPConnection
 
 from foragerr.auth import sessions as sessions_mod
-from foragerr.auth.audit import audit_event
+from foragerr.auth.audit import audit_event, client_ip
 from foragerr.auth.ratelimit import SURFACE_API_KEY, SURFACE_BASIC
 from foragerr.auth.repo import find_by_api_key, get_principal
 from foragerr.auth.passwords import verify_password_async
@@ -208,14 +208,13 @@ def _decode_basic(header: str) -> tuple[str, str] | None:
     return user, password
 
 
-def _client_ip(request: HTTPConnection) -> str:
-    """The direct-connection client IP (``X-Forwarded-For`` is not trusted)."""
-    client = request.client
-    return client.host if client is not None else "unknown"
+def raise_throttled(wait: float) -> None:
+    """Refuse a throttled surface with 429 + ``Retry-After`` (FRG-AUTH-009).
 
-
-def _raise_throttled(wait: float) -> None:
-    """Refuse a throttled surface with 429 + ``Retry-After`` (FRG-AUTH-009)."""
+    Shared by the perimeter's api-key/Basic paths and the login route (which
+    imports it) so the 429 shape is defined once. ``wait`` is seconds until the
+    deadline; the header is always a positive integer (callers only invoke this
+    when ``retry_after`` returned a value > 0)."""
     raise HTTPException(
         status_code=429,
         detail="too many failed attempts",
@@ -241,7 +240,7 @@ async def _authenticate(request: HTTPConnection) -> tuple[int, str] | None:
             return authed.principal_id, "cookie"
 
     limiter = getattr(app.state, "auth_rate_limiter", None)
-    ip = _client_ip(request)
+    ip = client_ip(request)
 
     # 2. X-Api-Key header (any surface). Header only — never a query param. A
     #    PRESENT key is a credential-bearing attempt: the surface is throttled
@@ -251,7 +250,7 @@ async def _authenticate(request: HTTPConnection) -> tuple[int, str] | None:
         if limiter is not None:
             wait = limiter.retry_after(ip, SURFACE_API_KEY)
             if wait is not None:
-                _raise_throttled(wait)
+                raise_throttled(wait)
         principal = await find_by_api_key(db, api_key)
         if principal is not None:
             if limiter is not None:
@@ -282,7 +281,7 @@ async def _authenticate(request: HTTPConnection) -> tuple[int, str] | None:
             if limiter is not None:
                 wait = limiter.retry_after(ip, SURFACE_BASIC)
                 if wait is not None:
-                    _raise_throttled(wait)
+                    raise_throttled(wait)
             cache = getattr(app.state, "opds_verify_cache", None)
             generation = 0
             if cache is not None:
@@ -441,7 +440,7 @@ async def authenticate_ws(websocket) -> int | None:
             # (auth.apikey_source_seen). Guessing is infeasible (256-bit key) so
             # the socket is not throttled, but a failure is still audited.
             sources = getattr(app.state, "auth_apikey_sources", None)
-            if sources is not None and sources.observe(_client_ip(websocket)):
+            if sources is not None and sources.observe(client_ip(websocket)):
                 audit_event("auth.apikey_source_seen", websocket, SURFACE_API_KEY)
             return principal.id
         audit_event("auth.apikey_failure", websocket, SURFACE_API_KEY, level=logging.WARNING)
