@@ -9,7 +9,9 @@ restart-safe), FRG-META-013 (re-fetch cover only on URL change).
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
+from collections import deque
 from pathlib import Path
 
 import pytest
@@ -31,6 +33,7 @@ from foragerr.library.models import IssueRow, SeriesRow
 
 from foragerr.db.base import utcnow
 from foragerr.metadata import ratelimit
+from foragerr.metadata.errors import ComicVineBudgetExhausted
 
 from flows_support import FakeCV, build_factory, credit, flows_settings, issue
 
@@ -598,6 +601,53 @@ async def test_credit_phase_defers_on_budget_then_resumes_next_run(
         factory=build_factory(budgeted, fake.handler()),
     )
     assert len(await _stamped_cv_ids(db, series_id)) == 15  # remainder resumed
+
+
+@pytest.mark.req("FRG-META-016")
+@pytest.mark.req("FRG-META-017")
+async def test_budget_refusal_mid_walk_leaves_stamp_and_issues_untouched(
+    db, settings, commands, root_folder_id, root_folder_path, format_profile_id
+):
+    """A budget refusal DURING the issue walk aborts the refresh before any
+    write transaction runs. Unlike a partial walk — which reconciles the pages
+    it got and must therefore clear the stamp — nothing was reconciled here,
+    so the stored stamp still describes the last COMPLETE walk and keeping it
+    is correct: the next refresh either short-circuits back to exactly that
+    state or full-walks on the changed date (gate finding, cv-budget-caching
+    review — pins the stamp-lifecycle distinction)."""
+    config_dir = Path(settings.config_dir)
+    series_id = await _make_series(db, root_folder_path, format_profile_id)
+
+    fake = FakeCV().volume(1, date_last_updated="D1").issues(
+        1, [issue(100, "1"), issue(101, "2")]
+    )
+    budgeted = flows_settings(config_dir, comicvine_hourly_path_budget=10)
+    ratelimit.reset_gate()
+    await refresh_series(
+        db, budgeted, series_id, commands=commands,
+        factory=build_factory(budgeted, fake.handler()),
+    )
+    async with db.read_session() as session:
+        series = await repo.get_series(session, series_id)
+    assert series.cv_date_last_updated == "D1"
+
+    # A changed date forces a walk; exhaust the issues-path budget first so
+    # the walk is refused before any page (or any write) happens.
+    fake.volume(1, date_last_updated="D2").issues(1, [issue(100, "1")])
+    gate = ratelimit.gate()
+    now = asyncio.get_running_loop().time()
+    gate._ledgers["issues"] = deque([now] * 10)
+    with pytest.raises(ComicVineBudgetExhausted):
+        await refresh_series(
+            db, budgeted, series_id, commands=commands,
+            factory=build_factory(budgeted, fake.handler()),
+        )
+
+    async with db.read_session() as session:
+        series = await repo.get_series(session, series_id)
+    rows = await _issues(db, series_id)
+    assert series.cv_date_last_updated == "D1"  # still the last complete walk
+    assert {r.cv_issue_id for r in rows} == {100, 101}  # nothing reconciled
 
 
 # --- chained commands + restart-safety (FRG-SER-005) ------------------------

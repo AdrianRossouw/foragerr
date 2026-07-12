@@ -109,6 +109,34 @@ class _RateGate:
         while ledger and ledger[0] <= cutoff:
             ledger.popleft()
 
+    def _refuse_if_exhausted(self, bucket: str, budget: int, now: float) -> None:
+        """Raise the typed refusal when ``bucket`` is at its ceiling.
+
+        ``retry_after_seconds`` is the time until the bucket next falls BELOW
+        the ceiling — the admission at index ``len - budget`` must age out,
+        which matches :meth:`budget_health`'s ``resumes_in_seconds`` even when
+        a lowered ceiling leaves the ledger holding more than ``budget``
+        entries (gate finding, cv-budget-caching review).
+        """
+        ledger = self._ledgers.setdefault(bucket, deque())
+        self._prune(ledger, now)
+        if len(ledger) >= budget:
+            retry_after = max(
+                0.0,
+                ledger[len(ledger) - budget] + BUDGET_WINDOW_SECONDS - now,
+            )
+            logger.warning(
+                "comicvine path budget exhausted for %r (%d/%d in the "
+                "last hour); refusing locally, resumes in ~%.0fs",
+                bucket,
+                len(ledger),
+                budget,
+                retry_after,
+            )
+            raise ComicVineBudgetExhausted(
+                bucket, retry_after_seconds=retry_after
+            )
+
     async def acquire(
         self,
         min_interval: float,
@@ -120,40 +148,33 @@ class _RateGate:
         min-interval spacing and any active back-off cool-down.
 
         When ``bucket`` and ``budget`` are supplied, the per-path hourly budget
-        (FRG-META-016) is enforced FIRST: if the bucket already holds ``budget``
-        admissions within the rolling hour, this raises
-        :class:`ComicVineBudgetExhausted` immediately — no sleep, no wire
+        (FRG-META-016) is enforced FIRST — and BEFORE queueing on the gate
+        lock, so an exhausted-path caller is refused immediately even while
+        another caller holds the lock sleeping out a spacing interval or a
+        429 cool-down (gate finding, cv-budget-caching review; the check has
+        no ``await``, so it is atomic on the event loop). The same check
+        re-runs under the lock as the authoritative admission decision. A
+        refusal raises :class:`ComicVineBudgetExhausted` — no sleep, no wire
         request, and WITHOUT touching the degraded/back-off state (the refusal
         is a purely local decision; ComicVine saw nothing). A timestamp is
         appended to the bucket's ledger only when the request is actually
         admitted (past both the budget check and the spacing/cool-down wait).
         """
+        loop = asyncio.get_running_loop()
+        if budget is not None:
+            self._budget = budget
+        if bucket is not None and budget is not None:
+            # Fast refusal without waiting on the gate lock.
+            self._refuse_if_exhausted(bucket, budget, loop.time())
+
         async with self._lock:
-            loop = asyncio.get_running_loop()
             now = loop.time()
 
-            # Budget check BEFORE any wait: refuse fast rather than sleeping a
-            # spacing interval only to reject at the end.
-            if budget is not None:
-                self._budget = budget
+            # Authoritative re-check under the lock: the fast check above may
+            # have admitted a caller whose window state changed while it
+            # queued for the lock.
             if bucket is not None and budget is not None:
-                ledger = self._ledgers.setdefault(bucket, deque())
-                self._prune(ledger, now)
-                if len(ledger) >= budget:
-                    retry_after = max(
-                        0.0, ledger[0] + BUDGET_WINDOW_SECONDS - now
-                    )
-                    logger.warning(
-                        "comicvine path budget exhausted for %r (%d/%d in the "
-                        "last hour); refusing locally, resumes in ~%.0fs",
-                        bucket,
-                        len(ledger),
-                        budget,
-                        retry_after,
-                    )
-                    raise ComicVineBudgetExhausted(
-                        bucket, retry_after_seconds=retry_after
-                    )
+                self._refuse_if_exhausted(bucket, budget, now)
 
             wait = 0.0
             if self._last is not None:

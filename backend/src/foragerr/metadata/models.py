@@ -46,10 +46,11 @@ class SeriesRecord:
     site_url: str | None
     first_issue: IssueRef | None
     image_url: str | None
-    #: ComicVine's ``date_last_updated`` for the volume, kept VERBATIM (sanitized
-    #: like every CV string) or ``None``. Used only for equality against the
-    #: stored stamp to decide the unchanged-volume refresh short-circuit
-    #: (FRG-META-017) — never parsed or timezone-converted.
+    #: ComicVine's ``date_last_updated`` for the volume as served, after the
+    #: standard CV-string sanitizer (FRG-META-014 covers every CV string), or
+    #: ``None``. Used only for equality against the stored stamp to decide the
+    #: unchanged-volume refresh short-circuit (FRG-META-017) — never parsed or
+    #: timezone-converted.
     date_last_updated: str | None = None
 
 

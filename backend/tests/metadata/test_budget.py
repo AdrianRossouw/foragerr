@@ -16,6 +16,7 @@ from __future__ import annotations
 from collections import deque
 
 import asyncio
+import contextlib
 import time
 
 import httpx
@@ -62,6 +63,35 @@ async def test_exhausted_path_refuses_locally_without_touching_other_paths():
 
     # A different path bucket is unaffected and admits normally.
     await gate.acquire(0.0, bucket="issue", budget=budget)  # no raise
+
+
+@pytest.mark.req("FRG-META-016")
+async def test_refusal_is_immediate_even_while_the_gate_lock_is_held():
+    """An exhausted-path caller is refused without queueing behind the gate
+    lock — even while another caller holds the lock sleeping out a spacing
+    interval (gate finding, cv-budget-caching review: the refusal check runs
+    lock-free first, then re-runs under the lock as the authoritative
+    admission decision)."""
+    gate = ratelimit.gate()
+    budget = 1
+    # One admission sets the spacing clock and fills "volume" to its ceiling.
+    await gate.acquire(0.0, bucket="volume", budget=budget)
+
+    # A caller on ANOTHER bucket now holds the lock sleeping a long interval.
+    sleeper = asyncio.create_task(
+        gate.acquire(30.0, bucket="issue", budget=budget)
+    )
+    await asyncio.sleep(0.05)  # let it take the lock and start its sleep
+
+    # The exhausted-path caller must be refused promptly, not after ~30 s.
+    with pytest.raises(ComicVineBudgetExhausted):
+        await asyncio.wait_for(
+            gate.acquire(0.0, bucket="volume", budget=budget), timeout=1.0
+        )
+
+    sleeper.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await sleeper
 
 
 @pytest.mark.req("FRG-META-016")
@@ -207,6 +237,7 @@ async def test_every_wire_request_consumes_exactly_one_budget_unit_covers_includ
 
 
 @pytest.mark.req("FRG-META-016")
+@pytest.mark.req("FRG-NFR-004")
 async def test_client_request_raises_typed_budget_error_at_ceiling(tmp_path):
     """Through the real client: once a path is at its (tiny configured) ceiling,
     the next request on it raises the typed error before reaching the wire."""
