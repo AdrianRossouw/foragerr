@@ -35,9 +35,11 @@ Design mechanics (m6-keystore, owner decisions 2026-07-10/11):
   (prefix check), covering both a fresh upgrade and a restored plaintext backup.
 
 Secret-field detection is the single source of truth already used elsewhere:
-values are secret iff their settings-model field is annotated ``SecretStr``, so
-a future persisted secret is encrypted with zero keystore-specific code in the
-new provider.
+a value is secret iff its TOP-LEVEL settings-model field is annotated
+``SecretStr`` (a ``SecretStr`` nested inside a list or a sub-model is NOT
+detected — a tripwire test guards against introducing one), so a future
+persisted secret is encrypted with zero keystore-specific code in the new
+provider.
 """
 
 from __future__ import annotations
@@ -47,10 +49,12 @@ import json
 import logging
 import os
 import threading
+import types
+from typing import Union, get_args, get_origin
 
 from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
-from pydantic import SecretStr
+from pydantic import BaseModel, SecretStr
 from sqlalchemy import LargeBinary, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -89,7 +93,7 @@ class KeystoreDecryptError(KeystoreError):
 
 
 class KeystoreMetaRow(Base):
-    """The single ``keystore_meta`` row (id=1): salt + sentinel (created 0019).
+    """The single ``keystore_meta`` row (id=1): salt + sentinel (created 0020).
 
     Both columns are non-secret: the salt only prevents rainbow precomputation,
     and the sentinel is a fixed plaintext encrypted under the derived key. The
@@ -129,6 +133,32 @@ def is_ciphertext(value: object) -> bool:
     return isinstance(value, str) and value.startswith(ENC_PREFIX)
 
 
+def _is_top_level_secret(annotation: object) -> bool:
+    """True iff a field annotation is ``SecretStr`` or ``Optional[SecretStr]``.
+
+    Deliberately TOP-LEVEL only: a ``SecretStr`` nested inside a ``list`` or a
+    sub-model is not a secret this keystore handles (see the module docstring)."""
+    if annotation is SecretStr:
+        return True
+    if get_origin(annotation) in (Union, types.UnionType):
+        args = [arg for arg in get_args(annotation) if arg is not type(None)]
+        return bool(args) and all(arg is SecretStr for arg in args)
+    return False
+
+
+def top_level_secret_field_names(model_cls: type[BaseModel]) -> set[str]:
+    """The names of a settings model's TOP-LEVEL ``SecretStr`` fields.
+
+    The single source of truth for "which incoming settings values are secret"
+    at the API input boundary (e.g. the reserved-prefix guard), matching the
+    top-level detection ``serialize_settings`` uses at persistence time."""
+    return {
+        name
+        for name, field in model_cls.model_fields.items()
+        if _is_top_level_secret(field.annotation)
+    }
+
+
 class Keystore:
     """The process keystore: encrypt/decrypt ``enc:v1:`` secret values.
 
@@ -137,14 +167,34 @@ class Keystore:
     works — it uses the currently derived key — so a mismatched key only affects
     decryption of data written under the original key (FRG-AUTH-012 fail-soft)."""
 
-    def __init__(self, fernet: MultiFernet, *, available: bool) -> None:
+    def __init__(
+        self,
+        fernet: MultiFernet,
+        *,
+        available: bool,
+        reinitialized_over_ciphertext: bool = False,
+    ) -> None:
         self._fernet = fernet
         self._available = available
+        self._reinitialized_over_ciphertext = reinitialized_over_ciphertext
 
     @property
     def available(self) -> bool:
         """Whether the boot sentinel matched (passphrase unchanged)."""
         return self._available
+
+    @property
+    def reinitialized_over_ciphertext(self) -> bool:
+        """A fresh keystore was created even though ``enc:v1:`` secrets existed.
+
+        Set only on the fresh-init path when the ``keystore_meta`` row was lost
+        (deleted/never restored) while encrypted provider secrets survive: the
+        previous key is unrecoverable, so those secrets can never decrypt under
+        this new key. ``available`` is still ``True`` (this key is now THE key —
+        re-entered secrets encrypt correctly), but health must use the
+        key-missing/changed wording rather than the corrupt-row wording for the
+        stranded ciphertext (FRG-AUTH-012)."""
+        return self._reinitialized_over_ciphertext
 
     def encrypt(self, plaintext: str) -> str:
         """Encrypt ``plaintext`` to an ``enc:v1:<token>`` value (current key)."""
@@ -282,8 +332,24 @@ async def init_keystore(db, passphrase: str) -> Keystore:
                     id=1, salt=salt, sentinel=sentinel, created_at=utcnow()
                 )
             )
-        logger.info("keystore: initialized a new keystore (salt + sentinel persisted)")
-        return Keystore(fernet, available=True)
+        # A missing keystore_meta row with encrypted secrets still present means
+        # the row was lost (deleted / not restored) while the ciphertext survives:
+        # the previous key is unrecoverable. Warn prominently and flag the keystore
+        # so health tells the key-missing/changed story, not "corrupt row".
+        orphaned = await _ciphertext_secrets_exist(db)
+        if orphaned:
+            logger.warning(
+                "keystore: keystore_meta was missing but encrypted (enc:v1:) "
+                "provider secrets already exist — the previous encryption key is "
+                "unrecoverable. A fresh keystore was initialized under the current "
+                "FORAGERR_SECRET_KEY; re-enter the affected provider secrets in "
+                "Settings to re-encrypt them under this key."
+            )
+        else:
+            logger.info(
+                "keystore: initialized a new keystore (salt + sentinel persisted)"
+            )
+        return Keystore(fernet, available=True, reinitialized_over_ciphertext=orphaned)
 
     fernet = MultiFernet([Fernet(derive_fernet_key(passphrase, row.salt))])
     try:
@@ -298,6 +364,30 @@ async def init_keystore(db, passphrase: str) -> Keystore:
             "re-entered. Startup and the library/OPDS surfaces are unaffected."
         )
     return Keystore(fernet, available=available)
+
+
+async def _ciphertext_secrets_exist(db) -> bool:
+    """True iff any indexer / download-client settings row carries an ``enc:v1:``
+    value. Used only on the fresh-init path to detect a lost ``keystore_meta`` row
+    while ciphertext still exists (the previous key is unrecoverable)."""
+    from sqlalchemy import select
+
+    from foragerr.downloads.models import DownloadClientRow
+    from foragerr.indexers.models import IndexerRow
+
+    for model_cls in (IndexerRow, DownloadClientRow):
+        async with db.read_session() as session:
+            rows = (await session.execute(select(model_cls))).scalars().all()
+            for row in rows:
+                try:
+                    payload = json.loads(row.settings)
+                except (ValueError, TypeError):
+                    continue
+                if isinstance(payload, dict) and any(
+                    is_ciphertext(value) for value in payload.values()
+                ):
+                    return True
+    return False
 
 
 async def migrate_plaintext_secrets(db) -> int:
@@ -373,6 +463,19 @@ async def keystore_startup_hook(app) -> None:
     db = app.state.db
     keystore = await init_keystore(db, passphrase)
     install_keystore(keystore)
+    # Only migrate legacy plaintext when the key MATCHES the stored keystore. On a
+    # wrong-key boot (sentinel mismatch) the current key is NOT the one that owns
+    # the existing ciphertext; encrypting a restored plaintext row under it would
+    # make that secret undecryptable once the correct key returns. Defer until then.
+    # (A fresh keystore over stranded ciphertext still has available=True — its key
+    # IS now the key — so migration under it is correct and runs here.)
+    if not keystore.available:
+        logger.info(
+            "keystore: FORAGERR_SECRET_KEY does not match the stored keystore; "
+            "deferring plaintext-secret migration until the matching key is "
+            "supplied (migrating under a mismatched key would be irreversible)."
+        )
+        return
     migrated = await migrate_plaintext_secrets(db)
     if migrated:
         logger.info(
@@ -399,4 +502,5 @@ __all__ = [
     "migrate_plaintext_secrets",
     "reset_keystore",
     "secret_state",
+    "top_level_secret_field_names",
 ]

@@ -94,6 +94,25 @@ def resolve_config_dir() -> Path:
     return Path(os.environ.get(CONFIG_DIR_ENV, str(DEFAULT_CONFIG_DIR))).expanduser()
 
 
+def ensure_secret_key_present(settings: "Settings") -> None:
+    """Enforce the mandatory at-rest passphrase (FRG-AUTH-011).
+
+    Shared by :func:`load_settings` (the uvicorn ``--factory`` path) and
+    :func:`foragerr.app.create_app` (the injected-``Settings`` path) so a keyless
+    boot fails identically no matter how ``Settings`` was constructed — the gate
+    lives in one place instead of only inside ``load_settings``. Raises
+    :class:`ConfigError` naming the variable and the one-line fix."""
+    if not settings.secret_key.get_secret_value().strip():
+        raise ConfigError(
+            f"{KEYSTORE_ENV_VAR} is not set. foragerr requires an operator-chosen "
+            "passphrase in this environment variable to encrypt stored provider "
+            "secrets at rest. Set it before starting, for example:\n"
+            f'  {KEYSTORE_ENV_VAR}="$(openssl rand -base64 32)"\n'
+            "and keep it stable across restarts (a changed value costs re-entry "
+            "of stored secrets, never data)."
+        )
+
+
 def _file_template_round_trips(template: str) -> bool:
     """True if ``template`` both round-trips a probe identity AND is injective over
     distinct issues (the FRG-PP-009 contract + its data-loss corollary).
@@ -1188,15 +1207,7 @@ def load_settings() -> Settings:
     # Mandatory at-rest encryption passphrase (FRG-AUTH-011): refuse to start
     # without it, BEFORE any migration or data access, so a keyless boot changes
     # nothing on the database. The message names the variable and the fix.
-    if not settings.secret_key.get_secret_value().strip():
-        raise ConfigError(
-            f"{KEYSTORE_ENV_VAR} is not set. foragerr requires an operator-chosen "
-            "passphrase in this environment variable to encrypt stored provider "
-            "secrets at rest. Set it before starting, for example:\n"
-            f'  {KEYSTORE_ENV_VAR}="$(openssl rand -base64 32)"\n'
-            "and keep it stable across restarts (a changed value costs re-entry "
-            "of stored secrets, never data)."
-        )
+    ensure_secret_key_present(settings)
 
     # Redaction registry hook (FRG-NFR-008): the filter learns every secret
     # value at config-load time — including the FORAGERR_SECRET_KEY passphrase.

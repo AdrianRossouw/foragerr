@@ -32,11 +32,13 @@ logger = logging.getLogger("foragerr.indexers.repo")
 def serialize_settings(model: BaseModel) -> str:
     """Serialize a settings model to canonical JSON, encrypting secret values.
 
-    Each ``SecretStr`` value is revealed then encrypted at rest to an
+    Each TOP-LEVEL ``SecretStr`` field is revealed then encrypted at rest to an
     ``enc:v1:<token>`` value (FRG-AUTH-008) via the process keystore — the ONLY
     place ``get_secret_value()`` is called at persistence time, so a future
-    ``SecretStr`` field is encrypted with no per-provider work. Non-secret
-    fields pass through unchanged. Stored server-side only."""
+    top-level ``SecretStr`` field is encrypted with no per-provider work. Secret
+    detection is top-level only: a ``SecretStr`` nested inside a list or a
+    sub-model is NOT encrypted here (a tripwire test guards against introducing
+    one). Non-secret fields pass through unchanged. Stored server-side only."""
     data: dict[str, object] = {}
     for name in type(model).model_fields:
         value = getattr(model, name)

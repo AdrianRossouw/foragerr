@@ -37,7 +37,12 @@ from types import FrameType
 from foragerr.api import register_api
 from foragerr.commands import register_scheduler
 from foragerr.commands.service import OFFLOAD_THREAD_PREFIX
-from foragerr.config import ConfigError, Settings, load_settings
+from foragerr.config import (
+    ConfigError,
+    Settings,
+    ensure_secret_key_present,
+    load_settings,
+)
 from foragerr.db import register_database
 from foragerr.logging import setup_logging
 from foragerr.logging_buffer import install_log_buffer
@@ -94,6 +99,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     """
     if settings is None:
         settings = _load_settings_or_exit()
+    else:
+        # Injected Settings bypass load_settings' FRG-AUTH-011 key gate (the gate
+        # lives inside load_settings). Enforce it here so a keyless embedding/test
+        # boot fails with the same typed ConfigError instead of proceeding without
+        # a keystore passphrase.
+        ensure_secret_key_present(settings)
     setup_logging(
         settings.config_dir,
         level=settings.log_level,

@@ -51,7 +51,10 @@ importer (follow-up change).
    write path, provider rows stay self-contained; the `enc:v1:` prefix makes
    encrypted-vs-legacy unambiguous and versions the format. Encrypt/decrypt lives in
    the two repo dump/load helpers — the only places `get_secret_value()` is called
-   at persistence time.
+   at persistence time. Because the prefix is reserved, the API input boundary
+   rejects (422) a user-supplied secret whose value literally begins with `enc:v1:`,
+   which would otherwise be stored verbatim as plaintext (the encrypt guard treats it
+   as already-ciphertext) and become unreadable on load.
 5. **Boot behavior**: key absent → fail startup during config validation
    (FRG-NFR-009 pattern) with an error naming the variable and one-line fix.
    Key present → derive once, hold in process memory only. Sentinel mismatch or row
@@ -64,7 +67,12 @@ importer (follow-up change).
    was claimed by the M5 creators backbone) creates `keystore_meta` only. Data migration
    (plaintext → `enc:v1:`) runs **at first keyed boot, not in alembic** — alembic
    contexts don't reliably have the env key, and boot-time migration can use the live
-   keystore. Idempotent by prefix check; one-way; logged (count only, no values).
+   keystore. Idempotent by prefix check; one-way; logged (count only, no values). The
+   boot migration runs ONLY when the derived key matches the stored keystore (sentinel
+   OK): a wrong-key boot defers it, so a restored plaintext row is never encrypted under
+   a mismatched key (which the correct key could then never decrypt). A fresh keystore
+   created over stranded ciphertext (lost `keystore_meta`) is itself the key, so it does
+   migrate.
 7. **Dependency**: `cryptography` (the Fernet/scrypt implementation; already a
    transitive candidate via httpx extras but now a direct SOUP-registered
    dependency). Vanilla stdlib has no authenticated-encryption primitive.

@@ -372,7 +372,13 @@ class HealthService:
         if secret_state(settings_json) != "unavailable":
             return None
         keystore = current_keystore()
-        if keystore is not None and not keystore.available:
+        # A wrong-key boot (sentinel mismatch) OR a fresh keystore initialized over
+        # stranded ciphertext (lost keystore_meta row) both mean the ORIGINAL key
+        # is gone — use the key-missing/changed wording. Only a genuinely
+        # decryptable-key-but-tampered value gets the corrupt-row wording.
+        if keystore is not None and (
+            not keystore.available or keystore.reinitialized_over_ciphertext
+        ):
             message = (
                 f"{label}: credential unavailable — encryption key missing or "
                 "changed; re-enter the secret"

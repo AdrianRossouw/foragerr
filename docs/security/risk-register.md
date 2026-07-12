@@ -60,19 +60,21 @@ Draft files: LD=library-domain, ACQ=acquisition, FD=files-domain, IF=interfaces,
 ## Counts
 
 - **Total risks**: 44
-- **Mitigate**: 36 (RISK-001–014, 018–030, 032, 033, 035–040, 043, 044) — several with a
+- **Mitigate**: 37 (RISK-001–014, 018–030, 032, 033, 035–041, 043, 044) — several with a
   partial/residual note; RISK-015 is mitigate-partial + accept-residual and is counted once
   under mitigate; RISK-040 moved from accept to mitigate in m2-daily-surfaces (blocked-event
-  dedup); RISK-043 and RISK-044 are likewise mitigate-partial (redaction-before-buffer;
+  dedup); RISK-041 moved from accept to mitigate in m6-keystore (at-rest secret encryption)
+  and carries a weak-passphrase residual note within its row; RISK-043 and RISK-044 are
+  likewise mitigate-partial (redaction-before-buffer;
   validation-scoped display-only-by-construction, respectively) + accept-residual (no-auth
   exposure, RISK-020 lineage) and are each counted once under mitigate, same convention as
   RISK-015.
-- **Accept**: 8 — RISK-016 (DDL ToS evasion), RISK-017 (per-provider proxy excluded), RISK-020
+- **Accept**: 7 — RISK-016 (DDL ToS evasion), RISK-017 (per-provider proxy excluded), RISK-020
   (**the M1 no-auth accepted risk**), RISK-031 (script hooks excluded), RISK-034 (self-update
-  excluded), RISK-041 (plaintext credentials in backups, M2-M4), RISK-042 (published
-  un-revocable ComicVine key, cross-linked to KA-001), plus RISK-015's, RISK-043's, and
-  RISK-044's residuals recorded within their mitigate rows.
-  (If RISK-015/RISK-043/RISK-044 residuals are tallied separately: 36 mitigate / 8 accept + 3
+  excluded), RISK-042 (published un-revocable ComicVine key, cross-linked to KA-001), plus
+  RISK-015's, RISK-043's, and RISK-044's residuals recorded within their mitigate rows.
+  (RISK-041 left Accept for Mitigate in m6-keystore.)
+  (If RISK-015/RISK-043/RISK-044 residuals are tallied separately: 37 mitigate / 7 accept + 3
   partial-accept.)
 
 ## Canonical ownership note (as required)

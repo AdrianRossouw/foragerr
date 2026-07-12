@@ -32,6 +32,7 @@ from foragerr.keystore import (
     Keystore,
     KeystoreDecryptError,
     KeystoreMetaRow,
+    _is_top_level_secret,
     current_keystore,
     decrypt_secret,
     derive_fernet_key,
@@ -39,10 +40,31 @@ from foragerr.keystore import (
     init_keystore,
     install_keystore,
     is_ciphertext,
+    keystore_startup_hook,
     migrate_plaintext_secrets,
     reset_keystore,
     secret_state,
+    top_level_secret_field_names,
 )
+
+
+def _contains_secretstr(annotation) -> bool:
+    """True iff ``SecretStr`` appears ANYWHERE in a type annotation — top-level,
+    inside a Union/list/dict, or inside a nested ``BaseModel``. The tripwire below
+    uses this to prove no registered settings model buries a secret where the
+    top-level-only keystore helpers would silently store it as plaintext."""
+    from typing import get_args, get_origin
+
+    if annotation is SecretStr:
+        return True
+    if get_origin(annotation) is not None:
+        return any(_contains_secretstr(arg) for arg in get_args(annotation))
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return any(
+            _contains_secretstr(field.annotation)
+            for field in annotation.model_fields.values()
+        )
+    return False
 
 
 # --- FRG-AUTH-008: keystore crypto engine -----------------------------------
@@ -367,3 +389,158 @@ async def test_restored_plaintext_backup_is_remigrated(db):
         decrypt_secret(json.loads(r.settings)["api_key"]) for r in healthy
     )
     assert keys == ["first-legacy-key", "restored-legacy-key"]
+
+
+@pytest.mark.req("FRG-AUTH-013")
+async def test_wrong_key_boot_defers_plaintext_migration(db, monkeypatch):
+    """A wrong-key boot must NOT migrate legacy plaintext: encrypting it under the
+    mismatched key would strand it forever from the correct key. The row is left
+    untouched; a later correct-key boot migrates it."""
+    from types import SimpleNamespace
+
+    from foragerr.indexers.models import IndexerRow
+
+    # Establish the keystore under passphrase A and inject a legacy PLAINTEXT row.
+    await init_and_install(db, "passphrase-A")
+    rid = await _make_plaintext_indexer(db, "legacy-plaintext-key")
+
+    # Boot the real startup hook with the WRONG passphrase B (sentinel mismatch).
+    reset_keystore()
+    monkeypatch.setenv("FORAGERR_SECRET_KEY", "passphrase-B")
+    settings_b = Settings(config_dir=db.db_path.parent)
+    assert settings_b.secret_key.get_secret_value() == "passphrase-B"
+    await keystore_startup_hook(
+        SimpleNamespace(state=SimpleNamespace(settings=settings_b, db=db))
+    )
+    assert current_keystore().available is False
+
+    # The plaintext row is untouched — never encrypted under the wrong key.
+    async with db.read_session() as session:
+        stored = json.loads((await session.get(IndexerRow, rid)).settings)
+    assert stored["api_key"] == "legacy-plaintext-key"
+    assert not is_ciphertext(stored["api_key"])
+
+    # A subsequent correct-key (A) boot migrates it.
+    reset_keystore()
+    monkeypatch.setenv("FORAGERR_SECRET_KEY", "passphrase-A")
+    settings_a = Settings(config_dir=db.db_path.parent)
+    await keystore_startup_hook(
+        SimpleNamespace(state=SimpleNamespace(settings=settings_a, db=db))
+    )
+    assert current_keystore().available is True
+    async with db.read_session() as session:
+        stored = json.loads((await session.get(IndexerRow, rid)).settings)
+    assert is_ciphertext(stored["api_key"])
+    assert decrypt_secret(stored["api_key"]) == "legacy-plaintext-key"
+
+
+@pytest.mark.req("FRG-AUTH-012")
+async def test_lost_keystore_meta_over_ciphertext_reports_key_missing(db, caplog):
+    """A lost keystore_meta row while enc:v1: secrets survive re-inits a fresh
+    keystore (available), but the previous key is unrecoverable: a prominent
+    WARNING is logged, health uses the key-missing/changed wording (not corrupt
+    row), and re-entry under the new key clears it (FRG-AUTH-012)."""
+    import logging as _logging
+
+    from foragerr.indexers.models import IndexerRow
+
+    # A secret encrypted under passphrase A with a real keystore_meta row.
+    await init_and_install(db, "passphrase-A")
+    row = await _new_indexer(db, api_key="key-under-A", name="DogNZB")
+
+    # The keystore_meta row is lost, but the ciphertext remains in the settings.
+    async with db.write_session() as session:
+        meta = await session.get(KeystoreMetaRow, 1)
+        await session.delete(meta)
+
+    reset_keystore()
+    with caplog.at_level(_logging.WARNING, logger="foragerr.keystore"):
+        ks = await init_keystore(db, "passphrase-B")  # meta gone → fresh keystore
+    install_keystore(ks)
+    assert ks.available is True
+    assert ks.reinitialized_over_ciphertext is True
+    assert any("unrecoverable" in rec.message for rec in caplog.records)
+
+    # The stranded ciphertext is unreadable under the new key; health says the key
+    # is missing/changed (the original key is gone), not "corrupt row".
+    async with db.read_session() as session:
+        stored = json.loads((await session.get(IndexerRow, row.id)).settings)
+    assert secret_state(json.dumps(stored)) == "unavailable"
+    warnings = await _health_warnings(db)
+    cred = [w for w in warnings if "credential unavailable" in w.message]
+    assert len(cred) == 1
+    assert "encryption key missing or changed" in cred[0].message
+    assert "corrupt" not in cred[0].message.lower()
+
+    # Re-entry under the CURRENT (new) key clears the condition.
+    await update_indexer(
+        db,
+        row.id,
+        settings=NewznabSettings(base_url="https://idx.test", api_key="key-under-B"),
+    )
+    listing = await load_indexers(db)
+    assert [r.name for r in listing.healthy] == ["DogNZB"]
+    warnings = await _health_warnings(db)
+    assert not [w for w in warnings if "credential unavailable" in w.message]
+
+
+# --- FRG-AUTH-011: injected-Settings key gate (create_app) -------------------
+
+
+@pytest.mark.req("FRG-AUTH-011")
+def test_create_app_enforces_key_gate_on_injected_settings(tmp_path, monkeypatch):
+    """create_app(settings=...) bypasses load_settings' FRG-AUTH-011 gate; the gate
+    is factored so create_app enforces it too — a keyless injected Settings raises
+    the same typed ConfigError."""
+    from foragerr.app import create_app
+
+    monkeypatch.delenv("FORAGERR_SECRET_KEY", raising=False)
+    cfg = tmp_path / "cfg"
+    cfg.mkdir()
+    keyless = Settings(config_dir=cfg)
+    assert not keyless.secret_key.get_secret_value().strip()
+    with pytest.raises(ConfigError) as exc:
+        create_app(keyless)
+    assert "FORAGERR_SECRET_KEY" in str(exc.value)
+
+
+# --- FRG-AUTH-008: top-level-only secret detection tripwire ------------------
+
+
+@pytest.mark.req("FRG-AUTH-008")
+def test_no_registered_settings_model_hides_a_nested_secret():
+    """Secret detection + encryption is TOP-LEVEL only (serialize_settings /
+    _decrypt_payload / register_row_secrets / the boot migration). A SecretStr
+    buried inside a list, dict, or nested BaseModel would be stored as PLAINTEXT.
+    Fail loudly here so a future author extends ALL of those helpers (and
+    top_level_secret_field_names) before shipping such a field."""
+    import foragerr.ddl  # noqa: F401 — registers the getcomics indexer implementation
+    from foragerr.downloads.registry import implementations as dc_impls
+    from foragerr.indexers.registry import implementations as idx_impls
+
+    models = [impl.settings_model for impl in idx_impls()]
+    models += [impl.settings_model for impl in dc_impls()]
+    for model_cls in models:
+        for name, field in model_cls.model_fields.items():
+            if _is_top_level_secret(field.annotation):
+                continue  # a plain top-level SecretStr is handled correctly
+            assert not _contains_secretstr(field.annotation), (
+                f"{model_cls.__name__}.{name} buries a SecretStr inside a "
+                "container/sub-model; the top-level-only keystore helpers would "
+                "store it as PLAINTEXT. Extend serialize_settings/_decrypt_payload/"
+                "register_row_secrets/the boot migration before shipping this field."
+            )
+
+
+@pytest.mark.req("FRG-AUTH-008")
+def test_getcomics_settings_carries_no_secret():
+    """ddl/search_provider.py + ddl/queue.py load GetComicsSettings WITHOUT the
+    keystore-decrypting loader; that bypass is safe ONLY while the model carries no
+    SecretStr. Pin it so the bypass can never be tripped silently."""
+    from foragerr.ddl.settings import GetComicsSettings
+
+    assert not top_level_secret_field_names(GetComicsSettings)
+    assert all(
+        not _contains_secretstr(field.annotation)
+        for field in GetComicsSettings.model_fields.values()
+    )

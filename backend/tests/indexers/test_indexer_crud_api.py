@@ -218,6 +218,86 @@ def test_create_unknown_implementation_is_400(client):
     assert resp.json()["errors"][0]["field"] == "implementation"
 
 
+# --- FRG-AUTH-008: reserved enc:v1: prefix on user input ---------------------
+
+
+@pytest.mark.req("FRG-AUTH-008")
+def test_create_rejects_reserved_enc_prefix_secret(client):
+    from foragerr.keystore import ENC_PREFIX
+
+    body = _create_body()
+    body["settings"]["api_key"] = ENC_PREFIX + "not-really-ciphertext"
+    resp = client.post("/api/v1/indexer", json=body)
+    assert resp.status_code == 422
+    assert resp.json()["errors"][0]["field"] == "settings.api_key"
+
+
+@pytest.mark.req("FRG-AUTH-008")
+def test_put_rejects_reserved_prefix_but_omitted_secret_round_trips(client):
+    from foragerr.keystore import ENC_PREFIX
+
+    created = client.post("/api/v1/indexer", json=_create_body()).json()
+    # A supplied secret starting with the reserved prefix is rejected.
+    resp = client.put(
+        f"/api/v1/indexer/{created['id']}",
+        json={
+            "settings": {
+                "base_url": "https://api.dognzb.cr",
+                "api_key": ENC_PREFIX + "x",
+                "categories": [7030],
+            }
+        },
+    )
+    assert resp.status_code == 422
+    assert resp.json()["errors"][0]["field"] == "settings.api_key"
+    # An omitted-secret update still round-trips (stored ciphertext kept).
+    ok = client.put(
+        f"/api/v1/indexer/{created['id']}",
+        json={"settings": {"base_url": "https://new.dognzb.cr", "categories": [7030]}},
+    )
+    assert ok.status_code == 200
+    stored = client.portal.call(_stored_settings, client.app, created["id"])
+    assert stored["api_key"] == SECRET
+    assert stored["base_url"] == "https://new.dognzb.cr"
+
+
+# --- FRG-AUTH-012: PUT stays fail-soft on a wrong-key row --------------------
+
+
+@pytest.mark.req("FRG-AUTH-012")
+def test_put_toggle_on_wrong_key_row_stays_200_and_persists(client):
+    """After a wrong-key boot, building the PUT response would 500 loading the
+    undecryptable row. The response falls back to the secret-free view so the write
+    stays 200; the row persists and the credential-unavailable warning is intact."""
+    from cryptography.fernet import Fernet, MultiFernet
+
+    from foragerr import keystore as keystore_mod
+    from foragerr.indexers.repo import get_indexer
+
+    created = client.post("/api/v1/indexer", json=_create_body()).json()
+
+    # Install a wrong-key keystore (cannot decrypt the row; available=False).
+    wrong = keystore_mod.derive_fernet_key("a-different-passphrase", b"0123456789abcdef")
+    keystore_mod.install_keystore(
+        keystore_mod.Keystore(MultiFernet([Fernet(wrong)]), available=False)
+    )
+
+    # A pure toggle PUT (secret omitted) must not 500 building the response.
+    resp = client.put(f"/api/v1/indexer/{created['id']}", json={"enabled": False})
+    assert resp.status_code == 200
+    assert resp.json()["enabled"] is False
+    assert "api_key" not in resp.json()["settings"]
+
+    # The toggle really persisted.
+    row = client.portal.call(get_indexer, client.app.state.db, created["id"])
+    assert row.enabled is False
+
+    # Health still surfaces the credential-unavailable (key changed) warning.
+    warnings_text = json.dumps(client.get("/api/v1/health").json())
+    assert "credential unavailable" in warnings_text
+    assert "encryption key missing or changed" in warnings_text
+
+
 @pytest.mark.req("FRG-API-009")
 def test_put_invalid_merged_settings_is_field_precise_400(client):
     created = client.post("/api/v1/indexer", json=_create_body()).json()

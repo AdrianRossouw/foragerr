@@ -523,6 +523,11 @@ class DdlQueueEngine:
             row = await session.get(IndexerRow, provider_id)
         if row is None:
             return DEFAULT_GETCOMICS_URL
+        # NOTE: bypasses the keystore-decrypting loader — SAFE only because
+        # ``GetComicsSettings`` has NO ``SecretStr`` field. If a secret is ever
+        # added, route this through ``indexers.repo.load_settings``; the
+        # m6-keystore tripwire test pins ``GetComicsSettings`` as secret-free so
+        # this stays honest.
         try:
             return GetComicsSettings.model_validate(json.loads(row.settings)).base_url
         except Exception:  # noqa: BLE001 — a corrupt provider row falls back

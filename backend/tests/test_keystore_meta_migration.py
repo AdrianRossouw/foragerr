@@ -1,4 +1,4 @@
-"""keystore_meta single-row table (migration 0019): a new table with salt (BLOB),
+"""keystore_meta single-row table (migration 0020): a new table with salt (BLOB),
 sentinel (TEXT), created_at (DATETIME), all NOT NULL. Provisioned empty — the
 id=1 row is written at first keyed boot by init_keystore, not by the migration.
 Forward-only (FRG-DB-002). FRG-AUTH-008."""
