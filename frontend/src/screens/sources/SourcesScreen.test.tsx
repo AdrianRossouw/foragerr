@@ -3,11 +3,12 @@ import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../../test/renderWithProviders';
 import { createQueryClient } from '../../queryClient';
-import { makeSeriesResource } from '../../test/mockData';
+import { makeCommand, makeSeriesResource } from '../../test/mockData';
 import { ApiRequestError, type Fetcher, type FetcherInit } from '../../api/fetcher';
 import type {
   EntitlementResource,
   EntitlementDetailResource,
+  SeriesResource,
   StoreSourceResource,
 } from '../../api/types';
 import { SourcesScreen } from './SourcesScreen';
@@ -62,6 +63,15 @@ interface FetcherState {
   /** Optional connect handler overriding the default success. */
   onConnect?: () => void;
   connectError?: ApiRequestError;
+  /** Optional reconnect handler overriding the default success. */
+  onReconnect?: () => void;
+  reconnectError?: ApiRequestError;
+  /** Library series the match-picker / booktype lookups resolve against;
+   * defaults to a single "Descender" series (booktype null) when omitted. */
+  librarySeries?: SeriesResource[];
+  /** The command GET /api/v1/command/{id} resolves to for the sync watcher;
+   * defaults to a `started` (still-running) command. */
+  commandStatus?: ReturnType<typeof makeCommand>;
 }
 
 function makeFetcher(state: FetcherState): Fetcher {
@@ -79,6 +89,27 @@ function makeFetcher(state: FetcherState): Fetcher {
           order_count: 12,
           message: 'Connected — 12 order(s)',
         };
+      }
+      const reconnectMatch = path.match(/^\/api\/v1\/sources\/(\d+)\/reconnect$/);
+      if (reconnectMatch) {
+        if (state.reconnectError) throw state.reconnectError;
+        state.onReconnect?.();
+        const id = Number(reconnectMatch[1]);
+        return {
+          source: state.sources.find((s) => s.id === id) ?? state.sources[0],
+          order_count: 12,
+          message: 'Reconnected — 12 order(s)',
+        };
+      }
+      const disconnectMatch = path.match(/^\/api\/v1\/sources\/(\d+)\/disconnect$/);
+      if (disconnectMatch) {
+        const id = Number(disconnectMatch[1]);
+        // Disconnect drops the credential but keeps the row (and its synced
+        // data) around in a `disconnected` state — mirrors the backend.
+        state.sources = state.sources.map((s) =>
+          s.id === id ? { ...s, connection_state: 'disconnected' as const } : s,
+        );
+        return state.sources.find((s) => s.id === id);
       }
       if (/\/api\/v1\/sources\/\d+\/sync$/.test(path)) {
         return { command_id: 1, status: 'queued' };
@@ -113,13 +144,16 @@ function makeFetcher(state: FetcherState): Fetcher {
     // --- Reads ---
     if (path === '/api/v1/sources') return state.sources;
     if (path.startsWith('/api/v1/series?')) {
+      const records = state.librarySeries ?? [
+        makeSeriesResource({ id: 1, title: 'Descender' }),
+      ];
       return {
         page: 1,
         pageSize: 200,
         sortKey: 'sort_title',
         sortDirection: 'asc',
-        totalRecords: 1,
-        records: [makeSeriesResource({ id: 1, title: 'Descender' })],
+        totalRecords: records.length,
+        records,
       };
     }
     const detailMatch = path.match(/\/api\/v1\/sources\/entitlements\/(\d+)$/);
@@ -129,6 +163,11 @@ function makeFetcher(state: FetcherState): Fetcher {
     }
     if (/\/api\/v1\/sources\/\d+\/entitlements/.test(path)) {
       return state.entitlements;
+    }
+    if (/^\/api\/v1\/command\/\d+$/.test(path)) {
+      // The "Sync now" watcher: defaults to a still-running command so a
+      // sync-in-progress test can observe the spinner state deterministically.
+      return state.commandStatus ?? makeCommand({ id: 1, name: 'humble-sync', status: 'started' });
     }
     throw new Error(`unexpected path ${path}`);
   };
@@ -433,5 +472,165 @@ describe('FRG-UI-029: reconcile chip edge rules', () => {
     await user.click(await screen.findByTestId('expand-22'));
     const panel = await screen.findByTestId('detail-22');
     expect(panel).toHaveTextContent(/No single issues to fill/);
+  });
+});
+
+describe('FRG-UI-029: reconnect, disconnect, connected-empty, and sync-in-progress', () => {
+  it('FRG-UI-029 — reconnecting from the expired state clears the amber reconnect UI and lands on the manage view', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [makeSource({ id: 5, connection_state: 'expired' })],
+      entitlements: [],
+      calls: [],
+      onReconnect: () => {
+        // The live validation passed — the session is fresh again.
+        state.sources = [makeSource({ id: 5, connection_state: 'connected' })];
+      },
+    };
+    renderScreen(state);
+
+    // The ConnectCard's `reconnecting` branch: reconnect title + the amber
+    // "session kept" note.
+    expect(
+      await screen.findByText('Reconnect your Humble Bundle account'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('note')).toHaveTextContent(/previous session expired/);
+
+    await user.type(screen.getByTestId('cookie-input'), 'fresh-cookie-1234567890');
+    await user.click(screen.getByTestId('connect-button'));
+
+    // The manage view appears once the source flips back to connected — the
+    // amber reconnect card and its note are both gone (all cleared).
+    await screen.findByTestId('store-manage');
+    expect(screen.queryByTestId('connect-card')).toBeNull();
+    expect(screen.queryByRole('note')).toBeNull();
+
+    const post = state.calls.find((c) => c.path === '/api/v1/sources/5/reconnect');
+    expect(post).toBeTruthy();
+    const body = post!.init!.body as { settings: { session_cookie: string } };
+    expect(body.settings.session_cookie).toBe('fresh-cookie-1234567890');
+  });
+
+  it('FRG-UI-029 — a connected store with no entitlements yet renders the empty-list message', async () => {
+    const source = makeSource({ id: 5, connection_state: 'connected' });
+    renderScreen({ sources: [source], entitlements: [], calls: [] });
+
+    const empty = await screen.findByTestId('empty-list');
+    expect(empty).toHaveTextContent(
+      'Nothing to review here yet — Humble purchases appear after a sync.',
+    );
+  });
+
+  it('FRG-UI-029 — Disconnect calls the endpoint and returns to the unconfigured connect state', async () => {
+    const user = userEvent.setup();
+    const source = makeSource({ id: 5, connection_state: 'connected' });
+    const state: FetcherState = { sources: [source], entitlements: [], calls: [] };
+    renderScreen(state);
+
+    await user.click(await screen.findByTestId('disconnect'));
+    await waitFor(() =>
+      expect(
+        state.calls.find((c) => c.path === '/api/v1/sources/5/disconnect'),
+      ).toBeTruthy(),
+    );
+
+    // Back on the connect card in its plain (non-reconnecting) state.
+    await screen.findByTestId('connect-card');
+    expect(screen.getByText('Connect your Humble Bundle account')).toBeInTheDocument();
+    expect(screen.queryByTestId('store-manage')).toBeNull();
+  });
+
+  it('FRG-UI-029 — Sync now shows the spinner/pending state while a sync is running', async () => {
+    const user = userEvent.setup();
+    const source = makeSource({ id: 5, connection_state: 'connected' });
+    renderScreen({ sources: [source], entitlements: [], calls: [] });
+
+    const syncBtn = await screen.findByTestId('sync-now');
+    expect(syncBtn).toHaveTextContent('Sync now');
+
+    await user.click(syncBtn);
+
+    // The command watcher's default `started` status keeps `syncing` true.
+    await waitFor(() => expect(syncBtn).toHaveTextContent('Syncing…'));
+    expect(syncBtn.querySelector('i')!.className).toMatch(/spin/);
+    expect(syncBtn).toBeDisabled();
+  });
+});
+
+describe('FRG-UI-029: a matched row prefers the linked series booktype over the file format', () => {
+  const source = makeSource({ id: 5, connection_state: 'connected' });
+
+  it('FRG-UI-029 — a matched row whose library series carries a booktype shows the booktype chip, not the file format', async () => {
+    const entitlements = [
+      ent({
+        id: 30,
+        human_name: 'Descender, Vol. 1: Tin Stars',
+        review_status: 'matched',
+        matched_series_id: 1,
+        preferred_format: 'CBZ',
+      }),
+    ];
+    renderScreen({
+      sources: [source],
+      entitlements,
+      calls: [],
+      librarySeries: [makeSeriesResource({ id: 1, title: 'Descender', booktype: 'tpb' })],
+    });
+
+    const row = await screen.findByTestId('entitlement-row-30');
+    const badge = within(row).getByTestId('booktype-badge');
+    expect(badge).toHaveTextContent('TPB');
+    // The decorative aria-hidden spine still shows the raw format — only the
+    // visible title-row chip swaps to the booktype badge.
+    expect(
+      within(row).queryByText('CBZ', { selector: '[class*="chip"]' }),
+    ).toBeNull();
+  });
+
+  it('FRG-UI-029 — a new row (no linked series yet) still shows the file-format chip', async () => {
+    const entitlements = [
+      ent({
+        id: 31,
+        human_name: 'Saga, Vol. 1',
+        review_status: 'new',
+        preferred_format: 'CBZ',
+      }),
+    ];
+    renderScreen({
+      sources: [source],
+      entitlements,
+      calls: [],
+      librarySeries: [makeSeriesResource({ id: 1, title: 'Descender', booktype: 'tpb' })],
+    });
+
+    const row = await screen.findByTestId('entitlement-row-31');
+    expect(
+      within(row).getByText('CBZ', { selector: '[class*="chip"]' }),
+    ).toBeInTheDocument();
+    expect(within(row).queryByTestId('booktype-badge')).toBeNull();
+  });
+
+  it('FRG-UI-029 — a matched row whose library series has no booktype falls back to the file-format chip', async () => {
+    const entitlements = [
+      ent({
+        id: 32,
+        human_name: 'Some Ongoing, Vol. 1',
+        review_status: 'matched',
+        matched_series_id: 1,
+        preferred_format: 'PDF',
+      }),
+    ];
+    renderScreen({
+      sources: [source],
+      entitlements,
+      calls: [],
+      librarySeries: [makeSeriesResource({ id: 1, title: 'Descender', booktype: null })],
+    });
+
+    const row = await screen.findByTestId('entitlement-row-32');
+    expect(
+      within(row).getByText('PDF', { selector: '[class*="chip"]' }),
+    ).toBeInTheDocument();
+    expect(within(row).queryByTestId('booktype-badge')).toBeNull();
   });
 });

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { BookTypeBadge } from '../../components/BookTypeBadge';
 import { Chip, type ChipTone } from '../../components/Chip';
 import {
   useAddEntitlement,
@@ -125,10 +126,12 @@ function FillSetView({ fillSet }: { fillSet: FillSet }) {
 }
 
 /**
- * One reviewable entitlement row (FRG-UI-029): cover spine, title + format
- * chip, status tag, per-status actions (New → Match/Add/Ignore, Matched →
- * Change/Ignore, Ignored → Restore), a selection checkbox for bulk review, and
- * an expandable reconcile detail with issue chips.
+ * One reviewable entitlement row (FRG-UI-029): cover spine, title + a chip
+ * (a matched row's linked library series booktype when it has one, else the
+ * source file's format), status tag, per-status actions (New →
+ * Match/Add/Ignore, Matched → Change/Ignore, Ignored → Restore), a selection
+ * checkbox for bulk review, and an expandable reconcile detail with issue
+ * chips.
  */
 export function EntitlementRow({
   entitlement,
@@ -157,6 +160,18 @@ export function EntitlementRow({
 
   const status = entitlement.review_status;
   const proposal = entitlement.proposed_match;
+
+  // Matched rows link to a real library series, whose collected-edition
+  // booktype (FRG-SER-018) is the truer chip than the source file's format —
+  // it is what the mock shows (design handoff: sources-connected.png). `new`
+  // rows have no linked series yet, so they always fall back to the format
+  // chip; a matched row whose series has no booktype (a single-issues run)
+  // also falls back to the format chip.
+  const matchedSeries =
+    status === 'matched' && entitlement.matched_series_id != null
+      ? librarySeries.find((s) => s.id === entitlement.matched_series_id)
+      : undefined;
+  const matchedBooktype = matchedSeries?.booktype ?? null;
 
   const doMatch = (seriesId: number) => {
     setPicking(false);
@@ -315,10 +330,14 @@ export function EntitlementRow({
         <div className={styles.rowMain}>
           <div className={styles.rowTitle}>
             <span className={styles.rowName}>{entitlement.human_name}</span>
-            {entitlement.preferred_format && (
-              <Chip tone={formatTone(entitlement.preferred_format)}>
-                {entitlement.preferred_format.toUpperCase()}
-              </Chip>
+            {matchedBooktype ? (
+              <BookTypeBadge booktype={matchedBooktype} />
+            ) : (
+              entitlement.preferred_format && (
+                <Chip tone={formatTone(entitlement.preferred_format)}>
+                  {entitlement.preferred_format.toUpperCase()}
+                </Chip>
+              )
             )}
           </div>
           <div className={styles.rowSub}>
