@@ -36,10 +36,32 @@ FAKE_SAB_KEY = "sab-fake-key-0000"
 
 # --- NZB fixtures -----------------------------------------------------------
 
+#: Spec-conformant NZB: the NZB 1.1 spec MANDATES the newzBin DOCTYPE, and real
+#: indexers (verified live against DogNZB, 2026-07-12) emit it — a fixture
+#: without it hid the forbid_dtd validation bug for six releases
+#: (v0-6-3-fixes). Keep this byte-shaped like a real response (FRG-DL-003).
 VALID_NZB = (
     b'<?xml version="1.0" encoding="UTF-8"?>'
+    b'<!DOCTYPE nzb PUBLIC "-//newzBin//DTD NZB 1.1//EN" '
+    b'"http://www.newzbin.com/DTD/nzb/nzb-1.1.dtd">'
     b'<nzb xmlns="http://www.newzbin.com/DTD/2003/nzb">'
     b'<file poster="p" date="1700000000" subject="Comic 001 (2024)">'
+    b"<groups><group>alt.binaries.comics</group></groups>"
+    b'<segments><segment bytes="500000" number="1">abc123@news</segment>'
+    b"</segments></file></nzb>"
+)
+
+#: An entity bomb hiding inside the allowed NZB DOCTYPE — the FRG-SEC-002
+#: carve-out must still kill this (entity declarations stay forbidden even
+#: though the DOCTYPE itself is tolerated).
+ENTITY_BOMB_NZB = (
+    b'<?xml version="1.0" encoding="UTF-8"?>'
+    b"<!DOCTYPE nzb ["
+    b'<!ENTITY a "aaaaaaaaaa"><!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">'
+    b'<!ENTITY c "&b;&b;&b;&b;&b;&b;&b;&b;&b;&b;">'
+    b"]>"
+    b'<nzb xmlns="http://www.newzbin.com/DTD/2003/nzb">'
+    b'<file poster="p" date="1700000000" subject="&c;">'
     b"<groups><group>alt.binaries.comics</group></groups>"
     b'<segments><segment bytes="500000" number="1">abc123@news</segment>'
     b"</segments></file></nzb>"

@@ -569,9 +569,17 @@ Two new outbound attack surfaces went live: COMP 5 (SABnzbd client) and COMP 6
 - **Server-side NZB fetch + content validation** (`T-SAB-1`/`T-IDX-4`, RISK-028/026):
   the client fetches the NZB bytes itself from the indexer link over the change-1
   `external` egress profile — routed through the indexer's `PROVIDER_INDEXER`
-  back-off ladder — and validates them (non-empty, parse under the ONE hardened
-  `parse_indexer_xml` defusedxml site reused from FRG-SEC-002, ≥1 `<segment>`)
-  BEFORE upload (`_validate_nzb`, FRG-DL-003). A hostile/mislabelled/empty payload
+  back-off ladder — and validates them (non-empty, parse under the NZB-specific
+  entry point of the ONE hardened defusedxml site, ≥1 `<segment>`)
+  BEFORE upload (`_validate_nzb`, FRG-DL-003). *Amended by v0-6-3-fixes
+  (2026-07-12, live-SABnzbd finding)*: the NZB 1.1 spec mandates a DOCTYPE, so
+  the blanket `forbid_dtd` parse rejected every real NZB; `parse_nzb_xml`
+  tolerates that DOCTYPE as inert while keeping entity declarations rejected
+  (billion-laughs/quadratic blowup), external resolution disabled (XXE — the
+  DOCTYPE identifier is never fetched), and the byte cap unchanged, so the
+  RISK-024/035/037 mitigations are unaffected. The carve-out is NZB-only:
+  every other surface keeps full DOCTYPE rejection, and the entity-bomb-inside-
+  DOCTYPE case is tagged-tested (FRG-SEC-002). A hostile/mislabelled/empty payload
   is a typed `GrabValidationError` and the bytes are never POSTed to SAB; indexer
   credentials never reach SAB. Intake is `mode=addfile` only — Mylar's add-by-URL /
   one-time-download-key callback surface is permanently excluded (`T-SAB-1` closed).

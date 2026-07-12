@@ -46,7 +46,7 @@ from foragerr.downloads.pathmap import RemotePathMapping, apply_mappings
 from foragerr.downloads.settings import SabnzbdSettings
 from foragerr.http import HttpClientFactory, OutboundHttpError
 from foragerr.indexers.errors import IndexerMalformedError
-from foragerr.indexers.xml import parse_indexer_xml
+from foragerr.indexers.xml import parse_nzb_xml
 from foragerr.security.paths import safe_path_component
 from foragerr.logging import register_secret
 from foragerr.providers.backoff import (
@@ -417,14 +417,17 @@ class SabnzbdClient:
 def _validate_nzb(nzb_bytes: bytes, *, title: str) -> None:
     """Validate fetched NZB bytes before upload (FRG-DL-003).
 
-    Non-empty, parses under the ONE hardened defusedxml site, and contains at
-    least one file segment. Any failure is a typed :class:`GrabValidationError`
-    carrying a reason — the bytes are never POSTed to SABnzbd.
+    Non-empty, parses under the NZB-specific hardened entry point — the NZB
+    1.1 spec mandates a DOCTYPE, so the general ``forbid_dtd`` parse would
+    reject every real NZB (FRG-SEC-002 carve-out; entities/external/size stay
+    forbidden) — and contains at least one file segment. Any failure is a typed
+    :class:`GrabValidationError` carrying a reason — the bytes are never POSTed
+    to SABnzbd.
     """
     if not nzb_bytes.strip():
         raise GrabValidationError(f"NZB for {title!r} is empty; grab failed")
     try:
-        root = parse_indexer_xml(nzb_bytes, max_bytes=NZB_MAX_BYTES)
+        root = parse_nzb_xml(nzb_bytes, max_bytes=NZB_MAX_BYTES)
     except IndexerMalformedError as exc:
         raise GrabValidationError(
             f"NZB for {title!r} did not parse as XML: {exc}"

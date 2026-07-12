@@ -59,7 +59,13 @@ To grab a usenet release, the system SHALL itself fetch the NZB bytes from the i
 
 - **Milestone**: M1
 - **Source**: sonarr-arch §4.2 (UsenetClientBase.Download, mode=addfile)
-- **Notes**: Deliberate divergence from Mylar's add-by-URL flow (SAB pulling the NZB back from Mylar's API with a one-time download key) — that scheme adds an extra auth surface and a callback dependency; recommend permanent exclusion (mylar-fs DL). Server-side fetch keeps indexer credentials off SAB and allows NZB validation.
+- **Notes**: Deliberate divergence from Mylar's add-by-URL flow (SAB pulling
+  the NZB back from Mylar's API with a one-time download key) — that scheme
+  adds an extra auth surface and a callback dependency; recommend permanent
+  exclusion (mylar-fs DL). Server-side fetch keeps indexer credentials off SAB
+  and allows NZB validation. Amended by v0-6-3-fixes (2026-07-12): validation
+  parses via the NZB-specific hardened entry point (FRG-SEC-002 carve-out) —
+  the previous blanket-DOCTYPE-ban parse rejected every spec-conformant NZB.
 
 #### Scenario: Server-side NZB fetch through the indexer back-off ladder
 
@@ -69,7 +75,7 @@ To grab a usenet release, the system SHALL itself fetch the NZB bytes from the i
 #### Scenario: NZB validation before upload
 
 - **WHEN** fetched NZB bytes are validated before upload
-- **THEN** they must be non-empty, parse under defusedxml, and contain at least one file segment; bytes failing any check surface as a failed grab with a reason and are never POSTed to SABnzbd
+- **THEN** they must be non-empty, parse under the NZB-specific hardened entry point (spec-conformant DOCTYPE-bearing NZBs accepted; entity-declaration payloads, external references, oversized bodies, and non-XML junk rejected), and contain at least one file segment; bytes failing any check surface as a failed grab with a reason and are never POSTed to SABnzbd
 
 #### Scenario: addfile multipart upload records nzo_id as download_id
 

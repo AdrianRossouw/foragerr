@@ -135,7 +135,10 @@ def main():
     counts = defaultdict(int)
     for rid in sorted(reg):
         row = reg[rid]
-        t = ', '.join(tests.get(rid, [])) or '—'
+        # Sorted: Path.glob discovery order is filesystem-dependent, and an
+        # unordered join makes regeneration reshuffle cells run-to-run
+        # (FRG-PROC-005 requires stable regeneration).
+        t = ', '.join(sorted(tests.get(rid, []))) or '—'
         c = ', '.join(refs.get(rid, [])[:6]) or '—'
         s = specs.get(rid, ['—'])[0]
         lines.append(f'| {rid} | {row["status"]} | {row["milestone"]} | {s} | {t} | {c} |')

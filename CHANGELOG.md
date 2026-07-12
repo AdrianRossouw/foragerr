@@ -9,6 +9,33 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.6.3] — 2026-07-12
+
+v0-6-3-fixes: the first live SABnzbd run (real indexer, real usenet servers)
+found and fixed the bug that broke every real usenet grab since v0.1.0.
+
+### Fixed
+- **Real NZBs validate again** (FRG-DL-003, FRG-SEC-002): the NZB 1.1 spec
+  mandates a `<!DOCTYPE nzb PUBLIC "-//newzBin//DTD NZB 1.1//EN">` header, but
+  grab validation parsed NZBs with the blanket hardened parser whose DOCTYPE
+  ban rejected them all — so no spec-conformant NZB from a real indexer ever
+  reached SABnzbd (test fixtures omitted the DOCTYPE and hid it). NZB bytes now
+  parse via a dedicated entry point that tolerates the mandated DOCTYPE as
+  inert while still rejecting entity declarations (billion-laughs), external
+  entity resolution (XXE), and oversized bodies; every other XML surface keeps
+  full DOCTYPE rejection. Verified live: a real DogNZB release grabbed through
+  the API, downloaded by SABnzbd from a real news server, and imported.
+  Fixtures are now spec-shaped so the whole suite exercises the real format.
+- **Stable traceability-matrix regeneration** (FRG-PROC-005): per-requirement
+  test lists are emitted sorted, so regenerating the matrix no longer
+  reshuffles cells run-to-run.
+
+### Changed
+- **README Sources screenshot** now shows a real connected Humble Bundle
+  account with its review queue (owner-supplied session; captured from the
+  owner's own purchases). The screenshot tool falls back to the connect-card
+  capture on unconfigured instances.
+
 ## [v0.6.2] — 2026-07-12
 
 m6-humble-source: Humble Bundle store source — connect the account you already
