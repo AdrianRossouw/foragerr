@@ -9,6 +9,43 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.8.0] — 2026-07-12
+
+m8-keys-opds: credential lifecycle — the second M8 authentication change.
+Everything seeded at bootstrap is now manageable from **Settings → Security**.
+
+### Added
+- **Settings → Security** (FRG-AUTH-004/005/007): change the web password
+  (every *other* session is signed out; the one you're using stays), change
+  the OPDS password independently (readers re-prompt; web/API untouched),
+  rotate the API key (old key dies immediately; the new one is shown exactly
+  once, with copy), and **Sign out everywhere** (deletes every session,
+  including the current one — the shared-device recovery). Every credential
+  change re-asks for the current admin password; a browser session alone
+  can't mint a key or change a password.
+- **OPDS Basic verify-cache** (FRG-AUTH-005): reader apps send credentials on
+  every request — a positive-only 60 s in-process cache now skips the repeated
+  scrypt verification. Failures are never cached, and any credential change
+  clears it immediately.
+
+### Changed
+- **Environment re-seed semantics** (FRG-AUTH-002): on boot, foragerr now
+  compares `FORAGERR_ADMIN_USER`/`FORAGERR_ADMIN_PASSWORD` (and
+  `FORAGERR_OPDS_PASSWORD`, independently) against the value the environment
+  *last seeded*, not against the live credential. A stale env password left in
+  compose no longer silently reverts an in-app password change on every boot.
+  Consequence: lockout recovery requires a **new** env value — re-asserting a
+  previously seeded one is a no-op. No configuration change is required for
+  this release; migration 0024 adds the fingerprint columns.
+
+### Security
+- FRG-AUTH-005/006/007 flip to implemented; RISK-003's credential-independence
+  residual closes. Threat-model notes added for the re-auth rule, re-seed
+  fingerprints (scrypt, same protection class as the live hashes), the
+  verify-cache exposure bound, and display-once key confinement (verified by
+  test: the rotated key is absent from DOM, query cache, and localStorage
+  after the dialog closes).
+
 ## [v0.7.0] — 2026-07-12
 
 m8-auth-core: the first change of the M8 authentication milestone. Login is

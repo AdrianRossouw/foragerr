@@ -30,8 +30,12 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import hmac
 import logging
+import time
+from collections import OrderedDict
+from typing import Callable
 
 from fastapi import HTTPException
 from starlette.requests import HTTPConnection
@@ -57,6 +61,110 @@ OPDS_REALM = 'Basic realm="foragerr-opds"'
 
 #: HTTP methods that never change state — exempt from the CSRF Origin check.
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+#: OPDS verify-cache tuning (FRG-AUTH-005). A reader (Panels, KyBook, …) fires a
+#: burst of OPDS requests each carrying the same Basic header; without a cache
+#: every one pays a full scrypt verify (~170 ms) and one reader can head-of-line
+#: block the pool. The window is short and the capacity tiny — it is a burst
+#: absorber, not a session store.
+OPDS_VERIFY_TTL_SECONDS = 60.0
+OPDS_VERIFY_CAPACITY = 8
+
+
+class OpdsVerifyCache:
+    """In-process, positive-only TTL cache of OPDS Basic verifications.
+
+    Key is the SHA-256 of the PRESENTED ``username\\0password`` (so a wrong
+    username can never share a slot with the real one, and the raw password is
+    never held); value is the resolved principal id. Only SUCCESSFUL verifies
+    are ever stored — a failed attempt is never cached, so the KDF always runs
+    for wrong credentials (no oracle, no bypass). Entries expire after
+    :data:`OPDS_VERIFY_TTL_SECONDS`; capacity is bounded at
+    :data:`OPDS_VERIFY_CAPACITY` with oldest-first eviction.
+
+    Lives on ``app.state`` (per-app, not module-global) so tests stay isolated;
+    ``clock`` is injectable like :class:`foragerr.indexers.caps.CapsCache`. Any
+    principal credential write (in-app change or env re-seed) calls
+    :meth:`clear` so a rotated password can never be authenticated from a stale
+    positive entry.
+    """
+
+    def __init__(
+        self,
+        *,
+        ttl_seconds: float = OPDS_VERIFY_TTL_SECONDS,
+        capacity: int = OPDS_VERIFY_CAPACITY,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._ttl = ttl_seconds
+        self._capacity = capacity
+        self._clock = clock
+        self._entries: OrderedDict[bytes, tuple[int, float]] = OrderedDict()
+        #: Bumped on every clear(). A verify that begins under one generation and
+        #: finishes after a clear (the KDF awaits, so a credential write can land
+        #: mid-verify) must NOT write its now-stale positive — put() rejects it.
+        self._generation = 0
+
+    @staticmethod
+    def _key(username: str, password: str) -> bytes:
+        # Length-unambiguous: hash each field, then hash the two digests. A plain
+        # ``user + NUL + password`` join is ambiguous in principle (("a\0b","c")
+        # and ("a","b\0c") collide); env/login inputs cannot contain NUL so it is
+        # not exploitable today, but the fixed-width digest join removes the class
+        # entirely (defense-in-depth, gate finding).
+        u = hashlib.sha256(username.encode("utf-8")).digest()
+        p = hashlib.sha256(password.encode("utf-8")).digest()
+        return hashlib.sha256(u + p).digest()
+
+    def generation(self) -> int:
+        """The current clear-generation. Capture BEFORE reading the credential a
+        verify will validate, then pass it to :meth:`put`."""
+        return self._generation
+
+    def get(self, username: str, password: str) -> int | None:
+        """The cached principal id for these exact creds if still fresh, else None."""
+        key = self._key(username, password)
+        entry = self._entries.get(key)
+        if entry is None:
+            return None
+        principal_id, expires_at = entry
+        if self._clock() >= expires_at:
+            del self._entries[key]
+            return None
+        return principal_id
+
+    def put(
+        self, username: str, password: str, principal_id: int, *, generation: int
+    ) -> None:
+        """Cache a SUCCESSFUL verify (never call this for a failed one).
+
+        ``generation`` is the value :meth:`generation` returned before the verify
+        read its credentials; if a :meth:`clear` has intervened since, the write
+        is dropped — the positive is stale (the credential may have just been
+        rotated) and must not be resurrected into the freshly-cleared cache."""
+        if generation != self._generation:
+            return
+        key = self._key(username, password)
+        self._entries[key] = (principal_id, self._clock() + self._ttl)
+        self._entries.move_to_end(key)
+        while len(self._entries) > self._capacity:
+            self._entries.popitem(last=False)  # drop oldest
+
+    def clear(self) -> None:
+        """Drop every entry and advance the generation — called on any principal
+        credential write, so an in-flight verify cannot re-seed a stale positive."""
+        self._generation += 1
+        self._entries.clear()
+
+
+def clear_opds_verify_cache(app) -> None:
+    """Clear the app's OPDS verify-cache if one is installed (no-op otherwise).
+
+    The single choke point the bootstrap re-seed and the credential-lifecycle
+    routes call after any password write (FRG-AUTH-005)."""
+    cache = getattr(app.state, "opds_verify_cache", None)
+    if cache is not None:
+        cache.clear()
 
 
 def is_exempt(path: str) -> bool:
@@ -128,8 +236,25 @@ async def _authenticate(request: HTTPConnection) -> tuple[int, str] | None:
     if _is_opds(request.scope["path"], settings.opds_base_path):
         creds = _decode_basic(request.headers.get("authorization", ""))
         if creds is not None:
+            cache = getattr(app.state, "opds_verify_cache", None)
+            generation = 0
+            if cache is not None:
+                # Capture the generation BEFORE reading the principal, so a
+                # credential write (clear) landing during the KDF below causes the
+                # eventual put() to be dropped rather than resurrect a stale
+                # positive (TOCTOU gate finding).
+                generation = cache.generation()
+                cached_id = cache.get(creds[0], creds[1])
+                if cached_id is not None:
+                    # A prior verify of these EXACT creds succeeded within the
+                    # TTL — skip the scrypt round-trip (only positives are ever
+                    # cached, so this can never accept a wrong password).
+                    return cached_id, "basic"
             principal = await get_principal(db)
             if principal is not None:
+                # On a cache miss both checks always run (the KDF fires even for
+                # a wrong username), so a bad username stays timing-indistinct
+                # from a bad password.
                 user_ok = hmac.compare_digest(
                     creds[0].encode("utf-8"), principal.username.encode("utf-8")
                 )
@@ -137,6 +262,10 @@ async def _authenticate(request: HTTPConnection) -> tuple[int, str] | None:
                     creds[1], principal.opds_password_hash
                 )
                 if user_ok and password_ok:
+                    if cache is not None:
+                        cache.put(
+                            creds[0], creds[1], principal.id, generation=generation
+                        )
                     return principal.id, "basic"
 
     return None
@@ -251,8 +380,10 @@ async def authenticate_ws(websocket) -> int | None:
 __all__ = [
     "EXEMPT_PATHS",
     "OPDS_REALM",
+    "OpdsVerifyCache",
     "allowed_origins",
     "authenticate_ws",
+    "clear_opds_verify_cache",
     "is_exempt",
     "perimeter",
     "ws_origin_ok",

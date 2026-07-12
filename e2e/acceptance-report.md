@@ -3,9 +3,9 @@
 _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.mjs` — do not edit by hand (FRG-PROC-010)._
 
 - **Verdict:** GREEN
-- **Scenarios:** 28 (27 pass, 0 fail, 1 skipped, 0 flaky, 0 not run)
-- **Run started:** 2026-07-12T16:00:00.875Z
-- **Duration:** 75.2s
+- **Scenarios:** 32 (31 pass, 0 fail, 1 skipped, 0 flaky, 0 not run)
+- **Run started:** 2026-07-12T17:46:08.314Z
+- **Duration:** 81.2s
 
 ## Scenario → requirement coverage
 
@@ -39,6 +39,10 @@ _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.m
 | PASS | FRG-UI-029: connecting with an invalid cookie surfaces an honest error and persists nothing | FRG-UI-029 |
 | PASS | FRG-PROC-010 FRG-SCHED-002: library and command queue survive a container restart | FRG-PROC-010, FRG-SCHED-002 |
 | PASS | FRG-PROC-010 FRG-UI-005: an unconfigured ComicVine key surfaces an actionable credential error, not "no results" | FRG-PROC-010, FRG-UI-005 |
+| PASS | FRG-AUTH-005: OPDS password changes independently and old Basic creds die instantly | FRG-AUTH-005 |
+| PASS | FRG-AUTH-007 FRG-AUTH-006: key rotation kills the old key immediately; re-auth required | FRG-AUTH-006, FRG-AUTH-007 |
+| PASS | FRG-AUTH-004: password change preserves the acting session and kills every other | FRG-AUTH-004 |
+| PASS | FRG-AUTH-004: logout-all destroys every session including the acting one | FRG-AUTH-004 |
 
 ## Requirement roll-up
 
@@ -48,6 +52,9 @@ _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.m
 | FRG-API-012 | PASS |
 | FRG-AUTH-002 | PASS |
 | FRG-AUTH-004 | PASS |
+| FRG-AUTH-005 | PASS |
+| FRG-AUTH-006 | PASS |
+| FRG-AUTH-007 | PASS |
 | FRG-AUTH-010 | PASS |
 | FRG-CRTR-001 | PASS |
 | FRG-DDL-010 | PASS |

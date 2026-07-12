@@ -206,12 +206,17 @@ export const queryKeys = {
     entitlementDetail: (id: number) => ['sources', 'entitlement', id] as const,
     newCount: (idsHash: string) => ['sources', 'new-count', idsHash] as const,
   },
-  // Auth (m8-auth-core, FRG-AUTH-002), mirroring GET /api/v1/auth/me. A
-  // singleton — not invalidated by the WebSocketBridge (no server push exists
-  // for session state); `AuthGate` re-derives the client auth store from it
-  // directly rather than reading this cache elsewhere.
+  // Auth (m8-auth-core FRG-AUTH-002; lifecycle status added in m8-keys-opds
+  // FRG-AUTH-004/005/007), mirroring GET /api/v1/auth/{me,credentials}. Both
+  // are singletons — not invalidated by the WebSocketBridge (no server push
+  // exists for session/credential state). `credentials` backs the Settings ->
+  // Security page's non-secret status read; the credential-write mutations
+  // (password/opds-password/api-key rotate) do not invalidate it — the raw
+  // key is never cached (FRG-AUTH-007 display-once lives only in component
+  // state) and the username/status it reports does not change from those writes.
   auth: {
     me: () => ['auth', 'me'] as const,
+    credentials: () => ['auth', 'credentials'] as const,
   },
 } as const;
 

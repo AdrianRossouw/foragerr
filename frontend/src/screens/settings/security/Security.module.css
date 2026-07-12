@@ -1,0 +1,212 @@
+/* Settings -> Security (m8-keys-opds, FRG-AUTH-004/005/007). Same Sonarr
+ * settings school as General/Media Management (bespoke module, underlined
+ * section headings), plus a bordered `.card` treatment per credential
+ * surface — this page groups four independent actions rather than one
+ * save-bar form, so each gets its own visually distinct box. */
+
+.page {
+  padding: var(--spacing-lg);
+  max-width: var(--layout-content-max-width);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xl);
+}
+
+.identity {
+  color: var(--text-secondary);
+  font-size: var(--font-size-base);
+  margin: calc(-1 * var(--spacing-md)) 0 0;
+}
+
+.identity strong {
+  color: var(--text-primary);
+  font-weight: var(--font-weight-medium);
+}
+
+.card {
+  background: var(--surface-card);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-lg);
+}
+
+.cardHeading {
+  font-size: var(--font-size-heading);
+  font-weight: var(--font-weight-normal);
+  padding-bottom: var(--spacing-sm);
+  margin: 0 0 var(--spacing-md);
+  border-bottom: 1px solid var(--surface-border);
+}
+
+.cardHelp {
+  color: var(--text-secondary);
+  margin: 0 0 var(--spacing-md);
+  font-size: var(--font-size-base);
+}
+
+.stateText {
+  color: var(--text-secondary);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  max-width: 360px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.label {
+  color: var(--text-primary);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+}
+
+.input {
+  width: 100%;
+  padding: var(--spacing-sm);
+  background: var(--surface-input);
+  color: var(--text-primary);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-base);
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.button {
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--color-accent);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  color: var(--color-accent-contrast);
+  font-size: var(--font-size-base);
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+}
+
+.button:disabled {
+  background: var(--surface-card-hover);
+  border-color: var(--surface-border);
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.buttonSecondary {
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--surface-card);
+  color: var(--text-primary);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-base);
+  cursor: pointer;
+}
+
+.buttonSecondary:hover:not(:disabled) {
+  background: var(--surface-card-hover);
+}
+
+.buttonSecondary:disabled {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.buttonDanger {
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: none;
+  color: var(--color-danger);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-base);
+  cursor: pointer;
+}
+
+.buttonDanger:hover:not(:disabled) {
+  background: rgba(240, 80, 80, 0.12);
+}
+
+.buttonDanger:disabled {
+  color: var(--text-muted);
+  border-color: var(--surface-border);
+  cursor: default;
+}
+
+.formError {
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-sm);
+  color: var(--color-danger);
+  font-size: var(--font-size-base);
+}
+
+.fieldError {
+  color: var(--color-danger);
+  font-size: var(--font-size-sm);
+}
+
+.successBanner {
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card-hover);
+  color: var(--text-primary);
+  font-size: var(--font-size-base);
+}
+
+.confirmIntro {
+  color: var(--text-secondary);
+  margin: 0 0 var(--spacing-md);
+}
+
+.confirmIntro strong {
+  color: var(--text-primary);
+}
+
+/* Display-once API key modal. */
+.keyRow {
+  display: flex;
+  gap: var(--spacing-sm);
+  align-items: center;
+}
+
+.keyValue {
+  flex: 1;
+  padding: var(--spacing-sm);
+  background: var(--surface-input);
+  color: var(--text-primary);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-base);
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.keyWarning {
+  margin-top: var(--spacing-md);
+  color: var(--color-danger);
+  font-size: var(--font-size-base);
+}
+
+.copiedHint {
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}

@@ -1509,6 +1509,75 @@ owned by `m8-rate-audit`); RISK-022 flips to **Mitigated**; RISK-003 notes the O
 Basic realm is live (credential-independence lifecycle flips with FRG-AUTH-005 in
 `m8-keys-opds`); RISK-043/044 close their RISK-020-lineage accept-residuals.
 
+### m8-keys-opds status (2026-07-12, v0.8.0)
+
+Credential lifecycle lands (FRG-AUTH-005/006/007 implemented): in-app admin
+password change (acting session preserved, all others invalidated), independent
+OPDS password change, API-key display-once rotation, logout-all. Security-relevant
+deltas on the shipped model:
+
+- **Uniform re-auth on credential writes.** Every credential-changing endpoint
+  requires the current admin password in the request body; a ridden session
+  alone cannot mint a durable credential or lock the operator out. Failures are
+  a single generic 403 with no field oracle, structured-logged
+  (`auth.reauth_failed`) for `m8-rate-audit`'s counters. Logout-all deliberately
+  requires no re-auth: it grants nothing (pure session destruction) and is the
+  shared-device recovery, where friction favours the attacker.
+- **Env re-seed fingerprints** (closes the core gate's deferred footgun): boot
+  re-seed now compares the env pair against a stored scrypt fingerprint of the
+  pair *as last seeded*, per credential (admin and OPDS decoupled). A stale env
+  var can no longer silently revert an in-app change (an unlogged credential
+  rollback + session wipe — an integrity/DoS hazard); recovery still works by
+  supplying a value the environment has not seeded before. The fingerprints are
+  scrypt hashes stored beside the live hashes — same protection class, no new
+  disclosure surface.
+- **OPDS Basic verify-cache.** Positive-only, in-process, 60 s TTL, capacity 8,
+  keyed by SHA-256 of the presented `username\0password`, cleared synchronously
+  on every credential write. Negative results are never cached (no
+  wrong-credential pinning, no stale-deny after a change). Residual: a
+  credential changed by DIRECT database edit (outside the app) could verify for
+  up to 60 s — out of threat model (arbitrary DB write is already game-over).
+  The wrong-username path still runs the KDF on cache misses, preserving the
+  timing uniformity shipped in core.
+- **Display-once API key.** The raw key exists only in the bootstrap one-shot
+  and the rotate response; at rest only its SHA-256. The frontend confines the
+  rotate response to component state (`gcTime: 0` + `.reset()` on the mutation so
+  neither the raw key nor the submitted admin password survives in React Query's
+  MutationCache), verified by a tagged test that the key is absent from the DOM,
+  the query cache, the mutation cache, and localStorage after the dialog closes.
+
+**Gate-round findings fixed in-branch (full 10-angle fleet + Codex, 2026-07-12):**
+
+- **OPDS verify-cache TOCTOU (LOW–MED, fixed).** The KDF awaits, so a credential
+  write could land mid-verify; a verify that captured the old credential could
+  then re-seed its now-stale positive *after* the clear, keeping an old OPDS
+  password valid for up to the 60 s TTL. Fixed with a generation counter: `clear`
+  advances it, the verify captures it before reading the principal, and `put`
+  drops the write if a clear intervened. Concurrency test added.
+- **Frontend MutationCache retention (MED, fixed).** See the display-once note
+  above — the raw key and admin passwords lingered in the MutationCache for the
+  default 5 min; `gcTime: 0` + `.reset()` close it.
+- **Hardening:** `current_password` is length-capped before the re-auth KDF (was
+  an unbounded self-inflicted amplifier); the verify-cache key is now a
+  length-unambiguous digest-of-digests (removes a theoretical field-boundary
+  collision class); a rotation drops any never-retrieved bootstrap key.
+
+**Accepted residuals (owned by `m8-rate-audit` / documented):**
+
+- **Auth-gated scrypt CPU/RAM pressure (→ AUTH-009).** An *already-authenticated*
+  caller firing parallel wrong-password credential writes drives ~40 concurrent
+  memory-hard KDFs (anyio's default limiter). No rate limit exists yet on the
+  `/api/v1/auth/*` re-auth path; the exempt `POST /auth/login` has the same,
+  worse, profile. This is the login-throttle/backoff work explicitly scoped to
+  `m8-rate-audit` (FRG-AUTH-009); the length cap above removes the per-request
+  amplifier in the meantime. Not a remote-unauthenticated DoS.
+- **Verify-cache is per-process.** Clearing it on a credential write clears one
+  worker's cache. The reference deployment runs a single uvicorn process, so this
+  is a non-issue today; were the image ever run with `>1` worker, an OPDS
+  password rotation would leave a stale positive live for ≤60 s in workers that
+  did not serve the write. Sessions are DB-backed and unaffected. A one-line
+  caveat for any future multi-worker mode.
+
 ## Coverage summary
 
 - **Well covered by the five drafts** (mitigation named, no new requirement needed): OPDS

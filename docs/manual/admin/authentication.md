@@ -48,10 +48,9 @@ FORAGERR_OPDS_PASSWORD=...
 
 If set, this becomes the password OPDS readers authenticate with, independent
 of the admin password. If left unset, the OPDS password **equals the admin
-password** at seed time. Changing the OPDS password independently later (a
-Settings screen) is planned for a follow-up release; until then, the only way
-to change it is the recovery path below (which also affects the admin
-password).
+password** at seed time. After seeding they are independent credentials: you
+can change the OPDS password at any time from **Settings → Security** (see
+below) without touching the web login or the API key.
 
 ### Lost password / lockout recovery
 
@@ -61,20 +60,29 @@ environment). Recovery is deliberate: **set a new `FORAGERR_ADMIN_USER` /
 `FORAGERR_ADMIN_PASSWORD` pair and restart the container.**
 
 On any boot after the first, foragerr compares the current environment pair
-against the stored account:
+against **the pair it last seeded from the environment** (a stored
+fingerprint), *not* against whatever the account's password currently is:
 
-- **Unchanged** (same username, and the password still verifies) — idempotent
-  no-op. This is the normal case on every ordinary restart.
-- **Changed** (different username, or a password that no longer verifies) —
-  foragerr re-seeds the account from the new pair and **signs out every
-  existing session**. This is the recovery path: if you're locked out, you get
-  back in by changing the environment, not by resetting anything in the app.
-  The re-seed is logged (username change and session count, never the
-  password) so it's visible after the fact.
+- **Unchanged from what the environment last seeded** — idempotent no-op.
+  This is the normal case on every ordinary restart, **including after you
+  change the password in Settings**: a stale `FORAGERR_ADMIN_PASSWORD` left in
+  your compose file does *not* silently revert an in-app change.
+- **Changed** (different username, or a password value the environment has
+  not seeded before) — foragerr re-seeds the account from the new pair and
+  **signs out every existing session**. This is the recovery path: if you're
+  locked out, you get back in by changing the environment, not by resetting
+  anything in the app. The re-seed is logged (username change and session
+  count, never the password) so it's visible after the fact.
 
-Re-seeding does **not** rotate the OPDS password (unless `FORAGERR_OPDS_PASSWORD`
-also changed) or the API key — see the API key section below for what a
-re-seed does and doesn't affect.
+One consequence worth spelling out: recovery requires a **new** value.
+Re-asserting the same password the environment seeded before is a no-op even
+if the in-app password has since diverged — if you're locked out, set a pair
+you haven't used in the environment before.
+
+`FORAGERR_OPDS_PASSWORD` follows the same rule independently: it re-seeds the
+OPDS password only when its value differs from what *it* last seeded, and an
+admin re-seed never touches an OPDS password you changed in Settings.
+Re-seeding never rotates the API key — see the API key section below.
 
 ## Credentials by surface
 
@@ -138,11 +146,10 @@ That endpoint answers **once per boot** — the key is held only in the
 running process's memory (never logged, never written to disk in plaintext),
 and the first successful read clears it. A second call, or a call after a
 restart, returns 404. **Save the key somewhere durable as soon as you retrieve
-it.** If you don't, there is currently no way to see it again or generate a
-replacement — key display and rotation from Settings are planned for a
-follow-up release. Re-seeding the account (the lost-password recovery path
-above) does **not** regenerate or reveal the API key either; it only affects
-the login/OPDS credentials.
+it.** If you lose it, rotate it from **Settings → Security** (see below) —
+the old key stops working immediately and the new one is shown exactly once.
+Re-seeding the account (the lost-password recovery path above) does **not**
+regenerate or reveal the API key; it only affects the login/OPDS credentials.
 
 The interactive API documentation (Swagger UI / ReDoc) that FastAPI serves by
 default is turned off, since those routes bypass the perimeter. The raw
@@ -165,6 +172,30 @@ connect and store it themselves — see `../user/reading-opds.md`. A bare
 request to `/opds` gets a `401` with a `WWW-Authenticate: Basic` challenge
 naming the `foragerr-opds` realm, so a reader that supports Basic auth will
 prompt automatically without any special configuration.
+
+## Managing credentials: Settings → Security
+
+Everything seeded at bootstrap is manageable afterwards from **Settings →
+Security**, signed in as the operator. Every change on this page asks for your
+**current admin password** again — a browser session alone (say, a machine
+left unlocked) is not enough to change a credential or mint a new key.
+
+- **Web password** — changes the login password. Every *other* signed-in
+  session (including remember-me sessions on other devices) is signed out
+  immediately; the session you made the change from stays signed in. The
+  environment pair is not consulted again until *it* changes (see the recovery
+  section above — a stale env password won't undo this).
+- **OPDS password** — changes what reading apps authenticate with, and nothing
+  else. Web sessions and the API key are untouched; your reader apps will
+  prompt again the next time they connect.
+- **API key** — rotate generates a fresh key and shows it **once**, in a
+  dialog with a copy button. The old key stops working the moment you rotate;
+  update your scripts before dismissing the dialog, because the new key is not
+  retrievable afterwards (rotate again if you lose it).
+- **Sign out everywhere** — deletes every session, *including the one you're
+  using* (you land back on the login screen). This is the recovery move for a
+  remember-me session left on a shared or lost device. It needs no password
+  confirmation: it can only ever sign people out.
 
 ## Reverse proxies and the WebSocket Origin check
 

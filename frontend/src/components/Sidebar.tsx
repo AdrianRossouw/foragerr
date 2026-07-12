@@ -85,6 +85,7 @@ const NAV_GROUPS: NavGroup[] = [
         label: 'Download Clients',
         icon: 'fa-cloud-arrow-down',
       },
+      { to: '/settings/security', label: 'Security', icon: 'fa-shield-halved' },
     ],
   },
   {
