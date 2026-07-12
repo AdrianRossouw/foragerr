@@ -167,3 +167,13 @@ def test_opds_basic_realm_challenge_and_verification(tmp_path):
         wrong = client.get("/opds", headers=basic(TEST_ADMIN_USER, "not-the-password"))
         assert wrong.status_code == 401
         assert wrong.headers.get("www-authenticate") == 'Basic realm="foragerr-opds"'
+        # The username binds to the principal — a correct password under a
+        # wrong username is refused identically (manual authentication.md).
+        wrong_user = client.get(
+            "/opds", headers=basic("not-the-admin", TEST_ADMIN_PASSWORD)
+        )
+        assert wrong_user.status_code == 401
+        assert (
+            wrong_user.headers.get("www-authenticate")
+            == 'Basic realm="foragerr-opds"'
+        )

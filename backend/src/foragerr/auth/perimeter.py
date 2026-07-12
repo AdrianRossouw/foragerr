@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hmac
 import logging
 
 from fastapi import HTTPException
@@ -120,15 +121,23 @@ async def _authenticate(request: HTTPConnection) -> tuple[int, str] | None:
         if principal is not None:
             return principal.id, "api_key"
 
-    # 3. OPDS HTTP Basic — only on the /opds subtree.
+    # 3. OPDS HTTP Basic — only on the /opds subtree. The username binds to the
+    #    principal (readers are configured with the admin username, manual
+    #    authentication.md); the password KDF runs on every attempt so a wrong
+    #    username is indistinguishable from a wrong password.
     if _is_opds(request.scope["path"], settings.opds_base_path):
         creds = _decode_basic(request.headers.get("authorization", ""))
         if creds is not None:
             principal = await get_principal(db)
-            if principal is not None and verify_password(
-                creds[1], principal.opds_password_hash
-            ):
-                return principal.id, "basic"
+            if principal is not None:
+                user_ok = hmac.compare_digest(
+                    creds[0].encode("utf-8"), principal.username.encode("utf-8")
+                )
+                password_ok = verify_password(
+                    creds[1], principal.opds_password_hash
+                )
+                if user_ok and password_ok:
+                    return principal.id, "basic"
 
     return None
 
