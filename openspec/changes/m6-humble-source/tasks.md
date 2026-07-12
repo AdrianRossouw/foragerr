@@ -36,8 +36,8 @@
 
 - [x] 6.1 STRIDE rows: cookie credential (at rest/in transit/clipboard residual), Humble JSON parsing, signed-URL egress; risk-register entries; threat-model update (FRG-PROC-006) — new COMP 14 (`docs/security/threat-model.md`, T-SRC-1/2/3 + `m6-humble-source` change-delta entry); RISK-045..048 (`docs/security/risk-register.md`, Counts rollup updated: 48 total / 40 mitigate / 8 accept)
 - [x] 6.2 Manual: `docs/manual/user/sources.md` (connect, review, expiry, auto-sync semantics) — new file; admin notes — `docs/manual/admin/secrets.md` (Humble cookie under the keystore) + `docs/manual/admin/configuration.md` (`source_sync_interval_seconds`/`source_min_request_interval_seconds` settings rows + a "Store sources" section) + `docs/manual/index.md` structure listing (screenshots deferred to gate). README tour section for Sources is ALSO deferred (not just its screenshot): `test_tour_captions_cite_implemented_ids_with_matching_spec_area` requires a cited id's registry status to be `implemented`/`verified`, and FRG-SRC-*/FRG-UI-029 are still `approved` pending task 6.3's registry flip — adding the tour section now would fail that gate. Add the Sources tour entry (screenshot + FRG citations) together with 6.3's status flip.
-- [ ] 6.3 Registry: SRC AREA row in commit-standard table; FRG-SRC-001..007 + FRG-UI-029 → implemented; matrix regen; SOUP check green (no new deps expected)
-- [ ] 6.4 CHANGELOG + release notes; version bump
+- [x] 6.3 Registry: SRC AREA row in commit-standard table (already present); FRG-SRC-001..007 + FRG-UI-029 → implemented; delta specs synced to baselines (new `openspec/specs/sources/spec.md`, FRG-UI-029 merged into ui baseline, FRG-PROC-014 amended in baseline + dev-process delta added to this change); roadmap M6 section reduced to the still-unshipped companion extension; matrix regen (trace exit 0, no gaps); SOUP check green (no new deps)
+- [x] 6.4 CHANGELOG v0.6.2 (Humble Bundle store source) + version bump to 0.6.2
 
 ## 7. Gate
 
