@@ -13,6 +13,24 @@ export const ADMIN_USER = process.env.FORAGERR_ADMIN_USER ?? 'e2e-admin';
 export const ADMIN_PASSWORD =
   process.env.FORAGERR_ADMIN_PASSWORD ?? 'e2e-admin-pw-9c3f2a1b';
 
+/**
+ * The LIVE admin/OPDS passwords, accounting for zzz-credential-lifecycle.spec.ts
+ * rotating both away from the bootstrap constants above. That file threads its
+ * final values through these env vars at the point each rotation is confirmed
+ * (mirroring the existing `E2E_API_KEY` threading for key rotation) — a spec
+ * that runs after it (only zzzz-rate-audit.spec.ts, by design) must call these
+ * functions rather than read `ADMIN_PASSWORD` directly, since the constant is
+ * only correct for specs that run BEFORE the rotation. Functions, not
+ * top-level consts: the env var is only populated once that spec's test body
+ * actually executes, long after every module has already loaded.
+ */
+export function currentAdminPassword(): string {
+  return process.env.E2E_CURRENT_ADMIN_PASSWORD ?? ADMIN_PASSWORD;
+}
+export function currentOpdsPassword(): string {
+  return process.env.E2E_CURRENT_OPDS_PASSWORD ?? ADMIN_PASSWORD;
+}
+
 /** Where auth.setup.ts writes the authenticated browser session (gitignored). */
 export const STORAGE_STATE = '.auth/state.json';
 

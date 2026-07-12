@@ -15,19 +15,20 @@ the refusal is logged structurally (the field, never any credential material).
 from __future__ import annotations
 
 import logging
+import math
 import secrets
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from foragerr.auth import sessions as sessions_mod
+from foragerr.auth.audit import audit_event
 from foragerr.auth.models import PrincipalRow
 from foragerr.auth.passwords import hash_password_async, verify_password_async
 from foragerr.auth.perimeter import clear_opds_verify_cache
+from foragerr.auth.ratelimit import SURFACE_LOGIN
 from foragerr.auth.repo import api_key_hash, get_principal
 from foragerr.db.base import utcnow
-
-logger = logging.getLogger("foragerr.auth")
 
 router = APIRouter()
 
@@ -87,13 +88,49 @@ def _clear_session_cookie(response: Response, request: Request) -> None:
     )
 
 
+def _throttle_check(request: Request) -> None:
+    """Refuse a throttled login before the KDF (FRG-AUTH-009), 429 + Retry-After.
+
+    A no-op when no limiter is installed (a bare test app) or the key is not yet
+    throttled. Runs at the top of the handler so a failure flood never reaches the
+    constant-work scrypt path — the timing-uniformity discipline still holds for
+    every non-throttled request."""
+    limiter = getattr(request.app.state, "auth_rate_limiter", None)
+    if limiter is None:
+        return
+    wait = limiter.retry_after(_login_ip(request), SURFACE_LOGIN)
+    if wait is not None:
+        raise HTTPException(
+            status_code=429,
+            detail="too many failed attempts",
+            headers={"Retry-After": str(int(math.ceil(wait)))},
+        )
+
+
+def _login_ip(request: Request) -> str:
+    client = request.client
+    return client.host if client is not None else "unknown"
+
+
+def _record_login_failure(request: Request, username: str) -> None:
+    """Count a credential failure and emit the audit events (FRG-AUTH-009)."""
+    limiter = getattr(request.app.state, "auth_rate_limiter", None)
+    if limiter is not None and limiter.record_failure(_login_ip(request), SURFACE_LOGIN):
+        audit_event("auth.backoff_triggered", request, SURFACE_LOGIN, level=logging.WARNING)
+    audit_event(
+        "auth.login.failure", request, SURFACE_LOGIN, level=logging.WARNING, username=username
+    )
+
+
 @router.post("/auth/login")
 async def login(body: LoginBody, request: Request, response: Response) -> dict:
     """Establish a session for correct credentials; generic 401 otherwise.
 
     Runs exactly one KDF operation on every path (even unknown-user) so an
     attacker cannot distinguish "no such user" from "wrong password" by timing,
-    and both yield the same generic failure."""
+    and both yield the same generic failure. Repeated failures from one address
+    are throttled before the KDF (FRG-AUTH-009); a success resets that key."""
+    _throttle_check(request)
     db = request.app.state.db
     settings = request.app.state.settings
     principal = await get_principal(db)
@@ -101,10 +138,12 @@ async def login(body: LoginBody, request: Request, response: Response) -> dict:
     if principal is None:
         # constant work — no user-enumeration timing (off-loop, like verify)
         await hash_password_async(body.password)
+        _record_login_failure(request, body.username)
         raise HTTPException(status_code=401, detail="invalid credentials")
 
     password_ok = await verify_password_async(body.password, principal.password_hash)
     if not (principal.username == body.username and password_ok):
+        _record_login_failure(request, body.username)
         raise HTTPException(status_code=401, detail="invalid credentials")
 
     # Session-fixation defense (FRG-AUTH-004): regenerate the token. Any session
@@ -119,6 +158,10 @@ async def login(body: LoginBody, request: Request, response: Response) -> dict:
         db, principal.id, tier=tier, settings=settings
     )
     _set_session_cookie(response, request, token, tier, settings)
+    limiter = getattr(request.app.state, "auth_rate_limiter", None)
+    if limiter is not None:
+        limiter.record_success(_login_ip(request), SURFACE_LOGIN)
+    audit_event("auth.login.success", request, SURFACE_LOGIN, username=principal.username)
     return {"username": principal.username}
 
 
@@ -133,6 +176,7 @@ async def logout(request: Request, response: Response) -> Response:
     # ships — a freshly constructed Response would drop it (FastAPI only merges
     # the injected response's headers when the handler doesn't return its own).
     _clear_session_cookie(response, request)
+    audit_event("auth.logout", request)
     response.status_code = 204
     return response
 
@@ -187,7 +231,7 @@ async def _reauth_admin(request: Request, current_password: str, *, field: str) 
     if len(current_password) > MAX_PASSWORD_LENGTH or not await verify_password_async(
         current_password, principal.password_hash
     ):
-        logger.warning("auth.reauth_failed: re-authentication refused for %s", field)
+        audit_event("auth.reauth_failed", request, level=logging.WARNING, field=field)
         raise HTTPException(status_code=403, detail="re-authentication failed")
     return principal
 
@@ -223,11 +267,7 @@ async def change_password(
     acting = getattr(request.state, "session_token", None)
     revoked = await sessions_mod.invalidate_others(db, principal.id, acting)
     clear_opds_verify_cache(request.app)
-    logger.info(
-        "auth.password_changed: web login password changed; revoked %d other "
-        "session(s)",
-        revoked,
-    )
+    audit_event("auth.password_changed", request, revoked_sessions=revoked)
     response.status_code = 204
     return response
 
@@ -252,7 +292,7 @@ async def change_opds_password(
         row.opds_password_hash = new_hash
         row.updated_at = utcnow()
     clear_opds_verify_cache(request.app)
-    logger.info("auth.opds_password_changed: OPDS reader password changed")
+    audit_event("auth.opds_password_changed", request)
     response.status_code = 204
     return response
 
@@ -276,7 +316,12 @@ async def rotate_api_key(body: ApiKeyRotateBody, request: Request) -> dict:
     # the one-shot handout would only ever return a dead key. Clearing it avoids
     # that confusing dangling affordance after a rotation.
     request.app.state.bootstrap_api_key = None
-    logger.info("auth.apikey_rotated: API key rotated")
+    # Reset the seen-source baseline so the rotated key re-audits its first use
+    # from any address (FRG-AUTH-009).
+    sources = getattr(request.app.state, "auth_apikey_sources", None)
+    if sources is not None:
+        sources.clear()
+    audit_event("auth.apikey_rotated", request)
     return {"api_key": raw_key}
 
 

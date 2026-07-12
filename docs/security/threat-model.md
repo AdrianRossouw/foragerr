@@ -1441,10 +1441,10 @@ CSRF rows; G-5 closed; FRG-AUTH-001 retired. Disposition:
   scrypt verification cost (~170 ms, n=2^17) bounds online guessing throughput per
   connection; failures are uniform (`401 {"message":"invalid credentials"}` for
   unknown-user and wrong-password alike, with one KDF operation on every path, so
-  neither response body nor timing distinguishes them). **Residual → `m8-rate-audit`**:
-  per-IP/principal failure counters with exponential backoff and structured audit
-  events (FRG-AUTH-009) — tracked on RISK-020's residual note, acceptable inside the
-  tailnet posture meanwhile.
+  neither response body nor timing distinguishes them). **Closed (`m8-rate-audit`,
+  2026-07-12)**: per-(IP, surface) failure counters with exponential 429+Retry-After
+  backoff run BEFORE the KDF on this route (FRG-AUTH-009) — see the m8-rate-audit
+  status note below for the full disposition.
 - **T-AUTH-2 (Spoofing/Elevation — session token theft or fixation)**: tokens are
   256-bit random, stored server-side only as SHA-256 (a DB/backup leak reveals no
   usable token); the raw token exists only in an HttpOnly SameSite=Lax cookie
@@ -1562,21 +1562,102 @@ deltas on the shipped model:
   length-unambiguous digest-of-digests (removes a theoretical field-boundary
   collision class); a rotation drops any never-retrieved bootstrap key.
 
-**Accepted residuals (owned by `m8-rate-audit` / documented):**
+**Accepted residuals:**
 
-- **Auth-gated scrypt CPU/RAM pressure (→ AUTH-009).** An *already-authenticated*
-  caller firing parallel wrong-password credential writes drives ~40 concurrent
-  memory-hard KDFs (anyio's default limiter). No rate limit exists yet on the
-  `/api/v1/auth/*` re-auth path; the exempt `POST /auth/login` has the same,
-  worse, profile. This is the login-throttle/backoff work explicitly scoped to
-  `m8-rate-audit` (FRG-AUTH-009); the length cap above removes the per-request
-  amplifier in the meantime. Not a remote-unauthenticated DoS.
+- **Re-auth confirmation path CPU pressure (accepted, out of FRG-AUTH-009 scope).**
+  `m8-rate-audit`'s limiter is wired at the three *unauthenticated* credential-
+  bearing surfaces named in its design (login, `X-Api-Key`, OPDS Basic) — the
+  `_reauth_admin` confirmation used by password-change/OPDS-password-change/key-
+  rotation is deliberately out of scope (the caller already holds a valid
+  session; the length cap on `current_password` still bounds the per-request KDF
+  cost). An *already-authenticated* caller firing parallel wrong-password
+  confirmation requests can still drive concurrent memory-hard KDFs (anyio's
+  default limiter). Accepted: this requires a live session first, so it is not a
+  remote-unauthenticated DoS, and no further M8 change is scoped to it (hard stop
+  at M9 per the standing grant); revisit if abuse is observed.
 - **Verify-cache is per-process.** Clearing it on a credential write clears one
   worker's cache. The reference deployment runs a single uvicorn process, so this
   is a non-issue today; were the image ever run with `>1` worker, an OPDS
   password rotation would leave a stale positive live for ≤60 s in workers that
   did not serve the write. Sessions are DB-backed and unaffected. A one-line
   caveat for any future multi-worker mode.
+
+### m8-rate-audit status (2026-07-12, v0.9.0)
+
+Failed-auth throttling and a unified audit vocabulary land (FRG-AUTH-009
+implemented) — the last M8 auth change. Security-relevant decisions on the
+shipped model:
+
+- **Brute-force mitigation: backoff, not lockout.** Sliding-window counters per
+  (client IP, surface) refuse further attempts on a key after 5 failures in a
+  15-minute window with a 429 + `Retry-After` deadline that doubles per excess
+  failure, capped at the window length. Deliberately no hard lockout: this is a
+  single-operator tool, so an attacker who could force a *permanent* refusal
+  would be handed a denial-of-service against the legitimate operator — a worse
+  outcome than temporarily slower guessing. A success resets the key; env
+  re-seed remains the recovery of last resort for a lost credential, unrelated
+  to this counter.
+- **Client-IP trust boundary.** The enforcing and observation counters key on
+  `request.client.host` — the direct TCP peer — only. `X-Forwarded-For` is
+  deliberately never parsed or trusted: the deployment model is a bare uvicorn
+  process on a tailnet with no reverse proxy in front of it, so there is no
+  trusted hop to have set that header, and honoring an attacker-supplied
+  `X-Forwarded-For` would let a single attacker spray failures under forged
+  identities to dodge the per-key counter entirely. Revisit if the deployment
+  model ever adds a documented reverse-proxy story (DEP's TLS/proxy work).
+  **Deployment caveat (gate finding S1, m8-rate-audit):** the per-IP isolation
+  that stops an attacker from throttling the operator only holds when foragerr
+  observes *real* peer addresses. Under Docker bridge networking with the
+  userland proxy enabled, the container can see the bridge gateway IP as the
+  source for every external client — collapsing operator and attacker onto one
+  `(gateway-IP, login)` key, so an in-tailnet attacker's login-failure burst
+  can 429 the operator's own login until the deadline expires. The surface
+  split still isolates login from OPDS/API, and the refusal is temporary (no
+  hard lockout; restart or deadline expiry recovers), so this is a
+  defence-in-depth degradation, not an authentication bypass. Mitigation is
+  operational and documented in `docs/manual/admin/network.md`: run with
+  `network_mode: host`, Tailscale inside the container, or a source-preserving
+  DNAT (`userland-proxy=false`) so the limiter keys on genuine client IPs.
+- **Log-injection hardening.** The one attacker-controlled string that reaches
+  an audit event — the submitted username — is stripped of every C0/C1 control
+  character (newlines, carriage returns, ANSI escape introducers) and length-
+  capped before it is rendered (`auth/audit.py::sanitize`), so a crafted
+  username can neither break the fixed `<event> key=value …` log line nor forge
+  a second event inside it. Messages are pre-rendered strings (no `%`-style log
+  interpolation), so a username containing `%` cannot trigger format-string
+  behavior either. Tagged tests cover newline/ANSI/oversized-username inputs.
+- **Limiter shields the constant-work KDF from failure-flood CPU exhaustion.**
+  The limiter check runs on all three credential-bearing surfaces (login,
+  `X-Api-Key`, OPDS Basic) *before* any scrypt verification — a throttled key
+  never reaches the deliberately constant-work KDF path, so a failure flood
+  against a single key cannot be used to burn CPU the way it could before this
+  change (T-AUTH-6 amplification bound, extended). The re-auth confirmation
+  path used by password/OPDS-password change and key rotation is out of this
+  scope (see the accepted residual below).
+- **Global counter is observation-only by design (anti-operator-DoS).** A
+  second, per-surface counter tracks failures across *all* keys but never
+  blocks — only the per-(IP, surface) counter enforces. This is deliberate: if
+  the global counter could block, an attacker spraying failures from many
+  spoofed or botnet source addresses could drive the shared surface counter
+  over threshold and lock the real operator out of their own login, turning a
+  distributed guessing attempt into a denial-of-service against the legitimate
+  user. Instead, crossing the global threshold only emits
+  `auth.backoff_triggered` (rising edge, once per hot period) so a distributed
+  pattern is visible in the audit trail with no enforcement action attached.
+- **Leaked-key visibility via `auth.apikey_source_seen`.** Per-request API-key
+  success events would be pure log noise (a programmatic client hits every
+  endpoint), so successful key use is audited *per source* instead: a TTL'd,
+  bounded seen-set of source IPs emits the event only on the first successful
+  use from a given address within the window, and key rotation clears the set
+  so a rotated key gets a fresh baseline. This closes an observability gap a
+  stolen-but-still-valid key previously had — it now surfaces in the audit
+  trail on its first use from any new address, at near-zero log volume,
+  without the operator needing to review every successful request.
+- **New dependency: none.** Stdlib only (`collections.OrderedDict`/`deque`,
+  `time.monotonic`); no SOUP register change.
+
+RISK-020's residual note (rate-limit/audit landing in `m8-rate-audit`) is now
+closed; see the row for the final disposition.
 
 ## Coverage summary
 
