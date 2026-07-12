@@ -1,0 +1,23 @@
+/*
+ * woff2-only stand-in for @fortawesome/fontawesome-free/css/solid.min.css.
+ * The shipped file also lists a .ttf fallback src, which the design-sync
+ * esbuild loader map doesn't handle (and no modern browser needs). Same
+ * font-face + style-family rules, minus the .ttf entry. Imported from
+ * preview-theme.js; keep in step with the fontawesome-free package version.
+ */
+:root,
+:host {
+  --fa-style-family-classic: "Font Awesome 6 Free";
+  --fa-font-solid: normal 900 1em/1 "Font Awesome 6 Free";
+}
+@font-face {
+  font-family: "Font Awesome 6 Free";
+  font-style: normal;
+  font-weight: 900;
+  font-display: block;
+  src: url("../frontend/node_modules/@fortawesome/fontawesome-free/webfonts/fa-solid-900.woff2") format("woff2");
+}
+.fa-solid,
+.fas {
+  font-weight: 900;
+}

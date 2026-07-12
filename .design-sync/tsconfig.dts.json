@@ -1,0 +1,16 @@
+{
+  "extends": "../frontend/tsconfig.app.json",
+  "include": ["../frontend/src/**/*"],
+  "exclude": ["../frontend/src/**/*.test.*", "../frontend/src/test/**/*"],
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "declarationMap": false,
+    "rootDir": "../frontend/src",
+    "types": [],
+    "typeRoots": ["../frontend/node_modules/@types"],
+    "outDir": "../frontend/dist/types",
+    "tsBuildInfoFile": null
+  }
+}

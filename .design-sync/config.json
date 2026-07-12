@@ -1,0 +1,17 @@
+{
+  "projectId": "2b5ffcd5-bfd5-4afc-a501-dc36430e98fb",
+  "shape": "package",
+  "pkg": "foragerr-frontend",
+  "globalName": "Foragerr",
+  "entry": "frontend/dist/.ds-no-dist.js",
+  "buildCmd": "npx --prefix frontend tsc -p .design-sync/tsconfig.dts.json && node .design-sync/gen-types-barrel.mjs",
+  "readmeHeader": ".design-sync/conventions.md",
+  "srcDir": "src/components",
+  "extraEntries": ["../.design-sync/preview-theme.js", "../.design-sync/preview-provider.jsx"],
+  "provider": { "component": "PreviewProvider" },
+  "componentSrcMap": { "PreviewProvider": null, "PreviewData": null },
+  "overrides": {
+    "Toolbar": { "cardMode": "column" },
+    "ProviderModal": { "cardMode": "single", "primaryStory": "EditIndexer" }
+  }
+}
