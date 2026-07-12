@@ -28,6 +28,7 @@ under the top level of `config.yaml`.
 | Setting | Env var | Default | Notes |
 |---|---|---|---|
 | `config_dir` | `FORAGERR_CONFIG_DIR` | `/config` | Environment-only; not read from `config.yaml` itself. |
+| `secret_key` | `FORAGERR_SECRET_KEY` | *(none — REQUIRED)* | **Mandatory** at-rest encryption passphrase; environment-only, never read from or written to `config.yaml`. foragerr refuses to start without it. Encrypts stored provider secrets at rest (`FRG-AUTH-008`). Generate with `openssl rand -base64 32` and keep it stable. See `secrets.md`. |
 | `host` | `FORAGERR_HOST` | `0.0.0.0` | Interface the HTTP listener binds to. |
 | `port` | `FORAGERR_PORT` | `8789` | TCP port for the HTTP listener. |
 | `log_level` | `FORAGERR_LOG_LEVEL` | `INFO` | One of DEBUG/INFO/WARNING/ERROR/CRITICAL. |
@@ -57,6 +58,8 @@ under the top level of `config.yaml`.
 | `comicvine_base_url` | `FORAGERR_COMICVINE_BASE_URL` | `https://comicvine.gamespot.com/api` | ComicVine API base. Leave at the default; overridden only to point the metadata client at a fixture server (the e2e harness). Every request carries your API key, so the scheme **must be https** — a plain-http value is refused at startup unless `comicvine_insecure_base` opts in. The egress policy additionally applies to the resolved host. |
 | `comicvine_insecure_base` | `FORAGERR_COMICVINE_INSECURE_BASE` | `false` | Test affordance only: permits a plain-http `comicvine_base_url` on a fixture network. Never set in production. |
 | `comicvine_min_interval_seconds` | `FORAGERR_COMICVINE_MIN_INTERVAL_SECONDS` | `2.0` | Minimum seconds between any two ComicVine requests, process-wide. |
+| `comicvine_hourly_path_budget` | `FORAGERR_COMICVINE_HOURLY_PATH_BUDGET` | `150` | Soft per-resource-path hourly request ceiling. ComicVine limits each API key to 200 requests/hour **per path** (volume, issue, search, …); spacing alone can still exhaust that over an hour. When a path reaches this ceiling over a rolling hour foragerr defers further requests on it locally (a logged, health-visible deferral with a resume time — **not** a server-visible rate-limit signal) and resumes as the window rolls. The default 150 leaves headroom under ComicVine's limit for other tools sharing the key. Clamped to `10..200` (never above 200) with a warning if set outside it. |
+| `comicvine_refresh_max_skip_days` | `FORAGERR_COMICVINE_REFRESH_MAX_SKIP_DAYS` | `7` | Maximum age of the last complete issue walk for which a refresh may skip the issue walk when ComicVine reports the volume unchanged. A full walk always runs at least this often as a correctness backstop. Clamped up to a floor of 1 day. |
 | `comicvine_page_size` | `FORAGERR_COMICVINE_PAGE_SIZE` | `100` | ComicVine's own page-size cap. |
 | `comicvine_max_pages` | `FORAGERR_COMICVINE_MAX_PAGES` | `200` | Hard cap on pages walked per list endpoint. |
 | `comicvine_search_result_cap` | `FORAGERR_COMICVINE_SEARCH_RESULT_CAP` | `1000` | Series-search candidates cap; truncation is visible. |
@@ -139,6 +142,26 @@ download happens until an operator enables the pair in Settings → Indexers /
 Download Clients (`ddl-optin-seeding`, amending `m2-first-run-defaults`). Newznab
 indexers and SABnzbd are never seeded. See `docs/manual/user/downloads.md` for
 the enable steps and RISK-015/RISK-016 in `docs/security/risk-register.md`.
+
+## ComicVine health states
+
+The **ComicVine** component on System → Health reports two distinct non-OK states,
+both of which clear on their own without a restart:
+
+- **Rate-limited / backed off** — ComicVine returned a rate-limit signal (HTTP
+  420/429) or an abnormal-traffic page, so foragerr backed off for a cool-down
+  window. The message shows roughly how long remains. If it persists, verify the
+  API key and connectivity.
+- **Hourly request budget exhausted** — a resource path reached its local
+  `comicvine_hourly_path_budget` ceiling, so foragerr is deferring requests on
+  that path rather than risking a ComicVine block. The message names the affected
+  path(s) and roughly how long until requests resume. This is a purely local
+  decision (ComicVine saw nothing) and is expected under heavy refresh/credit
+  activity; it resumes automatically as the rolling hour clears. Only raise the
+  budget up to ComicVine's documented 200/hour/path limit — never higher.
+
+Paths approaching (but not yet at) their ceiling appear in the health payload's
+per-path budget detail before any deferral happens, so a build-up is visible early.
 
 ## Listener resource limits
 
@@ -229,17 +252,20 @@ the System → Tasks screen with its interval and last/next run, and its
 prominent **"Back up now"** button force-runs it on demand (the same
 force-run mechanism every other task uses — see `../user/web-ui.md`).
 
-**A backup is a plaintext-credential artifact.** Both the database and
-`config.yaml` store the ComicVine, indexer (DogNZB, NZB.su), and SABnzbd API
-keys in plaintext today — foragerr has no encryption-at-rest or secret store
-yet — so every file under `/config/backups/` carries the same secrets as the
-live configuration. This is a deliberately accepted risk
-(`docs/security/risk-register.md` RISK-041), on the same footing as the
-no-auth posture (RISK-020): backups never leave the container-private
-`/config` volume (there is no cloud/remote/download-backup feature), they
-inherit `/config`'s non-root PUID/PGID ownership, and secret values are never
-logged. Treat `/config/backups/` with the same care as `/config` itself if you
-ever copy it off the host.
+**What a backup contains.** Provider secrets (indexer DogNZB/NZB.su and SABnzbd
+API keys) stored in the database are **encrypted at rest** (`FRG-AUTH-008`), so a
+copy of the database — including any file under `/config/backups/` — does not
+expose them without the `FORAGERR_SECRET_KEY` passphrase (which is never written
+to `/config`; see `secrets.md`). Restoring a backup into a deployment with a
+different passphrase degrades the affected integrations to re-entry, never data
+loss (`FRG-AUTH-012`). The `config.yaml` value `comicvine_api_key`, if you set it
+there rather than via the environment, is still stored in the file as you wrote
+it — it belongs to the operator-file trust class, like your `.env`. This closes
+the previously-accepted RISK-041 (now **Mitigated**). Backups still hold your
+library database, never leave the container-private `/config` volume, inherit
+its non-root PUID/PGID ownership, and secret values are never logged — treat
+`/config/backups/` with the same care as `/config` itself if you copy it off the
+host.
 
 See `deployment.md` → "Restoring from a backup" for how to use these files.
 

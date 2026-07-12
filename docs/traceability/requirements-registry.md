@@ -98,6 +98,8 @@ source. Compatibility: pre-1.0 releases may break with migration notes; from
 | FRG-META-013 | Cover art download and cache | meta | implemented | M1 |
 | FRG-META-014 | ComicVine content is untrusted input | meta | implemented | M1 |
 | FRG-META-015 | Relevance ordering of lookup candidates | meta | implemented | M4 |
+| FRG-META-016 | Per-path hourly request budget with defer-and-resume | meta | implemented | M6 |
+| FRG-META-017 | Unchanged-volume refresh short-circuit | meta | implemented | M6 |
 | FRG-PULL-001 | Metadata-derived weekly release view | pull | implemented | M3 |
 | FRG-PULL-002 | External pull-source fetch | pull | implemented | M3 |
 | FRG-PULL-003 | Idempotent per-week storage | pull | implemented | M3 |
@@ -356,9 +358,12 @@ source. Compatibility: pre-1.0 releases may break with migration notes; from
 | FRG-AUTH-005 | HTTP Basic for OPDS realm | auth | approved | M8 |
 | FRG-AUTH-006 | API keys separate from session auth | auth | approved | M8 |
 | FRG-AUTH-007 | API key lifecycle | auth | approved | M8 |
-| FRG-AUTH-008 | at-rest secret encryption | auth | approved | M6 |
+| FRG-AUTH-008 | at-rest secret encryption | auth | implemented | M6 |
 | FRG-AUTH-009 | login rate limiting and audit | auth | approved | M8 |
 | FRG-AUTH-010 | uniform coverage of all surfaces | auth | approved | M8 |
+| FRG-AUTH-011 | mandatory environment key at startup | auth | implemented | M6 |
+| FRG-AUTH-012 | decrypt failure degrades the integration, not the service | auth | implemented | M6 |
+| FRG-AUTH-013 | plaintext secret migration on first keyed boot | auth | implemented | M6 |
 | FRG-NFR-001 | startup time | nfr | implemented | M2 |
 | FRG-NFR-002 | library scan throughput | nfr | implemented | M2 |
 | FRG-NFR-003 | UI responsiveness at library scale | nfr | implemented | M2 |

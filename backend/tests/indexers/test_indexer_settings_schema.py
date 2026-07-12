@@ -80,12 +80,16 @@ def test_api_key_is_secret_write_only_and_registered_for_redaction():
     model = validate_settings(
         "newznab", {"base_url": "https://idx.test", "api_key": "super-secret-key"}
     )
-    # Serialized (server-side storage) reveals the value so the row can auth...
-    assert "super-secret-key" in serialize_settings(model)
-    # ...but the public view (a GET response) drops it entirely (write-only).
+    # Serialized (server-side storage) ENCRYPTS the value at rest (FRG-AUTH-008):
+    # the plaintext never appears; the encrypted field carries the enc:v1 frame.
+    serialized = serialize_settings(model)
+    assert "super-secret-key" not in serialized
+    assert "enc:v1:" in serialized
+    # The public view (a GET response) drops it entirely (write-only).
     assert "api_key" not in public_settings(model)
-    # Loading a row re-registers the secret for log redaction.
-    load_settings("newznab", serialize_settings(model))
+    # Loading a row decrypts the secret back and re-registers it for log redaction.
+    loaded = load_settings("newznab", serialized)
+    assert loaded.api_key.get_secret_value() == "super-secret-key"
     assert flog.redact("key=super-secret-key here") != "key=super-secret-key here"
     flog.clear_secrets()
 

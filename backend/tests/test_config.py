@@ -86,6 +86,12 @@ def test_first_run_generates_documented_config(config_dir):
 
     secret_names = set(settings.secret_fields())
     for name, field in Settings.model_fields.items():
+        if name == "secret_key":
+            # Environment-only AND secret: never emitted as a settable/placeholder
+            # line so the passphrase can't be captured into the file (m6-keystore).
+            assert "secret_key" not in parsed
+            assert "FORAGERR_SECRET_KEY" in text  # documented as env-only
+            continue
         assert name in text, f"setting {name} missing from generated config"
         assert field.description.splitlines()[0] in text, (
             f"explanatory comment for {name} missing"
@@ -121,10 +127,14 @@ def test_secrets_have_no_baked_in_defaults(config_dir):
     secrets = settings.secret_fields()
     assert secrets, "expected secret-typed settings to exist"
     for name, value in secrets.items():
-        assert value.get_secret_value() == "", f"{name} has a baked-in default"
         field_default = Settings.model_fields[name].default
         assert isinstance(field_default, SecretStr)
-        assert field_default.get_secret_value() == ""
+        assert field_default.get_secret_value() == "", f"{name} has a baked-in default"
+        # secret_key is the mandatory env-supplied passphrase (FRG-AUTH-011): its
+        # DEFAULT is empty like the rest, but load_settings requires it non-empty,
+        # so the loaded value is populated from the environment (not baked in).
+        if name != "secret_key":
+            assert value.get_secret_value() == "", f"{name} has a baked-in default"
     # generated config carries only commented placeholders for secrets
     parsed = yaml.safe_load((config_dir / CONFIG_FILENAME).read_text(encoding="utf-8"))
     assert not set(parsed) & set(secrets)

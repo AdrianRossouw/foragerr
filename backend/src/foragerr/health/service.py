@@ -46,6 +46,7 @@ from foragerr.db.backup import latest_scheduled_backup
 from foragerr.downloads.models import DownloadClientRow
 from foragerr.health.state import current_integrity
 from foragerr.indexers.models import IndexerRow
+from foragerr.keystore import current_keystore, secret_state
 from foragerr.library.models import RootFolderRow
 from foragerr.metadata.ratelimit import comicvine_health
 from foragerr.providers.backoff import (
@@ -251,6 +252,37 @@ class HealthService:
                     "persists, verify the ComicVine API key and connectivity."
                 ),
             )
+        # A per-path hourly budget refusal (FRG-META-016) is a LOCAL deferral,
+        # not a server-side rate-limit — the gate's degraded flag stays off — but
+        # it is surfaced here so a deferral is never silent. Report the exhausted
+        # bucket(s) and the longest resume time as a degraded component.
+        if health.get("budget_exhausted"):
+            budgets = health.get("path_budgets") or {}
+            exhausted = {
+                bucket: info
+                for bucket, info in budgets.items()
+                if int(info.get("used", 0)) >= int(info.get("ceiling", 0))
+            }
+            names = ", ".join(sorted(exhausted)) or "one or more paths"
+            resume = max(
+                (float(info.get("resumes_in_seconds", 0.0)) for info in exhausted.values()),
+                default=0.0,
+            )
+            return ComponentHealth(
+                component="comicvine",
+                kind="comicvine",
+                label="ComicVine",
+                state=_STATE_DEGRADED,
+                message=(
+                    f"ComicVine hourly request budget exhausted for "
+                    f"path(s): {names} (~{resume:.0f}s until requests resume)"
+                ),
+                remediation=(
+                    "Deferred requests resume automatically as the rolling hour "
+                    "clears; raise comicvine_hourly_path_budget only up to "
+                    "ComicVine's documented 200/hour/path limit."
+                ),
+            )
         return ComponentHealth(
             component="comicvine", kind="comicvine", label="ComicVine", state=_STATE_OK
         )
@@ -279,11 +311,19 @@ class HealthService:
 
         components: list[ComponentHealth] = []
         for row in indexers:
+            component = f"indexer:{row.id}"
+            label = f"Indexer: {row.name}"
+            credential = self._credential_component(
+                row.settings, kind="indexer", label=label, component=component
+            )
+            if credential is not None:
+                components.append(credential)
+                continue
             components.append(
                 self._provider_component(
                     kind="indexer",
-                    label=f"Indexer: {row.name}",
-                    component=f"indexer:{row.id}",
+                    label=label,
+                    component=component,
                     status=by_key.get((PROVIDER_INDEXER, row.id)),
                     remediation=(
                         f"Indexer '{row.name}' is in failure back-off; verify its "
@@ -294,11 +334,22 @@ class HealthService:
         for row in clients:
             is_ddl = row.implementation == "ddl"
             provider_type = PROVIDER_DDL if is_ddl else PROVIDER_DOWNLOAD_CLIENT
+            kind = "ddl" if is_ddl else "download_client"
+            component = f"{'ddl' if is_ddl else 'download-client'}:{row.id}"
+            label = (
+                f"DDL provider: {row.name}" if is_ddl else f"Download client: {row.name}"
+            )
+            credential = self._credential_component(
+                row.settings, kind=kind, label=label, component=component
+            )
+            if credential is not None:
+                components.append(credential)
+                continue
             components.append(
                 self._provider_component(
-                    kind="ddl" if is_ddl else "download_client",
-                    label=(f"DDL provider: {row.name}" if is_ddl else f"Download client: {row.name}"),
-                    component=f"{'ddl' if is_ddl else 'download-client'}:{row.id}",
+                    kind=kind,
+                    label=label,
+                    component=component,
                     status=by_key.get((provider_type, row.id)),
                     remediation=(
                         f"'{row.name}' is in failure back-off; verify its host, "
@@ -307,6 +358,48 @@ class HealthService:
                 )
             )
         return components
+
+    def _credential_component(
+        self, settings_json: str, *, kind: str, label: str, component: str
+    ) -> ComponentHealth | None:
+        """A credential-unavailable component when a row's stored secret cannot be
+        decrypted (FRG-AUTH-012), else ``None``.
+
+        Takes precedence over the back-off overlay: an integration whose secret
+        is unreadable behaves as unconfigured, so a failure back-off is moot until
+        the secret is re-entered. Wording distinguishes a changed/missing key
+        (sentinel mismatch) from an isolated corrupt value."""
+        if secret_state(settings_json) != "unavailable":
+            return None
+        keystore = current_keystore()
+        # A wrong-key boot (sentinel mismatch) OR a fresh keystore initialized over
+        # stranded ciphertext (lost keystore_meta row) both mean the ORIGINAL key
+        # is gone — use the key-missing/changed wording. Only a genuinely
+        # decryptable-key-but-tampered value gets the corrupt-row wording.
+        if keystore is not None and (
+            not keystore.available or keystore.reinitialized_over_ciphertext
+        ):
+            message = (
+                f"{label}: credential unavailable — encryption key missing or "
+                "changed; re-enter the secret"
+            )
+        else:
+            message = (
+                f"{label}: credential unavailable — the stored secret is corrupt "
+                "or unreadable; re-enter the secret"
+            )
+        return ComponentHealth(
+            component=component,
+            kind=kind,
+            label=label,
+            state=_STATE_DEGRADED,
+            message=message,
+            remediation=(
+                "Re-enter this integration's secret in Settings; it will be "
+                "re-encrypted under the current FORAGERR_SECRET_KEY and the "
+                "warning clears. Existing library browsing and OPDS are unaffected."
+            ),
+        )
 
     def _provider_component(
         self,

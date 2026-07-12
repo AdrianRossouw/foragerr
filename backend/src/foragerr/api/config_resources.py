@@ -318,9 +318,11 @@ async def comicvine_test(request: Request) -> ComicVineTestResponse:
         raise ApiError(400, f"comicvine test failed: {exc}") from exc
 
     # suggest_series swallows every NON-auth upstream failure (5xx, timeout,
-    # rate-limit, malformed) into complete=False rather than raising — so the
-    # except ComicVineError branch above is unreachable on this path, and a
-    # naive "no exception ⇒ success" would report a broken service as healthy.
+    # rate-limit, malformed) into complete=False rather than raising — with
+    # one deliberate exception: ComicVineBudgetExhausted propagates
+    # (FRG-META-016) and lands in the ComicVineError branch above. For the
+    # swallowed class, a naive "no exception ⇒ success" would report a broken
+    # service as healthy.
     # Treat an incomplete result as a reachability failure with a STATIC message
     # (no dynamic interpolation: defense-in-depth against a redacted-but-present
     # URL-with-key slipping into the body, even though OutboundHttpError text is

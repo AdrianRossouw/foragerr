@@ -31,6 +31,7 @@ from foragerr.db.migrations import app_version
 from foragerr.http import HttpClientFactory, OutboundHttpError, parse_retry_after
 from foragerr.metadata.errors import (
     ComicVineAuthError,
+    ComicVineBudgetExhausted,
     ComicVineError,
     ComicVineMalformedResponse,
     ComicVineRateLimited,
@@ -48,7 +49,7 @@ from foragerr.metadata.models import (
     SuggestResult,
     VolumeStub,
 )
-from foragerr.metadata.ratelimit import effective_interval, gate
+from foragerr.metadata.ratelimit import effective_budget, effective_interval, gate
 from foragerr.metadata.search import plausibility
 
 logger = logging.getLogger("foragerr.metadata.comicvine")
@@ -59,7 +60,7 @@ DEFAULT_BASE = "https://comicvine.gamespot.com/api"
 #: Per-endpoint field lists (minimise payload; request only what we map).
 VOLUME_FIELDS = (
     "id,name,publisher,imprint,start_year,count_of_issues,aliases,description,"
-    "site_detail_url,first_issue,image,issues"
+    "site_detail_url,first_issue,image,issues,date_last_updated"
 )
 SEARCH_VOLUME_FIELDS = (
     "id,name,publisher,imprint,start_year,count_of_issues,aliases,description,"
@@ -100,6 +101,17 @@ _BAN_MARKERS = (
     "rate limit",
     "request could not be satisfied",
 )
+
+
+def _budget_bucket(path: str) -> str:
+    """Classify a request path into its ComicVine budget bucket (FRG-META-016).
+
+    The bucket is the first, normalized URL path segment — the granularity
+    ComicVine's own 200/hour limit uses (per resource path). Any trailing
+    id/suffix is dropped: ``"volume/4050-123/"`` → ``"volume"``, ``"issues/"`` →
+    ``"issues"``, ``"issue/4000-9/"`` → ``"issue"``. No table to maintain.
+    """
+    return path.strip("/").split("/", 1)[0] or "?"
 
 
 def split_csv(value: str) -> list[str]:
@@ -143,6 +155,7 @@ class ComicVineClient:
         resolved_base = base or getattr(settings, "comicvine_base_url", "") or DEFAULT_BASE
         self._base = resolved_base.rstrip("/")
         self._interval = effective_interval(settings)
+        self._budget = effective_budget(settings)
         self._page_size = settings.comicvine_page_size
         self._max_pages = settings.comicvine_max_pages
         self._search_cap = settings.comicvine_search_result_cap
@@ -332,6 +345,11 @@ class ComicVineClient:
             data = await self._request("volumes/", params)
         except ComicVineAuthError:
             raise
+        except ComicVineBudgetExhausted:
+            # Budget carve-out (FRG-META-016): propagate so the suggest route
+            # surfaces an honest "resumes in ..." message rather than silently
+            # degrading to an empty result (mirrors the auth carve-out above).
+            raise
         except ComicVineError:
             return SuggestResult(candidates=(), complete=False)
 
@@ -389,6 +407,14 @@ class ComicVineClient:
                 # would make a credential failure indistinguishable from an
                 # empty search. Re-raise the typed error to the caller instead.
                 # The message is a static string (no api_key interpolated).
+                raise
+            except ComicVineBudgetExhausted:
+                # Budget carve-out (FRG-META-016): a local per-path refusal is
+                # not a partial upstream result to degrade — silently returning
+                # complete=False would hide the deferral and its resume time.
+                # Propagate the typed error so the caller (an interactive lookup)
+                # can surface an honest "resumes in ..." message, and a refresh's
+                # issue walk fails cleanly to retry via its staleness path.
                 raise
             except ComicVineError:
                 complete = False  # mid-walk failure: keep what we have
@@ -458,7 +484,14 @@ class ComicVineClient:
         return data
 
     async def _fetch(self, path: str, params: Mapping[str, Any]):
-        await gate().acquire(self._interval)
+        # The path's budget bucket rides the SAME acquire that enforces velocity
+        # spacing (FRG-META-003/016): one gate, one admission, both dimensions —
+        # so covers and every other call site are budgeted through the one funnel.
+        # A refused admission raises ComicVineBudgetExhausted here, before any
+        # wire request, and propagates to the call site as a typed ComicVineError.
+        await gate().acquire(
+            self._interval, bucket=_budget_bucket(path), budget=self._budget
+        )
         url = f"{self._base}/{path}"
         try:
             return await self._client.get(

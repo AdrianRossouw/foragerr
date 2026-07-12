@@ -30,6 +30,7 @@ from foragerr.library.models import IssueFileRow, IssueRow, SeriesRow
 from foragerr.library.ordering import ordering_key_for
 from foragerr.commands.registry import register_handler
 from foragerr.metadata import (
+    ComicVineBudgetExhausted,
     ComicVineClient,
     ComicVineError,
     CreditRecord,
@@ -93,6 +94,8 @@ async def refresh_series(
         if series is None:
             return f"series {series_id} no longer exists; refresh skipped"
         cv_volume_id = series.cv_volume_id
+        stored_stamp = series.cv_date_last_updated
+        last_walk_at = series.refreshed_at
         # Which issues already have their credits (stamped) — used to pick this
         # run's bounded credit-fetch targets. Read here so the detail fetches
         # stay OUTSIDE the write lock (FRG-CRTR-001).
@@ -110,25 +113,75 @@ async def refresh_series(
     # --- ComicVine I/O: strictly OUTSIDE the write lock --------------------
     async with ComicVineClient(settings, factory) as cv:
         record: SeriesRecord = await cv.get_volume(cv_volume_id)
-        page: Page[IssueRecord] = await cv.get_issues(cv_volume_id)
+
+        # Unchanged-volume short-circuit (FRG-META-017): when ComicVine's volume
+        # ``date_last_updated`` matches the stamp stored by the last COMPLETE
+        # walk (a non-NULL stamp implies completeness — see below) AND that walk
+        # is within the staleness bound, skip the whole issue pagination walk.
+        # The bound is measured against ``refreshed_at`` (the last real walk),
+        # which a short-circuit deliberately does NOT bump, so a full walk still
+        # runs at least every ``comicvine_refresh_max_skip_days`` as the
+        # correctness backstop.
+        short_circuit = _may_short_circuit(
+            stored_stamp, last_walk_at, record.date_last_updated, settings
+        )
+
+        page: Page[IssueRecord] | None
+        if short_circuit:
+            page = None
+            # Credit targets come from the DB (issues still lacking credits),
+            # not a walk we skipped, so credit backfill keeps progressing on an
+            # unchanged series (the common case for a large stable library).
+            async with db.read_session() as session:
+                target_rows = (
+                    await session.execute(
+                        select(
+                            IssueRow.cv_issue_id,
+                            IssueRow.store_date,
+                            IssueRow.cover_date,
+                        ).where(
+                            IssueRow.series_id == series_id,
+                            IssueRow.credits_fetched_at.is_(None),
+                        )
+                    )
+                ).all()
+            targets = _select_credit_targets_from_rows(
+                target_rows, settings.credits_fetch_per_refresh
+            )
+        else:
+            page = await cv.get_issues(cv_volume_id)
+            targets = _select_credit_fetch_targets(
+                page.items, stamped_cv_ids, settings.credits_fetch_per_refresh
+            )
 
         # Credit fetch phase (FRG-CRTR-001): ComicVine serves person_credits
         # only on the issue DETAIL endpoint, so fetch a bounded, newest-first
         # batch of the still-credit-needing issues sequentially through the same
         # rate gate. A failed fetch is logged and skipped (the issue stays
-        # unstamped and is retried next run) — never fatal to the refresh.
+        # unstamped and is retried next run) — never fatal to the refresh. A
+        # per-path BUDGET refusal (FRG-META-016) stops the phase cleanly for
+        # this run: the remaining targets stay unstamped and resume on a later
+        # refresh once the window rolls; the refresh itself still succeeds.
         # Accepted (gate, m5-credits-live-fetch): two overlapping refreshes of
         # the SAME series can each spend this budget on the same unstamped
         # issues before either commits stamps — the rate gate serializes the
         # wire cost and the writes are idempotent, so no per-series in-flight
         # guard is kept.
-        targets = _select_credit_fetch_targets(
-            page.items, stamped_cv_ids, settings.credits_fetch_per_refresh
-        )
         fetched_credits: dict[int, tuple[CreditRecord, ...]] = {}
         for cv_issue_id in targets:
             try:
                 fetched_credits[cv_issue_id] = await cv.get_issue_credits(cv_issue_id)
+            except ComicVineBudgetExhausted as exc:
+                logger.info(
+                    "credit backfill for series %d deferred: ComicVine hourly "
+                    "budget for path %r exhausted, resumes in ~%.0fs "
+                    "(%d issue(s) fetched this run, remainder retries later)",
+                    series_id,
+                    exc.bucket,
+                    exc.retry_after_seconds,
+                    len(fetched_credits),
+                )
+                break
             except ComicVineError as exc:
                 logger.warning(
                     "credit detail fetch for issue %s (series %d) failed, "
@@ -144,23 +197,33 @@ async def refresh_series(
         if series is None:  # deleted between the read and the write
             return f"series {series_id} no longer exists; refresh skipped"
 
-        stats = await _reconcile(session, series, page)
+        if short_circuit:
+            # No issue reconcile on a short-circuit — the volume is unchanged, so
+            # the local issue set is left entirely untouched (no walk, no diff).
+            stats = ReconcileStats(inserted=0, updated=0, deleted=0)
+            walk_complete = True
+        else:
+            assert page is not None
+            stats = await _reconcile(session, series, page)
+            walk_complete = page.complete
 
         # Per-issue creator credits ride the same transaction
         # (FRG-CRTR-001/002/004): reconcile the credits this run SOURCED —
-        # the detail fetches above plus any list rows that opportunistically
-        # carried credits (detail wins on overlap) — then stamp the fetched
-        # issues (INCLUDING zero-credit ones, so they are never re-fetched).
-        # Reconciliation upserts creators, replaces each sourced issue's credit
-        # set, and prunes orphans; it never sets ``followed`` — a follow is only
-        # ever explicit (owner decision 2026-07-11). Runs after the issue
-        # reconcile so deleted issues have cascaded their credits and inserted
-        # issues have ids.
-        credits_by_cv: dict[int, tuple[CreditRecord, ...]] = {
-            rec.cv_issue_id: rec.credits
-            for rec in page.items
-            if rec.credits and rec.cv_issue_id not in fetched_credits
-        }
+        # the detail fetches above plus, on a full walk, any list rows that
+        # opportunistically carried credits (detail wins on overlap) — then
+        # stamp the fetched issues (INCLUDING zero-credit ones, so they are
+        # never re-fetched). Reconciliation upserts creators, replaces each
+        # sourced issue's credit set, and prunes orphans; it never sets
+        # ``followed`` — a follow is only ever explicit (owner decision
+        # 2026-07-11). Runs after the issue reconcile so deleted issues have
+        # cascaded their credits and inserted issues have ids.
+        credits_by_cv: dict[int, tuple[CreditRecord, ...]] = {}
+        if page is not None:
+            credits_by_cv = {
+                rec.cv_issue_id: rec.credits
+                for rec in page.items
+                if rec.credits and rec.cv_issue_id not in fetched_credits
+            }
         credits_by_cv.update(fetched_credits)
         await reconcile_series_credits(session, series.id, credits_by_cv)
 
@@ -177,7 +240,18 @@ async def refresh_series(
         series.publisher = record.publisher
         series.start_year = record.start_year
         series.description_sanitized = record.description
-        series.refreshed_at = utcnow()
+
+        # The walk-completion stamp + refreshed_at are updated ONLY after a real
+        # walk (FRG-META-017): store the CV ``date_last_updated`` after a COMPLETE
+        # walk, clear it (NULL) after a partial one, so a non-NULL stamp always
+        # implies the last walk completed. A short-circuit leaves both untouched
+        # — the stamp still matches and ``refreshed_at`` keeps measuring age
+        # since the last real walk (the staleness backstop).
+        if not short_circuit:
+            series.refreshed_at = utcnow()
+            series.cv_date_last_updated = (
+                record.date_last_updated if walk_complete else None
+            )
 
         # Re-derive the collected-edition book-type unless the operator locked
         # it (FRG-SER-018) — refresh never changes ``series.title``, so this is
@@ -192,9 +266,9 @@ async def refresh_series(
 
         applied = await _apply_add_strategy_once(session, series)
 
-        queue_event(session, SeriesRefreshed(series_id, partial=not page.complete))
+        queue_event(session, SeriesRefreshed(series_id, partial=not walk_complete))
 
-    result = RefreshResult(stats=stats, partial=not page.complete, applied=applied)
+    result = RefreshResult(stats=stats, partial=not walk_complete, applied=applied)
 
     # --- best-effort cover cache (network, after commit) -------------------
     await _cache_cover_best_effort(
@@ -214,7 +288,58 @@ async def refresh_series(
     return result.summary()
 
 
+# --- unchanged-volume short-circuit (FRG-META-017) --------------------------
+
+
+def _may_short_circuit(
+    stored_stamp: str | None,
+    last_walk_at: dt.datetime | None,
+    fetched_stamp: str | None,
+    settings: Settings,
+) -> bool:
+    """Whether this refresh may skip the issue walk (FRG-META-017).
+
+    True only when ALL hold: a stamp was stored (non-NULL ⇒ the last walk was
+    complete), ComicVine's freshly fetched ``date_last_updated`` equals it
+    (verbatim equality — never parsed), and the last walk is within the
+    configured staleness bound. A NULL stamp (no complete walk yet, or the last
+    walk was partial), a changed value, an absent ``refreshed_at``, or an
+    over-bound age all force the full walk.
+    """
+    if stored_stamp is None or last_walk_at is None:
+        return False
+    if fetched_stamp is None or fetched_stamp != stored_stamp:
+        return False
+    skip_days = max(1, settings.comicvine_refresh_max_skip_days)
+    return (utcnow() - last_walk_at) <= dt.timedelta(days=skip_days)
+
+
 # --- credit fetch targeting (FRG-CRTR-001) ----------------------------------
+
+
+def _select_credit_targets_from_rows(
+    rows: "list",
+    bound: int,
+) -> list[int]:
+    """Pick bounded, newest-first credit-fetch targets on the short-circuit path.
+
+    ``rows`` are ``(cv_issue_id, store_date, cover_date)`` tuples of the series'
+    DB issues still lacking credits (``credits_fetched_at IS NULL``). Ordered
+    newest-first exactly like :func:`_select_credit_fetch_targets` — ``store_date``
+    DESC with NULLs last, then ``cover_date`` DESC, then ``cv_issue_id`` DESC —
+    and capped at ``bound``. The DB dates are ``date`` objects; a missing date
+    sorts as ``date.min`` which, under ``reverse=True``, lands last (NULLS LAST).
+    """
+    ordered = sorted(
+        rows,
+        key=lambda r: (
+            r.store_date or dt.date.min,
+            r.cover_date or dt.date.min,
+            r.cv_issue_id,
+        ),
+        reverse=True,
+    )
+    return [r.cv_issue_id for r in ordered[:bound]]
 
 
 def _select_credit_fetch_targets(
@@ -432,6 +557,15 @@ async def _cache_cover_best_effort(
         series = await session.get(SeriesRow, series_id)
         if series is not None:
             series.cover_cached_at = utcnow()
+            # Announce the newly cached cover on the event stream in the SAME
+            # transaction that records it (FRG-META-013): the frontend versions
+            # cover URLs by ``cover_cached_at`` and repaints on SeriesRefreshed,
+            # so this closes the "cover arrived but the open page never learns"
+            # gap. Reached only when a cover was actually (re)fetched — the
+            # unchanged-URL early return above emits nothing, so steady-state
+            # refreshes don't double-invalidate. ``partial=False``: a cover
+            # write never implies an incomplete issue walk.
+            queue_event(session, SeriesRefreshed(series_id, partial=False))
 
     try:
         cover_path.parent.mkdir(parents=True, exist_ok=True)

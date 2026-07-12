@@ -25,6 +25,7 @@ from foragerr.metadata.credits import (
 from foragerr.metadata.errors import (
     COMICVINE_CREDENTIAL_MESSAGE,
     ComicVineAuthError,
+    ComicVineBudgetExhausted,
     ComicVineError,
     ComicVineMalformedResponse,
     ComicVineRateLimited,
@@ -47,6 +48,7 @@ from foragerr.metadata.models import (
 from foragerr.metadata.ratelimit import (
     comicvine_degraded,
     comicvine_health,
+    effective_budget,
     effective_interval,
 )
 from foragerr.metadata.sanitize import MAX_TEXT_LENGTH, sanitize_cv_text
@@ -57,6 +59,7 @@ __all__ = [
     "DEFAULT_BASE",
     "MAX_TEXT_LENGTH",
     "ComicVineAuthError",
+    "ComicVineBudgetExhausted",
     "ComicVineClient",
     "ComicVineError",
     "ComicVineMalformedResponse",
@@ -77,6 +80,7 @@ __all__ = [
     "cache_cover",
     "comicvine_degraded",
     "comicvine_health",
+    "effective_budget",
     "effective_interval",
     "map_issue",
     "map_person_credits",

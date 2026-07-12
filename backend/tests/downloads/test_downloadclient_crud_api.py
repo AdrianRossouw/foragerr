@@ -62,10 +62,19 @@ def _create_body(**overrides):
 
 
 async def _stored_settings(app, client_id: int) -> dict | None:
+    """Persisted settings with secret fields DECRYPTED for write-only-survival
+    assertions. Secrets are encrypted at rest (``enc:v1:``, FRG-AUTH-008);
+    ``decrypt_secret`` reveals them here (and passes plaintext through)."""
     from foragerr.downloads.repo import get_download_client
+    from foragerr.keystore import decrypt_secret
 
     row = await get_download_client(app.state.db, client_id)
-    return json.loads(row.settings) if row is not None else None
+    if row is None:
+        return None
+    return {
+        key: (decrypt_secret(value) if isinstance(value, str) else value)
+        for key, value in json.loads(row.settings).items()
+    }
 
 
 # --- create / list -----------------------------------------------------------
