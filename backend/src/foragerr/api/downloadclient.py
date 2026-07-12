@@ -24,6 +24,11 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel, ValidationError
 
 from foragerr.api.errors import ApiError
+from foragerr.keystore import (
+    ENC_PREFIX,
+    KeystoreDecryptError,
+    top_level_secret_field_names,
+)
 from foragerr.downloads import make_download_factory
 from foragerr.downloads.errors import DownloadClientError
 from foragerr.downloads.models import DownloadClientRow
@@ -186,6 +191,7 @@ async def create_download_client_endpoint(
         get_implementation(body.implementation)
     except UnknownImplementationError as exc:
         raise ApiError(400, str(exc), field="implementation") from exc
+    _reject_reserved_secret_prefix(body.implementation, body.settings)
     try:
         model = validate_settings(body.implementation, body.settings)
     except ValidationError as exc:
@@ -228,6 +234,7 @@ async def update_download_client_endpoint(
     if body.remove_completed_downloads is not None:
         updates["remove_completed_downloads"] = body.remove_completed_downloads
     if body.settings is not None:
+        _reject_reserved_secret_prefix(existing.implementation, body.settings)
         stored = json.loads(existing.settings)
         merged = {**stored, **body.settings}  # incoming overrides; omitted kept
         try:
@@ -237,9 +244,7 @@ async def update_download_client_endpoint(
 
     row = await update_download_client(db, client_id, **updates)
     assert row is not None  # existence proven above; single-writer txn
-    return DownloadClientResource.from_row(
-        row, load_settings(row.implementation, row.settings)
-    )
+    return DownloadClientResource.from_row(row, _settings_for_response(row))
 
 
 @router.delete("/{client_id}", status_code=204)
@@ -316,6 +321,41 @@ class _TransientRow:
         self.implementation = implementation
         self.protocol = protocol
         self.remove_completed_downloads = True
+
+
+def _reject_reserved_secret_prefix(implementation: str, supplied: dict[str, Any]) -> None:
+    """Reject a user-supplied secret whose value begins with the reserved
+    ``enc:v1:`` framing prefix (FRG-AUTH-008).
+
+    Such a value would be stored as PLAINTEXT — ``encrypt_secret`` treats an
+    already-``enc:v1:`` string as ciphertext and passes it through — and then fail
+    to decrypt on load, silently disabling the credential. Only the caller-supplied
+    secret fields are checked, so the stored-ciphertext merge path (an omitted
+    secret that round-trips as stored ciphertext) is unaffected."""
+    model_cls = get_implementation(implementation).settings_model
+    for name in top_level_secret_field_names(model_cls):
+        value = supplied.get(name)
+        if isinstance(value, str) and value.startswith(ENC_PREFIX):
+            raise ApiError(
+                422,
+                f"settings.{name}: value must not begin with the reserved "
+                f"'{ENC_PREFIX}' prefix (it is reserved for at-rest secret framing)",
+                field=f"settings.{name}",
+            )
+
+
+def _settings_for_response(row: DownloadClientRow) -> BaseModel:
+    """Load a persisted row's settings for the response, resiliently.
+
+    A successful write can leave the row carrying a secret the CURRENT key cannot
+    decrypt (wrong-key/corrupt); loading it for the response would otherwise 500.
+    Fall back to validating the raw (still-encrypted) payload so the endpoint keeps
+    its 200 — ``public_settings`` drops secret fields, so no ciphertext leaks
+    (FRG-AUTH-012 fail-soft)."""
+    try:
+        return load_settings(row.implementation, row.settings)
+    except KeystoreDecryptError:
+        return validate_settings(row.implementation, json.loads(row.settings))
 
 
 def _validation_error(exc: ValidationError) -> ApiError:

@@ -21,6 +21,7 @@ from sqlalchemy import select
 from foragerr.db.base import utcnow
 from foragerr.indexers.models import USAGE_PATHS, IndexerRow
 from foragerr.indexers.registry import get_implementation, validate_settings
+from foragerr.keystore import decrypt_secret, encrypt_secret, is_ciphertext
 from foragerr.logging import register_secret
 from foragerr.providers.partial import UNSET as _UNSET
 from foragerr.providers.partial import apply_partial_update
@@ -29,24 +30,48 @@ logger = logging.getLogger("foragerr.indexers.repo")
 
 
 def serialize_settings(model: BaseModel) -> str:
-    """Serialize a settings model to canonical JSON, revealing secret values
-    so the persisted row can authenticate. Stored server-side only."""
+    """Serialize a settings model to canonical JSON, encrypting secret values.
+
+    Each TOP-LEVEL ``SecretStr`` field is revealed then encrypted at rest to an
+    ``enc:v1:<token>`` value (FRG-AUTH-008) via the process keystore — the ONLY
+    place ``get_secret_value()`` is called at persistence time, so a future
+    top-level ``SecretStr`` field is encrypted with no per-provider work. Secret
+    detection is top-level only: a ``SecretStr`` nested inside a list or a
+    sub-model is NOT encrypted here (a tripwire test guards against introducing
+    one). Non-secret fields pass through unchanged. Stored server-side only."""
     data: dict[str, object] = {}
     for name in type(model).model_fields:
         value = getattr(model, name)
         if isinstance(value, SecretStr):
-            value = value.get_secret_value()
+            value = encrypt_secret(value.get_secret_value())
         data[name] = value
     return json.dumps(data, sort_keys=True)
 
 
 def load_settings(implementation: str, settings_json: str) -> BaseModel:
-    """Parse + validate a row's settings JSON, registering its secrets for
-    redaction. Raises on unknown implementation or an invalid payload."""
-    payload = json.loads(settings_json)
+    """Parse + validate a row's settings JSON, decrypting secrets and registering
+    them for redaction. Raises on unknown implementation, an invalid payload, or
+    a secret that fails to decrypt (wrong key / corrupt — FRG-AUTH-012)."""
+    payload = _decrypt_payload(json.loads(settings_json))
     model = validate_settings(implementation, payload)
     register_row_secrets(model)
     return model
+
+
+def _decrypt_payload(payload: dict) -> dict:
+    """Decrypt any ``enc:v1:`` value in a settings payload back to plaintext.
+
+    Only secret fields are ever encrypted, and legacy plaintext never carries the
+    prefix, so decrypting every prefixed value is provider-agnostic (the single
+    source of truth stays the ``SecretStr`` annotation used at dump time). A
+    decrypt failure propagates so the owning row is isolated (credential
+    unavailable) rather than searched with a broken key."""
+    if not isinstance(payload, dict):
+        return payload
+    return {
+        key: (decrypt_secret(value) if is_ciphertext(value) else value)
+        for key, value in payload.items()
+    }
 
 
 def register_row_secrets(model: BaseModel) -> None:

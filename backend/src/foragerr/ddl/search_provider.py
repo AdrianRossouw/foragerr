@@ -61,6 +61,12 @@ _BACKOFF_STATUSES = frozenset({429, 503})
 def _load_settings(row: IndexerRow) -> GetComicsSettings:
     import json
 
+    # NOTE: this bypasses the keystore-decrypting ``indexers.repo.load_settings``.
+    # It is SAFE only because ``GetComicsSettings`` carries NO ``SecretStr`` field
+    # (nothing to decrypt). If a secret is ever added to it, route this (and the
+    # ``ddl.queue._provider_base_url`` sibling) through the decrypting loader — the
+    # m6-keystore tripwire test asserts ``GetComicsSettings`` stays secret-free so
+    # this bypass cannot be tripped silently.
     return GetComicsSettings.model_validate(json.loads(row.settings))
 
 

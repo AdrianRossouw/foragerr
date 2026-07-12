@@ -1,6 +1,6 @@
 [project]
 name = "foragerr"
-version = "0.6.0"
+version = "0.6.1"
 description = "Sonarr-style comic library management backend"
 license = "GPL-3.0-or-later"
 requires-python = ">=3.12,<3.13"
@@ -17,6 +17,7 @@ dependencies = [
     "defusedxml>=0.7",
     "websockets>=13",
     "pillow>=11,<12",
+    "cryptography>=43,<47",
 ]
 
 [project.scripts]

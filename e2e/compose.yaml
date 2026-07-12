@@ -32,6 +32,10 @@ services:
       PUID: ${FORAGERR_PUID:-911}
       PGID: ${FORAGERR_PGID:-911}
       TZ: Etc/UTC
+      # Mandatory at-rest secret passphrase (FRG-AUTH-011): the app refuses to
+      # start without it. A fixed non-secret value is fine for the hermetic e2e
+      # stack — it only derives the key that encrypts provider secrets at rest.
+      FORAGERR_SECRET_KEY: e2e-keystore-passphrase
       # Point the metadata client at the fixture ComicVine (the one sanctioned
       # e2e-only override; defaults to the real API in production).
       # Fixture-network plaintext is explicitly opted into (test affordance;

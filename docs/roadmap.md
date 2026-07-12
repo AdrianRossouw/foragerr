@@ -23,11 +23,11 @@ variables) start a clean slate under strict semantic versioning.
 
 ## M6 — Sources
 
-Broaden how issues you are entitled to enter the library:
+Broaden how issues you are entitled to enter the library. The encrypted
+credential store — at-rest encryption for provider secrets saved through the UI —
+has shipped as the first M6 change, before any account credential is persisted.
+Still planned:
 
-- **Encrypted credential store first** — at-rest encryption for provider
-  secrets saved through the UI, landing before any account credential is
-  persisted (`FRG-AUTH-008`).
 - **Humble Bundle importer** — unpack the DRM-free comic bundles you have
   purchased from Humble Bundle straight into your library.
 - **Companion browser extension** — a small, copy-only helper that puts the

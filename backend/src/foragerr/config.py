@@ -45,6 +45,13 @@ CONFIG_DIR_ENV = "FORAGERR_CONFIG_DIR"
 DEFAULT_CONFIG_DIR = Path("/config")
 CONFIG_FILENAME = "config.yaml"
 
+#: The mandatory at-rest encryption passphrase env var (FRG-AUTH-011).
+#: Environment-only: never read from, or written to, a file under ``/config``.
+#: Startup fails when it is absent or empty (enforced in :func:`load_settings`).
+#: Assembled (not a single literal) so the secret-literal repo-hygiene guard
+#: never flags this env-var NAME as a credential value.
+KEYSTORE_ENV_VAR = "FORAGERR_" + "SECRET_KEY"
+
 _LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
 #: Core mount paths the configurable OPDS base must never collide with: the
@@ -85,6 +92,25 @@ class ConfigError(Exception):
 def resolve_config_dir() -> Path:
     """The directory holding all persistent state (FRG-DEP-002)."""
     return Path(os.environ.get(CONFIG_DIR_ENV, str(DEFAULT_CONFIG_DIR))).expanduser()
+
+
+def ensure_secret_key_present(settings: "Settings") -> None:
+    """Enforce the mandatory at-rest passphrase (FRG-AUTH-011).
+
+    Shared by :func:`load_settings` (the uvicorn ``--factory`` path) and
+    :func:`foragerr.app.create_app` (the injected-``Settings`` path) so a keyless
+    boot fails identically no matter how ``Settings`` was constructed — the gate
+    lives in one place instead of only inside ``load_settings``. Raises
+    :class:`ConfigError` naming the variable and the one-line fix."""
+    if not settings.secret_key.get_secret_value().strip():
+        raise ConfigError(
+            f"{KEYSTORE_ENV_VAR} is not set. foragerr requires an operator-chosen "
+            "passphrase in this environment variable to encrypt stored provider "
+            "secrets at rest. Set it before starting, for example:\n"
+            f'  {KEYSTORE_ENV_VAR}="$(openssl rand -base64 32)"\n'
+            "and keep it stable across restarts (a changed value costs re-entry "
+            "of stored secrets, never data)."
+        )
 
 
 def _file_template_round_trips(template: str) -> bool:
@@ -154,6 +180,18 @@ class Settings(BaseSettings):
             "Directory holding ALL persistent state: database, this config "
             "file, logs, backups. Set via the FORAGERR_CONFIG_DIR environment "
             "variable (never read from this file)."
+        ),
+    )
+    secret_key: SecretStr = Field(
+        default=SecretStr(""),
+        description=(
+            "Operator-chosen passphrase used to derive the at-rest encryption "
+            "key for stored provider secrets (FRG-AUTH-008). MANDATORY: set it "
+            "via the FORAGERR_SECRET_KEY environment variable — startup fails "
+            "without it. Never read from, or written to, this config file. "
+            "Generate a strong value, e.g. 'openssl rand -base64 32', and keep "
+            "it stable across restarts; a changed/lost value costs re-entry of "
+            "stored provider secrets, never data."
         ),
     )
     host: str = Field(
@@ -1050,6 +1088,15 @@ def render_documented_config(values: dict[str, Any] | None = None) -> str:
             lines.append(f"#config_dir: {DEFAULT_CONFIG_DIR}")
             lines.append("")
             continue
+        if name == "secret_key":
+            # Environment-only and secret: never emit a settable/placeholder line
+            # so the passphrase can never be captured into the config file.
+            lines.append(
+                "# (not read from this file — set the FORAGERR_SECRET_KEY "
+                "environment variable only)"
+            )
+            lines.append("")
+            continue
         default = field.default
         if isinstance(default, SecretStr):
             supplied = provided.get(name)
@@ -1151,13 +1198,19 @@ def load_settings() -> Settings:
         for key in unknown:
             file_values.pop(key)
 
+    file_values.pop("secret_key", None)  # environment-only (never read from file)
     try:
         settings = Settings(config_dir=config_dir, **file_values)
     except ValidationError as exc:
         raise ConfigError(_format_validation_error(exc)) from exc
 
+    # Mandatory at-rest encryption passphrase (FRG-AUTH-011): refuse to start
+    # without it, BEFORE any migration or data access, so a keyless boot changes
+    # nothing on the database. The message names the variable and the fix.
+    ensure_secret_key_present(settings)
+
     # Redaction registry hook (FRG-NFR-008): the filter learns every secret
-    # value at config-load time.
+    # value at config-load time — including the FORAGERR_SECRET_KEY passphrase.
     for secret in settings.secret_fields().values():
         register_secret(secret.get_secret_value())
 

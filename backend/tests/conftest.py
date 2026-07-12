@@ -14,14 +14,40 @@ import pytest
 from foragerr import logging as flog
 
 
+#: The mandatory at-rest passphrase every test boots with (FRG-AUTH-011).
+TEST_SECRET_KEY = "test-secret-passphrase"
+
+
 @pytest.fixture(autouse=True)
 def _isolate(monkeypatch):
-    """Strip FORAGERR_* env vars and reset redaction/handler state per test."""
+    """Strip FORAGERR_* env vars and reset redaction/handler + keystore state.
+
+    Installs a deterministic, cheap process keystore (m6-keystore): scrypt cost
+    is lowered and the salt pinned so it is fast AND matches whatever an
+    app-boot's ``init_keystore`` derives from the SAME passphrase + salt — so a
+    secret encrypted before a ``create_app`` boot still decrypts after it. The
+    mandatory ``FORAGERR_SECRET_KEY`` is set so any ``load_settings`` boot passes
+    the FRG-AUTH-011 gate (tests exercising the missing-key path delenv it)."""
+    from cryptography.fernet import Fernet, MultiFernet
+
+    from foragerr import keystore as keystore_mod
+
     for key in list(os.environ):
         if key.startswith("FORAGERR_"):
             monkeypatch.delenv(key)
     flog.clear_secrets()
+
+    monkeypatch.setattr(keystore_mod, "SCRYPT_N", 2**4)
+    monkeypatch.setattr(keystore_mod, "_new_salt", lambda: b"0123456789abcdef")
+    monkeypatch.setenv("FORAGERR_SECRET_KEY", TEST_SECRET_KEY)
+    fernet_key = keystore_mod.derive_fernet_key(TEST_SECRET_KEY, keystore_mod._new_salt())
+    keystore_mod.install_keystore(
+        keystore_mod.Keystore(MultiFernet([Fernet(fernet_key)]), available=True)
+    )
+
     yield
+
+    keystore_mod.reset_keystore()
     flog.clear_secrets()
     root = logging.getLogger()
     for handler in list(root.handlers):

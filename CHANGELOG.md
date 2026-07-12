@@ -9,6 +9,50 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.6.1] — 2026-07-12
+
+m6-keystore: at-rest encryption of stored provider secrets (FRG-AUTH-008).
+
+> **⚠️ BREAKING — set `FORAGERR_SECRET_KEY` before upgrading.** foragerr now
+> **requires** the `FORAGERR_SECRET_KEY` environment variable (an operator-chosen
+> passphrase) and refuses to start without it, naming the variable in the error.
+> Generate a strong value once — `FORAGERR_SECRET_KEY="$(openssl rand -base64 32)"`
+> — add it to your container's environment, and keep it stable across restarts. On
+> first boot after upgrade, foragerr transparently encrypts any existing plaintext
+> provider secrets in the database under this passphrase. A changed or lost
+> passphrase costs **re-entry of your provider secrets, never data** (see
+> `docs/manual/admin/secrets.md`).
+
+### Added
+- **At-rest secret encryption** (FRG-AUTH-008): UI-entered provider secrets
+  (indexer API keys, SABnzbd credentials) are now stored encrypted in the
+  database as `enc:v1:<token>` using authenticated encryption (Fernet:
+  AES-128-CBC + HMAC-SHA256, via MultiFernet for a future key-rotation hook).
+  The encryption key is derived from the `FORAGERR_SECRET_KEY` passphrase with
+  scrypt and a random per-deployment salt; only the non-secret salt and a
+  sentinel check-value are persisted (new `keystore_meta` table). A copy of the
+  database — including any backup — no longer exposes provider secrets without
+  the environment passphrase. New secret fields are covered automatically (the
+  `SecretStr` annotation is the single source of truth), and `cryptography` is
+  added as a SOUP dependency.
+- **Mandatory startup key** (FRG-AUTH-011): the `FORAGERR_SECRET_KEY` passphrase
+  is required at startup; a keyless boot fails config validation before touching
+  the database, with an actionable error.
+
+### Changed
+- **Decrypt-fail-soft** (FRG-AUTH-012): if a stored secret cannot be decrypted
+  (passphrase changed, or a backup restored into a different deployment), foragerr
+  still starts and serves normally — library browsing and OPDS are unaffected —
+  and the affected integration reports "credential unavailable — encryption key
+  missing or changed; re-enter the secret" on the health screen, behaving as
+  unconfigured. Re-entering the secret re-encrypts it under the current key and
+  clears the warning.
+- **Plaintext migration on first keyed boot** (FRG-AUTH-013): existing plaintext
+  provider secrets are converted to `enc:v1:` ciphertext exactly once,
+  idempotently, also covering a restored pre-upgrade (plaintext) backup.
+- RISK-041 (plaintext credentials in backups) moves **Accept → Mitigated**;
+  residual weak-passphrase risk noted. Threat model updated.
+
 ## [v0.6.0] — 2026-07-12
 
 cv-budget-caching: ComicVine politeness grows an hourly dimension — M6 opens.
