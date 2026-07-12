@@ -1,0 +1,13 @@
+/* Full-viewport loading state (m8-auth-core): the boot-time auth gate and the
+ * post-login/post-logout transition both render this instead of protected UI
+ * or the login form while status is unsettled — matching the app shell's
+ * page background so there is no flash-of-wrong-color. */
+.wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: var(--surface-page);
+  color: var(--text-secondary);
+  font-size: var(--font-size-base);
+}

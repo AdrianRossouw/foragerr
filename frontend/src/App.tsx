@@ -1,5 +1,6 @@
 import { Routes, Route } from 'react-router-dom';
 import { AppShell } from './components/AppShell';
+import { LoginScreen } from './screens/auth/LoginScreen';
 import { LibraryIndex } from './screens/library/LibraryIndex';
 import { SeriesDetailRoute } from './screens/series/SeriesDetail';
 import { AddSeries } from './screens/add/AddSeries';
@@ -29,11 +30,15 @@ import { LogsScreen } from './screens/system/LogsScreen';
  * daily review screens: wanted (FRG-UI-011), history (FRG-UI-010), and
  * blocklist (FRG-UI-017). m2-ops-health-backups adds the System area
  * (FRG-UI-016): status, health, and tasks. m4-logs-viewer adds System — Logs
- * (FRG-UI-024).
+ * (FRG-UI-024). m8-auth-core adds /login, sitting OUTSIDE the `AppShell`
+ * route (no sidebar/header for an unauthenticated visitor) — `AuthGate`
+ * (mounted around this whole component in main.tsx) decides which of the two
+ * subtrees is actually reachable at any moment.
  */
 export function App() {
   return (
     <Routes>
+      <Route path="/login" element={<LoginScreen />} />
       <Route element={<AppShell />}>
         <Route index element={<LibraryIndex />} />
         <Route path="series/:id" element={<SeriesDetailRoute />} />

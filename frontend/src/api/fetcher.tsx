@@ -1,4 +1,5 @@
 import { createContext, useContext, type ReactNode } from 'react';
+import { useAuthStore } from '../store/authStore';
 
 /*
  * Injected fetcher (FRG-UI-001).
@@ -67,6 +68,24 @@ export function isComicVineAuthError(error: unknown): boolean {
 
 export type Fetcher = <T>(path: string, init?: FetcherInit) => Promise<T>;
 
+/**
+ * Auth endpoints own their OWN 401 handling and are exempt from the generic
+ * interception below (m8-auth-core, FRG-AUTH-002/010):
+ *   - `login` — a 401 here is an expected, inline "wrong credentials" outcome
+ *     the login form renders itself; treating it as a session-loss signal
+ *     would redirect the login screen to... the login screen.
+ *   - `me` — the boot-time check `AuthGate` runs is EXPECTED to 401 for an
+ *     anonymous visitor; `AuthGate` already turns that into the unauthenticated
+ *     state + redirect itself, with the return path it needs.
+ *   - `logout` — always exempt for symmetry; the contract never documents a
+ *     401 here, and a logout call is never itself a signal of session loss.
+ */
+const AUTH_EXEMPT_PATHS: ReadonlySet<string> = new Set([
+  '/api/v1/auth/login',
+  '/api/v1/auth/logout',
+  '/api/v1/auth/me',
+]);
+
 export const defaultFetcher: Fetcher = async <T,>(
   path: string,
   init?: FetcherInit,
@@ -74,6 +93,7 @@ export const defaultFetcher: Fetcher = async <T,>(
   const hasBody = init?.body !== undefined;
   const res = await fetch(path, {
     method: init?.method ?? 'GET',
+    credentials: 'same-origin',
     headers: {
       Accept: 'application/json',
       ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
@@ -87,6 +107,14 @@ export const defaultFetcher: Fetcher = async <T,>(
       body = (await res.json()) as ApiErrorBody;
     } catch {
       body = null;
+    }
+    // Central 401 interception (FRG-AUTH-010): any OTHER endpoint 401ing means
+    // the session died (expired, logged out elsewhere, revoked) mid-use.
+    // Flip the auth store — `AuthGate` observes the transition and redirects
+    // to /login, preserving wherever the user currently is as the return path.
+    // Read via `getState()`, not the hook: this module has no component tree.
+    if (res.status === 401 && !AUTH_EXEMPT_PATHS.has(path)) {
+      useAuthStore.getState().setUnauthenticated();
     }
     throw new ApiRequestError(res.status, body, path);
   }

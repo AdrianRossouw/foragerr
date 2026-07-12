@@ -206,6 +206,13 @@ export const queryKeys = {
     entitlementDetail: (id: number) => ['sources', 'entitlement', id] as const,
     newCount: (idsHash: string) => ['sources', 'new-count', idsHash] as const,
   },
+  // Auth (m8-auth-core, FRG-AUTH-002), mirroring GET /api/v1/auth/me. A
+  // singleton — not invalidated by the WebSocketBridge (no server push exists
+  // for session state); `AuthGate` re-derives the client auth store from it
+  // directly rather than reading this cache elsewhere.
+  auth: {
+    me: () => ['auth', 'me'] as const,
+  },
 } as const;
 
 export type SeriesListKey = ReturnType<typeof queryKeys.series.all>;
