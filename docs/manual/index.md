@@ -28,6 +28,7 @@ docs/manual/
     search.md              indexers, interactive search, decision engine
     downloads.md            SABnzbd + built-in DDL, queue, blocklist
     import.md                import pipeline, manual import, ComicInfo, recycle bin
+    sources.md                store sources (Humble Bundle): connect, sync, review
     web-ui.md                 the web interface, screen by screen
     reading-opds.md            OPDS catalog for reading on a tablet
   admin/

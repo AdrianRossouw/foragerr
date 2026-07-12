@@ -70,6 +70,8 @@ under the top level of `config.yaml`.
 | `pull_source_url` | `FORAGERR_PULL_SOURCE_URL` | `https://walksoftly.itsaninja.party/newcomics.php` | URL of the unofficial weekly-pull JSON source. Fetched only when `pull_enabled` is true, over the hardened **external** egress profile — a loopback/private/link-local host is refused per-hop and surfaced as a degraded source, never used to reach an internal host. An empty value disables the fetch. |
 | `pull_refresh_interval_seconds` | `FORAGERR_PULL_REFRESH_INTERVAL_SECONDS` | `14400` (4h) | How often the scheduled `pull-refresh` task runs. Clamped **up** to a documented 1 hour (3600s) floor to protect the unofficial source — a smaller value is raised, not rejected. A manual force-run bypasses the interval gate. |
 | `auto_redownload_failed` | `FORAGERR_AUTO_REDOWNLOAD_FAILED` | `true` | Self-healing re-search after a failed download. |
+| `source_sync_interval_seconds` | `FORAGERR_SOURCE_SYNC_INTERVAL_SECONDS` | `86400` (daily) | How often the scheduled store-source sync task (`FRG-SRC-003`) polls every connected source (e.g. Humble Bundle) for new entitlements. Clamped **up** to a documented 1 hour (3600 s) floor at task registration to stay polite to the store API — a smaller value is raised, not rejected. A manual "Sync now" on a source runs immediately regardless of this interval. See `../user/sources.md`. |
+| `source_min_request_interval_seconds` | `FORAGERR_SOURCE_MIN_REQUEST_INTERVAL_SECONDS` | `2.0` | Minimum seconds between two consecutive HTTP requests to one store source, enforced across the whole order-list → order-detail fan for that source (`FRG-NFR-005`). Floored at 0.1 s. |
 | `opds_base_path` | `FORAGERR_OPDS_BASE_PATH` | `/opds` | Base URL path the OPDS catalog is mounted at. Must start with `/`; trailing slash stripped; in-feed links are built relative to it. |
 | `opds_page_size` | `FORAGERR_OPDS_PAGE_SIZE` | `50` | Default entries per OPDS feed page when the client doesn't ask. |
 | `opds_page_size_cap` | `FORAGERR_OPDS_PAGE_SIZE_CAP` | `100` | Hard upper bound on OPDS page size; larger client requests are clamped. |
@@ -310,6 +312,24 @@ The pull side never writes issue status itself.
   is marked **degraded** on the health surface (System → Health) with a remediation
   hint, rather than failing silently or discarding good data. A bad-date `619`
   response skips only the affected week; the other week is still fetched.
+
+## Store sources
+
+foragerr can connect to an external store account so items you own there are
+discovered and reviewed automatically — see `../user/sources.md` for the
+full workflow (connecting, sync, review-first, auto-sync, expiry). This
+section covers only the operator-facing knobs:
+
+- **`source_sync_interval_seconds`** controls how often the scheduled
+  `source-sync` task polls every connected source; it appears on the System →
+  Tasks screen like every other scheduled job, with the same force-run
+  ("Sync now" per source, or Run Now for the whole task) available.
+- **`source_min_request_interval_seconds`** paces the requests one source's
+  sync makes to the store's API — a politeness floor, not a feature toggle.
+- There is no master on/off switch analogous to `pull_enabled`: a store
+  source issues no traffic at all until you deliberately connect one and
+  paste a credential (`../user/sources.md`), so there is nothing to opt out
+  of on a fresh install.
 
 ## Logs and diagnostics
 
