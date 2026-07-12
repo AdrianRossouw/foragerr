@@ -33,7 +33,7 @@
 
 ## 6. Gate + merge
 
-- [ ] 6.1 Full suite green (pytest + vitest + tsc + e2e via run.sh)
-- [ ] 6.2 Small/medium fleet + Codex with dedicated adversarial angle (bypass via key isolation/IP handling, backoff arithmetic, operator-DoS, log injection, credential leakage into logs)
-- [ ] 6.3 Apply gate findings; gitleaks re-scan appended to history-scan.md
+- [x] 6.1 Full suite green (pytest + vitest + tsc + e2e via run.sh)
+- [x] 6.2 Small/medium fleet + Codex with dedicated adversarial angle (bypass via key isolation/IP handling, backoff arithmetic, operator-DoS, log injection, credential leakage into logs)
+- [x] 6.3 Apply gate findings; gitleaks re-scan appended to history-scan.md
 - [ ] 6.4 Merge --no-ff to main, tag v0.9.0, gh release, archive change, delete branch
