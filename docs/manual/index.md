@@ -34,7 +34,8 @@ docs/manual/
   admin/
     configuration.md      config.yaml, FORAGERR_* env vars
     secrets.md             secrets handling
-    network.md              port, Tailscale-only posture, no authentication
+    authentication.md       mandatory login, bootstrap credentials, sessions
+    network.md              port, Tailscale-only posture, authentication
     deployment.md            Docker image build, run, upgrade
 ```
 

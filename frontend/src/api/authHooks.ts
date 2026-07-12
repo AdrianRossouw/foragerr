@@ -7,7 +7,7 @@ import { useFetcher } from './fetcher';
  * the fixed backend contract:
  *   GET  /api/v1/auth/me     -> 200 {username} authenticated, 401 otherwise
  *   POST /api/v1/auth/login -> 200 {username} + sets the session cookie,
- *                               401 {"detail":"invalid credentials"} on ANY
+ *                               401 {"message":"invalid credentials"} on ANY
  *                               failure (bad user, bad password — never
  *                               distinguished, so the UI never can either)
  *   POST /api/v1/auth/logout -> 204, invalidates the session server-side

@@ -13,10 +13,16 @@ http://<your-tailnet-address>:8789/opds
 ```
 
 (The `/opds` base path is configurable — `FORAGERR_OPDS_BASE_PATH`; see
-`admin/configuration.md`.) No credentials are required, as foragerr currently has
-no authentication: the catalog is
-protected only by your tailnet — the same Tailscale-only exposure rule as the web
-UI (`admin/network.md`). Do not expose the port beyond the tailnet.
+`admin/configuration.md`.) The catalog requires a credential like every other
+surface: sign in with the operator username and the OPDS password (set by
+your administrator — it's the admin password unless a separate
+`FORAGERR_OPDS_PASSWORD` was configured; see `admin/authentication.md`). Most
+reading apps, including Panels, Chunky, and KyBook, prompt for username and
+password the first time they connect to an OPDS catalog and store the
+credential themselves, so this is normally a one-time step per device. A bare
+request without credentials gets a `401` challenge, which is what triggers
+that prompt. The tailnet remains the recommended exposure boundary regardless
+— see `admin/network.md` — do not expose the port beyond it.
 
 ## What the catalog looks like
 

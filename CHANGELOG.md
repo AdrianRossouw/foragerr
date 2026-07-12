@@ -9,6 +9,60 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.7.0] — 2026-07-12
+
+m8-auth-core: the first change of the M8 authentication milestone. Login is
+now mandatory on every surface — the milestone the 1.0 roadmap names as the
+gate for "safe for strangers to deploy".
+
+### ⚠ BREAKING — upgrade steps required
+
+This release refuses to start until two new environment variables are set:
+
+```yaml
+environment:
+  - FORAGERR_ADMIN_USER=you
+  - FORAGERR_ADMIN_PASSWORD=choose-a-strong-one
+```
+
+They seed the single account at first boot. Setting a *new* pair later and
+restarting re-seeds the account (this is the lost-password recovery) and signs
+out all sessions. Optionally set `FORAGERR_OPDS_PASSWORD` to give OPDS reader
+apps their own password (defaults to the admin password). Rolling back below
+v0.7.0 re-opens the unauthenticated surface (the pre-M8 posture).
+
+### Added
+- **Mandatory authentication with a default-deny perimeter** (FRG-AUTH-002,
+  FRG-AUTH-010): every surface — web UI, REST API, OPDS, WebSocket — now
+  requires its credential; the exempt list is exactly `/health` and the login
+  screen. There is no auth-mode-none. The uniform-coverage invariant is proven
+  three ways: perimeter-by-construction at the app root, an exhaustive
+  route-inventory test, and end-to-end negative paths on every surface.
+- **Form login with two-tier sessions** (FRG-AUTH-004): "Remember this
+  device" keeps a sliding ~90-day session; otherwise sessions slide at ~24 h
+  of inactivity (both configurable). Sessions are server-side revocable:
+  logout works from the header, and a password change signs out every other
+  device. Session tokens are stored hashed; cookies are HttpOnly/SameSite=Lax.
+- **scrypt password hashing** (FRG-AUTH-003, amended from "argon2id or
+  bcrypt" by owner decision): memory-hard KDF from the existing
+  `cryptography` dependency — no new dependencies.
+- **Per-surface credentials**: session cookie for the UI, `X-Api-Key` header
+  (never a query parameter) for programmatic API use — the generated key is
+  shown once to a logged-in session via `/api/v1/auth/bootstrap-key` — and
+  HTTP Basic in a dedicated realm for OPDS readers (key rotation and OPDS
+  password change UI arrive in the next M8 change).
+- **CSRF and WebSocket-origin protection** (FRG-SEC-005): state-changing
+  requests under cookie auth require a matching Origin; cross-origin
+  WebSocket handshakes are refused before upgrade (allowlist configurable for
+  reverse-proxy deployments).
+
+### Changed
+- The interactive API docs (Swagger/redoc) are removed and `openapi.json` now
+  requires authentication — unauthenticated schema disclosure ends with the
+  no-auth posture.
+- RISK-020 (the M1 no-auth accepted risk) flips to **Mitigated**; FRG-AUTH-001
+  is withdrawn and its scenarios invert into the perimeter tests.
+
 ## [v0.6.3] — 2026-07-12
 
 v0-6-3-fixes: the first live SABnzbd run (real indexer, real usenet servers)

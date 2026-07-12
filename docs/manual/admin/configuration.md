@@ -29,6 +29,12 @@ under the top level of `config.yaml`.
 |---|---|---|---|
 | `config_dir` | `FORAGERR_CONFIG_DIR` | `/config` | Environment-only; not read from `config.yaml` itself. |
 | `secret_key` | `FORAGERR_SECRET_KEY` | *(none — REQUIRED)* | **Mandatory** at-rest encryption passphrase; environment-only, never read from or written to `config.yaml`. foragerr refuses to start without it. Encrypts stored provider secrets at rest (`FRG-AUTH-008`). Generate with `openssl rand -base64 32` and keep it stable. See `secrets.md`. |
+| `admin_user` | `FORAGERR_ADMIN_USER` | *(none — REQUIRED on first boot)* | Bootstrap operator username (`FRG-AUTH-002`). **Mandatory** when no operator account exists yet; foragerr refuses to start without it (and `admin_password`). A changed value on a later boot re-seeds the account (lost-password recovery). See `authentication.md`. |
+| `admin_password` | `FORAGERR_ADMIN_PASSWORD` | *(none — REQUIRED on first boot)* | Bootstrap operator password; environment-only, never read from or written to `config.yaml`, stored only as a scrypt hash. See `authentication.md`. |
+| `opds_password` | `FORAGERR_OPDS_PASSWORD` | *(empty)* | Optional separate OPDS HTTP-Basic password; when empty, equals the admin password at seed time. Environment-only; stored only as a scrypt hash. See `authentication.md`. |
+| `session_timeout_seconds` | `FORAGERR_SESSION_TIMEOUT_SECONDS` | `86400` (24 h) | Standard-session sliding-inactivity timeout (`FRG-AUTH-004`); each authenticated request pushes it forward. See `authentication.md`. |
+| `remember_timeout_seconds` | `FORAGERR_REMEMBER_TIMEOUT_SECONDS` | `7776000` (90 d) | "Remember this device" sliding timeout. A default, not a floor. See `authentication.md`. |
+| `auth_origin_allowlist` | `FORAGERR_AUTH_ORIGIN_ALLOWLIST` | *(empty)* | Comma-separated extra allowed Origins for the CSRF check and the WebSocket handshake, beyond the deployment's own origin — set this for a reverse-proxied deployment. See `authentication.md`. |
 | `host` | `FORAGERR_HOST` | `0.0.0.0` | Interface the HTTP listener binds to. |
 | `port` | `FORAGERR_PORT` | `8789` | TCP port for the HTTP listener. |
 | `log_level` | `FORAGERR_LOG_LEVEL` | `INFO` | One of DEBUG/INFO/WARNING/ERROR/CRITICAL. |
@@ -168,8 +174,9 @@ per-path budget detail before any deferral happens, so a build-up is visible ear
 ## Listener resource limits
 
 The `listener_*` and `ws_*` settings above are availability safety valves on the
-inbound HTTP/WebSocket listener, not access control (foragerr has no
-authentication — see `network.md`). Their defaults are deliberately
+inbound HTTP/WebSocket listener, not access control — they bound resource use
+regardless of who is authenticated (see `authentication.md` for the actual
+access control). Their defaults are deliberately
 generous so nothing in normal single-admin use is ever refused; they exist to
 bound memory/CPU if something on the tailnet misbehaves or a client floods the
 listener. If you ever see one of these responses, it means a limit was hit —

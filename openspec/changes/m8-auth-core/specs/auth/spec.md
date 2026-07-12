@@ -55,7 +55,7 @@ The system SHALL store the user password only as a salted hash using a memory-ha
 
 ### Requirement: FRG-AUTH-004 — session management
 
-The system SHALL issue authenticated sessions as DB-backed opaque tokens delivered in HttpOnly, SameSite cookies, storing server-side only a hash of the token, with two sliding-expiry tiers — a standard session (configurable inactivity timeout, default 24 h) and an opt-in remember-me tier (configurable, default 90 d) selected on the login form. The system SHALL regenerate the session token at login, support explicit logout invalidating the session server-side, invalidate all other sessions on password change, and prune expired sessions on the existing scheduler.
+The system SHALL issue authenticated sessions as DB-backed opaque tokens delivered in HttpOnly, SameSite cookies, storing server-side only a hash of the token, with two sliding-expiry tiers — a standard session (configurable inactivity timeout, default 24 h) and an opt-in remember-me tier (configurable, default 90 d) selected on the login form. The system SHALL regenerate the session token at login, support explicit logout invalidating the session server-side, invalidate every existing session when the account credentials change (in this change, via the env re-seed recovery path; user-initiated password change with acting-session preservation ships with the m8-keys-opds lifecycle change), and prune expired sessions on the existing scheduler.
 
 - **Milestone**: M8
 - **Source**: mylar-feature-surface.md §8 AUTH ("session login with timeout"); m8-auth pre-design owner decision (remember-me comfort tier), 2026-07-11/12.
@@ -76,10 +76,10 @@ The system SHALL issue authenticated sessions as DB-backed opaque tokens deliver
 - **WHEN** a user logs in (with any pre-existing session cookie present) and later logs out, then replays the old cookies
 - **THEN** login issues a fresh token (the prior token no longer authenticates — fixation defense), and after logout the deleted session's cookie yields 401 on replay (back-button included)
 
-#### Scenario: Password change invalidates other sessions
+#### Scenario: Credential re-seed invalidates all sessions
 
-- **WHEN** the password is changed from an authenticated session while other sessions (including remember-me) exist
-- **THEN** every other session row is deleted — subsequent requests on them return 401 — while the acting session remains valid
+- **WHEN** the account credentials are re-seeded at boot from a changed env pair while sessions (including remember-me) exist
+- **THEN** every session row is deleted — subsequent requests on them return 401 — and access requires a fresh login with the new credentials (user-initiated password change, preserving the acting session, is specified in m8-keys-opds with its Settings surface)
 
 #### Scenario: Expired rows are pruned
 
@@ -120,4 +120,4 @@ Every HTTP surface (UI, API, OPDS, WebSocket) SHALL require its designated crede
 
 **Reason**: The accepted-risk window this requirement governed ends with m8-auth-core: mandatory authentication now covers every surface, so operating without authentication is no longer a supported (or possible) configuration. RISK-020 flips Accept → Mitigated in the same change.
 
-**Migration**: The requirement's protective intent inverts into FRG-AUTH-010's perimeter scenarios — the old "all surfaces respond without credentials" assertion becomes "every surface refuses bare requests", and the no-half-built-auth-paths scenario is superseded by the fully built perimeter. The registry row flips to `retired` (never reused, per FRG-PROC-002); deployment docs drop the tailnet-only compensating-control framing in favor of the auth upgrade block.
+**Migration**: The requirement's protective intent inverts into FRG-AUTH-010's perimeter scenarios — the old "all surfaces respond without credentials" assertion becomes "every surface refuses bare requests", and the no-half-built-auth-paths scenario is superseded by the fully built perimeter. The registry row flips to `withdrawn` — kept for history, never reused (FRG-PROC-002); deployment docs drop the tailnet-only compensating-control framing in favor of the auth upgrade block.
