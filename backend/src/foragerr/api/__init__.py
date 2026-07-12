@@ -1,6 +1,5 @@
 """foragerr API area: uniform error handling, paging, health, version, and
-command/series/issues transport (FRG-API-001..006, FRG-DEP-007, FRG-DEP-010,
-FRG-AUTH-001).
+command/series/issues transport (FRG-API-001..006, FRG-DEP-007, FRG-DEP-010).
 
 :func:`register_api` is the app factory's extension point (mirrors
 ``register_database``/``register_scheduler``): it installs the uniform-shape
@@ -8,10 +7,10 @@ exception handlers, mounts ``/api/v1/system/status``, ``/api/v1/command*``,
 ``/api/v1/series*`` and ``/api/v1/issues*``, mounts root-level ``/health``,
 and logs the version line at startup.
 
-No auth (FRG-AUTH-001, M1 accepted risk): this module registers no
-middleware and no auth dependency on the app or on any router — every route
-mounted here (including the series/issues routers) responds credential-free
-by construction.
+Auth (FRG-AUTH-010): every route mounted here is protected by the default-deny
+perimeter installed at the app root (``foragerr.auth.perimeter``) — this module
+adds no per-route auth of its own; the routers are covered by construction. The
+root ``/health`` probe is on the perimeter exempt list.
 """
 
 from __future__ import annotations
