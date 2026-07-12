@@ -43,11 +43,12 @@ handling, and uniform coverage of the UI, API, and OPDS surfaces. **In
 progress**: the first change (`m8-auth-core`, v0.7.0) shipped the default-deny
 perimeter, mandatory login, two-tier sessions, scrypt password hashing, env
 bootstrap, the CSRF stance, and WebSocket origin validation, mitigating
-`RISK-020`. The requirements below remain planned for the follow-up changes.
+`RISK-020`; the second (`m8-keys-opds`, v0.8.0) shipped the credential
+lifecycle — Settings → Security password changes, API-key rotation with
+display-once, independent OPDS credentials, sign-out-everywhere, and the
+env re-seed fingerprint semantics.
 
-- Remaining requirements: `FRG-AUTH-005` (independent OPDS Basic credential
-  lifecycle), `FRG-AUTH-006` (API keys), `FRG-AUTH-007` (key lifecycle) —
-  planned for `m8-keys-opds`; `FRG-AUTH-009` (login rate limiting and audit) —
+- Remaining requirements: `FRG-AUTH-009` (login rate limiting and audit) —
   planned for `m8-rate-audit`.
 
 ## M9 — UI refinement
