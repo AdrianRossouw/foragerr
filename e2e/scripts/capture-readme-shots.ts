@@ -194,19 +194,35 @@ const shots: Shot[] = [
   {
     id: 'sources',
     run: async (page) => {
-      // Sources: the UNCONFIGURED connect state is the only honest capture for
-      // public labelling — this fresh instance has no Humble account attached,
-      // so the screen renders the connect card (cookie paste + live-validated
-      // Connect + privacy note), never any real entitlement or account data.
-      // Reveal the helper steps so the shot shows how a source is connected.
+      // Sources: when the target instance has a CONNECTED source, capture the
+      // real review queue (owner decision 2026-07-12, v0-6-3-fixes — the shot
+      // is taken from the owner's own account; the session cookie has no
+      // rendered representation anywhere on this screen). Against an
+      // unconfigured instance, fall back to the connect card with the helper
+      // revealed, so the one-command refresh keeps working everywhere.
+      const connected = await page
+        .request.get(`${BASE_URL}/api/v1/sources`)
+        .then(async (r) => (r.ok() ? await r.json() : []))
+        .then((sources: Array<{ connection_state?: string }>) =>
+          sources.some((s) => s.connection_state === 'connected'))
+        .catch(() => false);
       await page.goto(`${BASE_URL}/sources`, { waitUntil: 'domcontentloaded' });
-      await page.waitForSelector('[data-testid="connect-card"]', {
-        timeout: 30_000,
-      });
-      const helper = page.locator('[data-testid="helper-toggle"]');
-      if (await helper.count()) {
-        await helper.first().click().catch(() => {});
-        await page.waitForSelector('[data-testid="cookie-helper"]', { timeout: 5_000 }).catch(() => {});
+      if (connected) {
+        await page.waitForSelector('[data-testid="store-manage"]', {
+          timeout: 30_000,
+        });
+        await page.waitForSelector('[data-testid^="entitlement-row-"]', {
+          timeout: 30_000,
+        });
+      } else {
+        await page.waitForSelector('[data-testid="connect-card"]', {
+          timeout: 30_000,
+        });
+        const helper = page.locator('[data-testid="helper-toggle"]');
+        if (await helper.count()) {
+          await helper.first().click().catch(() => {});
+          await page.waitForSelector('[data-testid="cookie-helper"]', { timeout: 5_000 }).catch(() => {});
+        }
       }
       await settle(page);
       await shoot(page, 'sources');

@@ -106,3 +106,58 @@ def test_no_unhardened_xml_parser_constructed_in_src():
     )
     # The hardened site itself uses defusedxml.
     assert "defusedxml" in HARDENED.read_text(encoding="utf-8")
+
+
+# --- parse_nzb_xml: the ONE DOCTYPE carve-out (v0-6-3-fixes) -----------------
+
+SPEC_NZB = (
+    b'<?xml version="1.0" encoding="UTF-8"?>'
+    b'<!DOCTYPE nzb PUBLIC "-//newzBin//DTD NZB 1.1//EN" '
+    b'"http://www.newzbin.com/DTD/nzb/nzb-1.1.dtd">'
+    b'<nzb xmlns="http://www.newzbin.com/DTD/2003/nzb">'
+    b'<file poster="p" date="1" subject="s"><segments>'
+    b'<segment bytes="1" number="1">a@b</segment></segments></file></nzb>'
+)
+
+
+@pytest.mark.req("FRG-SEC-002")
+def test_nzb_parse_tolerates_the_spec_mandated_doctype():
+    """The NZB 1.1 spec mandates the newzBin DOCTYPE; the NZB entry point must
+    accept it (the general parse rejecting it broke every real grab)."""
+    from foragerr.indexers.xml import parse_nzb_xml
+
+    root = parse_nzb_xml(SPEC_NZB)
+    assert root.tag.endswith("nzb")
+    # And the general hardened parse still refuses the same bytes — the
+    # carve-out is the NZB entry point only, not a global relaxation.
+    with pytest.raises(IndexerMalformedError):
+        parse_untrusted_xml(SPEC_NZB)
+
+
+@pytest.mark.req("FRG-SEC-002")
+def test_nzb_parse_still_kills_entity_bombs_and_external_entities(tmp_path):
+    """Tolerating the DOCTYPE must not readmit the attacks DTDs carry: entity
+    declarations (billion-laughs) and external resolution (XXE) stay fatal."""
+    from foragerr.indexers.xml import parse_nzb_xml
+
+    with pytest.raises(IndexerMalformedError):
+        parse_nzb_xml(BILLION_LAUGHS)
+    with pytest.raises(IndexerMalformedError):
+        parse_nzb_xml(QUADRATIC_BLOWUP)
+    secret = tmp_path / "secret.txt"
+    secret.write_text("TOP-SECRET-XXE-CANARY")
+    payload = EXTERNAL_ENTITY.replace(
+        b"file:///etc/passwd", f"file://{secret}".encode()
+    )
+    with pytest.raises(IndexerMalformedError):
+        parse_nzb_xml(payload)
+
+
+@pytest.mark.req("FRG-SEC-002")
+def test_nzb_parse_keeps_the_byte_cap_and_junk_rejection():
+    from foragerr.indexers.xml import parse_nzb_xml
+
+    with pytest.raises(IndexerMalformedError):
+        parse_nzb_xml(SPEC_NZB, max_bytes=10)
+    with pytest.raises(IndexerMalformedError):
+        parse_nzb_xml(JUNK_BYTES)

@@ -16,10 +16,12 @@ from foragerr.providers.backoff import PROVIDER_DOWNLOAD_CLIENT, PROVIDER_INDEXE
 from foragerr.search_ops.grab import GrabReleaseCommand
 from downloads_support import (
     EMPTY_NZB,
+    ENTITY_BOMB_NZB,
     JUNK_NZB,
     NO_SEGMENT_NZB,
     NZB_URL,
     SAB_BASE,
+    VALID_NZB,
     SabFixture,
     make_sab_client,
 )
@@ -69,7 +71,9 @@ async def test_local_service_egress_reaches_the_private_sab_host(tmp_path, db):
 
 
 @pytest.mark.req("FRG-DL-003")
-@pytest.mark.parametrize("bad", [EMPTY_NZB, JUNK_NZB, NO_SEGMENT_NZB])
+@pytest.mark.parametrize(
+    "bad", [EMPTY_NZB, JUNK_NZB, NO_SEGMENT_NZB, ENTITY_BOMB_NZB]
+)
 async def test_invalid_nzb_fails_grab_and_is_never_posted(tmp_path, db, bad):
     fixture = SabFixture()
     fixture.nzb_bytes = bad
@@ -77,6 +81,19 @@ async def test_invalid_nzb_fails_grab_and_is_never_posted(tmp_path, db, bad):
     with pytest.raises(GrabValidationError):
         await client.download(_grab())
     assert "addfile" not in fixture.modes  # never POSTed to SABnzbd
+
+
+@pytest.mark.req("FRG-DL-003")
+async def test_spec_conformant_doctype_nzb_is_accepted(tmp_path, db):
+    """The NZB 1.1 spec MANDATES the newzBin DOCTYPE; a validation that rejects
+    it rejects every real indexer's NZB (the v0-6-3-fixes live finding — this
+    exact case failed against a real DogNZB response)."""
+    assert b"<!DOCTYPE nzb PUBLIC" in VALID_NZB  # fixture stays spec-shaped
+    fixture = SabFixture()
+    fixture.addfile_nzo_ids = ["SABnzbd_nzo_dtd"]
+    client = make_sab_client(tmp_path, fixture, db)
+    result = await client.download(_grab())
+    assert result == "SABnzbd_nzo_dtd"  # validated AND uploaded
 
 
 @pytest.mark.req("FRG-DL-003")
