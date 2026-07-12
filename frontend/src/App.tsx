@@ -8,6 +8,7 @@ import { QueueScreen } from './screens/queue/QueueScreen';
 import { HistoryScreen } from './screens/history/HistoryScreen';
 import { BlocklistScreen } from './screens/blocklist/BlocklistScreen';
 import { WantedScreen } from './screens/wanted/WantedScreen';
+import { SourcesScreen } from './screens/sources/SourcesScreen';
 import { CalendarScreen } from './screens/calendar/CalendarScreen';
 import { CreatorsScreen } from './screens/creators/CreatorsScreen';
 import { CreatorProfileRoute } from './screens/creators/CreatorProfile';
@@ -42,6 +43,7 @@ export function App() {
         <Route path="add" element={<AddSeries />} />
         <Route path="library-import" element={<LibraryImport />} />
         <Route path="wanted" element={<WantedScreen />} />
+        <Route path="sources" element={<SourcesScreen />} />
         <Route path="queue" element={<QueueScreen />} />
         <Route path="history" element={<HistoryScreen />} />
         <Route path="blocklist" element={<BlocklistScreen />} />

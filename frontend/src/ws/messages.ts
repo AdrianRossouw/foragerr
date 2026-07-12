@@ -88,6 +88,24 @@ export function isBibliographyFetchComplete(msg: WsMessage): boolean {
   );
 }
 
+/** The store-source sync command name (backend `SOURCE_SYNC_TASK`). */
+export const SOURCE_SYNC_COMMAND = 'source-sync';
+
+/**
+ * True only for a `command` message reporting the store-source sync reaching
+ * `completed` — the transition that has just diffed the store and (re)written
+ * entitlement rows (FRG-UI-029). Mirrors `isPullRefreshComplete`: the backend
+ * pushes a `command` message on EVERY lifecycle transition of EVERY command, so
+ * the bridge sweeps the (whole-inventory) sources family only on this one. This
+ * covers the BACKGROUND scheduled sync; the manual "Sync now" also re-invalidates
+ * itself when its watched command finishes.
+ */
+export function isSourceSyncComplete(msg: WsMessage): boolean {
+  if (msg.name !== 'command') return false;
+  const r = msg.resource as Partial<CommandResource> | null;
+  return !!r && r.name === SOURCE_SYNC_COMMAND && r.status === 'completed';
+}
+
 export function parseWsMessage(raw: string): WsMessage | null {
   try {
     const parsed = JSON.parse(raw) as Partial<WsMessage>;

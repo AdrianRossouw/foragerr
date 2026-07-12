@@ -12,6 +12,7 @@ import {
   isBibliographyFetchComplete,
   isPullRefreshComplete,
   isQueueProgress,
+  isSourceSyncComplete,
   parseWsMessage,
   type WsMessage,
 } from './messages';
@@ -189,6 +190,16 @@ export function WebSocketBridge({
         if (isBibliographyFetchComplete(msg)) {
           void queryClient.invalidateQueries({
             queryKey: queryKeys.creators.bibliographyAll(),
+          });
+        }
+        // A finished store-source sync has (re)written entitlement rows and
+        // may have flipped a source to `expired` — sweep the whole sources
+        // family so the manage list, counts, nav badge, and expiry banner
+        // re-derive without a reload. Narrowed to EXACTLY this command reaching
+        // `completed` (same reasoning as pull-refresh above).
+        if (isSourceSyncComplete(msg)) {
+          void queryClient.invalidateQueries({
+            queryKey: queryKeys.sources.all(),
           });
         }
       }

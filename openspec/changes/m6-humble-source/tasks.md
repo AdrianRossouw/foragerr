@@ -27,10 +27,10 @@
 
 ## 5. Frontend
 
-- [ ] 5.1 Sources route + nav item with badge states; store rail with placeholder tab (`FRG-UI-029`)
-- [ ] 5.2 Connect card (paste field, helper with extension-coming-soon chip + DevTools steps, live-validated Connect, privacy note) (`FRG-UI-029`)
-- [ ] 5.3 Manage view: account bar, count line, filter segments, entitlement rows + expand detail with issue chips per edge rules; bulk + shift-range select (`FRG-UI-029`)
-- [ ] 5.4 Global banner + amber header/footer health wiring over the health WS; e2e covering connect, review, expiry (negative path per UAT policy: unconfigured + expired states) (`FRG-UI-029`)
+- [x] 5.1 Sources route + nav item with badge states; store rail with placeholder tab (`FRG-UI-029`) — `SourcesScreen.tsx` route + rail (Humble + 2000 AD placeholder + Add a source); Sidebar `Sources` nav item with `SourcesNavBadge` (amber `!` on expiry, else unreviewed-new count); `sourceHooks.ts` + `queryKeys.sources`
+- [x] 5.2 Connect card (paste field, helper with extension-coming-soon chip + DevTools steps, live-validated Connect, privacy note) (`FRG-UI-029`) — `ConnectCard.tsx` (masked password field, >12-char Connect gate, live connect/reconnect, honest error, privacy note, auto-sync-at-connect toggle)
+- [x] 5.3 Manage view: account bar, count line, filter segments, entitlement rows + expand detail with issue chips per edge rules; bulk + shift-range select (`FRG-UI-029`) — `StoreManage.tsx` + `EntitlementRow.tsx` (segments+non-comic toggle, per-status actions, expand→fill-set chips: amber owned-single kept, green fill, >12 text-only, standalone note; FRG-UI-025 anchor/shift-range bulk ignore/restore/accept)
+- [x] 5.4 Global banner + amber header/footer health wiring over the health WS; e2e covering connect, review, expiry (negative path per UAT policy: unconfigured + expired states) (`FRG-UI-029`) — `GlobalBanner.tsx` in AppShell + amber pulsing header health icon + amber sidebar-footer ("sync needs attention"); WS `isSourceSyncComplete` invalidation; e2e `z-sources.spec.ts` (unconfigured first-run + connect-failure negative paths). Connect-success/review/expired e2e blocked by hardcoded `HUMBLE_API_BASE` (no fixture override) — covered by the vitest FRG-UI-029 suite instead; gap reported
 
 ## 6. Security, docs, traceability
 
