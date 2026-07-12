@@ -17,6 +17,7 @@ import { IndexerSettings } from './routes/settings/IndexerSettings';
 import { DownloadClientSettings } from './routes/settings/DownloadClientSettings';
 import { MediaManagement } from './screens/settings/MediaManagement';
 import { General } from './screens/settings/General';
+import { Security } from './screens/settings/Security';
 import { StatusScreen } from './screens/system/StatusScreen';
 import { HealthScreen } from './screens/system/HealthScreen';
 import { TasksScreen } from './screens/system/TasksScreen';
@@ -33,7 +34,10 @@ import { LogsScreen } from './screens/system/LogsScreen';
  * (FRG-UI-024). m8-auth-core adds /login, sitting OUTSIDE the `AppShell`
  * route (no sidebar/header for an unauthenticated visitor) — `AuthGate`
  * (mounted around this whole component in main.tsx) decides which of the two
- * subtrees is actually reachable at any moment.
+ * subtrees is actually reachable at any moment. m8-keys-opds adds
+ * settings/security (FRG-AUTH-004/005/007): the credential-lifecycle
+ * Settings page (password/OPDS-password/API-key/logout-all), inside
+ * `AppShell` like every other settings screen.
  */
 export function App() {
   return (
@@ -62,6 +66,7 @@ export function App() {
           path="settings/media-management"
           element={<MediaManagement />}
         />
+        <Route path="settings/security" element={<Security />} />
         <Route path="system/status" element={<StatusScreen />} />
         <Route path="system/health" element={<HealthScreen />} />
         <Route path="system/tasks" element={<TasksScreen />} />
