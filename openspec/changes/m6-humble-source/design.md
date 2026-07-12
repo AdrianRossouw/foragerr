@@ -38,10 +38,17 @@ generic webhook/push discovery (poll only).
    identity*: sync is a diff; the key must survive title edits and re-syncs.
 2. **Status model: review status and download state are separate axes.** The
    handoff's user-facing statuses (New / Matched / Ignored) are the review axis;
-   download/import progress (queued → fetching → verifying → imported → failed) is
-   the existing-pipeline axis surfaced in Activity, not a new UI concept. *Why*:
-   keeps the Sources list a review surface (design intent) and reuses queue
-   infrastructure instead of duplicating progress UI.
+   download/import progress (queued → fetching → verifying → import_pending →
+   imported | import_blocked | failed) is the existing-pipeline axis surfaced in
+   Activity, not a new UI concept. *Why*: keeps the Sources list a review surface
+   (design intent) and reuses queue infrastructure instead of duplicating
+   progress UI. *Handoff bridge (gate fix)*: the grab verifies md5 then hands the
+   file to the import pipeline and leaves the entitlement `import_pending` — the
+   entitlement only advances to `imported` (and reconciliation only marks covered
+   singles owned-via-edition) when the tracked download durably reaches `imported`
+   in the import worker, keyed on the `humble:{id}` download-id. An import that
+   blocks or fails mirrors to `import_blocked`/`failed`; ownership is never
+   claimed before the file is durable.
 3. **Humble client** (`sources/humble.py`): `GET /api/v1/user/order` → gamekeys;
    `GET /api/v1/order/{gamekey}?all_tpkds=true` → subproducts → `download_struct`
    (signed time-limited `url.web`, md5, size, filename). Cookie rides as
