@@ -23,7 +23,7 @@ review-first sync (FRG-SRC-001..007, FRG-UI-029).
   rest under the keystore (FRG-AUTH-008) and never returned in any API response
   or log. foragerr never stores your Humble password and never automates login.
   The store model is generic so further storefronts can be added without
-  reshaping it (a 2000 AD placeholder rail entry marks the seam).
+  reshaping it.
 - **Entitlement sync, daily and on demand** (FRG-SRC-003): foragerr polls your
   Humble orders on a schedule (default daily) and whenever you press **Sync
   now**, diffing by store-native key so re-syncs never duplicate. Items are
@@ -35,7 +35,11 @@ review-first sync (FRG-SRC-001..007, FRG-UI-029).
   Nothing downloads until you accept it — match to an existing series, add as
   new, ignore, or restore, one at a time or in bulk (with shift-range select). A
   per-source **auto-sync** toggle can accept-and-download confidently matched new
-  items automatically, and it defaults to **off**.
+  items automatically, and it defaults to **off**. Ignoring an accepted item
+  cancels its download wherever it is — a queued or in-flight grab aborts at its
+  re-read guard, a completed download awaiting import is withdrawn from the
+  import queue, and an import already claimed by the drain is discarded before
+  it can mark the item owned.
 - **Collected-edition reconciliation that never suppresses singles**
   (FRG-SRC-007): accepting a collected edition marks exactly the issues it fills
   as owned-via-edition, leaves any issue you already own as a single untouched
