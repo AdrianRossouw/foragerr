@@ -35,12 +35,23 @@ def register_auth(app: FastAPI) -> None:
     from foragerr.auth.bootstrap import seed_principal_startup_hook
     from foragerr.auth.commands import register_prune_sessions_task
     from foragerr.auth.perimeter import OpdsVerifyCache
+    from foragerr.auth.ratelimit import RateLimiter, SeenSourceSet
     from foragerr.auth.routes import router as auth_router
 
     # Per-app OPDS Basic verify-cache (FRG-AUTH-005): stashed on app.state (not a
     # module global) so concurrent test apps never share it; the perimeter reads
     # it and every credential write clears it.
     app.state.opds_verify_cache = OpdsVerifyCache()
+
+    # Per-app failed-auth rate limiter (FRG-AUTH-009): same app.state discipline
+    # as the verify-cache so concurrent test apps never share throttle state; the
+    # login route and the perimeter's API-key/Basic paths consult it.
+    app.state.auth_rate_limiter = RateLimiter()
+
+    # Per-app seen-source set (FRG-AUTH-009): successful API-key use is audited
+    # once per source per window (auth.apikey_source_seen); the perimeter's
+    # API-key success path observes it and the key-rotation route clears it.
+    app.state.auth_apikey_sources = SeenSourceSet()
 
     app.include_router(auth_router, prefix="/api/v1")
 

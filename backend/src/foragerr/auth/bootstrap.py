@@ -46,6 +46,7 @@ import secrets
 import sqlite3
 from pathlib import Path
 
+from foragerr.auth.audit import audit_event
 from foragerr.auth.passwords import hash_password, verify_password
 from foragerr.auth.repo import api_key_hash, get_principal
 from foragerr.config import ConfigError, Settings
@@ -230,13 +231,14 @@ async def _maybe_reseed_admin(app, db, principal, user, admin_password, now) -> 
         row.updated_at = now
     invalidated = await sessions_mod.invalidate_all(db, principal.id)
     clear_opds_verify_cache(app)
-    logger.warning(
-        "auth: re-seeded the operator principal from a changed environment "
-        "credential pair (username %r -> %r); invalidated %d existing "
-        "session(s). Recovery path per FRG-AUTH-002.",
-        old_username,
-        user,
-        invalidated,
+    audit_event(
+        "auth.reseed",
+        None,
+        level=logging.WARNING,
+        credential="admin",
+        old_username=old_username,
+        new_username=user,
+        invalidated_sessions=invalidated,
     )
 
 
@@ -280,10 +282,7 @@ async def _maybe_reseed_opds(app, db, principal, opds_env, now) -> None:
         row.env_opds_password_hash = hash_password(opds_env)
         row.updated_at = now
     clear_opds_verify_cache(app)
-    logger.warning(
-        "auth: re-seeded the OPDS reader password from a changed "
-        "FORAGERR_OPDS_PASSWORD; existing sessions are untouched (FRG-AUTH-005)."
-    )
+    audit_event("auth.reseed", None, level=logging.WARNING, credential="opds")
 
 
 __all__ = [

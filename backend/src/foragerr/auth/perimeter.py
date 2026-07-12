@@ -33,6 +33,7 @@ import binascii
 import hashlib
 import hmac
 import logging
+import math
 import time
 from collections import OrderedDict
 from typing import Callable
@@ -41,6 +42,8 @@ from fastapi import HTTPException
 from starlette.requests import HTTPConnection
 
 from foragerr.auth import sessions as sessions_mod
+from foragerr.auth.audit import audit_event
+from foragerr.auth.ratelimit import SURFACE_API_KEY, SURFACE_BASIC
 from foragerr.auth.repo import find_by_api_key, get_principal
 from foragerr.auth.passwords import verify_password_async
 
@@ -205,6 +208,21 @@ def _decode_basic(header: str) -> tuple[str, str] | None:
     return user, password
 
 
+def _client_ip(request: HTTPConnection) -> str:
+    """The direct-connection client IP (``X-Forwarded-For`` is not trusted)."""
+    client = request.client
+    return client.host if client is not None else "unknown"
+
+
+def _raise_throttled(wait: float) -> None:
+    """Refuse a throttled surface with 429 + ``Retry-After`` (FRG-AUTH-009)."""
+    raise HTTPException(
+        status_code=429,
+        detail="too many failed attempts",
+        headers={"Retry-After": str(int(math.ceil(wait)))},
+    )
+
+
 async def _authenticate(request: HTTPConnection) -> tuple[int, str] | None:
     """Resolve a request to ``(principal_id, auth_via)`` or ``None``.
 
@@ -222,12 +240,34 @@ async def _authenticate(request: HTTPConnection) -> tuple[int, str] | None:
             request.state.session_token = token
             return authed.principal_id, "cookie"
 
-    # 2. X-Api-Key header (any surface). Header only — never a query param.
+    limiter = getattr(app.state, "auth_rate_limiter", None)
+    ip = _client_ip(request)
+
+    # 2. X-Api-Key header (any surface). Header only — never a query param. A
+    #    PRESENT key is a credential-bearing attempt: the surface is throttled
+    #    before the lookup and a mismatch counts toward backoff (FRG-AUTH-009).
     api_key = request.headers.get("x-api-key")
     if api_key:
+        if limiter is not None:
+            wait = limiter.retry_after(ip, SURFACE_API_KEY)
+            if wait is not None:
+                _raise_throttled(wait)
         principal = await find_by_api_key(db, api_key)
         if principal is not None:
+            if limiter is not None:
+                limiter.record_success(ip, SURFACE_API_KEY)
+            # Audit a successful key use once per source per window (never per
+            # request) so a leaked key used from a new address surfaces without
+            # flooding the log (FRG-AUTH-009).
+            sources = getattr(app.state, "auth_apikey_sources", None)
+            if sources is not None and sources.observe(ip):
+                audit_event("auth.apikey_source_seen", request, SURFACE_API_KEY)
             return principal.id, "api_key"
+        if limiter is not None and limiter.record_failure(ip, SURFACE_API_KEY):
+            audit_event(
+                "auth.backoff_triggered", request, SURFACE_API_KEY, level=logging.WARNING
+            )
+        audit_event("auth.apikey_failure", request, SURFACE_API_KEY, level=logging.WARNING)
 
     # 3. OPDS HTTP Basic — only on the /opds subtree. The username binds to the
     #    principal (readers are configured with the admin username, manual
@@ -236,6 +276,13 @@ async def _authenticate(request: HTTPConnection) -> tuple[int, str] | None:
     if _is_opds(request.scope["path"], settings.opds_base_path):
         creds = _decode_basic(request.headers.get("authorization", ""))
         if creds is not None:
+            # Throttle a decodable-but-failing Basic key BEFORE the cache/KDF, and
+            # return the 429 (not the realm challenge) so a looping reader surfaces
+            # the error instead of re-prompting forever (FRG-AUTH-009).
+            if limiter is not None:
+                wait = limiter.retry_after(ip, SURFACE_BASIC)
+                if wait is not None:
+                    _raise_throttled(wait)
             cache = getattr(app.state, "opds_verify_cache", None)
             generation = 0
             if cache is not None:
@@ -248,7 +295,11 @@ async def _authenticate(request: HTTPConnection) -> tuple[int, str] | None:
                 if cached_id is not None:
                     # A prior verify of these EXACT creds succeeded within the
                     # TTL — skip the scrypt round-trip (only positives are ever
-                    # cached, so this can never accept a wrong password).
+                    # cached, so this can never accept a wrong password). A cache
+                    # hit is a success, so it resets the key; the success is NOT
+                    # re-logged (opds success is logged per verification only).
+                    if limiter is not None:
+                        limiter.record_success(ip, SURFACE_BASIC)
                     return cached_id, "basic"
             principal = await get_principal(db)
             if principal is not None:
@@ -266,7 +317,19 @@ async def _authenticate(request: HTTPConnection) -> tuple[int, str] | None:
                         cache.put(
                             creds[0], creds[1], principal.id, generation=generation
                         )
+                    if limiter is not None:
+                        limiter.record_success(ip, SURFACE_BASIC)
+                    # OPDS success is logged per VERIFICATION (this cache-fill
+                    # path), never per request — a reader polling with valid creds
+                    # cannot flood the log.
+                    audit_event("auth.opds_success", request, SURFACE_BASIC)
                     return principal.id, "basic"
+            # Decodable Basic that did not verify — a credential-bearing failure.
+            if limiter is not None and limiter.record_failure(ip, SURFACE_BASIC):
+                audit_event(
+                    "auth.backoff_triggered", request, SURFACE_BASIC, level=logging.WARNING
+                )
+            audit_event("auth.opds_failure", request, SURFACE_BASIC, level=logging.WARNING)
 
     return None
 
