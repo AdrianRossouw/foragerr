@@ -13,10 +13,26 @@ Two responsibilities:
 2. **Seeding startup hook** (:func:`seed_principal_startup_hook`) — first authed
    boot seeds the principal (scrypt password, OPDS password from
    ``FORAGERR_OPDS_PASSWORD`` else = admin password, a generated 256-bit API key
-   stored as SHA-256). A later boot whose env pair DIFFERS (username changed, or
-   the password no longer verifies) re-seeds and invalidates every existing
-   session — the self-lockout recovery path — logged structurally (counts /
-   usernames only, never a password). Unchanged boots are idempotent no-ops.
+   stored as SHA-256) and records the env FINGERPRINTS.
+
+   Re-seed on a later boot is measured against those fingerprints, not the live
+   hashes, and the admin and OPDS credentials are decoupled:
+
+   - **Admin** re-seeds iff the env pair is present AND (the username changed OR
+     the env password no longer verifies against ``env_password_hash``). It
+     updates the live hash + fingerprint and invalidates every session — the
+     self-lockout recovery path — logged structurally (counts / usernames only,
+     never a password).
+   - **OPDS** re-seeds iff ``FORAGERR_OPDS_PASSWORD`` is set AND no longer
+     verifies against ``env_opds_password_hash``. It updates the OPDS hash +
+     fingerprint and clears the verify-cache, and NEVER touches sessions. An
+     admin re-seed never clobbers an in-app OPDS password from a stale OPDS env.
+   - Comparing against the fingerprint (the last env value SEEDED) rather than
+     the live hash is what stops a stale env var from silently reverting an
+     in-app credential change on the next boot.
+   - **NULL fingerprint** (a v0.7.0 principal predating the columns): compare the
+     env value against the LIVE hash exactly once — old semantics — then record
+     the fingerprint. Unchanged boots are otherwise idempotent no-ops.
 
 The raw API key is surfaced exactly once: it is held in process memory on
 ``app.state.bootstrap_api_key`` (never logged, never persisted plaintext) and
@@ -101,12 +117,6 @@ def ensure_admin_bootstrap_present(settings: Settings) -> None:
     )
 
 
-def _resolve_opds_password(settings: Settings, admin_password: str) -> str:
-    """The OPDS Basic password: FORAGERR_OPDS_PASSWORD if set, else = admin."""
-    opds = settings.opds_password.get_secret_value()
-    return opds if opds else admin_password
-
-
 def _register_credentials_for_redaction(settings: Settings, admin_password: str) -> None:
     """Register the env credential values with the log-redaction filter.
 
@@ -129,6 +139,7 @@ async def seed_principal_startup_hook(app) -> None:
     db = app.state.db
     user = settings.admin_user.strip()
     admin_password = settings.admin_password.get_secret_value()
+    opds_env = settings.opds_password.get_secret_value()  # "" when unset
     _register_credentials_for_redaction(settings, admin_password)
 
     principal = await get_principal(db)
@@ -137,7 +148,7 @@ async def seed_principal_startup_hook(app) -> None:
     if principal is None:
         # First authed boot — the config gate guarantees the pair is present.
         raw_api_key = _new_api_key()
-        opds_password = _resolve_opds_password(settings, admin_password)
+        opds_password = opds_env if opds_env else admin_password
         from foragerr.auth.models import PrincipalRow
 
         async with db.write_session() as session:
@@ -147,6 +158,14 @@ async def seed_principal_startup_hook(app) -> None:
                     password_hash=hash_password(admin_password),
                     opds_password_hash=hash_password(opds_password),
                     api_key_sha256=api_key_hash(raw_api_key),
+                    # Fingerprint the env values that were seeded (FRG-AUTH-002):
+                    # the OPDS fingerprint is recorded ONLY when the env var was
+                    # set — NULL when OPDS defaulted to the admin password, so a
+                    # later boot that sets FORAGERR_OPDS_PASSWORD seeds it fresh.
+                    env_password_hash=hash_password(admin_password),
+                    env_opds_password_hash=(
+                        hash_password(opds_env) if opds_env else None
+                    ),
                     created_at=now,
                     updated_at=now,
                 )
@@ -160,29 +179,57 @@ async def seed_principal_startup_hook(app) -> None:
         )
         return
 
-    # Principal exists. Re-seed only when the env pair is present AND differs
-    # (username changed, or the password no longer verifies) — the recovery
-    # path. Absent env pair, or an unchanged pair, is an idempotent no-op.
+    # Principal exists — two INDEPENDENT re-seed decisions, each measured against
+    # its own env fingerprint (not the live hash) so a stale env var can never
+    # silently revert an in-app credential change.
+    await _maybe_reseed_admin(app, db, principal, user, admin_password, now)
+    await _maybe_reseed_opds(app, db, principal, opds_env, now)
+
+
+async def _maybe_reseed_admin(app, db, principal, user, admin_password, now) -> None:
+    """Re-seed the admin pair from the env when it differs (FRG-AUTH-002).
+
+    Fires iff the env pair is present AND (the username changed OR the env
+    password no longer verifies against ``env_password_hash``). A re-seed updates
+    the live hash + fingerprint, invalidates every session (self-lockout
+    recovery), and clears the OPDS verify-cache. When the fingerprint is NULL
+    (v0.7.0 upgrade) the env value is compared against the LIVE hash once, then
+    the fingerprint is recorded even if no re-seed was needed."""
     if not (user and admin_password):
         return
-    changed = (principal.username != user) or (
-        not verify_password(admin_password, principal.password_hash)
-    )
-    if not changed:
+
+    from foragerr.auth.models import PrincipalRow
+
+    fingerprint = principal.env_password_hash
+    if fingerprint is None:
+        # v0.7.0 upgrade: no fingerprint yet, so fall back to the live hash once.
+        pw_matches = verify_password(admin_password, principal.password_hash)
+    else:
+        pw_matches = verify_password(admin_password, fingerprint)
+    reseed = (principal.username != user) or not pw_matches
+
+    if not reseed:
+        if fingerprint is None:
+            # Backfill the fingerprint without disturbing the live credential, so
+            # subsequent boots use fingerprint semantics (no live-hash compare).
+            async with db.write_session() as session:
+                row = await session.get(PrincipalRow, principal.id)
+                row.env_password_hash = hash_password(admin_password)
+                row.updated_at = now
         return
 
     from foragerr.auth import sessions as sessions_mod
-    from foragerr.auth.models import PrincipalRow
+    from foragerr.auth.perimeter import clear_opds_verify_cache
 
-    opds_password = _resolve_opds_password(settings, admin_password)
     async with db.write_session() as session:
         row = await session.get(PrincipalRow, principal.id)
         old_username = row.username
         row.username = user
         row.password_hash = hash_password(admin_password)
-        row.opds_password_hash = hash_password(opds_password)
+        row.env_password_hash = hash_password(admin_password)
         row.updated_at = now
     invalidated = await sessions_mod.invalidate_all(db, principal.id)
+    clear_opds_verify_cache(app)
     logger.warning(
         "auth: re-seeded the operator principal from a changed environment "
         "credential pair (username %r -> %r); invalidated %d existing "
@@ -190,6 +237,52 @@ async def seed_principal_startup_hook(app) -> None:
         old_username,
         user,
         invalidated,
+    )
+
+
+async def _maybe_reseed_opds(app, db, principal, opds_env, now) -> None:
+    """Re-seed the OPDS password from the env when it differs (FRG-AUTH-005).
+
+    Decoupled from the admin re-seed: fires iff ``FORAGERR_OPDS_PASSWORD`` is set
+    AND no longer verifies against ``env_opds_password_hash``. Updates the OPDS
+    hash + fingerprint and clears the verify-cache; NEVER touches sessions. The
+    fingerprint tracks the last ENV value seeded, so an in-app OPDS change (which
+    leaves the fingerprint untouched) is not clobbered by a stale OPDS env var —
+    including across an admin re-seed. When the fingerprint is NULL the env value
+    is compared against the LIVE OPDS hash once, then recorded."""
+    if not opds_env:
+        # OPDS env unset: leave the OPDS credential (and its NULL fingerprint)
+        # exactly as-is — the admin re-seed does not reach it.
+        return
+
+    from foragerr.auth.models import PrincipalRow
+    from foragerr.auth.perimeter import clear_opds_verify_cache
+
+    fingerprint = principal.env_opds_password_hash
+    if fingerprint is None:
+        # v0.7.0 upgrade with FORAGERR_OPDS_PASSWORD set (or the env var set for
+        # the first time): compare against the live OPDS hash once.
+        opds_matches = verify_password(opds_env, principal.opds_password_hash)
+    else:
+        opds_matches = verify_password(opds_env, fingerprint)
+
+    if opds_matches:
+        if fingerprint is None:
+            async with db.write_session() as session:
+                row = await session.get(PrincipalRow, principal.id)
+                row.env_opds_password_hash = hash_password(opds_env)
+                row.updated_at = now
+        return
+
+    async with db.write_session() as session:
+        row = await session.get(PrincipalRow, principal.id)
+        row.opds_password_hash = hash_password(opds_env)
+        row.env_opds_password_hash = hash_password(opds_env)
+        row.updated_at = now
+    clear_opds_verify_cache(app)
+    logger.warning(
+        "auth: re-seeded the OPDS reader password from a changed "
+        "FORAGERR_OPDS_PASSWORD; existing sessions are untouched (FRG-AUTH-005)."
     )
 
 

@@ -46,11 +46,23 @@ class PrincipalRow(Base):
     #: scrypt hash of the web login password (``scrypt$n$r$p$salt$hash``).
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
     #: scrypt hash of the OPDS HTTP-Basic password (seeded = admin password
-    #: unless FORAGERR_OPDS_PASSWORD is set; independent lifecycle lands later).
+    #: unless FORAGERR_OPDS_PASSWORD is set; independent in-app / env lifecycle
+    #: since m8-keys-opds, FRG-AUTH-005).
     opds_password_hash: Mapped[str] = mapped_column(Text, nullable=False)
     #: SHA-256 hex of the 256-bit programmatic API key (the raw key is never
     #: persisted — high-entropy input needs no KDF).
     api_key_sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    #: scrypt fingerprint of the admin password last SEEDED from the env
+    #: (FORAGERR_ADMIN_PASSWORD). Re-seed compares the env value against THIS,
+    #: not the live hash, so an in-app password change is never reverted by a
+    #: stale env var (FRG-AUTH-002). NULL on a v0.7.0 upgrade — the bootstrap
+    #: backfills it after a one-time compare against the live hash.
+    env_password_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: scrypt fingerprint of the OPDS password last SEEDED from
+    #: FORAGERR_OPDS_PASSWORD, decoupled from the admin fingerprint. NULL when
+    #: OPDS defaulted to the admin password (the env var was unset), or on a
+    #: v0.7.0 upgrade (FRG-AUTH-005).
+    env_opds_password_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(StrictDateTime, nullable=False)
     updated_at: Mapped[dt.datetime] = mapped_column(StrictDateTime, nullable=False)
 
