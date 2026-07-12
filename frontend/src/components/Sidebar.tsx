@@ -6,6 +6,7 @@ import {
   useHealthWarnings,
   useSystemStatus,
 } from '../api/hooks';
+import { useSources, useSourcesNewCount } from '../api/sourceHooks';
 import { LogoMarkIcon } from './icons';
 import styles from './AppShell.module.css';
 
@@ -29,7 +30,7 @@ interface NavItem {
   /** Font Awesome 6 Free (self-hosted) glyph class. */
   icon: string;
   end?: boolean;
-  badge?: BadgeKind;
+  badge?: BadgeKind | 'sources';
 }
 
 interface NavGroup {
@@ -52,6 +53,12 @@ const NAV_GROUPS: NavGroup[] = [
         label: 'Wanted',
         icon: 'fa-triangle-exclamation',
         badge: 'wanted',
+      },
+      {
+        to: '/sources',
+        label: 'Sources',
+        icon: 'fa-store',
+        badge: 'sources',
       },
     ],
   },
@@ -131,16 +138,63 @@ function NavBadge({ kind }: { kind: BadgeKind }) {
   );
 }
 
+/**
+ * Sources nav badge (FRG-UI-029): an amber `!` when any connected store's
+ * session has expired (the more serious signal, always wins), else the count of
+ * unreviewed `new` items across connected sources. Both use the warn (amber)
+ * style. No source configured / nothing pending / all clean → no badge.
+ */
+function SourcesNavBadge() {
+  const sources = useSources();
+  const connectedIds = (sources.data ?? [])
+    .filter((s) => s.connection_state === 'connected')
+    .map((s) => s.id);
+  const expired = (sources.data ?? []).some(
+    (s) => s.connection_state === 'expired',
+  );
+  const newCount = useSourcesNewCount(connectedIds);
+
+  if (expired) {
+    return (
+      <span
+        className={`${styles.navBadge} ${styles.navBadgeWarn}`}
+        data-testid="nav-badge-sources"
+        aria-label="A store session needs attention"
+      >
+        !
+      </span>
+    );
+  }
+  const value = newCount.data;
+  if (value === undefined || value <= 0) return null;
+  return (
+    <span
+      className={`${styles.navBadge} ${styles.navBadgeWarn}`}
+      data-testid="nav-badge-sources"
+    >
+      {value}
+    </span>
+  );
+}
+
 export function Sidebar() {
   const connection = useConnectionStore((s) => s.status);
   const health = useHealthWarnings();
   const status = useSystemStatus();
+  const sources = useSources();
+
+  // A store-session expiry surfaces in the footer immediately off the
+  // authoritative sources cache (design handoff: "Humble sync needs attention"),
+  // rather than waiting on the 15s health poll that also reports it.
+  const sourceExpired = (sources.data ?? []).some(
+    (s) => s.connection_state === 'expired',
+  );
 
   // Health pulse: healthy until the warnings list reports at least one active
   // warning. While loading (undefined) the sidebar reads as healthy rather than
   // flashing an alarm state.
   const warningCount = health.data?.length ?? 0;
-  const healthy = warningCount === 0;
+  const healthy = warningCount === 0 && !sourceExpired;
   const healthDotClass = !healthy
     ? styles.statusWarn
     : connection === 'disconnected'
@@ -151,11 +205,14 @@ export function Sidebar() {
   // warnings still take precedence (they are the more serious signal); otherwise
   // a dropped/reconnecting socket surfaces as "reconnecting…", and only a
   // connected, warning-free app reads "all healthy".
-  const healthLabel = !healthy
-    ? `${warningCount} warning${warningCount === 1 ? '' : 's'}`
-    : connection !== 'connected'
-      ? 'reconnecting…'
-      : 'all healthy';
+  const healthLabel =
+    sourceExpired && warningCount === 0
+      ? 'sync needs attention'
+      : !healthy
+        ? `${warningCount} warning${warningCount === 1 ? '' : 's'}`
+        : connection !== 'connected'
+          ? 'reconnecting…'
+          : 'all healthy';
   const version = status.data?.version;
 
   return (
@@ -190,7 +247,11 @@ export function Sidebar() {
                   <i className={`fa-solid ${item.icon}`} />
                 </span>
                 <span className={styles.navLabel}>{item.label}</span>
-                {item.badge && <NavBadge kind={item.badge} />}
+                {item.badge === 'sources' ? (
+                  <SourcesNavBadge />
+                ) : (
+                  item.badge && <NavBadge kind={item.badge} />
+                )}
               </NavLink>
             ))}
           </div>

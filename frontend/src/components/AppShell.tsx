@@ -1,7 +1,9 @@
 import { Outlet, useNavigate } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { HeaderQuickSearch } from './HeaderQuickSearch';
+import { GlobalBanner } from './GlobalBanner';
 import { WebSocketBridge } from '../ws/WebSocketBridge';
+import { useHasExpiredSource } from '../api/sourceHooks';
 import type { SocketFactory } from '../ws/socket';
 import styles from './AppShell.module.css';
 
@@ -17,6 +19,10 @@ import styles from './AppShell.module.css';
  */
 export function AppShell({ socketFactory }: { socketFactory?: SocketFactory }) {
   const navigate = useNavigate();
+  // A store-session expiry tints the header health icon amber and pulses it
+  // (design handoff §Connection lifecycle) — the same signal that raises the
+  // global banner and flips the sidebar footer.
+  const expired = useHasExpiredSource();
   return (
     <div className={styles.shell}>
       <a className={styles.skipLink} href="#main-content">
@@ -25,6 +31,7 @@ export function AppShell({ socketFactory }: { socketFactory?: SocketFactory }) {
       <WebSocketBridge socketFactory={socketFactory} />
       <Sidebar />
       <div className={styles.main}>
+        <GlobalBanner />
         <header className={styles.header}>
           <div className={styles.headerSearch}>
             <HeaderQuickSearch />
@@ -33,10 +40,15 @@ export function AppShell({ socketFactory }: { socketFactory?: SocketFactory }) {
           <div className={styles.headerActions}>
             <button
               type="button"
-              className={styles.iconButton}
+              className={
+                expired
+                  ? `${styles.iconButton} ${styles.iconButtonWarn}`
+                  : styles.iconButton
+              }
               aria-label="System health"
-              title="Health"
+              title={expired ? 'A store session needs attention' : 'Health'}
               data-testid="header-health"
+              data-expired={expired ? 'true' : 'false'}
               onClick={() => navigate('/system/health')}
             >
               <i className="fa-solid fa-heart-pulse" aria-hidden />

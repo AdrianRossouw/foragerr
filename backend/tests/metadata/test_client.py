@@ -349,6 +349,12 @@ async def test_full_flow_at_debug_never_emits_the_key(tmp_path):
 
     log_text = (config_dir / "logs" / "foragerr.log").read_text(encoding="utf-8")
     assert key not in log_text, "the API key leaked into the log file"
-    assert "api_key=***REDACTED***" in log_text, (
-        "expected the logged request URL's api_key to be redacted"
+    # httpx/httpcore request logging is silenced to WARNING (FRG-NFR-008,
+    # threat T-API-7): the request URL — with its api_key/signed-token query —
+    # is never emitted at all, a stronger guarantee than relying on the
+    # redaction filter to mask an INFO/DEBUG request line after the fact. The
+    # redaction filter itself is proven by the SENTINEL tests above.
+    assert "HTTP Request" not in log_text, (
+        "httpx request lines (which carry the key in the URL) must not be logged"
     )
+    assert "api_key=" not in log_text

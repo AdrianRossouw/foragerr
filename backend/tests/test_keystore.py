@@ -517,9 +517,11 @@ def test_no_registered_settings_model_hides_a_nested_secret():
     import foragerr.ddl  # noqa: F401 — registers the getcomics indexer implementation
     from foragerr.downloads.registry import implementations as dc_impls
     from foragerr.indexers.registry import implementations as idx_impls
+    from foragerr.sources.registry import implementations as src_impls
 
     models = [impl.settings_model for impl in idx_impls()]
     models += [impl.settings_model for impl in dc_impls()]
+    models += [impl.settings_model for impl in src_impls()]
     for model_cls in models:
         for name, field in model_cls.model_fields.items():
             if _is_top_level_secret(field.annotation):

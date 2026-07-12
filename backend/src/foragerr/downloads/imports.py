@@ -78,6 +78,7 @@ from foragerr.importer import (
 )
 from foragerr.library import repo
 from foragerr.library.models import IssueFileRow, IssueRow, SeriesRow
+from foragerr.sources.import_hook import apply_source_import, source_import_withdrawn
 
 logger = logging.getLogger("foragerr.downloads.imports")
 
@@ -249,7 +250,16 @@ async def _process_one(
         # Claimed but nothing to import from: block, never lose it.
         final_state, status, messages = _resolve_final([], [], no_output=True)
         async with db.write_session() as session:
+            if await source_import_withdrawn(session, download_id):
+                return await _withdraw_import(session, row_id, download_id)
             await _apply_state(session, row_id, final_state, status, messages, ctx.now)
+            await apply_source_import(
+                session,
+                download_id=download_id,
+                final_state=final_state,
+                imported_issues=[],
+                now=ctx.now,
+            )
         return final_state
 
     # 2. Build the source (mappings passed as data — FRG-PP-008) and gather
@@ -287,12 +297,36 @@ async def _process_one(
     #    its history event land atomically with the final state transition.
     outcomes: list[ImportOutcome] = []
     async with db.write_session() as session:
+        # Store-source withdrawal gate (FRG-SRC-004): re-checked INSIDE the
+        # import transaction, before any file moves — an operator ignore that
+        # landed after this row was claimed imports NOTHING (writer-lock
+        # serialization means the ignore either committed before this check, or
+        # runs after this import commits and reverts it as already-imported).
+        if await source_import_withdrawn(session, download_id):
+            return await _withdraw_import(session, row_id, download_id)
         for candidate in candidates:
             outcomes.append(await import_candidate(session, candidate, ctx))
         final_state, status, messages = _resolve_final(
             candidates, outcomes, no_output=False
         )
         await _apply_state(session, row_id, final_state, status, messages, ctx.now)
+        # Store-source hook (FRG-SRC-006/007): mirror the verdict onto the
+        # entitlement and, on success, fill owned-via-edition singles for any
+        # imported collected edition — all inside this import transaction.
+        imported_issues = [
+            (o.issue_id, o.imported_path)
+            for o in outcomes
+            if o.status is ImportStatus.IMPORTED
+            and o.issue_id is not None
+            and o.imported_path
+        ]
+        await apply_source_import(
+            session,
+            download_id=download_id,
+            final_state=final_state,
+            imported_issues=imported_issues,
+            now=ctx.now,
+        )
 
     # 4. Post-commit side-effects — OUTSIDE the write lock so they can open their
     #    own sessions (the writer lock is not re-entrant): change-5 failure loop
@@ -355,10 +389,18 @@ async def _reconcile_recovered_import(
 
     linked_paths = set(linked)
     # Case A: a recorded file for this issue still exists → import already durable.
-    if any(os.path.exists(p) for p in linked_paths):
+    existing = next((p for p in linked_paths if os.path.exists(p)), None)
+    if existing is not None:
         async with db.write_session() as session:
             await _apply_state(
                 session, row_id, TrackedDownloadState.IMPORTED, TRACKED_STATUS_OK, [], ctx.now
+            )
+            await apply_source_import(
+                session,
+                download_id=download_id,
+                final_state=TrackedDownloadState.IMPORTED,
+                imported_issues=[(issue_id, existing)],
+                now=ctx.now,
             )
         return TrackedDownloadState.IMPORTED
 
@@ -394,6 +436,13 @@ async def _reconcile_recovered_import(
         )
         await _apply_state(
             session, row_id, TrackedDownloadState.IMPORTED, TRACKED_STATUS_OK, [], ctx.now
+        )
+        await apply_source_import(
+            session,
+            download_id=download_id,
+            final_state=TrackedDownloadState.IMPORTED,
+            imported_issues=[(issue_id, adopted)],
+            now=ctx.now,
         )
     logger.info(
         "process-imports: recovered orphaned import for download %s -> %s",
@@ -436,6 +485,27 @@ def _resolve_final(
         for reason in (o.reasons or ("blocked",))
     ]
     return TrackedDownloadState.IMPORT_BLOCKED, TRACKED_STATUS_WARNING, messages
+
+
+async def _withdraw_import(
+    session: AsyncSession,
+    row_id: int,
+    download_id: str,
+) -> TrackedDownloadState:
+    """Terminate a claimed store download whose acceptance was withdrawn.
+
+    The row is DELETED (the same de-track manual queue-remove performs): the
+    grab handoff dedups on ``download_id`` regardless of state, so any surviving
+    row would strand a later restore + re-accept with no claimable row. The
+    entitlement itself is untouched — the review action already reset its
+    download axis. Runs inside the caller's import transaction."""
+    logger.info(
+        "process-imports: %s no longer accepted; import withdrawn", download_id
+    )
+    row = await session.get(TrackedDownloadRow, row_id)
+    if row is not None:
+        await session.delete(row)
+    return TrackedDownloadState.IGNORED
 
 
 async def _apply_state(

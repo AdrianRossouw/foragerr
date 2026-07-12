@@ -385,6 +385,69 @@ allocated yet).
 
 ---
 
+## COMP 14 — Store-source clients (Humble Bundle)
+
+- **Assets**: the operator's Humble Bundle session cookie (the most sensitive secret
+  foragerr holds — full account access, not scoped); the process (parsing untrusted
+  store JSON); the download-staging area and, transitively, the library (a fetched
+  entitlement becomes an ordinary import).
+- **Trust boundary**: process → `www.humblebundle.com` (order API, operator-pasted
+  cookie); Humble order-API response (untrusted JSON) → parser/DB/UI; process →
+  the signed-URL CDN host at grab time (FRG-SRC-006).
+- **Threats**
+  - **T-SRC-1 (Spoofing/Info disclosure — the Humble session-cookie credential)**:
+    the `_simpleauth_sess` cookie is the sole authentication mechanism (no password,
+    no login automation, FRG-SRC-002) and is as powerful as the operator's own
+    browser session. *At rest*: stored as a TOP-LEVEL `SecretStr` on
+    `HumbleSettings` (`sources/settings.py`), which rides the same keystore path as
+    every other provider secret (FRG-AUTH-008) — `enc:v1:`-encrypted, never
+    plaintext in the DB or a backup. *In transit*: sent only as a `Cookie` header to
+    `https://www.humblebundle.com` over the shared factory's TLS-verify-always
+    `external` profile (FRG-SEC-001), and stripped on any cross-host redirect. *API
+    exposure*: write-only — `GET /sources` / connect / reconnect responses report
+    only whether a cookie is configured (`public_settings()`), never the value; the
+    logging filter redacts it at registration. *Clipboard residual*: the operator
+    copies the cookie from browser DevTools and pastes it into the connect card —
+    the same OS-clipboard exposure window as any manual cookie-paste workflow, not
+    something foragerr's server surface adds or can close (a companion browser
+    extension that removes the manual-copy step is recorded as future work — see
+    `docs/roadmap.md`, not restated here). Coverage: RISK-045 (at-rest, mitigated —
+    cross-references RISK-041's keystore mitigation rather than restating it) +
+    RISK-046 (theft blast radius, accepted residual with rationale).
+  - **T-SRC-2 (Tampering/DoS — store-controlled JSON parsing)**: the Humble order-list
+    and order-detail responses are untrusted JSON from a third party (FRG-NFR-012);
+    a compromised or hostile response could attempt an oversized body, a malformed
+    shape, or hostile string content designed to corrupt display fields or forge log
+    lines. Coverage: byte caps on both response types
+    (`ORDER_LIST_MAX_BYTES`/`ORDER_DETAIL_MAX_BYTES`) below the shared factory
+    ceiling; pydantic-validated leaf models (`extra="ignore"`, defensive optional
+    fields) with hard element caps (`MAX_GAMEKEYS`/`MAX_SUBPRODUCTS`/
+    `MAX_DOWNLOAD_STRUCTS`) enforced even within the byte cap; a single malformed
+    subproduct is skipped-and-logged rather than aborting the sync, and a
+    whole-body shape failure is a typed, caught `HumbleMalformedError` (FRG-SRC-003
+    "never crash the scheduler"); every store-supplied display string is sanitized
+    through the shared ComicVine ingest sanitizer (`sanitize_cv_text`, FRG-META-014)
+    before it can reach the DB, API, or UI — the same HTML/control/CR-LF/Trojan-Source
+    stripping RISK-011/014 already established, reused with zero new sanitizer code.
+    RISK-047.
+  - **T-SRC-3 (SSRF/DoS — signed-URL download egress)**: an accepted entitlement's
+    file is fetched from a signed, time-limited URL the order API returns at grab
+    time; a compromised/hostile API response could attempt to steer that fetch at an
+    arbitrary internal or external host, or serve an oversized/slow payload
+    (FRG-SRC-006). Coverage: the signed URL is always fetched FRESH at grab time
+    (never a stored/stale value), the fetch is restricted to HTTPS plus the Humble
+    CDN host allowlist established by prior-art dissection (`dl.humble.com`,
+    `docs/research/humble-api.md`; confirmed at UAT per the proposal's relaxed
+    verification constraint) — a URL outside the allowlist or not HTTPS is refused
+    and logged, never fetched (mirrors the DDL per-provider allowlist, RISK-007);
+    the fetch runs under the shared factory's bounded size/timeout caps
+    (FRG-NFR-006); the downloaded bytes are md5-verified against the API-supplied
+    checksum before the file reaches the import pipeline, and a mismatch quarantines
+    the file into the existing failed-download/retry surface instead of importing
+    it. RISK-048.
+
+---
+
 ## Change deltas
 
 ### 2026-07-05 — m1-foundation (change 1 of Phase 3)
@@ -1299,6 +1362,61 @@ no-auth acceptance. Disposition:
 RISK-044 is added (new) for this row; it cites RISK-020 for the no-auth acceptance
 rather than restating it. No new SOUP (SQLAlchemy ORM + the existing repo/session
 patterns only; `tools/soup_check.py` unaffected).
+
+### 2026-07-12 — m6-humble-source (M6, first M6 change)
+
+New attack surface on a new **COMP 14 — Store-source clients (Humble Bundle)**: the
+first outbound integration authenticated with an operator-pasted session cookie
+(not an API key), the first parser of store-controlled JSON, and (per FRG-SRC-006)
+the first signed-URL download path outside the existing indexer/SAB/DDL surfaces.
+Three new risk ids (RISK-045..048 — four ids, one of which is an accepted residual
+rather than a mitigation). Disposition:
+
+- **T-SRC-1 (cookie credential) — mitigated by the same construction as every other
+  provider secret, closed for the arms foragerr's own surface controls**: keeping
+  `session_cookie` a TOP-LEVEL `SecretStr` on `HumbleSettings` means the m6-keystore
+  machinery (FRG-AUTH-008, merged first as this change's hard dependency) encrypts
+  it at rest with zero source-specific code — RISK-045 cross-references RISK-041's
+  keystore mitigation rather than restating it. Write-only API exposure and TLS-only
+  transit are implemented exactly as design decision 1/9 specified. **The residual
+  this row cannot close**: once pasted, the cookie IS the operator's live Humble
+  session — full account access, not a scoped token, because Humble does not offer
+  one. RISK-046 accepts this with rationale (session cookies expire on the order of
+  weeks; the operator can invalidate the session, and therefore foragerr's copy of
+  it, by logging out of Humble in the browser at any time — the next sync surfaces
+  as `expired`, FRG-SRC-005; no payment/billing action is reachable through the
+  order-list/order-detail API surface this client exercises) and a review trigger
+  (reported unauthorized account activity, or Humble introducing a scoped token).
+- **T-SRC-2 (store-JSON parsing) — CLOSED**: `sources/humble.py` byte-caps both
+  response types, validates every leaf through pydantic with defensive defaults,
+  hard-caps element counts even within the byte cap, skips-and-logs a single
+  malformed subproduct rather than aborting the sync, and reuses the ComicVine
+  ingest sanitizer (`sanitize_cv_text`) on every store-supplied display string —
+  extending the RISK-011/014 untrusted-text posture to a new source with no new
+  sanitizer code. RISK-047.
+- **T-SRC-3 (signed-URL egress) — specified, implementation lands in this same
+  change**: FRG-SRC-006 (fresh URL at grab time, HTTPS + Humble CDN host allowlist,
+  bounded size/timeout, md5 verification, checksum-mismatch quarantine) is recorded
+  here ahead of/governing the download-worker task (tasks.md 4.1) that implements
+  it — per FRG-PROC-006, the STRIDE/risk-register update for a new outbound
+  integration is required in the same change that introduces it, and this change is
+  the same change. RISK-048.
+- **Comic/other classification is not a security control**: `sources/classify.py`'s
+  platform/format rule (design decision 4) determines what the UI shows by default,
+  not what is trusted — non-comic items are retained, never dropped (FRG-SRC-003),
+  so a misclassification is a discoverability question, not an attack surface.
+- **New dependency: none.** The Humble client is built entirely on the existing
+  outbound HTTP factory, pydantic, and the shared sanitizer; no SOUP register change.
+- **Session expiry as a modeled state (FRG-SRC-005) also closes a DoS/repudiation
+  concern for free**: a 401 mid-sync flips the source to `expired` and the
+  `source-sync` handler skips every non-`connected` source on later ticks (see
+  `sources/commands.py::_handle_source_sync`) — there is no retry storm against a
+  dead session, and the failure is recorded (`last_sync_status`) rather than
+  silently swallowed.
+
+RISK-045, RISK-047, and RISK-048 are added as **Mitigate**; RISK-046 is added as
+**Accept (residual)**. No new STRIDE category beyond Spoofing/Info
+disclosure/Tampering/DoS/SSRF, all already modeled elsewhere in this document.
 
 ## Coverage summary
 

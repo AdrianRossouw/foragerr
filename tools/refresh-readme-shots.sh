@@ -78,6 +78,10 @@ fi
 # --- Start the backend against the demo library ------------------------------
 if [ "${REUSING:-}" != "1" ]; then
   export FORAGERR_CONFIG_DIR="${CONFIG_DIR}"
+  # The keystore requires a passphrase at startup (FRG-AUTH-011); this is a
+  # throwaway capture instance in a temp config dir with no stored secrets, so a
+  # fixed hermetic value suffices (same posture as e2e/compose.yaml).
+  export FORAGERR_SECRET_KEY="${FORAGERR_SECRET_KEY:-readme-shots-capture-passphrase}"
   export FORAGERR_HOST=127.0.0.1
   export FORAGERR_PORT="${PORT}"
   export FORAGERR_LOG_LEVEL=WARNING

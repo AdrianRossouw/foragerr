@@ -150,6 +150,46 @@ def test_entries_render_from_db_fields(client, tmp_path):
         assert entry.find(f"{ATOM}id").text.startswith("/opds/file/")
 
 
+@pytest.mark.req("FRG-SRC-007")
+def test_acquisition_feed_excludes_owned_via_edition_rows(client, tmp_path):
+    """An owned-via-edition provenance row (size-0, edition_issue_id set) points
+    at a shared collected file, not a distinct downloadable copy — it must NOT
+    appear as an acquisition entry (no duplicate/size-0 entries, FRG-SRC-007)."""
+    data = _seed(client, tmp_path, [simple_series(n_issues=2)])
+    series_id = data["series"][0]["id"]
+    real_issue_id = data["series"][0]["issues"][0]["id"]
+    edition_issue_id = data["series"][0]["issues"][1]["id"]
+    real_file_path = data["series"][0]["issues"][0]["files"][0]["path"]
+
+    async def _add_edition_row(app):
+        from foragerr.db.base import utcnow
+        from foragerr.library.models import IssueFileRow
+
+        async with app.state.db.write_session() as session:
+            # An owned-via-edition marker for the OTHER issue, sharing the real
+            # file's path with size 0 (the reconciliation shape).
+            session.add(
+                IssueFileRow(
+                    issue_id=edition_issue_id,
+                    path=real_file_path,
+                    size=0,
+                    edition_issue_id=real_issue_id,
+                    added_at=utcnow(),
+                )
+            )
+
+    client.portal.call(_add_edition_row, client.app)
+
+    feed = ET.fromstring(client.get(f"/opds/series/{series_id}").text)
+    entries = feed.findall(f"{ATOM}entry")
+    # Only the two REAL single files are offered — the edition row is filtered.
+    assert len(entries) == 2
+
+    # And the recent feed likewise excludes the edition row.
+    recent = ET.fromstring(client.get("/opds/recent").text)
+    assert len(recent.findall(f"{ATOM}entry")) == 2
+
+
 @pytest.mark.req("FRG-OPDS-002")
 def test_cover_and_thumbnail_links_point_at_local_cache(client, tmp_path):
     data = _seed(client, tmp_path, [simple_series(n_issues=1)])

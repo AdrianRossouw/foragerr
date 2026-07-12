@@ -272,6 +272,26 @@
   color: var(--text-primary);
 }
 
+/* A store-session expiry tints + slow-pulses the header health icon amber. */
+.iconButtonWarn {
+  color: var(--color-warning);
+  animation: healthPulse 2s ease-in-out infinite;
+}
+
+.iconButtonWarn:hover {
+  color: var(--color-warning);
+}
+
+@keyframes healthPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
 /* --- Per-screen toolbar slot + scroll-confined content --- */
 .toolbar {
   display: flex;

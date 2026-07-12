@@ -971,3 +971,115 @@ export interface CreatorBibliography {
   state: 'fresh' | 'pending';
   records: BibliographyEntry[];
 }
+
+/*
+ * Store sources (FRG-UI-029 / FRG-SRC-001..007). A source is an account-backed
+ * store (Humble) with an inventory of entitlements the operator reviews. Field
+ * spellings mirror the wire exactly (backend/src/foragerr/api/sources.py).
+ */
+
+/** Connection lifecycle of a configured source (backend `connection_state`). */
+export type SourceConnectionState = 'connected' | 'expired' | 'disconnected';
+
+/**
+ * One `GET /api/v1/sources` row (FRG-SRC-001). `settings` is the PUBLIC view —
+ * the session cookie is dropped, never echoed (write-only, FRG-SRC-002).
+ */
+export interface StoreSourceResource {
+  id: number;
+  type: string;
+  name: string;
+  connection_state: SourceConnectionState;
+  auto_sync: boolean;
+  last_sync_status: string | null;
+  settings: Record<string, unknown>;
+}
+
+/** A successful `POST /sources` / `reconnect` result (FRG-SRC-002). */
+export interface SourceConnectResponse {
+  source: StoreSourceResource;
+  order_count: number;
+  message: string;
+}
+
+/** `POST /sources/{id}/sync` acknowledgement (202) — the enqueued command. */
+export interface SourceSyncResponse {
+  command_id: number;
+  status: string;
+}
+
+/** Entitlement content classification (FRG-SRC-003): comic vs everything else. */
+export type EntitlementClassification = 'comic' | 'other';
+
+/** Entitlement review axis (FRG-SRC-004) — distinct from download progress. */
+export type EntitlementReviewStatus = 'new' | 'matched' | 'ignored';
+
+/**
+ * The server-computed proposed match on a `new` entitlement (FRG-SRC-004): a
+ * `library` best links to an existing series (`series_id`); a `comicvine` best
+ * proposes an add of `cv_volume_id`. `confidence` is the name-similarity ratio.
+ */
+export interface EntitlementProposedMatch {
+  kind: 'library' | 'comicvine';
+  series_id: number | null;
+  cv_volume_id: number | null;
+  title: string | null;
+  year: number | null;
+  confidence: number;
+  auto?: boolean;
+}
+
+/** One `GET /sources/{id}/entitlements` row (FRG-SRC-004). */
+export interface EntitlementResource {
+  id: number;
+  source_id: number;
+  machine_name: string;
+  human_name: string;
+  publisher: string | null;
+  classification: EntitlementClassification;
+  review_status: EntitlementReviewStatus;
+  download_state: string | null;
+  download_error: string | null;
+  preferred_format: string | null;
+  file_size: number | null;
+  filename: string | null;
+  proposed_series_id: number | null;
+  matched_series_id: number | null;
+  proposed_match: EntitlementProposedMatch | null;
+}
+
+/**
+ * One covered single issue's ownership state in a fill range (FRG-SRC-007):
+ * `single` = already owned as a separate single (kept, chipped amber);
+ * `edition` = owned via THIS collected edition; `fillable` = released with no
+ * file, would be filled on import (chipped green).
+ */
+export type FillOwnership = 'single' | 'edition' | 'fillable';
+
+export interface FillIssue {
+  issue_id: number;
+  issue_number: string | null;
+  ownership: FillOwnership;
+}
+
+export interface FillRange {
+  target_series_id: number;
+  range_label: string;
+  issues: FillIssue[];
+}
+
+/**
+ * The reconcile fill-set for a matched collected edition (FRG-SRC-007): the
+ * single issues it fills, per declared range. `standalone` (OGN / artbook with
+ * no declared containment) fabricates no singles.
+ */
+export interface FillSet {
+  trade_issue_id: number;
+  standalone: boolean;
+  ranges: FillRange[];
+}
+
+/** `GET /sources/entitlements/{id}` — an entitlement plus its fill-sets. */
+export interface EntitlementDetailResource extends EntitlementResource {
+  fill_sets: FillSet[];
+}

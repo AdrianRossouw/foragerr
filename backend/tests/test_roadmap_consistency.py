@@ -146,13 +146,15 @@ def test_roadmap_cited_ids_are_registered_and_not_yet_shipped():
 
 @pytest.mark.req("FRG-PROC-018")
 @pytest.mark.req("FRG-PROC-014")
-def test_roadmap_lists_humble_and_archive_as_future_work():
-    """The roadmap is where the Humble Bundle importer and public-domain archive
-    import are recorded as future work (FRG-PROC-014's obligation, moved here
-    from the README by roadmap-single-source). The spec pins *that* they are
-    listed, not where: the archive import moved from the M6 Sources section to
-    the post-1.0 section by the 2026-07-11 1.0-cut owner decision, so only the
-    Humble entry is still required to live under Sources."""
+def test_roadmap_lists_archive_import_as_future_work():
+    """The roadmap is where the public-domain archive import is recorded as
+    future work (FRG-PROC-014's obligation, moved here from the README by
+    roadmap-single-source). The Humble Bundle importer used to be pinned here
+    too, but it shipped in m6-humble-source, so FRG-PROC-014 was amended to
+    require only the archive import as the still-future example (the Humble
+    entry now describes a shipped feature, not forward-looking work). The
+    Sources milestone section must still exist — the milestone is not closed
+    (the companion browser extension remains planned)."""
     roadmap_path = REPO_ROOT / "docs" / "roadmap.md"
     assert roadmap_path.exists(), "docs/roadmap.md must exist (FRG-PROC-018)"
     roadmap = roadmap_path.read_text()
@@ -164,10 +166,6 @@ def test_roadmap_lists_humble_and_archive_as_future_work():
     )
     assert sources is not None, (
         "docs/roadmap.md must keep a Sources milestone section"
-    )
-    assert "Humble Bundle" in sources, (
-        "the roadmap's Sources section must list the Humble Bundle importer "
-        "as future work"
     )
     assert "public-domain archive import" in body.lower(), (
         "the roadmap's milestone sections must list the public-domain archive "

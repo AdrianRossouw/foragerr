@@ -23,13 +23,14 @@ variables) start a clean slate under strict semantic versioning.
 
 ## M6 — Sources
 
-Broaden how issues you are entitled to enter the library. The encrypted
-credential store — at-rest encryption for provider secrets saved through the UI —
-has shipped as the first M6 change, before any account credential is persisted.
-Still planned:
+Broaden how issues you are entitled to enter the library. Two M6 changes have
+shipped: the encrypted credential store — at-rest encryption for provider
+secrets saved through the UI, landed before any account credential is
+persisted — and the **Humble Bundle importer**, which connects your Humble
+account with a pasted session cookie and brings the DRM-free comic bundles you
+have purchased into your library through a review-first sync and the standard
+import pipeline. Still planned:
 
-- **Humble Bundle importer** — unpack the DRM-free comic bundles you have
-  purchased from Humble Bundle straight into your library.
 - **Companion browser extension** — a small, copy-only helper that puts the
   Humble session cookie on the clipboard so connecting a source is a paste,
   never a stored password.

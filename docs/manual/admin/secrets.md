@@ -99,6 +99,19 @@ deployment with a different passphrase):
   secret is always re-encrypted under the current passphrase, which clears the
   warning for that integration.
 
+### Store-source credentials (Humble Bundle)
+
+A connected store source's session cookie — today, Humble Bundle's
+`_simpleauth_sess` cookie — is a stored secret under the same keystore as
+every provider credential above: it lives in the source's settings row as a
+top-level `SecretStr`, so it is written `enc:v1:`-encrypted under
+`FORAGERR_SECRET_KEY`, dropped from every API response (write-only, the same
+"value is stored" marker other secret fields show), and registered for log
+redaction. See `../user/sources.md` for how to connect a source and what
+happens if `FORAGERR_SECRET_KEY` changes or the session itself expires on
+Humble's side (recovery is the same re-entry path described above — never
+data loss).
+
 ### Backups
 
 A backup taken after this release requires the **same** `FORAGERR_SECRET_KEY` to

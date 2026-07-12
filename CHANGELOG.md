@@ -9,6 +9,60 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.6.2] — 2026-07-12
+
+m6-humble-source: Humble Bundle store source — connect the account you already
+own comics on and bring your DRM-free purchases into the library through a
+review-first sync (FRG-SRC-001..007, FRG-UI-029).
+
+### Added
+- **Humble Bundle as a store source** (FRG-SRC-001, FRG-SRC-002): a new
+  top-level **Sources** screen connects Humble Bundle by pasting your
+  `_simpleauth_sess` session cookie. The cookie is validated with a live
+  order-list call before anything is saved, then stored server-side encrypted at
+  rest under the keystore (FRG-AUTH-008) and never returned in any API response
+  or log. foragerr never stores your Humble password and never automates login.
+  The store model is generic so further storefronts can be added without
+  reshaping it.
+- **Entitlement sync, daily and on demand** (FRG-SRC-003): foragerr polls your
+  Humble orders on a schedule (default daily) and whenever you press **Sync
+  now**, diffing by store-native key so re-syncs never duplicate. Items are
+  classified comic or other; non-comic purchases (games, prose books) are kept
+  and shown on demand rather than silently dropped, and malformed order entries
+  are skipped and logged without failing the sync.
+- **Review-first workflow, auto-sync off by default** (FRG-SRC-004): every newly
+  discovered comic lands in a review state with a server-proposed library match.
+  Nothing downloads until you accept it — match to an existing series, add as
+  new, ignore, or restore, one at a time or in bulk (with shift-range select). A
+  per-source **auto-sync** toggle can accept-and-download confidently matched new
+  items automatically, and it defaults to **off**. Ignoring an accepted item
+  cancels its download wherever it is — a queued or in-flight grab aborts at its
+  re-read guard, a completed download awaiting import is withdrawn from the
+  import queue, and an import already claimed by the drain is re-checked inside
+  the import transaction and imports nothing. A later restore + re-accept always
+  downloads afresh.
+- **Collected-edition reconciliation that never suppresses singles**
+  (FRG-SRC-007): accepting a collected edition marks exactly the issues it fills
+  as owned-via-edition, leaves any issue you already own as a single untouched
+  (no replacement, no double-counting), and adds OGNs/artbooks with no
+  single-issue mapping as standalone items. The FRG-SER-019 invariant is extended
+  to sources — reconciliation only ever moves an issue to owned, never clears a
+  wanted flag.
+- **Verified downloads into the standard import pipeline** (FRG-SRC-006):
+  accepting an entitlement fetches a fresh signed URL at grab time, streams it
+  over HTTPS with bounded size and timeout, confines egress to the Humble CDN
+  host allowlist, verifies the file against the API-provided md5, and hands the
+  verified file to the existing import pipeline as a normal completed download.
+  Checksum mismatches are quarantined and off-allowlist or non-HTTPS URLs are
+  refused, each surfaced on the entitlement with a reason and a retry.
+- **Session expiry as a first-class state** (FRG-SRC-005, FRG-UI-029): an auth
+  failure during sync flips the source to **expired** and pauses further calls
+  against the dead session instead of retrying blindly. The condition surfaces
+  through component health, a global reconnect banner, an amber header/footer
+  treatment, and a `!` on the Sources nav badge; pasting a fresh cookie
+  revalidates, clears all three, and resumes sync. Expiry and disconnect never
+  remove or degrade already-synced or imported data.
+
 ## [v0.6.1] — 2026-07-12
 
 m6-keystore: at-rest encryption of stored provider secrets (FRG-AUTH-008).

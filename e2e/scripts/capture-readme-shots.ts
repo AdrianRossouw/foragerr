@@ -27,7 +27,8 @@
  *   BASE_URL  base URL of the running app        (default http://127.0.0.1:8790)
  *   OUT_DIR   output directory for the PNGs      (default ../docs/readme-assets)
  *   SHOTS     comma-separated subset of shot ids (default: all)
- *             ids: comics-grid, series-detail, wanted, manual-import, settings
+ *             ids: comics-grid, series-detail, creators-grid, wanted,
+ *                  manual-import, settings, sources
  *   SERIES    preferred series title for the detail shot (default "Planet")
  */
 import { chromium, type Page } from '@playwright/test';
@@ -188,6 +189,27 @@ const shots: Shot[] = [
       });
       await settle(page);
       await shoot(page, 'settings');
+    },
+  },
+  {
+    id: 'sources',
+    run: async (page) => {
+      // Sources: the UNCONFIGURED connect state is the only honest capture for
+      // public labelling — this fresh instance has no Humble account attached,
+      // so the screen renders the connect card (cookie paste + live-validated
+      // Connect + privacy note), never any real entitlement or account data.
+      // Reveal the helper steps so the shot shows how a source is connected.
+      await page.goto(`${BASE_URL}/sources`, { waitUntil: 'domcontentloaded' });
+      await page.waitForSelector('[data-testid="connect-card"]', {
+        timeout: 30_000,
+      });
+      const helper = page.locator('[data-testid="helper-toggle"]');
+      if (await helper.count()) {
+        await helper.first().click().catch(() => {});
+        await page.waitForSelector('[data-testid="cookie-helper"]', { timeout: 5_000 }).catch(() => {});
+      }
+      await settle(page);
+      await shoot(page, 'sources');
     },
   },
 ];

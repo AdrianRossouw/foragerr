@@ -315,6 +315,45 @@ def test_comicvine_base_url_requires_https(config_dir):
         Settings(config_dir=config_dir, comicvine_base_url="not-a-url")
 
 
+@pytest.mark.req("FRG-SRC-002")
+def test_humble_base_url_default_and_override(config_dir):
+    """humble_base_url mirrors comicvine_base_url: the real origin by default,
+    overridable to a fixture host, with a trailing slash normalized away."""
+    from foragerr.config import Settings
+
+    assert (
+        Settings(config_dir=config_dir).humble_base_url
+        == "https://www.humblebundle.com"
+    )
+    # A trailing slash is stripped so f"{base}{path}" never doubles a separator.
+    assert (
+        Settings(
+            config_dir=config_dir,
+            humble_base_url="https://humble.example/",
+        ).humble_base_url
+        == "https://humble.example"
+    )
+
+
+@pytest.mark.req("FRG-SRC-002")
+def test_humble_base_url_requires_https(config_dir):
+    """The session cookie rides every Humble request; a plaintext base would
+    exfiltrate it. https passes, http is refused unless the test affordance
+    opts in explicitly, and a non-URL is rejected outright."""
+    from foragerr.config import Settings
+
+    Settings(config_dir=config_dir, humble_base_url="https://humble.example")
+    with pytest.raises(Exception, match="plain http"):
+        Settings(config_dir=config_dir, humble_base_url="http://humble.example")
+    Settings(
+        config_dir=config_dir,
+        humble_base_url="http://mockhub:8080",
+        humble_insecure_base=True,
+    )
+    with pytest.raises(Exception, match="absolute http"):
+        Settings(config_dir=config_dir, humble_base_url="not-a-url")
+
+
 def test_unwritable_config_dir_is_named_in_the_failure(config_dir):
     (config_dir / CONFIG_FILENAME).write_text("log_level: INFO\n", encoding="utf-8")
     config_dir.chmod(0o555)

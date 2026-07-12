@@ -1,0 +1,44 @@
+# m6-humble-source — tasks
+
+## 1. API schema & fixtures
+
+- [x] 1.1 ~~Owner live capture~~ DONE VIA PRIOR-ART DISSECTION (owner direction 2026-07-11): schema documented in `docs/research/humble-api.md` from three OSS clients (incl. one pushed 2026-06); build synthetic fixtures from it (comic bundle w/ CBZ+PDF twins, collected edition, EPUB-only book, game item, malformed subproduct) — `backend/tests/sources/fixtures/order_list.json` + `order_comics.json` (+ a PDF-only artbook and a PDF+EPUB prose book to pin both PDF branches)
+- [x] 1.2 Finalize comic-classification rule (platform=="ebook" + format/extension) and auto-match confidence threshold against the fixtures; record in design.md. LIVE VALIDATION MOVES TO UAT: first real connect+sync against the operator's account confirms schema + CDN egress allowlist (expected dl.humble.com); any drift updates client + fixtures together — rule finalized in `sources/classify.py` + recorded in design.md; auto-match confidence threshold deferred to worker A2 (proposed-match seam columns are NULL)
+
+## 2. Backend model & client
+
+- [x] 2.1 Alembic migration: `sources` + `source_entitlements` tables; SQLAlchemy models (`FRG-SRC-001`) — migration `0021_sources_entitlements`, models in `sources/models.py`
+- [x] 2.2 Humble client module: order list/detail, fixture-driven tests, politeness/backoff (NFR-005), bounded requests (NFR-006); cookie as SecretStr through the keystore path (`FRG-SRC-002`) — `sources/humble.py` over the shared external factory; per-source spacing gate `sources/ratelimit.py`
+- [x] 2.2b Live-gated tests behind `FORAGERR_TEST_HUMBLE_COOKIE` (.env, operator-provided; skipped when absent, per the existing usenet live-test pattern): real order-list/detail round-trip; capture responses and commit them as fixtures ONLY after redacting gamekeys, signature/expiry params, and account email; confirm the CDN egress allowlist. Operator invalidates the session (browser logout) after merge — `tests/sources/test_live_humble.py` (no responses captured; fixtures are synthetic)
+- [x] 2.3 Connect/validate/disconnect service + API routes; cookie write-only in responses; disconnect deletes credential, keeps data (`FRG-SRC-001`, `FRG-SRC-002`) — `sources/service.py` + `api/sources.py`
+- [x] 2.4 Sync command on the scheduler (default daily) + Sync-now endpoint: store-native-key diff, comic/other classification, skip-and-log malformed entries, idempotent re-sync (`FRG-SRC-003`) — `sources/commands.py` (source-sync task, 1 h floor) + `POST /sources/{id}/sync`
+- [x] 2.5 Expiry handling: 401 → `expired`, pause, health contribution, reconnect resumes (`FRG-SRC-005`) — state flip in `sources/commands._sync_one`; health `_sources_component`; reconnect via `service.reconnect_source`
+
+## 3. Review workflow & reconciliation
+
+- [x] 3.1 Entitlement review actions (match/add/ignore/restore, single + bulk) with proposed-match computation via existing ranking + booktype/containment (`FRG-SRC-004`) — proposed match `sources/matching.py` (reuses `metadata.search.name_similarity`, library-first then CV `suggest_series`, budget-aware); actions `sources/review.py` + `api/sources.py` entitlement endpoints; survives-resync proven (`test_review.py`, `test_entitlements_api.py`)
+- [x] 3.2 Auto-sync toggle, default OFF; confident-match auto-accept path when ON (`FRG-SRC-004`) — `sources/enrich.py` post-sync pass; `AUTO_MATCH_THRESHOLD = 0.85` decided + recorded in design.md; OFF-default pins nothing downloads without operator action (`test_review.py`)
+- [x] 3.3 Reconciliation module: fills-range computation, owned-single preservation, OGN/artbook standalone path; three-way invariant proof tests mirroring FRG-SER-019 (`FRG-SRC-007`) — `sources/reconcile.py` (owned-via-edition via `issue_files.edition_issue_id` size-0 rows, migration 0022 partial unique index); fill-set on the entitlement-detail API; three-way proof `test_reconcile.py`
+
+## 4. Download & import
+
+- [x] 4.1 Grab path: fresh signed URL at grab time, HTTPS + CDN allowlist enforcement, size/timeout bounds, md5 verify, staging handoff to import pipeline (`FRG-SRC-006`) — `sources/grab.py` (`source-grab` command); `HumbleClient.fetch_download_url` re-fetches the URL; reuses DDL `AllowList`/`download_link` + factory `external`; hands off via `import_pending` `tracked_downloads` + `grab_history` (`test_grab.py`)
+- [x] 4.2 Failure paths into the existing failed-download surface with retry; checksum-mismatch quarantine test (`FRG-SRC-006`) — per-entitlement `download_state="failed"` + `download_error` (deviation from usenet blocklist/re-search loop, flagged in design.md); checksum mismatch quarantines + egress-confinement refusal proven (`test_grab.py`)
+
+## 5. Frontend
+
+- [x] 5.1 Sources route + nav item with badge states; single-store rail (`FRG-UI-029`) — `SourcesScreen.tsx` route + rail (Humble Bundle only — the 2000 AD placeholder tab and "Add a source" affordance were dropped at the gate, owner decision, as dead UI for an unbuilt integration); Sidebar `Sources` nav item with `SourcesNavBadge` (amber `!` on expiry, else unreviewed-new count); `sourceHooks.ts` + `queryKeys.sources`
+- [x] 5.2 Connect card (paste field, helper with extension-coming-soon chip + DevTools steps, live-validated Connect, privacy note) (`FRG-UI-029`) — `ConnectCard.tsx` (masked password field, >12-char Connect gate, live connect/reconnect, honest error, privacy note, auto-sync-at-connect toggle)
+- [x] 5.3 Manage view: account bar, count line, filter segments, entitlement rows + expand detail with issue chips per edge rules; bulk + shift-range select (`FRG-UI-029`) — `StoreManage.tsx` + `EntitlementRow.tsx` (segments+non-comic toggle, per-status actions, expand→fill-set chips: amber owned-single kept, green fill, >12 text-only, standalone note; FRG-UI-025 anchor/shift-range bulk ignore/restore/accept)
+- [x] 5.4 Global banner + amber header/footer health wiring over the health WS; e2e covering connect, review, expiry (negative path per UAT policy: unconfigured + expired states) (`FRG-UI-029`) — `GlobalBanner.tsx` in AppShell + amber pulsing header health icon + amber sidebar-footer ("sync needs attention"); WS `isSourceSyncComplete` invalidation; e2e `z-sources.spec.ts` (unconfigured first-run + connect-failure negative paths). Connect-success/review/expired e2e blocked by hardcoded `HUMBLE_API_BASE` (no fixture override) — covered by the vitest FRG-UI-029 suite instead; gap reported. FOLLOW-UP (gap-closing worker): the hardcoded base is now removed — `humble_base_url`/`humble_insecure_base` config settings thread a fixture host through the client (mirroring `comicvine_base_url`). DEFERRED: mockhub Humble order-list/order-detail endpoints are NOT built here (out of scope for this gap-closing pass); the connect-success/review/expired e2e stays covered by vitest until those fixture endpoints land.
+
+## 6. Security, docs, traceability
+
+- [x] 6.1 STRIDE rows: cookie credential (at rest/in transit/clipboard residual), Humble JSON parsing, signed-URL egress; risk-register entries; threat-model update (FRG-PROC-006) — new COMP 14 (`docs/security/threat-model.md`, T-SRC-1/2/3 + `m6-humble-source` change-delta entry); RISK-045..048 (`docs/security/risk-register.md`, Counts rollup updated: 48 total / 40 mitigate / 8 accept)
+- [x] 6.2 Manual: `docs/manual/user/sources.md` (connect, review, expiry, auto-sync semantics) — new file; admin notes — `docs/manual/admin/secrets.md` (Humble cookie under the keystore) + `docs/manual/admin/configuration.md` (`source_sync_interval_seconds`/`source_min_request_interval_seconds` settings rows + a "Store sources" section) + `docs/manual/index.md` structure listing (screenshots deferred to gate). README tour section for Sources is ALSO deferred (not just its screenshot): `test_tour_captions_cite_implemented_ids_with_matching_spec_area` requires a cited id's registry status to be `implemented`/`verified`, and FRG-SRC-*/FRG-UI-029 are still `approved` pending task 6.3's registry flip — adding the tour section now would fail that gate. Add the Sources tour entry (screenshot + FRG citations) together with 6.3's status flip.
+- [x] 6.3 Registry: SRC AREA row in commit-standard table (already present); FRG-SRC-001..007 + FRG-UI-029 → implemented; delta specs synced to baselines (new `openspec/specs/sources/spec.md`, FRG-UI-029 merged into ui baseline, FRG-PROC-014 amended in baseline + dev-process delta added to this change); roadmap M6 section reduced to the still-unshipped companion extension; matrix regen (trace exit 0, no gaps); SOUP check green (no new deps)
+- [x] 6.4 CHANGELOG v0.6.2 (Humble Bundle store source) + version bump to 0.6.2
+
+## 7. Gate
+
+- [ ] 7.1 Full suite green; security-touching tier → full 8-angle fleet + adversarial angle with a tested cookie-leak scenario + Codex; merge-gate checklist

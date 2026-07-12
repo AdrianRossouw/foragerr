@@ -283,6 +283,14 @@ source. Compatibility: pre-1.0 releases may break with migration notes; from
 | FRG-UI-026 | Collections tab | ui | implemented | M4 |
 | FRG-UI-027 | Creators grid screen | ui | implemented | M5 |
 | FRG-UI-028 | Creator profile screen | ui | implemented | M5 |
+| FRG-UI-029 | Sources screen | ui | implemented | M6 |
+| FRG-SRC-001 | store-source model and connection lifecycle | sources | implemented | M6 |
+| FRG-SRC-002 | Humble session-cookie authentication | sources | implemented | M6 |
+| FRG-SRC-003 | entitlement sync | sources | implemented | M6 |
+| FRG-SRC-004 | review-first entitlement workflow | sources | implemented | M6 |
+| FRG-SRC-005 | session expiry as a modeled state | sources | implemented | M6 |
+| FRG-SRC-006 | entitlement download and import handoff | sources | implemented | M6 |
+| FRG-SRC-007 | collected-edition reconciliation never suppresses singles | sources | implemented | M6 |
 | FRG-OPDS-001 | OPDS 1.2 Atom catalog with navigation root | opds | implemented | M1 |
 | FRG-OPDS-002 | Acquisition feeds with per-entry metadata | opds | implemented | M1 |
 | FRG-OPDS-003 | Library-id-based file resolution only (no client-supplied paths) | opds | implemented | M1 |

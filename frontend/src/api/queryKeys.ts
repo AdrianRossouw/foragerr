@@ -188,6 +188,24 @@ export const queryKeys = {
   health: {
     warnings: () => ['health'] as const,
   },
+  // Store sources (FRG-UI-029 / FRG-SRC-*), mirroring
+  //   ['sources']                                   <-> GET /api/v1/sources
+  //   ['sources', id, 'entitlements', hash]         <-> GET /sources/{id}/entitlements
+  //   ['sources', 'entitlement', id]                <-> GET /sources/entitlements/{id}
+  //   ['sources', 'new-count', idsHash]             <-> aggregated new-review count
+  // The list key is the bare ['sources'] prefix, so a review action / sync /
+  // connect that invalidates `sources.all()` sweeps the list, every source's
+  // entitlement queries, an open entitlement detail, AND the sidebar new-count
+  // in one call (the whole inventory re-derives together). 'entitlement' and
+  // 'new-count' (strings) never collide with a numeric source id under the prefix.
+  sources: {
+    all: () => ['sources'] as const,
+    list: () => ['sources'] as const,
+    entitlements: (sourceId: number, filtersHash = '') =>
+      ['sources', sourceId, 'entitlements', filtersHash] as const,
+    entitlementDetail: (id: number) => ['sources', 'entitlement', id] as const,
+    newCount: (idsHash: string) => ['sources', 'new-count', idsHash] as const,
+  },
 } as const;
 
 export type SeriesListKey = ReturnType<typeof queryKeys.series.all>;

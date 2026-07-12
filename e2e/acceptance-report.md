@@ -3,9 +3,9 @@
 _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.mjs` — do not edit by hand (FRG-PROC-010)._
 
 - **Verdict:** GREEN
-- **Scenarios:** 17 (16 pass, 0 fail, 1 skipped, 0 flaky, 0 not run)
-- **Run started:** 2026-07-12T03:24:50.512Z
-- **Duration:** 63.1s
+- **Scenarios:** 19 (18 pass, 0 fail, 1 skipped, 0 flaky, 0 not run)
+- **Run started:** 2026-07-12T12:49:53.358Z
+- **Duration:** 83.9s
 
 ## Scenario → requirement coverage
 
@@ -26,6 +26,8 @@ _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.m
 | PASS | FRG-PROC-010 FRG-API-011: History shows the grabbed and imported rows sharing a downloadId | FRG-API-011, FRG-PROC-010 |
 | PASS | FRG-PROC-010 FRG-API-012: Wanted lists a monitored, published, fileless issue | FRG-API-012, FRG-PROC-010 |
 | PASS | FRG-PROC-010 FRG-OPDS-013: OPDS Recent serves the imported issue file bytes | FRG-OPDS-013, FRG-PROC-010 |
+| PASS | FRG-UI-029: an unconfigured Sources screen shows the Humble connect card and DevTools helper | FRG-UI-029 |
+| PASS | FRG-UI-029: connecting with an invalid cookie surfaces an honest error and persists nothing | FRG-UI-029 |
 | PASS | FRG-PROC-010 FRG-SCHED-002: library and command queue survive a container restart | FRG-PROC-010, FRG-SCHED-002 |
 | PASS | FRG-PROC-010 FRG-UI-005: an unconfigured ComicVine key surfaces an actionable credential error, not "no results" | FRG-PROC-010, FRG-UI-005 |
 
@@ -62,6 +64,7 @@ _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.m
 | FRG-UI-015 | PASS |
 | FRG-UI-018 | PASS |
 | FRG-UI-027 | PASS |
+| FRG-UI-029 | PASS |
 
 ---
 

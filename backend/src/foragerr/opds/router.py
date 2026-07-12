@@ -340,6 +340,11 @@ def build_opds_router(base_path: str) -> APIRouter:
                 select(IssueFileRow, IssueRow)
                 .join(IssueRow, IssueRow.id == IssueFileRow.issue_id)
                 .where(IssueRow.series_id == series_id)
+                # Owned-via-edition rows (FRG-SRC-007) are size-0 provenance
+                # markers pointing at a shared collected file, not distinct
+                # downloadable copies; excluding them keeps the acquisition feed
+                # to real single/collected files (no duplicate entries).
+                .where(IssueFileRow.edition_issue_id.is_(None))
             )
             total, result = await _count_and_page(
                 session,
@@ -389,6 +394,9 @@ def build_opds_router(base_path: str) -> APIRouter:
                 select(IssueFileRow, IssueRow, SeriesRow)
                 .join(IssueRow, IssueRow.id == IssueFileRow.issue_id)
                 .join(SeriesRow, SeriesRow.id == IssueRow.series_id)
+                # Exclude owned-via-edition provenance rows (FRG-SRC-007) — a
+                # single collected file must not appear once per filled single.
+                .where(IssueFileRow.edition_issue_id.is_(None))
             )
             total, result = await _count_and_page(
                 session,

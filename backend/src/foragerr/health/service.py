@@ -163,6 +163,12 @@ class HealthService:
             label="Weekly pull source",
         )
         components += await self._safe(
+            lambda: self._sources_component(),
+            component="sources",
+            kind="source",
+            label="Store sources",
+        )
+        components += await self._safe(
             lambda: self._scheduler_component(),
             component="scheduler",
             kind="scheduler",
@@ -478,6 +484,56 @@ class HealthService:
                 disabled_until=disabled_until,
             )
         ]
+
+    async def _sources_component(self) -> list[ComponentHealth]:
+        """Store-source warnings (FRG-SRC-005 / FRG-AUTH-012 / FRG-NFR-011).
+
+        Two conditions surface as degraded: an ``expired`` session (re-paste the
+        cookie) and a credential-unavailable source whose stored cookie cannot be
+        decrypted (encryption key missing/changed — FRG-AUTH-012). The credential
+        check takes precedence and mirrors the indexer/download-client wording via
+        the shared :meth:`_credential_component`. A connected, decryptable, or
+        intentionally-disconnected source contributes nothing."""
+        from foragerr.sources.models import SourceRow
+
+        async with self._db.read_session() as session:
+            rows = (
+                (await session.execute(select(SourceRow).order_by(SourceRow.id)))
+                .scalars()
+                .all()
+            )
+        components: list[ComponentHealth] = []
+        for row in rows:
+            credential = self._credential_component(
+                row.settings,
+                kind="source",
+                label=f"Source: {row.name}",
+                component=f"source:{row.id}",
+            )
+            if credential is not None:
+                components.append(credential)
+                continue
+            if row.connection_state != "expired":
+                continue
+            components.append(
+                ComponentHealth(
+                    component=f"source:{row.id}",
+                    kind="source",
+                    label=f"Source: {row.name}",
+                    state=_STATE_DEGRADED,
+                    message=(
+                        f"'{row.name}' session has expired; sync is paused until "
+                        "you reconnect"
+                    ),
+                    remediation=(
+                        "Open Sources and re-paste the store session cookie to "
+                        "resume syncing; already-synced and imported items are "
+                        "unaffected."
+                    ),
+                    last_failure=row.last_sync_at,
+                )
+            )
+        return components
 
     async def _scheduler_component(self) -> ComponentHealth:
         label = "Scheduler"

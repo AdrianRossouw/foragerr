@@ -9,16 +9,32 @@ import {
   makeSystemStatus,
   mockQueueEnvelope,
 } from '../test/mockData';
-import type { SeriesResource } from '../api/types';
+import type { SeriesResource, StoreSourceResource } from '../api/types';
 import type { Fetcher } from '../api/fetcher';
 import { Sidebar } from './Sidebar';
 
-/** A fetcher answering exactly the sidebar's four read paths. */
+function makeSource(
+  overrides: Partial<StoreSourceResource> & Pick<StoreSourceResource, 'id'>,
+): StoreSourceResource {
+  return {
+    type: 'humble',
+    name: 'Humble Bundle',
+    connection_state: 'connected',
+    auto_sync: false,
+    last_sync_status: 'ok',
+    settings: {},
+    ...overrides,
+  };
+}
+
+/** A fetcher answering exactly the sidebar's read paths. */
 function sidebarFetcher(opts: {
   series: SeriesResource[];
   queueTotal: number;
   version?: string;
   warnings?: unknown[];
+  sources?: StoreSourceResource[];
+  newPerSource?: Record<number, number>;
 }): Fetcher {
   const resolve = async (path: string): Promise<unknown> => {
     if (path.includes('/api/v1/series?')) {
@@ -39,6 +55,13 @@ function sidebarFetcher(opts: {
     if (path.includes('/api/v1/system/status')) {
       return makeSystemStatus({ version: opts.version ?? '9.9.9' });
     }
+    // Source entitlement new-count slice: /api/v1/sources/{id}/entitlements?review_status=new
+    const ent = path.match(/\/api\/v1\/sources\/(\d+)\/entitlements/);
+    if (ent) {
+      const n = opts.newPerSource?.[Number(ent[1])] ?? 0;
+      return Array.from({ length: n }, (_, i) => ({ id: i + 1 }));
+    }
+    if (path === '/api/v1/sources') return opts.sources ?? [];
     throw new Error(`unexpected path ${path}`);
   };
   return resolve as unknown as Fetcher;
@@ -117,6 +140,7 @@ describe('FRG-UI-023: sidebar nav lists only shipped screens', () => {
       '/add',
       '/library-import',
       '/wanted',
+      '/sources',
       '/queue',
       '/history',
       '/blocklist',
@@ -221,6 +245,63 @@ describe('FRG-UI-023: sidebar count badges are live', () => {
     });
     await waitFor(() =>
       expect(screen.getByTestId('nav-badge-series')).toHaveTextContent('2'),
+    );
+  });
+
+  it('FRG-UI-029 — the Sources nav item shows the unreviewed-new count, amber', async () => {
+    renderWithProviders(<Sidebar />, {
+      withRouter: true,
+      client: createQueryClient(),
+      fetcher: sidebarFetcher({
+        series: [],
+        queueTotal: 0,
+        sources: [makeSource({ id: 5, connection_state: 'connected' })],
+        newPerSource: { 5: 7 },
+      }),
+    });
+
+    expect(screen.getByRole('link', { name: /Sources/ })).toHaveAttribute(
+      'href',
+      '/sources',
+    );
+    const badge = await screen.findByTestId('nav-badge-sources');
+    expect(badge).toHaveTextContent('7');
+    expect(badge.className).toMatch(/navBadgeWarn/);
+  });
+
+  it('FRG-UI-029 — an expired source flips the Sources badge to an amber "!" and the footer to attention', async () => {
+    renderWithProviders(<Sidebar />, {
+      withRouter: true,
+      client: createQueryClient(),
+      fetcher: sidebarFetcher({
+        series: [],
+        queueTotal: 0,
+        version: '1.4.2',
+        sources: [makeSource({ id: 9, connection_state: 'expired' })],
+      }),
+    });
+
+    const badge = await screen.findByTestId('nav-badge-sources');
+    expect(badge).toHaveTextContent('!');
+    expect(badge.className).toMatch(/navBadgeWarn/);
+    await waitFor(() =>
+      expect(screen.getByTestId('sidebar-status')).toHaveTextContent(
+        'sync needs attention',
+      ),
+    );
+  });
+
+  it('FRG-UI-029 — no source configured shows no Sources badge', async () => {
+    renderWithProviders(<Sidebar />, {
+      withRouter: true,
+      client: createQueryClient(),
+      fetcher: sidebarFetcher({ series: [], queueTotal: 0, sources: [] }),
+    });
+    // The nav item is present…
+    expect(screen.getByRole('link', { name: /Sources/ })).toBeInTheDocument();
+    // …but a clean, source-less install carries no badge.
+    await waitFor(() =>
+      expect(screen.queryByTestId('nav-badge-sources')).toBeNull(),
     );
   });
 

@@ -553,6 +553,48 @@ class Settings(BaseSettings):
             "interval gate and runs immediately."
         ),
     )
+    source_sync_interval_seconds: int = Field(
+        default=86400,
+        ge=1,
+        description=(
+            "How often the scheduled store-source sync task polls connected "
+            "sources (e.g. Humble Bundle) for new entitlements (FRG-SRC-003). "
+            "Default daily (86400 s); clamped UP to a documented 1 hour (3600 s) "
+            "floor at task registration to stay polite to the store API "
+            "(FRG-NFR-005). A manual 'Sync now' (POST /api/v1/sources/{id}/sync) "
+            "runs immediately regardless of this interval."
+        ),
+    )
+    source_min_request_interval_seconds: float = Field(
+        default=2.0,
+        ge=0.1,
+        description=(
+            "Minimum seconds between two consecutive HTTP requests to one store "
+            "source, enforced across the order-list → order-detail fan "
+            "(FRG-NFR-005). Default 2 s; floored at 0.1 s."
+        ),
+    )
+    humble_base_url: str = Field(
+        default="https://www.humblebundle.com",
+        description=(
+            "Base URL of the Humble Bundle order API (FRG-SRC-002). Defaults to "
+            "the real service and is only overridden to point the store client at "
+            "a fixture server (the end-to-end harness, FRG-PROC-010). Every "
+            "request carries the operator's session cookie, so the scheme MUST be "
+            "https unless humble_insecure_base explicitly opts in (test fixtures "
+            "only) — a plaintext override would exfiltrate the session cookie to "
+            "whatever host this names. The outbound egress policy (FRG-SEC-001) "
+            "additionally applies to whatever host this resolves to."
+        ),
+    )
+    humble_insecure_base: bool = Field(
+        default=False,
+        description=(
+            "Permit a plain-http humble_base_url. A TEST AFFORDANCE for the e2e "
+            "fixture network only — never set in production; the session cookie "
+            "rides every request."
+        ),
+    )
     opds_base_path: str = Field(
         default="/opds",
         description=(
@@ -901,6 +943,28 @@ class Settings(BaseSettings):
                 "comicvine_base_url uses plain http, which would send the "
                 "ComicVine API key unencrypted; use https, or set "
                 "comicvine_insecure_base=true if this is a test fixture"
+            )
+        return self
+
+    @field_validator("humble_base_url")
+    @classmethod
+    def _humble_base_shape(cls, value: str) -> str:
+        from urllib.parse import urlsplit
+
+        parts = urlsplit(value)
+        if parts.scheme not in ("http", "https") or not parts.netloc:
+            raise ValueError(
+                "humble_base_url must be an absolute http(s) URL"
+            )
+        return value.rstrip("/")
+
+    @model_validator(mode="after")
+    def _humble_base_requires_tls(self):
+        if self.humble_base_url.startswith("http://") and not self.humble_insecure_base:
+            raise ValueError(
+                "humble_base_url uses plain http, which would send the "
+                "Humble session cookie unencrypted; use https, or set "
+                "humble_insecure_base=true if this is a test fixture"
             )
         return self
 
