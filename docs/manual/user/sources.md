@@ -126,10 +126,12 @@ Accepting a matched entitlement fetches it from Humble and hands it to the
 same import pipeline every other acquisition path uses (`FRG-SRC-006`): the
 download is verified against the checksum Humble's API reports before it's
 imported, so a corrupted or mismatched transfer is caught and never lands in
-your library — it appears in the same failed-download surface as any other
-download, with retry available. A successful download imports exactly like a
-completed indexer grab, and the entitlement shows as matched with its issues
-owned.
+your library. A failed or mismatched download is recorded on the
+entitlement's own row on the Sources screen — with the reason and a retry —
+rather than in the indexer/usenet failed-downloads list, because there is
+nothing to blocklist or re-search for content you already own. A successful
+download imports exactly like a completed indexer grab, and the entitlement
+shows as matched with its issues owned.
 
 See `../admin/secrets.md` for how the Humble cookie is protected at rest, and
 `../admin/configuration.md` for the sync interval and request-spacing

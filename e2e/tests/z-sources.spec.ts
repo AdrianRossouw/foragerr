@@ -6,13 +6,13 @@ import { test, expect } from '@playwright/test';
  * connected, so this exercises the unconfigured first-run render and the connect
  * endpoint's failure path exactly as an operator would hit them.
  *
- * NOTE (reported gap): a connect-SUCCESS / review / expired-state journey cannot
- * run in the hermetic stack because the Humble API base URL is hardcoded
- * (`sources/humble.py: HUMBLE_API_BASE`) with no override to point at a fixture —
- * unlike ComicVine's `FORAGERR_COMICVINE_BASE_URL`. So the positive flow and the
- * expired state are covered by the vitest component suite (FRG-UI-029) instead;
- * add a `FORAGERR_HUMBLE_BASE_URL` override + mockhub order endpoints to lift
- * them into e2e.
+ * NOTE (deferred): a connect-SUCCESS / review / expired-state journey needs a
+ * fixture Humble origin. The base URL override now exists (`humble_base_url` /
+ * `FORAGERR_HUMBLE_BASE_URL`, mirroring ComicVine), but the mockhub order
+ * endpoints to serve against it are not yet built (tasks.md 5.4), so the
+ * positive flow and the expired state stay covered by the vitest component
+ * suite (FRG-UI-029). Building the mockhub Humble endpoints would lift them
+ * into e2e.
  */
 
 test.describe('FRG-UI-029 Sources', () => {
