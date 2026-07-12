@@ -6,7 +6,8 @@ than restating unshipped plans. Two committed-text checks, run at every merge
 gate (same pattern as `test_public_labelling.py`), keep that invariant true as
 the project ships:
 
-  - **Containment** — future-milestone tokens (``M5``–``M9``) and
+  - **Containment** — future-milestone tokens (``M5`` and up, ``M10+``
+    included) and
     planned-phrasing markers may not appear in controlled documents other than
     the roadmap, save an explicit file+token allowlist. ``M4`` is deliberately
     excluded: it is the current milestone, handled by the corrective sweep, not
@@ -148,15 +149,17 @@ def test_roadmap_cited_ids_are_registered_and_not_yet_shipped():
 def test_roadmap_lists_humble_and_archive_as_future_work():
     """The roadmap is where the Humble Bundle importer and public-domain archive
     import are recorded as future work (FRG-PROC-014's obligation, moved here
-    from the README by roadmap-single-source)."""
+    from the README by roadmap-single-source). The spec pins *that* they are
+    listed, not where: the archive import moved from the M6 Sources section to
+    the post-1.0 section by the 2026-07-11 1.0-cut owner decision, so only the
+    Humble entry is still required to live under Sources."""
     roadmap_path = REPO_ROOT / "docs" / "roadmap.md"
     assert roadmap_path.exists(), "docs/roadmap.md must exist (FRG-PROC-018)"
     roadmap = roadmap_path.read_text()
+    sections = re.split(r"^## ", roadmap, flags=re.M)
+    body = "## ".join(sections[1:])
     sources = next(
-        (
-            s for s in re.split(r"^## ", roadmap, flags=re.M)[1:]
-            if "Sources" in s.splitlines()[0]
-        ),
+        (s for s in sections[1:] if "Sources" in s.splitlines()[0]),
         None,
     )
     assert sources is not None, (
@@ -166,7 +169,7 @@ def test_roadmap_lists_humble_and_archive_as_future_work():
         "the roadmap's Sources section must list the Humble Bundle importer "
         "as future work"
     )
-    assert "public-domain" in sources, (
-        "the roadmap's Sources section must list the public-domain archive "
+    assert "public-domain archive import" in body.lower(), (
+        "the roadmap's milestone sections must list the public-domain archive "
         "import as future work"
     )
