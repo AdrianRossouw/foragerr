@@ -164,3 +164,11 @@ def setup_logging(
         handler._foragerr = True  # type: ignore[attr-defined]
         root.addHandler(handler)
     root.setLevel(level.upper())
+
+    # httpx/httpcore log every request line at INFO — including full URLs. Those
+    # URLs carry signed, time-limited download tokens and Humble gamekeys that
+    # the ring-buffered /api/v1/log would then expose (FRG-NFR-008, threat
+    # T-API-7). Raise their floor to WARNING so request lines never reach the log
+    # pipeline; genuine transport warnings/errors still surface.
+    for noisy in ("httpx", "httpcore"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)

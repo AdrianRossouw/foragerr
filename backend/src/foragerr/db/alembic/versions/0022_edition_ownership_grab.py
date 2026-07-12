@@ -7,13 +7,16 @@ Create Date: 2026-07-12
 Two additive schema changes for worker A2's review/reconcile/download slice:
 
 1. ``issue_files.edition_issue_id`` (FRG-SRC-007) — owned-via-edition
-   provenance. Reconciliation of a matched collected edition writes one
-   ``issue_files`` row per filled single, tagged with the trade ``issues.id``
-   that provides it and ``size = 0`` (so the collected file's bytes are counted
-   once, on its own file — the "no double-counting" guarantee). Because
-   ownership is still "an ``issue_files`` row exists", ``wanted_issues()`` and
-   ``series_statistics`` need NO new predicate and their FRG-SER-019 absence
-   proof is unchanged.
+   provenance, a FK to ``issues.id`` with ``ON DELETE CASCADE``. Reconciliation
+   of a matched collected edition writes one ``issue_files`` row per filled
+   single, tagged with the trade ``issues.id`` that provides it and ``size = 0``
+   (so the collected file's bytes are counted once, on its own file — the
+   "no double-counting" guarantee). The cascade FK (FRG-SER-019) means deleting
+   the trade issue/series removes those owned-via-edition rows, returning the
+   filled singles to wanted rather than leaving a dangling reference that
+   silently suppresses them. Because ownership is still "an ``issue_files`` row
+   exists", ``wanted_issues()`` and ``series_statistics`` need NO new predicate
+   and their FRG-SER-019 absence proof is unchanged.
 
    The old column-level ``UNIQUE(path)`` is replaced by a PARTIAL unique index
    over ordinary single files (``edition_issue_id IS NULL``) — behaviour-
@@ -49,7 +52,22 @@ def upgrade() -> None:
     #    rebuild that adds the column (SQLite rebuilds the table copy-and-swap,
     #    preserving fix_revision/page_count added by 0008/0012).
     with op.batch_alter_table("issue_files") as batch:
-        batch.add_column(sa.Column("edition_issue_id", sa.Integer(), nullable=True))
+        batch.add_column(
+            sa.Column(
+                "edition_issue_id",
+                sa.Integer(),
+                # A real FK to issues.id with ON DELETE CASCADE (FRG-SER-019):
+                # deleting the trade issue/series removes the owned-via-edition
+                # rows, so the filled singles return to wanted instead of being
+                # silently suppressed by a dangling reference.
+                sa.ForeignKey(
+                    "issues.id",
+                    ondelete="CASCADE",
+                    name="fk_issue_files_edition_issue_id",
+                ),
+                nullable=True,
+            )
+        )
         batch.drop_constraint("uq_issue_files_path", type_="unique")
     op.create_index(
         "uq_issue_files_path_single",

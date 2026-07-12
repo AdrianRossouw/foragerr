@@ -157,3 +157,73 @@ async def test_requests_are_spaced_per_source(config_dir):
         elapsed = time.monotonic() - start
     # Two requests to the same source are spaced by at least the min interval.
     assert elapsed >= 0.2
+
+
+@pytest.mark.req("FRG-SRC-003")
+async def test_malformed_url_web_skips_subproduct_not_whole_order(config_dir):
+    """An unparseable ``url.web`` ("http://[") in one struct must not abort the
+    whole multi-subproduct order (skip-and-log, FRG-SRC-003 / FRG-NFR-012)."""
+    import json
+
+    body = json.dumps(
+        {
+            "gamekey": GAMEKEY,
+            "subproducts": [
+                {
+                    "machine_name": "bad_url_item",
+                    "human_name": "Bad URL Comic",
+                    "downloads": [
+                        {
+                            "platform": "ebook",
+                            "download_struct": [
+                                {"name": "CBZ", "md5": "a" * 32, "url": {"web": "http://["}}
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "machine_name": "good_item",
+                    "human_name": "Good Comic #1",
+                    "downloads": [
+                        {
+                            "platform": "ebook",
+                            "download_struct": [
+                                {
+                                    "name": "CBZ",
+                                    "md5": "b" * 32,
+                                    "url": {"web": "https://dl.humble.com/good.cbz?t=x"},
+                                }
+                            ],
+                        }
+                    ],
+                },
+            ],
+        }
+    ).encode()
+    handler = order_handler(order_bodies={GAMEKEY: body})
+    async with _client(config_dir, handler) as client:
+        ents = await client.fetch_order(GAMEKEY)
+    names = {e.machine_name for e in ents}
+    # Both subproducts survive — the crafted URL did not crash the parse.
+    assert names == {"bad_url_item", "good_item"}
+
+
+@pytest.mark.req("FRG-META-014")
+async def test_gamekey_is_url_encoded_into_the_order_path(config_dir):
+    """An untrusted gamekey containing path/query/fragment metacharacters is
+    percent-encoded so it cannot steer the request path (FRG-META-014/NFR-012)."""
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.raw_path.decode())
+        return httpx.Response(200, content=b"{}")
+
+    hostile = "abc/../../admin?x=1#frag"
+    async with _client(config_dir, handler) as client:
+        await client.fetch_order(hostile)
+    # The whole gamekey is one encoded path segment under /api/v1/order/.
+    assert len(seen) == 1
+    assert seen[0].startswith("/api/v1/order/")
+    assert "/../" not in seen[0]
+    assert "abc%2F" in seen[0] or "%2F" in seen[0]
+    assert "#" not in seen[0]

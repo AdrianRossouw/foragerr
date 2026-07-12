@@ -486,10 +486,14 @@ class HealthService:
         ]
 
     async def _sources_component(self) -> list[ComponentHealth]:
-        """Expired store sources surface as degraded with reconnect guidance
-        (FRG-SRC-005 / FRG-NFR-011). A connected or intentionally-disconnected
-        source contributes nothing — only an ``expired`` session is a warning
-        the operator must act on (re-paste the cookie)."""
+        """Store-source warnings (FRG-SRC-005 / FRG-AUTH-012 / FRG-NFR-011).
+
+        Two conditions surface as degraded: an ``expired`` session (re-paste the
+        cookie) and a credential-unavailable source whose stored cookie cannot be
+        decrypted (encryption key missing/changed — FRG-AUTH-012). The credential
+        check takes precedence and mirrors the indexer/download-client wording via
+        the shared :meth:`_credential_component`. A connected, decryptable, or
+        intentionally-disconnected source contributes nothing."""
         from foragerr.sources.models import SourceRow
 
         async with self._db.read_session() as session:
@@ -500,6 +504,15 @@ class HealthService:
             )
         components: list[ComponentHealth] = []
         for row in rows:
+            credential = self._credential_component(
+                row.settings,
+                kind="source",
+                label=f"Source: {row.name}",
+                component=f"source:{row.id}",
+            )
+            if credential is not None:
+                components.append(credential)
+                continue
             if row.connection_state != "expired":
                 continue
             components.append(

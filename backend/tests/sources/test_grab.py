@@ -135,10 +135,12 @@ async def test_happy_path_verifies_and_hands_off_to_import(db, config_dir):
     summary = await run_grab(
         db, _grab_factory(config_dir, handler), settings, ent.id, min_interval=0.0
     )
-    assert "imported" in summary
+    assert "handed off to import" in summary
 
+    # The entitlement is NOT yet imported — it waits on the drain (FRG-SRC-006):
+    # ownership is never claimed before the file lands in the library.
     after = await repo.get_entitlement(db, ent.id)
-    assert after.download_state == "imported"
+    assert after.download_state == "import_pending"
     assert after.download_error is None
 
     # Handed to the existing import pipeline as a normal completed download:
@@ -156,6 +158,80 @@ async def test_happy_path_verifies_and_hands_off_to_import(db, config_dir):
     assert tracked.state == "import_pending"
     assert tracked.series_id == 4321
     assert tracked.output_path.endswith(".cbz")
+
+
+@pytest.mark.req("FRG-SRC-006")
+async def test_handoff_is_deduped_on_download_id(db, config_dir):
+    """Two handoffs for the same entitlement create exactly one tracked_downloads
+    row — the client_id-NULL uniqueness gap is closed by a download_id dedup
+    (FRG-SRC-004/006)."""
+    from foragerr.sources.grab import _handoff_to_import, sources_staging_dir
+
+    ent = await _matched_entitlement(db, config_dir, md5=FILE_MD5)
+    folder = sources_staging_dir(config_dir) / str(ent.id)
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / "synthetic.cbz"
+    path.write_bytes(b"x")
+
+    await _handoff_to_import(db, ent, path)
+    await _handoff_to_import(db, ent, path)
+    from foragerr.downloads.models import TrackedDownloadRow
+
+    async with db.read_session() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(TrackedDownloadRow).where(
+                        TrackedDownloadRow.download_id == f"humble:{ent.id}"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert len(rows) == 1
+
+
+@pytest.mark.req("FRG-SRC-006")
+async def test_null_size_grab_is_refused(db, config_dir):
+    """A NULL file_size entitlement is refused rather than streamed uncapped
+    (disk-fill DoS guard, FRG-NFR-006)."""
+    ent = await _matched_entitlement(db, config_dir, md5=FILE_MD5)
+    async with db.write_session() as session:
+        row = await session.get(SourceEntitlementRow, ent.id)
+        row.file_size = None
+        row.download_state = "queued"
+    settings = make_settings(config_dir)
+    handler = _handler(
+        order_body=_order_body(
+            "synth_singleissue_01", "https://dl.humble.com/synth_hero_01.cbz?t=x"
+        )
+    )
+    summary = await run_grab(
+        db, _grab_factory(config_dir, handler), settings, ent.id, min_interval=0.0
+    )
+    assert "no size" in summary
+    after = await repo.get_entitlement(db, ent.id)
+    assert after.download_state == "failed"
+    assert "file size" in after.download_error
+
+
+@pytest.mark.req("FRG-SRC-003")
+async def test_unparseable_download_url_fails_not_strands(db, config_dir):
+    """A crafted, unparseable url.web at grab time lands the entitlement failed
+    (not stuck in fetching) (FRG-SRC-003 / FRG-NFR-012)."""
+    ent = await _matched_entitlement(db, config_dir, md5=FILE_MD5)
+    settings = make_settings(config_dir)
+    handler = _handler(
+        order_body=_order_body("synth_singleissue_01", "http://["),
+        serve_file=False,
+    )
+    summary = await run_grab(
+        db, _grab_factory(config_dir, handler), settings, ent.id, min_interval=0.0
+    )
+    assert "unparseable" in summary or "failed" in summary
+    after = await repo.get_entitlement(db, ent.id)
+    assert after.download_state == "failed"
 
 
 @pytest.mark.req("FRG-SRC-006")
@@ -187,6 +263,35 @@ async def test_checksum_mismatch_quarantines_and_fails(db, config_dir):
             await session.execute(select(TrackedDownloadRow))
         ).scalars().all()
     assert rows == []
+
+
+@pytest.mark.req("FRG-AUTH-012")
+async def test_grab_with_undecryptable_cookie_fails_not_stranded(db, config_dir):
+    """A grab whose source cookie cannot be decrypted (key missing/changed) fails
+    cleanly instead of stranding the entitlement in 'fetching' (FRG-AUTH-012)."""
+    from cryptography.fernet import Fernet, MultiFernet
+
+    from foragerr import keystore as keystore_mod
+
+    ent = await _matched_entitlement(db, config_dir, md5=FILE_MD5)
+    # Rotate to a wrong key so the stored cookie can no longer be decrypted.
+    wrong = keystore_mod.derive_fernet_key("nope", b"0123456789abcdef")
+    keystore_mod.install_keystore(
+        keystore_mod.Keystore(MultiFernet([Fernet(wrong)]), available=False)
+    )
+    settings = make_settings(config_dir)
+    handler = _handler(
+        order_body=_order_body(
+            "synth_singleissue_01", "https://dl.humble.com/synth_hero_01.cbz?t=x"
+        )
+    )
+    summary = await run_grab(
+        db, _grab_factory(config_dir, handler), settings, ent.id, min_interval=0.0
+    )
+    assert "credential unavailable" in summary
+    after = await repo.get_entitlement(db, ent.id)
+    assert after.download_state == "failed"
+    assert "encryption key" in after.download_error
 
 
 @pytest.mark.req("FRG-SRC-006")

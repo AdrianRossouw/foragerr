@@ -279,7 +279,13 @@ class IssueRow(Base):
 
     series: Mapped[SeriesRow] = relationship(back_populates="issues")
     files: Mapped[list["IssueFileRow"]] = relationship(
-        back_populates="issue", cascade="all, delete-orphan", passive_deletes=True
+        back_populates="issue",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        # issue_files now has TWO FKs to issues.id (issue_id and the
+        # owned-via-edition edition_issue_id); this relationship is the
+        # ownership one, keyed on issue_id.
+        foreign_keys="IssueFileRow.issue_id",
     )
 
     __table_args__ = (
@@ -336,11 +342,19 @@ class IssueFileRow(Base):
     #: ownership is still "an ``issue_files`` row exists", ``wanted_issues()`` /
     #: ``series_statistics`` need NO new predicate (the FRG-SER-019 three-way
     #: proof is unchanged); reconciliation deletes these rows to restore wanted.
+    #: A real FK to ``issues.id`` with ``ON DELETE CASCADE`` (FRG-SER-019): when
+    #: the trade issue (or its series) is deleted, its owned-via-edition rows are
+    #: removed too, so the filled singles correctly return to wanted rather than
+    #: being silently suppressed by a dangling reference.
     edition_issue_id: Mapped[int | None] = mapped_column(
-        StrictInteger, nullable=True
+        StrictInteger,
+        ForeignKey("issues.id", ondelete="CASCADE"),
+        nullable=True,
     )
 
-    issue: Mapped[IssueRow] = relationship(back_populates="files")
+    issue: Mapped[IssueRow] = relationship(
+        back_populates="files", foreign_keys=lambda: [IssueFileRow.issue_id]
+    )
 
     __table_args__ = (
         Index("ix_issue_files_issue_id", "issue_id"),

@@ -30,7 +30,7 @@ import logging
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -174,13 +174,29 @@ def _struct_format(struct: _DownloadStruct) -> str:
         if isinstance(candidate, str):
             web = candidate
     if web:
-        path = urlsplit(web).path
+        try:
+            path = urlsplit(web).path
+        except ValueError:
+            # A crafted, unparseable url.web (e.g. "http://[") must not abort the
+            # whole sync — fall back to the name label (skip-and-log, FRG-SRC-003
+            # / FRG-NFR-012).
+            path = ""
         _, _, ext = path.rpartition(".")
         if ext and "/" not in ext and len(ext) <= 5:
             return ext.upper()
     if struct.name:
         return struct.name.strip().upper()
     return ""
+
+
+def _encode_gamekey(gamekey: str) -> str:
+    """Percent-encode a gamekey for safe interpolation into the order URL path.
+
+    The gamekey is untrusted store input (FRG-META-014 / FRG-NFR-012): a value
+    containing ``/``, ``?`` or ``#`` would otherwise steer the request to a
+    different path or inject query/fragment. ``safe=""`` encodes every reserved
+    character so the key can only ever be one path segment."""
+    return quote(gamekey, safe="")
 
 
 def _clean_md5(value: Any) -> str | None:
@@ -401,7 +417,7 @@ class HumbleClient:
         """Fetch + parse one order's entitlements
         (``GET /api/v1/order/{gamekey}?all_tpkds=true``)."""
         content = await self._get(
-            f"/api/v1/order/{gamekey}",
+            f"/api/v1/order/{_encode_gamekey(gamekey)}",
             ORDER_DETAIL_MAX_BYTES,
             params={"all_tpkds": "true"},
         )
@@ -417,7 +433,7 @@ class HumbleClient:
         ``None`` when the order no longer carries the link. An auth failure
         raises :class:`HumbleAuthError` (drives the ``expired`` state)."""
         content = await self._get(
-            f"/api/v1/order/{gamekey}",
+            f"/api/v1/order/{_encode_gamekey(gamekey)}",
             ORDER_DETAIL_MAX_BYTES,
             params={"all_tpkds": "true"},
         )

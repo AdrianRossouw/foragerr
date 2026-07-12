@@ -117,3 +117,24 @@ def test_api_key_shaped_url_params_masked_without_registration(config_dir, capsy
         # non-secret query params stay readable
         assert "q=batman" in output
         assert "format=json" in output
+
+
+@pytest.mark.req("FRG-NFR-008")
+def test_httpx_request_logging_is_silenced(config_dir, capsys):
+    """httpx/httpcore INFO request lines carry full URLs with signed download
+    tokens and Humble gamekeys; setup_logging raises their floor to WARNING so
+    those URLs never reach the ring-buffered log pipeline (threat T-API-7)."""
+    setup_logging(config_dir, level="INFO")
+    assert logging.getLogger("httpx").getEffectiveLevel() >= logging.WARNING
+    assert logging.getLogger("httpcore").getEffectiveLevel() >= logging.WARNING
+
+    # An httpx INFO line (as emitted per request) is dropped, not logged.
+    logging.getLogger("httpx").info(
+        'HTTP Request: GET https://dl.humble.com/x.cbz?t=SIGNED&gamekey=SECRET "200 OK"'
+    )
+    out = capsys.readouterr().out
+    assert "SIGNED" not in out
+    assert "gamekey" not in out
+    # A genuine WARNING still surfaces.
+    logging.getLogger("httpx").warning("transport retry")
+    assert "transport retry" in capsys.readouterr().out

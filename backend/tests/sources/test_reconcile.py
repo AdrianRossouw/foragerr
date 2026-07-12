@@ -314,6 +314,84 @@ def test_no_suppression_predicate_in_the_three_choke_points():
     assert ".monitored" not in recon_src
 
 
+@pytest.mark.req("FRG-SER-019")
+async def test_deleting_trade_issue_cascades_edition_rows_and_restores_wanted(
+    db, scenario
+):
+    """edition_issue_id is a real FK with ON DELETE CASCADE: deleting the trade
+    issue removes its owned-via-edition rows so the filled singles return to
+    wanted (never silently suppressed by a dangling reference)."""
+    from sqlalchemy import func, select
+
+    from foragerr.library.models import IssueFileRow, IssueRow
+
+    trade_issue_id = scenario["trade_issue_id"]
+    third = scenario["issue_ids"][2]
+
+    async with db.write_session() as session:
+        await apply_owned_via_edition(
+            session, trade_issue_id=trade_issue_id, edition_file_path=EDITION_FILE
+        )
+    async with db.read_session() as session:
+        n = (
+            await session.execute(
+                select(func.count())
+                .select_from(IssueFileRow)
+                .where(IssueFileRow.edition_issue_id == trade_issue_id)
+            )
+        ).scalar_one()
+    assert n == 5
+
+    # Delete the trade issue → the cascade removes every edition row it provided.
+    async with db.write_session() as session:
+        trade_issue = await session.get(IssueRow, trade_issue_id)
+        await session.delete(trade_issue)
+
+    async with db.read_session() as session:
+        remaining = (
+            await session.execute(
+                select(func.count())
+                .select_from(IssueFileRow)
+                .where(IssueFileRow.edition_issue_id == trade_issue_id)
+            )
+        ).scalar_one()
+        wanted = set(await repo.wanted_issue_ids(session))
+    assert remaining == 0
+    # The five formerly-filled singles are wanted again; #3 (real single) is not.
+    assert wanted == {i for i in scenario["issue_ids"] if i != third}
+
+
+@pytest.mark.req("FRG-SRC-007")
+async def test_revert_for_series_cleans_editions_but_keeps_real_singles(db, scenario):
+    """The un-match/ignore cleanup reverts a whole matched series' edition fills
+    without touching real single files (FRG-SRC-004/007)."""
+    from foragerr.sources.reconcile import revert_owned_via_edition_for_series
+
+    trade_issue_id = scenario["trade_issue_id"]
+    third = scenario["issue_ids"][2]
+    async with db.write_session() as session:
+        await apply_owned_via_edition(
+            session, trade_issue_id=trade_issue_id, edition_file_path=EDITION_FILE
+        )
+
+    # The trade series id is the series of the trade issue.
+    from foragerr.library.models import IssueRow
+
+    async with db.read_session() as session:
+        trade_series_id = (await session.get(IssueRow, trade_issue_id)).series_id
+
+    async with db.write_session() as session:
+        reverted = await revert_owned_via_edition_for_series(
+            session, series_id=trade_series_id
+        )
+    assert reverted == 5
+
+    async with db.read_session() as session:
+        wanted = set(await repo.wanted_issue_ids(session))
+    # Singles back to wanted; #3's real single is preserved (still owned).
+    assert wanted == {i for i in scenario["issue_ids"] if i != third}
+
+
 @pytest.mark.req("FRG-SRC-007")
 async def test_fill_set_reports_edition_owned_after_apply(db, scenario):
     async with db.write_session() as session:

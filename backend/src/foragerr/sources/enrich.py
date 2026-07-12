@@ -81,19 +81,33 @@ async def enrich_source(db, settings, source, *, commands=None, cv_client=None) 
     try:
         budget_hit = False
         for ent in pending:
+            # ``consulted_cv`` records whether CV was available for THIS item. A
+            # proposal computed library-only because the CV budget was exhausted
+            # is provisional, not final — see below.
+            consulted_cv = not budget_hit
             client = None if budget_hit else cv_client
             try:
                 proposal = await compute_proposed_match(
                     human_name=ent.human_name, library=library, cv_client=client
                 )
             except ComicVineBudgetExhausted:
-                # Defer this and the rest of the CV arm; leave NULL (retry later).
+                # Defer this and the rest of the CV arm to the next sync.
                 budget_hit = True
+                consulted_cv = False
                 proposal = await compute_proposed_match(
                     human_name=ent.human_name, library=library, cv_client=None
                 )
-            if proposal is not None:
-                proposals[ent.id] = proposal
+            if proposal is None:
+                continue
+            # A budget-deferred, CV-less computation that only yielded a WEAK
+            # (below-auto-threshold) library guess must NOT be frozen as the final
+            # proposal (FRG-SRC-004): stamping it would exclude the item from the
+            # pending set forever, so the deferred CV lookup would never retry.
+            # Leave it NULL/retryable; a confident library match (CV would not
+            # override it) still stands.
+            if not consulted_cv and proposal.confidence < AUTO_MATCH_THRESHOLD:
+                continue
+            proposals[ent.id] = proposal
     finally:
         if owns_client and cv_client is not None:
             await cv_client.aclose()

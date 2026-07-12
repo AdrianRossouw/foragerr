@@ -99,7 +99,12 @@ class SourceEntitlementRow(Base):
     )
     #: Download/import-progress axis, separate from review status (design
     #: decision 2): ``None`` (never grabbed) → ``queued`` → ``fetching`` →
-    #: ``verifying`` → ``imported`` | ``failed`` (FRG-SRC-006).
+    #: ``verifying`` → ``import_pending`` → ``imported`` | ``import_blocked`` |
+    #: ``failed`` (FRG-SRC-006). The entitlement only becomes ``imported`` once
+    #: the completed-download drain actually lands the file in the library
+    #: (``import_pending`` bridges handoff → durable import); ``import_blocked`` /
+    #: ``failed`` reflect a rejected or failed import. Cleared to ``None`` when the
+    #: item is ignored.
     download_state: Mapped[str | None] = mapped_column(Text, nullable=True)
     #: The last grab failure reason (FRG-SRC-006) — the per-entitlement
     #: failed-download surface. Set alongside ``download_state = "failed"``;

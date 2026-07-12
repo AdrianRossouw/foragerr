@@ -78,6 +78,7 @@ from foragerr.importer import (
 )
 from foragerr.library import repo
 from foragerr.library.models import IssueFileRow, IssueRow, SeriesRow
+from foragerr.sources.import_hook import apply_source_import
 
 logger = logging.getLogger("foragerr.downloads.imports")
 
@@ -250,6 +251,13 @@ async def _process_one(
         final_state, status, messages = _resolve_final([], [], no_output=True)
         async with db.write_session() as session:
             await _apply_state(session, row_id, final_state, status, messages, ctx.now)
+            await apply_source_import(
+                session,
+                download_id=download_id,
+                final_state=final_state,
+                imported_issues=[],
+                now=ctx.now,
+            )
         return final_state
 
     # 2. Build the source (mappings passed as data — FRG-PP-008) and gather
@@ -293,6 +301,23 @@ async def _process_one(
             candidates, outcomes, no_output=False
         )
         await _apply_state(session, row_id, final_state, status, messages, ctx.now)
+        # Store-source hook (FRG-SRC-006/007): mirror the verdict onto the
+        # entitlement and, on success, fill owned-via-edition singles for any
+        # imported collected edition — all inside this import transaction.
+        imported_issues = [
+            (o.issue_id, o.imported_path)
+            for o in outcomes
+            if o.status is ImportStatus.IMPORTED
+            and o.issue_id is not None
+            and o.imported_path
+        ]
+        await apply_source_import(
+            session,
+            download_id=download_id,
+            final_state=final_state,
+            imported_issues=imported_issues,
+            now=ctx.now,
+        )
 
     # 4. Post-commit side-effects — OUTSIDE the write lock so they can open their
     #    own sessions (the writer lock is not re-entrant): change-5 failure loop
@@ -355,10 +380,18 @@ async def _reconcile_recovered_import(
 
     linked_paths = set(linked)
     # Case A: a recorded file for this issue still exists → import already durable.
-    if any(os.path.exists(p) for p in linked_paths):
+    existing = next((p for p in linked_paths if os.path.exists(p)), None)
+    if existing is not None:
         async with db.write_session() as session:
             await _apply_state(
                 session, row_id, TrackedDownloadState.IMPORTED, TRACKED_STATUS_OK, [], ctx.now
+            )
+            await apply_source_import(
+                session,
+                download_id=download_id,
+                final_state=TrackedDownloadState.IMPORTED,
+                imported_issues=[(issue_id, existing)],
+                now=ctx.now,
             )
         return TrackedDownloadState.IMPORTED
 
@@ -394,6 +427,13 @@ async def _reconcile_recovered_import(
         )
         await _apply_state(
             session, row_id, TrackedDownloadState.IMPORTED, TRACKED_STATUS_OK, [], ctx.now
+        )
+        await apply_source_import(
+            session,
+            download_id=download_id,
+            final_state=TrackedDownloadState.IMPORTED,
+            imported_issues=[(issue_id, adopted)],
+            now=ctx.now,
         )
     logger.info(
         "process-imports: recovered orphaned import for download %s -> %s",

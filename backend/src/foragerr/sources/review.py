@@ -53,19 +53,36 @@ def _is_grabbable(row: SourceEntitlementRow) -> bool:
     return row.classification == "comic" and bool(row.md5) and bool(row.filename)
 
 
+#: Download-axis states from which a (re-)accept may (re-)queue a grab. Any other
+#: value (queued / fetching / verifying / import_pending / imported) means a grab
+#: is already in flight or done, so re-accepting is an idempotent no-op — never a
+#: second grab (FRG-SRC-004).
+_QUEUEABLE_STATES = (None, "failed")
+
+
 async def _queue_grab(db, entitlement_id: int, commands) -> None:
     """Mark an accepted entitlement queued and enqueue its grab (FRG-SRC-006).
+
+    Idempotent: a grab is queued ONLY on a durable transition out of an unstarted
+    (``None``) or ``failed`` download state, and the enqueue happens only when
+    that transition actually occurred — so a double-accept (or a re-accept while a
+    grab is in flight) never spawns a duplicate grab or tracked-download row.
 
     Kept import-local to avoid a module import cycle with the grab command."""
     from foragerr.sources.grab import SOURCE_GRAB_TASK
 
+    queued = False
     async with db.write_session() as session:
         row = await session.get(SourceEntitlementRow, entitlement_id)
         if row is None or not _is_grabbable(row):
             return
+        if row.download_state not in _QUEUEABLE_STATES:
+            return  # already queued / in flight / imported — no duplicate grab
         row.download_state = "queued"
+        row.download_error = None  # clear a prior failure on retry
         row.updated_at = utcnow()
-    if commands is not None:
+        queued = True
+    if queued and commands is not None:
         await commands.enqueue(
             SOURCE_GRAB_TASK,
             {"entitlement_id": entitlement_id},
@@ -81,12 +98,34 @@ async def match_entitlement(
     The operator's chosen ``series_id`` overrides any server proposal
     (FRG-SRC-004). Sets ``matched_series_id`` + ``review_status = "matched"`` and,
     for a grabbable comic, queues the download. Idempotent.
+
+    The target ``series_id`` must name a real library series (a stale/garbage id
+    is a 404), so a match never links an entitlement to a phantom series. When
+    the entitlement was already imported against a DIFFERENT series, that prior
+    series' owned-via-edition fills are reverted so the re-match does not strand
+    ownership pointing at the old collected edition (FRG-SRC-007).
     """
+    from foragerr.library.models import SeriesRow
+    from foragerr.sources.reconcile import revert_owned_via_edition_for_series
+
     async with db.write_session() as session:
         row = await session.get(SourceEntitlementRow, entitlement_id)
         if row is None:
             raise EntitlementActionError(
                 f"entitlement {entitlement_id} not found", status=404
+            )
+        if await session.get(SeriesRow, series_id) is None:
+            raise EntitlementActionError(
+                f"series {series_id} does not exist", status=404
+            )
+        prior_series_id = row.matched_series_id
+        if (
+            prior_series_id is not None
+            and prior_series_id != series_id
+            and row.download_state == "imported"
+        ):
+            await revert_owned_via_edition_for_series(
+                session, series_id=prior_series_id
             )
         row.matched_series_id = series_id
         row.review_status = "matched"
@@ -162,14 +201,31 @@ async def ignore_entitlement(db, entitlement_id: int) -> SourceEntitlementRow:
     """Exclude an entitlement from pending-review counts/default views.
 
     It remains listed under its ``ignored`` filter; no download occurs. Idempotent.
+
+    Ignoring also RESETS the download axis (FRG-SRC-004/006): a queued/in-flight
+    grab is cancelled by clearing ``download_state`` — the in-flight ``run_grab``
+    re-reads the entitlement before the irreversible import and aborts once it is
+    no longer ``matched``. An already-imported collected edition has its
+    owned-via-edition fills reverted so the singles it provided return to wanted
+    (real single files are never touched).
     """
+    from foragerr.sources.reconcile import revert_owned_via_edition_for_series
+
     async with db.write_session() as session:
         row = await session.get(SourceEntitlementRow, entitlement_id)
         if row is None:
             raise EntitlementActionError(
                 f"entitlement {entitlement_id} not found", status=404
             )
+        if row.download_state == "imported" and row.matched_series_id is not None:
+            await revert_owned_via_edition_for_series(
+                session, series_id=row.matched_series_id
+            )
         row.review_status = "ignored"
+        # Cancel any queued / in-flight / completed grab on the download axis so
+        # the item is fully excluded; an in-flight grab aborts at its re-read guard.
+        row.download_state = None
+        row.download_error = None
         row.updated_at = utcnow()
     return await _reload(db, entitlement_id)
 

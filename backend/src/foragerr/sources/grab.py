@@ -38,12 +38,14 @@ import hashlib
 import logging
 from pathlib import Path
 from typing import Any, ClassVar, Literal
+from urllib.parse import urlsplit
 
 from foragerr.commands.registry import BaseCommand, register_command, register_handler
 from foragerr.commands.service import HandlerContext
 from foragerr.db.base import utcnow
 from foragerr.ddl import download as dl
 from foragerr.ddl.errors import DdlDownloadError
+from foragerr.keystore import KeystoreDecryptError
 from foragerr.security.paths import safe_path_component
 from foragerr.sources import repo
 from foragerr.sources.commands import make_humble_factory
@@ -71,6 +73,19 @@ def sources_staging_dir(config_dir) -> Path:
 def cdn_allowlist() -> dl.AllowList:
     """The HTTPS-only Humble CDN egress allowlist (FRG-SRC-006)."""
     return dl.AllowList(hosts=HUMBLE_CDN_HOSTS, scheme="https")
+
+
+def _is_parseable_url(url: str) -> bool:
+    """Whether ``url`` parses to an HTTPS URL with a host (defensive pre-check).
+
+    A crafted ``url.web`` such as ``"http://["`` makes ``urlsplit`` raise
+    ``ValueError`` deep in the download path; validating here turns that into a
+    clean per-entitlement failure (FRG-SRC-003 / FRG-NFR-012)."""
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return False
+    return bool(parts.scheme) and bool(parts.hostname)
 
 
 def compute_md5(path: Path) -> str:
@@ -129,15 +144,35 @@ async def run_grab(
     if not (ent.md5 and ent.filename):
         await _fail(db, entitlement_id, "entitlement has no grabbable copy")
         return f"source-grab: entitlement {entitlement_id} not grabbable"
+    if ent.file_size is None:
+        # Without a declared size the streaming byte-ceiling would be unbounded
+        # when the CDN also omits Content-Length (disk-fill DoS, FRG-NFR-006).
+        # Refuse rather than stream uncapped.
+        await _fail(db, entitlement_id, "entitlement has no declared file size to bound the download")
+        return f"source-grab: entitlement {entitlement_id} not grabbable (no size)"
 
     source = await repo.get_source(db, ent.source_id)
     if source is None or source.connection_state != "connected":
         await _fail(db, entitlement_id, "source not connected")
         return f"source-grab: entitlement {entitlement_id} source not connected"
 
-    await _set_state(db, entitlement_id, "fetching")
-    settings_model = repo.load_source_settings(source.type, source.settings)
+    try:
+        settings_model = repo.load_source_settings(source.type, source.settings)
+    except KeystoreDecryptError:
+        # The stored cookie cannot be decrypted (encryption key missing/changed).
+        # Fail this grab with a clear reason instead of leaving it stuck in
+        # "fetching"; the health surface flags the credential-unavailable source
+        # (FRG-AUTH-012).
+        await _fail(
+            db,
+            entitlement_id,
+            "credential unavailable — the encryption key is missing or changed; "
+            "re-enter the store session cookie",
+        )
+        return f"source-grab: entitlement {entitlement_id} credential unavailable"
     cookie = settings_model.session_cookie.get_secret_value()
+
+    await _set_state(db, entitlement_id, "fetching")
 
     staging = sources_staging_dir(settings.config_dir)
     partial = staging / f"{entitlement_id}.partial"
@@ -156,6 +191,12 @@ async def run_grab(
             if not url:
                 await _fail(db, entitlement_id, "order no longer offers this download")
                 return f"source-grab: {entitlement_id} no download url"
+            if not _is_parseable_url(url):
+                # A crafted/garbled ``url.web`` that ``urlsplit`` cannot parse
+                # would otherwise raise deep in the download path and strand the
+                # entitlement in "fetching" (FRG-SRC-003 / FRG-NFR-012).
+                await _fail(db, entitlement_id, "order returned an unparseable download URL")
+                return f"source-grab: {entitlement_id} unparseable download url"
             outcome = await dl.download_link(
                 factory=factory,
                 url=url,
@@ -166,7 +207,9 @@ async def run_grab(
     except HumbleAuthError:
         await _fail(db, entitlement_id, "Humble session expired during grab")
         return f"source-grab: {entitlement_id} session expired"
-    except (DdlDownloadError, HumbleError) as exc:
+    except (DdlDownloadError, HumbleError, ValueError, OSError) as exc:
+        # ValueError: an unparseable URL slipping through to urlsplit.
+        # OSError: a write failure (e.g. disk full) mid-stream.
         partial.unlink(missing_ok=True)
         await _fail(db, entitlement_id, f"download refused/failed: {exc}")
         return f"source-grab: {entitlement_id} download failed"
@@ -185,10 +228,26 @@ async def run_grab(
         )
         return f"source-grab: {entitlement_id} md5 mismatch (quarantined)"
 
+    # Re-read guard before the irreversible import handoff (FRG-SRC-004): the
+    # operator may have ignored/un-matched the entitlement while we were
+    # downloading. Abort rather than fabricate a completed download for an item
+    # no longer accepted — the ignore path has already cleared the download axis.
+    fresh = await repo.get_entitlement(db, entitlement_id)
+    if fresh is None or fresh.review_status != "matched":
+        outcome.partial_path.unlink(missing_ok=True)
+        logger.info(
+            "source-grab: entitlement %s no longer matched mid-grab; aborting import",
+            entitlement_id,
+        )
+        return f"source-grab: {entitlement_id} no longer matched; import aborted"
+
     final_path = _promote(staging, outcome.partial_path, ent, entitlement_id)
     await _handoff_to_import(db, ent, final_path)
-    await _set_state(db, entitlement_id, "imported", clear_error=True)
-    return f"source-grab: {entitlement_id} imported ({final_path.name})"
+    # The entitlement stays on the download axis as ``import_pending`` — it is
+    # advanced to ``imported`` only when ProcessImportsCommand actually lands the
+    # file in the library (FRG-SRC-006), so ownership is never claimed early.
+    await _set_state(db, entitlement_id, "import_pending", clear_error=True)
+    return f"source-grab: {entitlement_id} handed off to import ({final_path.name})"
 
 
 # --- import handoff ---------------------------------------------------------
@@ -206,12 +265,28 @@ async def _handoff_to_import(
     client): the row is never observed by the tracking reconcile (it is not
     ``downloading`` and its download id is unseen), so it is never regressed.
     """
+    from sqlalchemy import select
+
     from foragerr.downloads.models import GrabHistoryRow, TrackedDownloadRow
     from foragerr.downloads.state import TRACKED_STATUS_OK, TrackedDownloadState
 
     download_id = f"humble:{ent.id}"
     now = utcnow()
     async with db.write_session() as session:
+        # Idempotency guard (FRG-SRC-004): the tracked_downloads uniqueness
+        # constraint is (client_id, download_id) and client_id is NULL here, so
+        # SQLite would NOT reject a duplicate. Dedup explicitly on the humble:
+        # download_id so a re-accept / re-run never spawns a second grab-import
+        # row for the same entitlement.
+        existing = (
+            await session.execute(
+                select(TrackedDownloadRow.id).where(
+                    TrackedDownloadRow.download_id == download_id
+                )
+            )
+        ).first()
+        if existing is not None:
+            return
         session.add(
             GrabHistoryRow(
                 download_id=download_id,

@@ -133,6 +133,59 @@ async def test_default_sync_downloads_nothing(db, config_dir):
     assert all(e.download_state is None for e in comics)
 
 
+@pytest.mark.req("FRG-SRC-004")
+async def test_match_to_nonexistent_series_is_rejected(db, config_dir):
+    """A match naming a phantom series id is a 404, never a phantom link."""
+    source = await _synced_source(db, config_dir)
+    ent = await _comic(db, source.id, "synth_singleissue_01")
+    with pytest.raises(review.EntitlementActionError) as exc:
+        await review.match_entitlement(db, ent.id, series_id=999999, commands=None)
+    assert exc.value.status == 404
+    after = await repo.get_entitlement(db, ent.id)
+    assert after.review_status == "new"
+    assert after.matched_series_id is None
+
+
+@pytest.mark.req("FRG-SRC-004")
+async def test_double_accept_enqueues_one_grab(
+    db, config_dir, root_folder_id, format_profile_id
+):
+    """Re-accepting an already-queued entitlement is idempotent — one grab only."""
+    source = await _synced_source(db, config_dir)
+    series_id = await _mk_series(
+        db, root_folder_id, format_profile_id, cvid=571, title="Synthetic Hero"
+    )
+    ent = await _comic(db, source.id, "synth_singleissue_01")
+    commands = FakeCommands()
+
+    await review.match_entitlement(db, ent.id, series_id=series_id, commands=commands)
+    await review.match_entitlement(db, ent.id, series_id=series_id, commands=commands)
+    # The second accept finds download_state already "queued" → no second grab.
+    assert commands.enqueued == [
+        ("source-grab", {"entitlement_id": ent.id}, "accept")
+    ]
+
+
+@pytest.mark.req("FRG-SRC-004")
+async def test_ignore_after_accept_clears_download_axis(
+    db, config_dir, root_folder_id, format_profile_id
+):
+    """Ignoring a queued entitlement cancels the grab by clearing download_state,
+    so the in-flight run_grab aborts at its re-read guard (FRG-SRC-004/006)."""
+    source = await _synced_source(db, config_dir)
+    series_id = await _mk_series(
+        db, root_folder_id, format_profile_id, cvid=572, title="Synthetic Hero"
+    )
+    ent = await _comic(db, source.id, "synth_singleissue_01")
+    await review.match_entitlement(db, ent.id, series_id=series_id, commands=None)
+    queued = await repo.get_entitlement(db, ent.id)
+    assert queued.download_state == "queued"
+
+    ignored = await review.ignore_entitlement(db, ent.id)
+    assert ignored.review_status == "ignored"
+    assert ignored.download_state is None  # grab cancelled on the download axis
+
+
 # --- ignore + restore -------------------------------------------------------
 
 

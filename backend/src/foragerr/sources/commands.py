@@ -26,6 +26,7 @@ from foragerr.commands.registry import BaseCommand, register_command, register_h
 from foragerr.commands.service import HandlerContext
 from foragerr.db.base import utcnow
 from foragerr.http import HttpClientFactory
+from foragerr.keystore import KeystoreDecryptError, secret_state
 from foragerr.sources import repo
 from foragerr.sources.humble import (
     HUMBLE_API_BASE,
@@ -93,6 +94,20 @@ async def _handle_source_sync(command: SourceSyncCommand, ctx: HandlerContext) -
         if source.connection_state != "connected":
             skipped += 1
             continue
+        # Credential-unavailable fail-soft (FRG-AUTH-012): a source whose stored
+        # cookie cannot be decrypted (encryption key missing/changed) is SKIPPED
+        # before any request, so one undecryptable source neither aborts the
+        # batch nor retries in a storm — the health surface flags it for the
+        # operator to re-paste the cookie. The state is NOT flipped to "expired"
+        # (that means cookie-expiry, cleared by reconnect, not a key problem).
+        if secret_state(source.settings) == "unavailable":
+            logger.warning(
+                "source-sync: source %s credential unavailable (encryption key "
+                "missing or changed); skipping until the cookie is re-entered",
+                source.id,
+            )
+            skipped += 1
+            continue
         outcome = await _sync_one(
             ctx.db, factory, source, min_interval, base_url=base_url
         )
@@ -142,6 +157,17 @@ async def _sync_one(
         result = await run_sync(
             db, factory, source, min_interval=min_interval, base_url=base_url
         )
+    except KeystoreDecryptError:
+        # Defensive: the pre-loop secret_state check normally skips this source,
+        # but a key change racing the tick lands here. Isolate it (FRG-AUTH-012)
+        # — leave it CONNECTED (a key problem, not cookie-expiry), do not retry,
+        # and let the batch continue for every other source.
+        logger.warning(
+            "source-sync: source %s credential unavailable mid-sync (encryption "
+            "key missing or changed); left connected, skipped",
+            source.id,
+        )
+        return SyncResult()
     except HumbleAuthError as exc:
         logger.warning(
             "source-sync: source %s session expired mid-sync; pausing "

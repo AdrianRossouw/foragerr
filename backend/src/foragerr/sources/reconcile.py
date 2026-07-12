@@ -280,6 +280,46 @@ async def revert_owned_via_edition(
     return len(rows)
 
 
+async def revert_owned_via_edition_for_series(
+    session: AsyncSession, *, series_id: int
+) -> int:
+    """Delete every owned-via-edition row whose providing trade issue lives in
+    ``series_id``; return the count. Real single files (``edition_issue_id IS
+    NULL``) are never touched.
+
+    The un-match / ignore cleanup path (FRG-SRC-004/007): a collected-edition
+    entitlement is matched to a trade *series*, and its import fills singles
+    tagged with that series' trade issue(s). Un-matching or ignoring the imported
+    entitlement should return those filled singles to wanted without disturbing
+    any real single files the operator owns.
+    """
+    trade_ids = (
+        (
+            await session.execute(
+                select(IssueRow.id).where(IssueRow.series_id == series_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not trade_ids:
+        return 0
+    rows = (
+        (
+            await session.execute(
+                select(IssueFileRow).where(
+                    IssueFileRow.edition_issue_id.in_(trade_ids)
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for row in rows:
+        await session.delete(row)
+    return len(rows)
+
+
 __all__ = [
     "FILLABLE",
     "OWNED_EDITION",
@@ -291,4 +331,5 @@ __all__ = [
     "compute_fill_set",
     "fill_sets_for_series",
     "revert_owned_via_edition",
+    "revert_owned_via_edition_for_series",
 ]
