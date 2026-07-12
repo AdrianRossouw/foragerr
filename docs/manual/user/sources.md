@@ -4,9 +4,8 @@ Sources connect an external store account to foragerr so items you already own
 there show up in your library review queue on their own, instead of you moving
 files across by hand. The model is generic — a connection lifecycle, an
 inventory of owned items, and a review workflow — with one store implemented
-today: **Humble Bundle** (`FRG-SRC-001`). Other tabs on the Sources screen may
-appear as placeholders for stores foragerr doesn't connect to yet; only Humble
-Bundle is connectable.
+today: **Humble Bundle** (`FRG-SRC-001`). It is the only store on the Sources
+screen; more stores will appear here as they are built.
 
 ## Connecting Humble Bundle
 

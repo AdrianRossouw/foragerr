@@ -18,10 +18,12 @@ decided with the owner on 2026-07-11.
 
 ## What Changes
 
-- **New top-level Sources area** (nav item, hub screen with store tabs, per the v2
-  handoff): a generic store-source model — connection lifecycle, entitlement
-  inventory, review workflow — implemented for one store, Humble Bundle. (2000 AD
-  appears as a not-yet-connected placeholder tab only; no second integration.)
+- **New top-level Sources area** (nav item, hub screen, per the v2 handoff): a
+  generic store-source model — connection lifecycle, entitlement inventory, review
+  workflow — implemented for one store, Humble Bundle. The rail is single-store; no
+  placeholder tab is shipped for an unbuilt integration (owner decision at the M6
+  gate — the design mock's 2000 AD placeholder tab is dropped; a second store tab
+  arrives with a real second integration).
 - **Cookie-paste authentication**: the operator logs into Humble in their own
   browser and pastes the `_simpleauth_sess` session cookie into the connect card.
   Stored server-side, encrypted via the m6-keystore (FRG-AUTH-008 et al. — hard

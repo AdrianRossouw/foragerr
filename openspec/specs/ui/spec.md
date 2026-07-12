@@ -1058,7 +1058,10 @@ creator id SHALL render the standard not-found state.
 
 The web UI SHALL provide a top-level Sources screen per the v2 design handoff: a
 Sources nav item (badge = unreviewed-new count, amber `!` on expiry); a store rail
-(connected/expired/not-connected status per store); a connect card for
+showing the connected/expired/not-connected status of each built store (Humble
+Bundle is the only one today — the rail carries no placeholder tab for an unbuilt
+integration; a second store tab appears when a second integration ships); a connect
+card for
 disconnected/expired sources (cookie paste with helper steps, live-validated
 Connect, privacy note); and a manage view for connected sources (account bar with
 auto-sync toggle, Sync now, Disconnect; count line; All/New/Matched/Ignored filter;

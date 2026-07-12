@@ -94,7 +94,11 @@ generic webhook/push discovery (poll only).
 10. **Frontend**: new Sources route per the handoff component tree (SourcesRail,
     ConnectCard, StoreManage with ItemList/ExpandDetail); GlobalBanner + health
     wiring reuse the existing health WS. Bulk review actions reuse the M4
-    bulk-selection pattern (FRG-UI-025), including shift-range select.
+    bulk-selection pattern (FRG-UI-025), including shift-range select. *Gate
+    amendment (owner, 2026-07-12)*: the rail is single-store — the handoff mock's
+    2000 AD placeholder tab and the "Add a source" affordance are dropped rather
+    than shipped as dead UI for an unbuilt integration; a second store tab lands
+    with a real second source.
 
 ## Risks / Trade-offs
 

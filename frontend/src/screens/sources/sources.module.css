@@ -51,12 +51,6 @@
   background: linear-gradient(150deg, #e2604f, #b8352b);
 }
 
-.tile2000ad {
-  /* 2000 AD placeholder store tile (a not-yet-built integration) — a bespoke
-   * brand blue, deliberately off the design-system palette (token audit). */
-  background: linear-gradient(150deg, #5687c2, #37568f);
-}
-
 .statusDot {
   width: 7px;
   height: 7px;
@@ -74,30 +68,6 @@
 
 .dotDisconnected {
   background: var(--text-muted);
-}
-
-.addSource {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--spacing-xs);
-  border: none;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: var(--font-size-base);
-  cursor: pointer;
-  padding: var(--spacing-sm) var(--spacing-xs);
-}
-
-.addSource:hover {
-  color: var(--text-secondary);
-}
-
-.placeholder {
-  padding: var(--spacing-xl);
-  text-align: center;
-  color: var(--text-secondary);
-  border: 1px dashed var(--surface-border);
-  border-radius: var(--radius-lg);
 }
 
 /* --- Connect card --- */
