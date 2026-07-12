@@ -357,11 +357,15 @@ async def test_ignore_leaves_claimed_import_row_to_the_hook_guard(
     db, config_dir, root_folder_id, format_profile_id
 ):
     """A row the drain has already claimed (``importing``) is NOT deleted by
-    ignore — the import hook's ``review_status`` re-read guard discards that
-    import's entitlement effects instead."""
+    ignore — and when that claimed import reaches its terminal transition, the
+    import hook's ``review_status`` re-read guard discards its entitlement
+    effects (no ownership claim, no axis resurrection)."""
+    import datetime as dt
+
     from foragerr.db.base import utcnow
     from foragerr.downloads.models import TrackedDownloadRow
     from foragerr.downloads.state import TRACKED_STATUS_OK, TrackedDownloadState
+    from foragerr.sources.import_hook import apply_source_import
 
     source = await _synced_source(db, config_dir)
     series_id = await _mk_series(
@@ -405,3 +409,97 @@ async def test_ignore_leaves_claimed_import_row_to_the_hook_guard(
             )
         ).scalar_one()
     assert row.state == TrackedDownloadState.IMPORTING.value
+
+    # The claimed import's terminal transition is discarded by the hook guard:
+    # no ownership claim, no download-axis resurrection.
+    async with db.write_session() as session:
+        await apply_source_import(
+            session,
+            download_id=f"humble:{ent.id}",
+            final_state=TrackedDownloadState.IMPORTED,
+            imported_issues=[],
+            now=dt.datetime(2026, 7, 12, 12, 0, 0),
+        )
+    fresh = await repo.get_entitlement(db, ent.id)
+    assert fresh.review_status == "ignored"
+    assert fresh.download_state is None
+
+
+@pytest.mark.req("FRG-SRC-004")
+async def test_ignore_deletes_dead_terminal_rows_so_reaccept_can_rehandoff(
+    db, config_dir, root_folder_id, format_profile_id
+):
+    """Ignore deletes a ``failed_pending`` (or any non-``importing``) humble row:
+    the grab handoff dedups on download_id regardless of state, so a surviving
+    dead terminal would silently strand restore + re-accept with no claimable
+    row — the entitlement would sit in import_pending forever."""
+    from pathlib import Path
+
+    from foragerr.db.base import utcnow
+    from foragerr.downloads.models import TrackedDownloadRow
+    from foragerr.downloads.state import TRACKED_STATUS_ERROR, TrackedDownloadState
+    from foragerr.sources.grab import _handoff_to_import
+
+    source = await _synced_source(db, config_dir)
+    series_id = await _mk_series(
+        db, root_folder_id, format_profile_id, cvid=557, title="Synthetic Hero"
+    )
+    ent = await review.match_entitlement(
+        db,
+        (await _comic(db, source.id, "synth_singleissue_01")).id,
+        series_id=series_id,
+        commands=FakeCommands(),
+    )
+    now = utcnow()
+    async with db.write_session() as session:
+        session.add(
+            TrackedDownloadRow(
+                download_id=f"humble:{ent.id}",
+                client_id=None,
+                client_name="Humble Bundle",
+                protocol="humble",
+                source="store",
+                state=TrackedDownloadState.FAILED_PENDING.value,
+                status=TRACKED_STATUS_ERROR,
+                series_id=series_id,
+                issue_id=None,
+                title=ent.human_name,
+                output_path="/tmp/staging/x",
+                encrypted=False,
+                added_at=now,
+                updated_at=now,
+            )
+        )
+
+    await review.ignore_entitlement(db, ent.id)
+
+    async with db.read_session() as session:
+        remaining = (
+            (
+                await session.execute(
+                    select(TrackedDownloadRow).where(
+                        TrackedDownloadRow.download_id == f"humble:{ent.id}"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert remaining == []
+
+    # Restore + re-accept can hand off afresh: the dedup finds no stale row.
+    restored = await review.restore_entitlement(db, ent.id)
+    assert restored.review_status == "new"
+    rematched = await review.match_entitlement(
+        db, ent.id, series_id=series_id, commands=FakeCommands()
+    )
+    await _handoff_to_import(db, rematched, Path("/tmp/staging/x/file.cbz"))
+    async with db.read_session() as session:
+        row = (
+            await session.execute(
+                select(TrackedDownloadRow).where(
+                    TrackedDownloadRow.download_id == f"humble:{ent.id}"
+                )
+            )
+        ).scalar_one()
+    assert row.state == TrackedDownloadState.IMPORT_PENDING.value

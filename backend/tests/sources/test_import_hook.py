@@ -382,21 +382,104 @@ async def test_ignored_mid_import_claims_no_ownership(
 
 @pytest.mark.req("FRG-SRC-006")
 async def test_blocked_or_failed_import_never_resurrects_ignored_axis(db, config_dir):
-    """The guard covers the non-success mirrors too: a block/fail terminal for an
-    ignored entitlement must not push it back onto the download axis."""
-    eid = await _entitlement(db, matched_series_id=None, download_state="import_pending")
+    """The guard covers the non-success mirrors too: a block OR fail terminal for
+    an ignored entitlement must not push it back onto the download axis."""
+    for final_state in (
+        TrackedDownloadState.IMPORT_BLOCKED,
+        TrackedDownloadState.FAILED_PENDING,
+    ):
+        eid = await _entitlement(
+            db, matched_series_id=None, download_state="import_pending"
+        )
+        async with db.write_session() as session:
+            row = await session.get(SourceEntitlementRow, eid)
+            row.review_status = "ignored"
+            row.download_state = None
+        async with db.write_session() as session:
+            await apply_source_import(
+                session,
+                download_id=f"humble:{eid}",
+                final_state=final_state,
+                imported_issues=[],
+                now=_NOW,
+            )
+        ent = await repo.get_entitlement(db, eid)
+        assert ent.download_state is None, final_state
+        assert ent.download_error is None, final_state
+        assert ent.review_status == "ignored", final_state
+
+
+@pytest.mark.req("FRG-SRC-004")
+async def test_drain_withdraws_claimed_import_of_unaccepted_entitlement(
+    db, config_dir, format_profile_id, tmp_path
+):
+    """The drain's in-transaction withdrawal gate: a completed download whose
+    entitlement was ignored after handoff imports NOTHING — no issue_files row,
+    no ownership — and its tracked row is deleted so a later restore + re-accept
+    can hand off afresh."""
+    root = tmp_path / "lib-root"
+    root.mkdir(exist_ok=True)
+    async with db.write_session() as session:
+        rf = await library_repo.create_root_folder(session, str(root))
+        series = await library_repo.create_series(
+            session,
+            cv_volume_id=987655,
+            title="Spawn",
+            start_year=2024,
+            format_profile_id=format_profile_id,
+            root_folder_id=rf.id,
+            path=str(root / "Spawn"),
+            monitored=True,
+        )
+        await session.flush()
+        issue = await library_repo.create_issue(
+            session,
+            series_id=series.id,
+            cv_issue_id=123457,
+            issue_number="1",
+            cover_date=dt.date(2024, 1, 1),
+            monitored=True,
+        )
+        series_id, issue_id = series.id, issue.id
+
+    eid = await _entitlement(
+        db, matched_series_id=series_id, download_state="import_pending"
+    )
+    dl_dir = tmp_path / "downloads" / "Spawn.001.2024"
+    _make_cbz(dl_dir / "Spawn 001 (2024).cbz")
+    await _tracked(
+        db,
+        download_id=f"humble:{eid}",
+        series_id=series_id,
+        output_path=str(dl_dir),
+        title="Spawn 001 (2024)",
+    )
+    # The operator's ignore lands while the row sits in the queue (the review
+    # action's own cancel is bypassed here to simulate losing that race).
     async with db.write_session() as session:
         row = await session.get(SourceEntitlementRow, eid)
         row.review_status = "ignored"
         row.download_state = None
-    async with db.write_session() as session:
-        await apply_source_import(
-            session,
-            download_id=f"humble:{eid}",
-            final_state=TrackedDownloadState.IMPORT_BLOCKED,
-            imported_issues=[],
-            now=_NOW,
+
+    summary = await process_imports(db, make_settings(config_dir), now=_NOW)
+
+    assert summary == "imported=0 blocked=0 failed=0"  # nothing landed
+    async with db.read_session() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(TrackedDownloadRow).where(
+                        TrackedDownloadRow.download_id == f"humble:{eid}"
+                    )
+                )
+            )
+            .scalars()
+            .all()
         )
+    assert rows == []  # withdrawn row deleted — re-accept can re-handoff
+    async with db.read_session() as session:
+        wanted = set(await library_repo.wanted_issue_ids(session))
+    assert issue_id in wanted  # the ignored item never entered the library
     ent = await repo.get_entitlement(db, eid)
-    assert ent.download_state is None
     assert ent.review_status == "ignored"
+    assert ent.download_state is None

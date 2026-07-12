@@ -206,9 +206,10 @@ async def ignore_entitlement(db, entitlement_id: int) -> SourceEntitlementRow:
     grab is cancelled by clearing ``download_state`` — the in-flight ``run_grab``
     re-reads the entitlement before the irreversible import and aborts once it is
     no longer ``matched``. A grab already handed off to the import pipeline has
-    its not-yet-claimed ``humble:{id}`` tracked row deleted so the drain never
-    imports the ignored item; a row the drain has already claimed is instead
-    discarded by the import hook's own ``review_status`` re-read guard. An
+    its ``humble:{id}`` tracked row deleted (any state except the drain-claimed
+    ``importing``) so the drain never imports the ignored item and a later
+    restore + re-accept can hand off afresh; a claimed row is instead withdrawn
+    by the drain's own in-transaction ``source_import_withdrawn`` re-check. An
     already-imported collected edition has its owned-via-edition fills reverted
     so the singles it provided return to wanted (real single files are never
     touched).
@@ -230,21 +231,19 @@ async def ignore_entitlement(db, entitlement_id: int) -> SourceEntitlementRow:
             await revert_owned_via_edition_for_series(
                 session, series_id=row.matched_series_id
             )
-        # Cancel a completed download awaiting the import drain (FRG-SRC-004/006):
-        # state-guarded so a row the drain has already claimed (``importing``) is
-        # left for the import hook's guard, and DELETED (not re-stated) so the
-        # handoff's download-id dedup can re-create it on a later restore +
-        # re-accept.
+        # Cancel this entitlement's completed-download row (FRG-SRC-004/006).
+        # DELETED (not re-stated) because the handoff dedups on download_id
+        # regardless of state — any surviving row (import_pending, blocked,
+        # failed_pending, imported) would silently strand a later restore +
+        # re-accept with no claimable row. Only the drain-claimed ``importing``
+        # row is left alone: deleting it would strand the in-flight move, and
+        # the drain's in-transaction withdrawal re-check discards it instead.
         await session.execute(
             delete(TrackedDownloadRow).where(
                 TrackedDownloadRow.download_id
                 == f"{HUMBLE_DOWNLOAD_PREFIX}{entitlement_id}",
-                TrackedDownloadRow.state.in_(
-                    (
-                        TrackedDownloadState.IMPORT_PENDING.value,
-                        TrackedDownloadState.IMPORT_BLOCKED.value,
-                    )
-                ),
+                TrackedDownloadRow.state
+                != TrackedDownloadState.IMPORTING.value,
             )
         )
         row.review_status = "ignored"

@@ -48,7 +48,15 @@ generic webhook/push discovery (poll only).
    singles owned-via-edition) when the tracked download durably reaches `imported`
    in the import worker, keyed on the `humble:{id}` download-id. An import that
    blocks or fails mirrors to `import_blocked`/`failed`; ownership is never
-   claimed before the file is durable.
+   claimed before the file is durable. *Withdrawal (gate fix)*: ignoring an
+   accepted item cancels its download wherever it is — an in-flight grab aborts
+   at its pre-handoff re-read, a not-yet-claimed tracked row is deleted by the
+   ignore itself (any state but `importing`, so restore + re-accept can hand
+   off afresh past the download-id dedup), and a drain-claimed row is re-checked
+   inside the import transaction (`source_import_withdrawn`) before any file
+   moves — a withdrawn import lands nothing and de-tracks its row. The
+   remaining ordering (ignore after the import commits) is reverted by ignore's
+   own owned-via-edition revert.
 3. **Humble client** (`sources/humble.py`): `GET /api/v1/user/order` → gamekeys;
    `GET /api/v1/order/{gamekey}?all_tpkds=true` → subproducts → `download_struct`
    (signed time-limited `url.web`, md5, size, filename). Cookie rides as

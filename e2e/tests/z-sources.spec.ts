@@ -26,8 +26,11 @@ test.describe('FRG-UI-029 Sources', () => {
   }) => {
     await page.goto('/sources');
 
-    // The store rail + connect card render for a source-less first run.
-    await expect(page.getByRole('button', { name: /Humble Bundle/ })).toBeVisible();
+    // The store rail + connect card render for a source-less first run. The
+    // single-store rail entry is a non-interactive tab (the 2000 AD placeholder
+    // and the tab's button semantics were removed by owner decision at the gate).
+    const rail = page.getByLabel('Store sources');
+    await expect(rail.getByText('Humble Bundle')).toBeVisible();
     const card = page.getByTestId('connect-card');
     await expect(card).toBeVisible();
 

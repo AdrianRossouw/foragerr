@@ -47,6 +47,23 @@ def entitlement_id_from_download_id(download_id: str) -> int | None:
         return None
 
 
+async def source_import_withdrawn(session: AsyncSession, download_id: str) -> bool:
+    """Whether a store download's operator acceptance has been withdrawn.
+
+    True when the ``humble:{id}`` entitlement is gone or no longer ``matched``
+    (ignored, or restored to ``new``). The drain checks this INSIDE the import
+    transaction, before any file is moved into the library, so an ignore that
+    landed while the completed download sat claimed in the queue imports nothing
+    (FRG-SRC-004) — the ordering the review action's own state-guarded cancel
+    cannot reach. Always False for a non-store download.
+    """
+    ent_id = entitlement_id_from_download_id(download_id)
+    if ent_id is None:
+        return False
+    row = await session.get(SourceEntitlementRow, ent_id)
+    return row is None or row.review_status != "matched"
+
+
 async def apply_source_import(
     session: AsyncSession,
     *,
@@ -108,4 +125,5 @@ __all__ = [
     "HUMBLE_DOWNLOAD_PREFIX",
     "apply_source_import",
     "entitlement_id_from_download_id",
+    "source_import_withdrawn",
 ]

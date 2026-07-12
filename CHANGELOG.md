@@ -38,8 +38,9 @@ review-first sync (FRG-SRC-001..007, FRG-UI-029).
   items automatically, and it defaults to **off**. Ignoring an accepted item
   cancels its download wherever it is — a queued or in-flight grab aborts at its
   re-read guard, a completed download awaiting import is withdrawn from the
-  import queue, and an import already claimed by the drain is discarded before
-  it can mark the item owned.
+  import queue, and an import already claimed by the drain is re-checked inside
+  the import transaction and imports nothing. A later restore + re-accept always
+  downloads afresh.
 - **Collected-edition reconciliation that never suppresses singles**
   (FRG-SRC-007): accepting a collected edition marks exactly the issues it fills
   as owned-via-edition, leaves any issue you already own as a single untouched
