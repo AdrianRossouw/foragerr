@@ -164,6 +164,30 @@ export function useReconnectSource(): UseMutationResult<
   });
 }
 
+/**
+ * PATCH /api/v1/sources/{id} — change a source's mutable controls post-connect
+ * (FRG-SRC-004). Today that is the `auto_sync` toggle: flipping it ON persists
+ * the flag only and NEVER retroactively accepts existing entitlements (the
+ * backend auto-accepts confident matches on a subsequent sync). On success we
+ * sweep the whole sources family so the toggle and any dependent view re-derive.
+ */
+export function useUpdateSource(): UseMutationResult<
+  StoreSourceResource,
+  Error,
+  { sourceId: number; auto_sync: boolean }
+> {
+  const fetcher = useFetcher();
+  const invalidate = useInvalidateSources();
+  return useMutation({
+    mutationFn: ({ sourceId, auto_sync }) =>
+      fetcher<StoreSourceResource>(`/api/v1/sources/${sourceId}`, {
+        method: 'PATCH',
+        body: { auto_sync },
+      }),
+    onSuccess: invalidate,
+  });
+}
+
 /** POST /api/v1/sources/{id}/disconnect — delete the credential, keep data. */
 export function useDisconnectSource(): UseMutationResult<
   StoreSourceResource,

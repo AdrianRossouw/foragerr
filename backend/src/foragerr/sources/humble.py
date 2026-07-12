@@ -377,11 +377,16 @@ class HumbleClient:
         *,
         source_id: int,
         min_interval: float = ratelimit.DEFAULT_MIN_INTERVAL,
+        base_url: str = HUMBLE_API_BASE,
     ) -> None:
         self._client = factory.external()
         self._cookie = session_cookie
         self._source_id = source_id
         self._min_interval = min_interval
+        # Normalized (no trailing slash) so ``f"{base}{path}"`` never doubles a
+        # separator; the real default is the Humble origin, overridden only to a
+        # fixture host (settings.humble_base_url, FRG-SRC-002).
+        self._base_url = base_url.rstrip("/")
 
     async def list_gamekeys(self) -> list[str]:
         """Fetch the owned-order gamekeys (``GET /api/v1/user/order``).
@@ -430,7 +435,7 @@ class HumbleClient:
         }
         try:
             result = await self._client.get(
-                f"{HUMBLE_API_BASE}{path}",
+                f"{self._base_url}{path}",
                 params=params,
                 headers=headers,
                 max_bytes=max_bytes,

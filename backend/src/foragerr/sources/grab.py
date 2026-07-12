@@ -144,7 +144,11 @@ async def run_grab(
     allowlist = cdn_allowlist()
     try:
         async with HumbleClient(
-            factory, cookie, source_id=source.id, min_interval=min_interval
+            factory,
+            cookie,
+            source_id=source.id,
+            min_interval=min_interval,
+            base_url=settings.humble_base_url,
         ) as client:
             url = await client.fetch_download_url(
                 ent.gamekey, ent.machine_name, md5=ent.md5

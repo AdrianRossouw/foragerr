@@ -25,6 +25,7 @@ from pydantic import BaseModel
 
 from foragerr.db.base import utcnow
 from foragerr.sources.humble import (
+    HUMBLE_API_BASE,
     HumbleAuthError,
     HumbleClient,
     HumbleMalformedError,
@@ -113,13 +114,18 @@ async def connect_source(
     settings: BaseModel,
     auto_sync: bool = False,
     min_interval: float,
+    base_url: str = HUMBLE_API_BASE,
 ) -> tuple[SourceRow, int]:
     """Validate the cookie live, then persist the source (FRG-SRC-001/002).
 
     Returns ``(row, order_count)``. On validation failure NOTHING is persisted
     and :class:`SourceConnectError` names the cause."""
     async with HumbleClient(
-        factory, _cookie_of(settings), source_id=0, min_interval=min_interval
+        factory,
+        _cookie_of(settings),
+        source_id=0,
+        min_interval=min_interval,
+        base_url=base_url,
     ) as client:
         order_count = await _validate_cookie(client)
     row = await create_source(
@@ -134,12 +140,22 @@ async def connect_source(
 
 
 async def reconnect_source(
-    db, factory, source: SourceRow, *, settings: BaseModel, min_interval: float
+    db,
+    factory,
+    source: SourceRow,
+    *,
+    settings: BaseModel,
+    min_interval: float,
+    base_url: str = HUMBLE_API_BASE,
 ) -> tuple[SourceRow, int]:
     """Re-validate a fresh cookie on an existing source and return it to
     ``connected`` (FRG-SRC-005 reconnect). Nothing changes on failure."""
     async with HumbleClient(
-        factory, _cookie_of(settings), source_id=source.id, min_interval=min_interval
+        factory,
+        _cookie_of(settings),
+        source_id=source.id,
+        min_interval=min_interval,
+        base_url=base_url,
     ) as client:
         order_count = await _validate_cookie(client)
     row = await update_source_settings(
@@ -150,7 +166,12 @@ async def reconnect_source(
 
 
 async def run_sync(
-    db, factory, source: SourceRow, *, min_interval: float
+    db,
+    factory,
+    source: SourceRow,
+    *,
+    min_interval: float,
+    base_url: str = HUMBLE_API_BASE,
 ) -> SyncResult:
     """Diff the Humble order API against known entitlements (FRG-SRC-003).
 
@@ -161,7 +182,11 @@ async def run_sync(
     settings = load_source_settings(source.type, source.settings)
     result = SyncResult()
     async with HumbleClient(
-        factory, _cookie_of(settings), source_id=source.id, min_interval=min_interval
+        factory,
+        _cookie_of(settings),
+        source_id=source.id,
+        min_interval=min_interval,
+        base_url=base_url,
     ) as client:
         gamekeys = await client.list_gamekeys()  # 401 here → caller marks expired
         for gamekey in gamekeys:

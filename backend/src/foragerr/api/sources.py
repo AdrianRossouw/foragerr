@@ -23,7 +23,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Request
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from foragerr.api.errors import ApiError
 from foragerr.http import HttpClientFactory
@@ -46,6 +46,7 @@ from foragerr.sources.repo import (
     list_sources,
     load_source_settings,
     public_settings,
+    set_auto_sync,
 )
 from foragerr.sources.review import (
     EntitlementActionError,
@@ -118,6 +119,17 @@ class SourceReconnect(BaseModel):
     settings: dict[str, Any]
 
 
+class SourceUpdate(BaseModel):
+    """Request body for ``PATCH /sources/{id}`` — mutable source controls
+    (FRG-SRC-004). Extensible (more fields may follow) but ``extra="forbid"`` so
+    an unknown key is a 400 rather than silently ignored. Every field is optional;
+    a body that sets nothing is rejected."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    auto_sync: bool | None = None
+
+
 class ConnectResponse(BaseModel):
     """A successful connect/reconnect result with the validated order count."""
 
@@ -135,6 +147,10 @@ def _factory(request: Request) -> HttpClientFactory:
 
 def _min_interval(request: Request) -> float:
     return float(request.app.state.settings.source_min_request_interval_seconds)
+
+
+def _base_url(request: Request) -> str:
+    return request.app.state.settings.humble_base_url
 
 
 @router.get("/schema", response_model=list[SourceTypeSchema])
@@ -189,6 +205,7 @@ async def connect_source_endpoint(
             settings=model,
             auto_sync=body.auto_sync,
             min_interval=_min_interval(request),
+            base_url=_base_url(request),
         )
     except SourceConnectError as exc:
         field = "settings.session_cookie" if exc.cause == "auth" else "type"
@@ -223,6 +240,7 @@ async def reconnect_source_endpoint(
             existing,
             settings=model,
             min_interval=_min_interval(request),
+            base_url=_base_url(request),
         )
     except SourceConnectError as exc:
         field = "settings.session_cookie" if exc.cause == "auth" else "type"
@@ -232,6 +250,29 @@ async def reconnect_source_endpoint(
         order_count=order_count,
         message=f"Reconnected — {order_count} order(s)",
     )
+
+
+@router.patch("/{source_id}", response_model=SourceResource)
+async def update_source_endpoint(
+    source_id: int, body: SourceUpdate, request: Request
+) -> SourceResource:
+    """Change a source's mutable controls post-connect (FRG-SRC-004).
+
+    Today that is the ``auto_sync`` toggle (ships OFF; changeable here). Flipping
+    it ON persists the flag only — it NEVER retroactively auto-accepts existing
+    entitlements; auto-accept fires exclusively on a subsequent sync's confident
+    matches (``sources.enrich``). Returns the source with its PUBLIC settings."""
+    if body.auto_sync is None:
+        raise ApiError(400, "supply auto_sync", field="auto_sync")
+    db = request.app.state.db
+    row = await set_auto_sync(db, source_id, body.auto_sync)
+    if row is None:
+        raise ApiError(404, f"source {source_id} not found")
+    try:
+        model = load_source_settings(row.type, row.settings)
+    except Exception:  # noqa: BLE001 — a disconnected/blank row loads no secret
+        model = None
+    return SourceResource.from_row(row, model)
 
 
 @router.post("/{source_id}/disconnect", response_model=SourceResource)

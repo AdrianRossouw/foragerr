@@ -41,6 +41,7 @@ __all__ = [
     "load_source_settings",
     "public_settings",
     "serialize_settings",
+    "set_auto_sync",
     "set_connection_state",
     "update_source_settings",
 ]
@@ -150,6 +151,23 @@ async def update_source_settings(
             return None
         row.settings = serialize_settings(settings)
         row.connection_state = connection_state
+        await session.flush()
+        session.expunge(row)
+        return row
+
+
+async def set_auto_sync(db, source_id: int, auto_sync: bool) -> SourceRow | None:
+    """Flip a source's ``auto_sync`` toggle post-connect (FRG-SRC-004).
+
+    Persists the flag only; it NEVER retroactively accepts existing entitlements
+    — auto-accept happens exclusively during a subsequent sync's enrichment pass
+    over newly discovered confident matches (``sources.enrich``). Returns the
+    detached row, or ``None`` when the id is unknown."""
+    async with db.write_session() as session:
+        row = await session.get(SourceRow, source_id)
+        if row is None:
+            return None
+        row.auto_sync = auto_sync
         await session.flush()
         session.expunge(row)
         return row

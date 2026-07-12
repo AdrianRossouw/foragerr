@@ -28,6 +28,7 @@ from foragerr.db.base import utcnow
 from foragerr.http import HttpClientFactory
 from foragerr.sources import repo
 from foragerr.sources.humble import (
+    HUMBLE_API_BASE,
     HumbleAuthError,
     HumbleMalformedError,
     HumbleUnavailable,
@@ -75,6 +76,7 @@ async def _handle_source_sync(command: SourceSyncCommand, ctx: HandlerContext) -
         raise RuntimeError("source-sync requires a settings-bearing service")
     factory = make_humble_factory(settings)
     min_interval = float(settings.source_min_request_interval_seconds)
+    base_url = settings.humble_base_url
 
     if command.source_id is not None:
         source = await repo.get_source(ctx.db, command.source_id)
@@ -91,7 +93,9 @@ async def _handle_source_sync(command: SourceSyncCommand, ctx: HandlerContext) -
         if source.connection_state != "connected":
             skipped += 1
             continue
-        outcome = await _sync_one(ctx.db, factory, source, min_interval)
+        outcome = await _sync_one(
+            ctx.db, factory, source, min_interval, base_url=base_url
+        )
         synced += 1
         if outcome.expired:
             expired += 1
@@ -125,12 +129,19 @@ async def _enrich(ctx: HandlerContext, source: SourceRow) -> None:
 
 
 async def _sync_one(
-    db, factory: HttpClientFactory, source: SourceRow, min_interval: float
+    db,
+    factory: HttpClientFactory,
+    source: SourceRow,
+    min_interval: float,
+    *,
+    base_url: str = HUMBLE_API_BASE,
 ) -> SyncResult:
     """Sync one source, converting a mid-sync 401 into the ``expired`` state
     (FRG-SRC-005) — partial results kept, no retry storm."""
     try:
-        result = await run_sync(db, factory, source, min_interval=min_interval)
+        result = await run_sync(
+            db, factory, source, min_interval=min_interval, base_url=base_url
+        )
     except HumbleAuthError as exc:
         logger.warning(
             "source-sync: source %s session expired mid-sync; pausing "

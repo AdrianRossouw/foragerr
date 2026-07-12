@@ -83,6 +83,19 @@ function makeFetcher(state: FetcherState): Fetcher {
       if (/\/api\/v1\/sources\/\d+\/sync$/.test(path)) {
         return { command_id: 1, status: 'queued' };
       }
+      // PATCH /sources/{id} — flip a mutable control (auto_sync). Mutate the
+      // in-memory source so the invalidation-driven refetch reflects it.
+      const patchMatch = path.match(/^\/api\/v1\/sources\/(\d+)$/);
+      if (patchMatch && init?.method === 'PATCH') {
+        const id = Number(patchMatch[1]);
+        const body = init.body as { auto_sync: boolean };
+        // Replace the array with a fresh one (a new reference) so the
+        // invalidation-driven refetch is not short-circuited by identity.
+        state.sources = state.sources.map((s) =>
+          s.id === id ? { ...s, auto_sync: body.auto_sync } : s,
+        );
+        return state.sources.find((s) => s.id === id);
+      }
       if (path === '/api/v1/sources/entitlements/bulk') {
         return { applied: 2, skipped: 0, errors: [] };
       }
@@ -237,6 +250,39 @@ describe('FRG-UI-029: manage view review', () => {
     ent({ id: 12, human_name: 'Saga, Vol. 1 (Humble Choice copy)', review_status: 'ignored' }),
     ent({ id: 13, human_name: 'A Prose Novel', classification: 'other', review_status: 'new' }),
   ];
+
+  it('FRG-UI-029 — the auto-sync toggle is operable and PATCHes the source', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [makeSource({ id: 5, auto_sync: false })],
+      entitlements,
+      calls: [],
+    };
+    renderScreen(state);
+
+    const toggle = await screen.findByTestId('auto-sync-manage');
+    // Ships OFF and is NOT disabled (it is wired to the PATCH endpoint).
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    expect(toggle).not.toBeDisabled();
+
+    await user.click(toggle);
+    await waitFor(() =>
+      expect(
+        state.calls.find(
+          (c) => c.path === '/api/v1/sources/5' && c.init?.method === 'PATCH',
+        ),
+      ).toBeTruthy(),
+    );
+    const patch = state.calls.find((c) => c.path === '/api/v1/sources/5')!;
+    expect((patch.init!.body as { auto_sync: boolean }).auto_sync).toBe(true);
+    // After the invalidation-driven refetch the switch reflects ON.
+    await waitFor(() =>
+      expect(screen.getByTestId('auto-sync-manage')).toHaveAttribute(
+        'aria-checked',
+        'true',
+      ),
+    );
+  });
 
   it('FRG-UI-029 — the count line and status tags reflect the comic-scoped inventory', async () => {
     renderScreen({ sources: [source], entitlements, calls: [] });

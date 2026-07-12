@@ -174,3 +174,76 @@ async def test_bulk_match_requires_series_id(app_client):
         json={"action": "match", "entitlement_ids": [comics[0].id]},
     )
     assert resp.status_code == 422
+
+
+@pytest.mark.req("FRG-SRC-004")
+async def test_patch_auto_sync_flips_on_then_off_and_persists(app_client):
+    """The auto-sync toggle ships OFF and is changeable post-connect via
+    PATCH /sources/{id}: ON then OFF, each flip persisted (FRG-SRC-004)."""
+    app = app_client.app
+    source_id = await _populate(app)
+    # Ships OFF.
+    assert app_client.get("/api/v1/sources").json()[0]["auto_sync"] is False
+
+    on = app_client.patch(f"/api/v1/sources/{source_id}", json={"auto_sync": True})
+    assert on.status_code == 200
+    assert on.json()["auto_sync"] is True
+    assert app_client.get("/api/v1/sources").json()[0]["auto_sync"] is True
+
+    off = app_client.patch(f"/api/v1/sources/{source_id}", json={"auto_sync": False})
+    assert off.status_code == 200
+    assert off.json()["auto_sync"] is False
+    assert app_client.get("/api/v1/sources").json()[0]["auto_sync"] is False
+    # The cookie is never echoed back on the manage response.
+    assert "session_cookie" not in off.json()["settings"]
+
+
+@pytest.mark.req("FRG-SRC-004")
+async def test_patch_auto_sync_on_does_not_retroactively_accept(app_client):
+    """Flipping auto-sync ON only persists the flag — it NEVER retroactively
+    accepts existing `new` entitlements. Auto-accept fires exclusively on a
+    subsequent sync's confident matches (FRG-SRC-004)."""
+    app = app_client.app
+    source_id = await _populate(app)
+    before = await repo.list_entitlements(
+        app.state.db, source_id, classification="comic", review_status="new"
+    )
+    assert before  # the fixture yields un-reviewed new comics
+
+    resp = app_client.patch(f"/api/v1/sources/{source_id}", json={"auto_sync": True})
+    assert resp.status_code == 200
+
+    # Every previously-new comic is STILL new — nothing was accepted/matched.
+    after_new = await repo.list_entitlements(
+        app.state.db, source_id, classification="comic", review_status="new"
+    )
+    assert {e.id for e in after_new} == {e.id for e in before}
+    after_matched = await repo.list_entitlements(
+        app.state.db, source_id, classification="comic", review_status="matched"
+    )
+    assert after_matched == []
+
+
+@pytest.mark.req("FRG-SRC-004")
+async def test_patch_rejects_unknown_field_and_empty_body(app_client):
+    """The PATCH body is extensible but ``extra="forbid"``: an unknown key is a
+    400, and a body that sets nothing is a 400 (FRG-SRC-004)."""
+    app = app_client.app
+    source_id = await _populate(app)
+
+    unknown = app_client.patch(
+        f"/api/v1/sources/{source_id}", json={"auto_sync": True, "bogus": 1}
+    )
+    assert unknown.status_code == 400
+
+    empty = app_client.patch(f"/api/v1/sources/{source_id}", json={})
+    assert empty.status_code == 400
+    assert empty.json()["errors"][0]["field"] == "auto_sync"
+
+
+@pytest.mark.req("FRG-SRC-004")
+async def test_patch_unknown_source_is_404(app_client):
+    """PATCH against an unknown source id is a 404 (FRG-SRC-004)."""
+    app_client.app  # noqa: B018 — ensure the app/db fixtures are live
+    resp = app_client.patch("/api/v1/sources/9999", json={"auto_sync": True})
+    assert resp.status_code == 404

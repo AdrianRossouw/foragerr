@@ -10,6 +10,7 @@ import {
   useEntitlements,
   useMatchEntitlement,
   useSyncSource,
+  useUpdateSource,
 } from '../../api/sourceHooks';
 import { queryKeys } from '../../api/queryKeys';
 import type { EntitlementResource, StoreSourceResource } from '../../api/types';
@@ -37,6 +38,7 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
 
   const queryClient = useQueryClient();
   const syncNow = useSyncSource();
+  const updateSource = useUpdateSource();
   const disconnect = useDisconnectSource();
   const bulk = useBulkEntitlements();
   const match = useMatchEntitlement();
@@ -166,10 +168,12 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
             Auto-sync new purchases
             <Toggle
               checked={source.auto_sync}
-              onChange={() => {}}
-              disabled
+              onChange={(next) =>
+                updateSource.mutate({ sourceId: source.id, auto_sync: next })
+              }
+              disabled={updateSource.isPending}
               label="Auto-sync new purchases"
-              title="Auto-sync is chosen when connecting (no update endpoint yet)"
+              title="Auto-match and add confidently matched new purchases on each sync"
               testId="auto-sync-manage"
             />
           </span>
