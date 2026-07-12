@@ -89,6 +89,7 @@ class FakeCV:
         count_of_issues: int | None = None,
         description: str | None = "A space opera.",
         image_url: str | None = None,
+        date_last_updated: str | None = None,
     ) -> "FakeCV":
         vol: dict = {"id": volume_id, "name": name, "start_year": start_year}
         if publisher is not None:
@@ -100,6 +101,10 @@ class FakeCV:
         if image_url is not None:
             vol["image"] = {"original_url": image_url}
             self._images.add(image_url.split("?")[0])
+        if date_last_updated is not None:
+            # Served on the volume detail (FRG-META-017): the unchanged-volume
+            # refresh short-circuit compares it verbatim against the stored stamp.
+            vol["date_last_updated"] = date_last_updated
         self._volumes[volume_id] = vol
         return self
 

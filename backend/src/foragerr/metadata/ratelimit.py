@@ -20,6 +20,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import deque
+
+from foragerr.metadata.errors import ComicVineBudgetExhausted
 
 logger = logging.getLogger("foragerr.metadata.ratelimit")
 
@@ -29,6 +32,20 @@ MIN_INTERVAL_FLOOR = 0.25
 
 #: Exponential-backoff ceiling on repeated rate-limit signals.
 MAX_BACKOFF_SECONDS = 300.0
+
+#: The rolling window over which per-path admissions are counted (FRG-META-016).
+#: ComicVine's server-side limit is per resource path per HOUR, so we count over
+#: exactly one hour of monotonic time and prune anything older.
+BUDGET_WINDOW_SECONDS = 3600.0
+
+#: Documented bounds for the per-path hourly budget. The floor keeps the budget
+#: usable; the ceiling never exceeds ComicVine's documented 200/hour/path limit.
+BUDGET_FLOOR = 10
+BUDGET_CEILING = 200
+
+#: Fraction of the ceiling at which a bucket starts appearing in the health
+#: payload (near-ceiling visibility before the deferral actually bites).
+BUDGET_WARNING_FRACTION = 0.8
 
 
 def effective_interval(settings) -> float:
@@ -45,6 +62,28 @@ def effective_interval(settings) -> float:
     return configured
 
 
+def effective_budget(settings) -> int:
+    """The enforced per-path hourly ceiling (FRG-META-016): the configured value
+    clamped into the documented ``BUDGET_FLOOR..BUDGET_CEILING`` range (with a
+    one-line warning when clamping), mirroring :func:`effective_interval`.
+
+    An operator may lower the ceiling to leave more headroom for other tools
+    sharing the key, but can never raise it above ComicVine's documented
+    200/hour/path limit."""
+    configured = int(settings.comicvine_hourly_path_budget)
+    clamped = min(max(configured, BUDGET_FLOOR), BUDGET_CEILING)
+    if clamped != configured:
+        logger.warning(
+            "comicvine_hourly_path_budget=%s is outside the safe range %s..%s; "
+            "clamped to %s",
+            configured,
+            BUDGET_FLOOR,
+            BUDGET_CEILING,
+            clamped,
+        )
+    return clamped
+
+
 class _RateGate:
     """Serializes CV traffic and enforces spacing + back-off cool-downs."""
 
@@ -54,13 +93,68 @@ class _RateGate:
         self._cooldown_until = 0.0
         self._consecutive = 0
         self._degraded = False
+        #: Per-bucket rolling-hour admission ledger (FRG-META-016): a deque of
+        #: monotonic-clock timestamps, one appended per ADMITTED request, pruned
+        #: at BUDGET_WINDOW_SECONDS. Bounded by the ceiling, so memory is
+        #: O(paths × ceiling).
+        self._ledgers: dict[str, deque[float]] = {}
+        #: The most recently supplied effective ceiling, remembered so the health
+        #: snapshot can report usage-vs-ceiling without re-plumbing settings.
+        self._budget: int | None = None
 
-    async def acquire(self, min_interval: float) -> None:
-        """Block until this caller may issue its request, honoring both the
-        min-interval spacing and any active back-off cool-down."""
+    @staticmethod
+    def _prune(ledger: deque[float], now: float) -> None:
+        """Drop admissions older than the rolling window."""
+        cutoff = now - BUDGET_WINDOW_SECONDS
+        while ledger and ledger[0] <= cutoff:
+            ledger.popleft()
+
+    async def acquire(
+        self,
+        min_interval: float,
+        *,
+        bucket: str | None = None,
+        budget: int | None = None,
+    ) -> None:
+        """Block until this caller may issue its request, honoring the
+        min-interval spacing and any active back-off cool-down.
+
+        When ``bucket`` and ``budget`` are supplied, the per-path hourly budget
+        (FRG-META-016) is enforced FIRST: if the bucket already holds ``budget``
+        admissions within the rolling hour, this raises
+        :class:`ComicVineBudgetExhausted` immediately — no sleep, no wire
+        request, and WITHOUT touching the degraded/back-off state (the refusal
+        is a purely local decision; ComicVine saw nothing). A timestamp is
+        appended to the bucket's ledger only when the request is actually
+        admitted (past both the budget check and the spacing/cool-down wait).
+        """
         async with self._lock:
             loop = asyncio.get_running_loop()
             now = loop.time()
+
+            # Budget check BEFORE any wait: refuse fast rather than sleeping a
+            # spacing interval only to reject at the end.
+            if budget is not None:
+                self._budget = budget
+            if bucket is not None and budget is not None:
+                ledger = self._ledgers.setdefault(bucket, deque())
+                self._prune(ledger, now)
+                if len(ledger) >= budget:
+                    retry_after = max(
+                        0.0, ledger[0] + BUDGET_WINDOW_SECONDS - now
+                    )
+                    logger.warning(
+                        "comicvine path budget exhausted for %r (%d/%d in the "
+                        "last hour); refusing locally, resumes in ~%.0fs",
+                        bucket,
+                        len(ledger),
+                        budget,
+                        retry_after,
+                    )
+                    raise ComicVineBudgetExhausted(
+                        bucket, retry_after_seconds=retry_after
+                    )
+
             wait = 0.0
             if self._last is not None:
                 wait = max(wait, min_interval - (now - self._last))
@@ -72,6 +166,53 @@ class _RateGate:
                 self._degraded = False
                 self._consecutive = 0
             self._last = now
+            if bucket is not None:
+                self._ledgers.setdefault(bucket, deque()).append(now)
+
+    def budget_health(self) -> tuple[dict[str, dict[str, object]], bool]:
+        """The per-path budget snapshot for the health payload (FRG-META-016).
+
+        Returns ``(path_budgets, budget_exhausted)`` where ``path_budgets`` maps
+        each bucket AT OR ABOVE the warning threshold (≥80% of the ceiling) to
+        ``{used, ceiling, resumes_in_seconds}`` — so the common quiet case is an
+        empty map and the payload stays small — and ``budget_exhausted`` is
+        ``True`` when any bucket is at/over its ceiling. ``resumes_in_seconds``
+        is the duration until the bucket next falls below the ceiling (0 while it
+        still has headroom). Best-effort: with no running loop (no monotonic
+        clock) it reports a compact/empty snapshot.
+        """
+        if self._budget is None:
+            return {}, False
+        try:
+            now = asyncio.get_running_loop().time()
+        except RuntimeError:
+            return {}, False
+        ceiling = self._budget
+        threshold = ceiling * BUDGET_WARNING_FRACTION
+        budgets: dict[str, dict[str, object]] = {}
+        exhausted = False
+        for bucket, ledger in self._ledgers.items():
+            self._prune(ledger, now)
+            used = len(ledger)
+            if used == 0:
+                continue
+            if used >= ceiling:
+                exhausted = True
+            if used >= threshold:
+                if used >= ceiling:
+                    # The admission at index (used - ceiling) must age out before
+                    # the bucket drops back below the ceiling.
+                    resumes_in = max(
+                        0.0, ledger[used - ceiling] + BUDGET_WINDOW_SECONDS - now
+                    )
+                else:
+                    resumes_in = 0.0
+                budgets[bucket] = {
+                    "used": used,
+                    "ceiling": ceiling,
+                    "resumes_in_seconds": round(resumes_in, 3),
+                }
+        return budgets, exhausted
 
     def note_rate_limited(self, retry_after: float | None) -> float:
         """Record a rate-limit/ban signal: extend the cool-down to
@@ -134,11 +275,20 @@ def comicvine_degraded() -> bool:
 
 
 def comicvine_health() -> dict[str, object]:
-    """A small health snapshot the API health endpoint can surface later.
+    """A small health snapshot the API health endpoint surfaces.
 
-    Shape: ``{"degraded": bool, "cooldown_remaining_seconds": float}``.
+    Shape: ``{"degraded": bool, "cooldown_remaining_seconds": float,
+    "path_budgets": {bucket: {used, ceiling, resumes_in_seconds}},
+    "budget_exhausted": bool}``. ``path_budgets`` lists only buckets at or above
+    the 80% warning threshold (empty in the common quiet case), and
+    ``budget_exhausted`` flags a bucket at/over its ceiling (FRG-META-016). The
+    budget dimension is INDEPENDENT of ``degraded`` — a local budget refusal
+    never flips the rate-limit back-off state.
     """
+    path_budgets, budget_exhausted = _GATE.budget_health()
     return {
         "degraded": _GATE.is_degraded(),
         "cooldown_remaining_seconds": round(_GATE.cooldown_remaining(), 3),
+        "path_budgets": path_budgets,
+        "budget_exhausted": budget_exhausted,
     }

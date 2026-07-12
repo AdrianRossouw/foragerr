@@ -98,8 +98,8 @@ source. Compatibility: pre-1.0 releases may break with migration notes; from
 | FRG-META-013 | Cover art download and cache | meta | implemented | M1 |
 | FRG-META-014 | ComicVine content is untrusted input | meta | implemented | M1 |
 | FRG-META-015 | Relevance ordering of lookup candidates | meta | implemented | M4 |
-| FRG-META-016 | Per-path hourly request budget with defer-and-resume | meta | proposed | M6 |
-| FRG-META-017 | Unchanged-volume refresh short-circuit | meta | proposed | M6 |
+| FRG-META-016 | Per-path hourly request budget with defer-and-resume | meta | implemented | M6 |
+| FRG-META-017 | Unchanged-volume refresh short-circuit | meta | implemented | M6 |
 | FRG-PULL-001 | Metadata-derived weekly release view | pull | implemented | M3 |
 | FRG-PULL-002 | External pull-source fetch | pull | implemented | M3 |
 | FRG-PULL-003 | Idempotent per-week storage | pull | implemented | M3 |

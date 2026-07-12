@@ -54,6 +54,7 @@ from foragerr.library.repo import SeriesStatistics
 from foragerr.metadata import (
     COMICVINE_CREDENTIAL_MESSAGE,
     ComicVineAuthError,
+    ComicVineBudgetExhausted,
     ComicVineClient,
     ComicVineError,
     sanitize_cv_text,
@@ -535,6 +536,17 @@ def _comicvine_error_to_api_error(exc: ComicVineError) -> ApiError:
             _COMICVINE_LOOKUP_ERROR_STATUS,
             f"comicvine lookup failed: {COMICVINE_CREDENTIAL_MESSAGE}",
             field="comicvine_api_key",
+        )
+    if isinstance(exc, ComicVineBudgetExhausted):
+        # An honest, user-legible deferral message with the resume time
+        # (FRG-META-016) — no key material, only the bucket + a duration. Mapped
+        # to the same 503 the lookup family uses; the frontend surfaces the
+        # message through its existing lookup-error path.
+        minutes = max(1, round(exc.retry_after_seconds / 60))
+        return ApiError(
+            _COMICVINE_LOOKUP_ERROR_STATUS,
+            "ComicVine hourly request budget exhausted for this lookup; "
+            f"retries in about {minutes} minute(s).",
         )
     return ApiError(
         _COMICVINE_LOOKUP_ERROR_STATUS, f"comicvine lookup failed: {exc}"

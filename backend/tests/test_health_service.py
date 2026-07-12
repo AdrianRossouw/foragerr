@@ -87,6 +87,29 @@ def _by_component(components):
     return {c.component: c for c in components}
 
 
+@pytest.mark.req("FRG-META-016")
+async def test_comicvine_budget_exhaustion_surfaces_as_degraded(db):
+    """An exhausted per-path budget surfaces the ComicVine component as degraded
+    with a budget message (a deferral is never silent), even though the gate's
+    rate-limit degraded/back-off flag stays OFF."""
+    from foragerr.metadata.errors import ComicVineBudgetExhausted
+
+    gate = ratelimit.gate()
+    budget = 2
+    for _ in range(budget):
+        await gate.acquire(0.0, bucket="issue", budget=budget)
+    with pytest.raises(ComicVineBudgetExhausted):
+        await gate.acquire(0.0, bucket="issue", budget=budget)
+
+    service = _service(db)
+    comp = _by_component(await service.component_view())["comicvine"]
+    assert comp.state == "degraded"
+    message = (comp.message or "").lower()
+    assert "budget" in message and "issue" in message
+    # And it shows up in the actionable warnings list.
+    assert "comicvine" in {w.source for w in await service.warnings()}
+
+
 @pytest.mark.req("FRG-NFR-011")
 async def test_indexer_backoff_shows_degraded_then_recovers(db):
     indexer_id = await _add_indexer(db)

@@ -590,6 +590,27 @@ async def _raise_comicvine_unavailable(self, term, **_kwargs):
     raise ComicVineUnavailable("simulated upstream failure")
 
 
+async def _raise_budget_exhausted(self, term, **_kwargs):
+    from foragerr.metadata import ComicVineBudgetExhausted
+
+    raise ComicVineBudgetExhausted("volumes", retry_after_seconds=600.0)
+
+
+@pytest.mark.req("FRG-META-016")
+def test_lookup_budget_exhausted_surfaces_honest_resume_message(client, monkeypatch):
+    """A per-path budget refusal on an interactive lookup surfaces the typed
+    error through the existing lookup-error path as a 503 with an honest,
+    key-free message that includes the resume time (FRG-META-016)."""
+    from foragerr.metadata import ComicVineClient
+
+    monkeypatch.setattr(ComicVineClient, "search_series", _raise_budget_exhausted)
+
+    response = client.get("/api/v1/series/lookup", params={"term": "Saga"})
+    assert response.status_code == 503
+    message = response.json()["message"].lower()
+    assert "budget" in message and "retries in about 10 minute" in message
+
+
 @pytest.mark.req("FRG-API-003")
 def test_lookup_upstream_failure_maps_to_503(client, monkeypatch):
     """Tests the router's OWN error-mapping in isolation from the real

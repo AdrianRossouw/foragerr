@@ -199,4 +199,5 @@ def map_volume(payload: dict[str, Any]) -> SeriesRecord:
         ),
         first_issue=map_issue_ref(payload.get("first_issue")),
         image_url=_image_url(payload.get("image")),
+        date_last_updated=_text(payload.get("date_last_updated")),
     )

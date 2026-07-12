@@ -29,7 +29,10 @@ from foragerr.library.flows import (
 from foragerr.library.flows import refresh as refresh_mod
 from foragerr.library.models import IssueRow, SeriesRow
 
-from flows_support import FakeCV, build_factory, flows_settings, issue
+from foragerr.db.base import utcnow
+from foragerr.metadata import ratelimit
+
+from flows_support import FakeCV, build_factory, credit, flows_settings, issue
 
 
 @pytest.fixture
@@ -361,6 +364,240 @@ async def test_cover_cached_at_set_even_if_sidecar_write_fails(
     async with db.read_session() as session:
         series = await repo.get_series(session, series_id)
     assert series.cover_cached_at is not None
+
+
+@pytest.mark.req("FRG-META-013")
+async def test_cover_cache_write_queues_series_refreshed_event(
+    db, settings, commands, root_folder_id, root_folder_path, format_profile_id
+):
+    """Caching a (re)fetched cover queues a SeriesRefreshed on the event stream
+    in the same write transaction (so open clients repaint); the unchanged-URL
+    reuse path emits nothing."""
+    img = "https://comicvine.gamespot.com/a/uploads/original/cover1.jpg"
+    series_id = await _make_series(db, root_folder_path, format_profile_id)
+    fake = FakeCV().volume(1, image_url=img).issues(1, [issue(100, "1")])
+    factory = build_factory(settings, fake.handler())
+
+    bus = EventBus()
+    received: list[SeriesRefreshed] = []
+    bus.subscribe(SeriesRefreshed, received.append)
+    db.event_publisher = bus.publish
+
+    # First refresh (complete walk): the main refresh event PLUS a second event
+    # from the cover cache write that actually fetched the cover.
+    await refresh_series(db, settings, series_id, commands=commands, factory=factory)
+    assert received == [
+        SeriesRefreshed(series_id, partial=False),  # main refresh txn
+        SeriesRefreshed(series_id, partial=False),  # cover cache txn
+    ]
+
+    # Second refresh, same cover URL: the cover is reused, so ONLY the main
+    # refresh event fires — the reuse path queues nothing.
+    received.clear()
+    await refresh_series(db, settings, series_id, commands=commands, factory=factory)
+    assert received == [SeriesRefreshed(series_id, partial=False)]
+
+
+# --- unchanged-volume refresh short-circuit (FRG-META-017) ------------------
+
+
+def _issue_walk_reqs(transport) -> int:
+    """Count issue-list (walk) requests — path ``.../issues/`` (plural)."""
+    return sum(1 for r in transport.requests if r.url.path.endswith("/issues/"))
+
+
+def _credit_detail_ids(transport) -> list[int]:
+    """Issue ids fetched via the credit DETAIL endpoint (``issue/4000-{id}/``)."""
+    return [
+        int(r.url.path.split("4000-")[1].rstrip("/"))
+        for r in transport.requests
+        if "/issue/4000-" in r.url.path
+    ]
+
+
+async def _stamped_cv_ids(db, series_id: int) -> set[int]:
+    async with db.read_session() as session:
+        rows = await session.execute(
+            select(IssueRow.cv_issue_id).where(
+                IssueRow.series_id == series_id,
+                IssueRow.credits_fetched_at.is_not(None),
+            )
+        )
+        return set(rows.scalars().all())
+
+
+@pytest.mark.req("FRG-META-017")
+async def test_unchanged_stamp_within_bound_skips_the_walk(
+    db, settings, commands, root_folder_id, root_folder_path, format_profile_id
+):
+    series_id = await _make_series(db, root_folder_path, format_profile_id)
+    fake = FakeCV().volume(1, date_last_updated="2026-07-12 10:00:00").issues(
+        1, [issue(100, "1"), issue(101, "2")]
+    )
+    factory = build_factory(settings, fake.handler())
+    transport = factory._transport
+
+    # First refresh: a full walk that stores the stamp.
+    await refresh_series(db, settings, series_id, commands=commands, factory=factory)
+    assert _issue_walk_reqs(transport) == 1
+    async with db.read_session() as session:
+        series = await repo.get_series(session, series_id)
+    assert series.cv_date_last_updated == "2026-07-12 10:00:00"
+    first_refreshed_at = series.refreshed_at
+
+    # Second refresh, same date within the bound: SHORT-CIRCUIT — no new walk.
+    bus = EventBus()
+    received: list[SeriesRefreshed] = []
+    bus.subscribe(SeriesRefreshed, received.append)
+    db.event_publisher = bus.publish
+
+    await refresh_series(db, settings, series_id, commands=commands, factory=factory)
+    assert _issue_walk_reqs(transport) == 1  # walk skipped
+    rows = await _issues(db, series_id)
+    assert {r.cv_issue_id for r in rows} == {100, 101}  # issues untouched
+    assert SeriesRefreshed(series_id, partial=False) in received  # event still emitted
+
+    # A short-circuit deliberately does NOT bump refreshed_at (it must keep
+    # measuring age since the last real walk, the staleness backstop).
+    async with db.read_session() as session:
+        series = await repo.get_series(session, series_id)
+    assert series.refreshed_at == first_refreshed_at
+
+
+@pytest.mark.req("FRG-META-017")
+async def test_changed_absent_or_stale_forces_the_full_walk(
+    db, settings, commands, root_folder_id, root_folder_path, format_profile_id
+):
+    series_id = await _make_series(db, root_folder_path, format_profile_id)
+    fake = FakeCV().volume(1, date_last_updated="D1").issues(1, [issue(100, "1")])
+    factory = build_factory(settings, fake.handler())
+    transport = factory._transport
+
+    # Absent stamp (first ever refresh) -> full walk.
+    await refresh_series(db, settings, series_id, commands=commands, factory=factory)
+    assert _issue_walk_reqs(transport) == 1
+
+    # Changed date_last_updated -> full walk again.
+    fake.volume(1, date_last_updated="D2").issues(1, [issue(100, "1")])
+    await refresh_series(db, settings, series_id, commands=commands, factory=factory)
+    assert _issue_walk_reqs(transport) == 2
+
+    # Same date now, but the last walk is older than the staleness bound: the
+    # backstop forces a full walk regardless of the unchanged stamp.
+    async with db.write_session() as session:
+        series = await repo.get_series(session, series_id)
+        series.refreshed_at = utcnow() - dt.timedelta(days=999)
+    await refresh_series(db, settings, series_id, commands=commands, factory=factory)
+    assert _issue_walk_reqs(transport) == 3
+
+
+@pytest.mark.req("FRG-META-017")
+async def test_partial_walk_clears_the_stamp(
+    db, settings, commands, root_folder_id, root_folder_path, format_profile_id
+):
+    config_dir = Path(settings.config_dir)
+    series_id = await _make_series(db, root_folder_path, format_profile_id)
+
+    # A complete walk stores the stamp.
+    fake = FakeCV().volume(1, date_last_updated="D1").issues(
+        1, [issue(100, "1"), issue(101, "2")]
+    )
+    await refresh_series(
+        db, settings, series_id, commands=commands,
+        factory=build_factory(settings, fake.handler()),
+    )
+    async with db.read_session() as session:
+        series = await repo.get_series(session, series_id)
+    assert series.cv_date_last_updated == "D1"
+
+    # A changed date forces a walk; make that walk PARTIAL (mid-pagination 500).
+    # page_size 1 so offset 1 fails after the first page.
+    small = flows_settings(config_dir, comicvine_page_size=1)
+    fake.volume(1, date_last_updated="D2").issues(
+        1, [issue(100, "1"), issue(101, "2")], fail_after_offset=1, fail_status=500
+    )
+    await refresh_series(
+        db, small, series_id, commands=commands,
+        factory=build_factory(small, fake.handler()),
+    )
+    # The partial walk cleared the stamp so the next refresh cannot short-circuit
+    # on top of an incomplete reconciliation.
+    async with db.read_session() as session:
+        series = await repo.get_series(session, series_id)
+    assert series.cv_date_last_updated is None
+
+
+@pytest.mark.req("FRG-META-017")
+async def test_short_circuit_still_backfills_db_known_unstamped_credits(
+    db, settings, commands, root_folder_id, root_folder_path, format_profile_id
+):
+    config_dir = Path(settings.config_dir)
+    series_id = await _make_series(db, root_folder_path, format_profile_id)
+    fake = FakeCV().volume(1, date_last_updated="D1").issues(
+        1,
+        [
+            issue(100, "1", credits=[credit(1, "Ann", "writer")]),
+            issue(101, "2", credits=[credit(2, "Bo", "artist")]),
+        ],
+    )
+    # Only ONE credit detail fetch per refresh so the first walk leaves a
+    # credit-needing issue behind for the short-circuit run to pick up.
+    one = flows_settings(config_dir, credits_fetch_per_refresh=1)
+
+    # First refresh: full walk, stamp stored, newest issue (101) credit-fetched.
+    await refresh_series(
+        db, one, series_id, commands=commands,
+        factory=build_factory(one, fake.handler()),
+    )
+    assert await _stamped_cv_ids(db, series_id) == {101}
+
+    # Second refresh: SHORT-CIRCUIT (no walk), but credit backfill still targets
+    # the DB-known unstamped issue (100) and progresses.
+    factory2 = build_factory(one, fake.handler())
+    await refresh_series(db, one, series_id, commands=commands, factory=factory2)
+    assert _issue_walk_reqs(factory2._transport) == 0  # walk skipped
+    assert _credit_detail_ids(factory2._transport) == [100]  # backfilled 100
+    assert await _stamped_cv_ids(db, series_id) == {100, 101}
+
+
+# --- credit-phase budget defer + resume (FRG-META-016) ----------------------
+
+
+@pytest.mark.req("FRG-META-016")
+async def test_credit_phase_defers_on_budget_then_resumes_next_run(
+    db, settings, commands, root_folder_id, root_folder_path, format_profile_id
+):
+    """When the issue-detail path budget is exhausted mid credit-phase, the
+    refresh still SUCCEEDS with the credits fetched so far; a later run (with the
+    window rolled over) fetches the remainder — a clean defer-and-resume, not a
+    failure loop."""
+    config_dir = Path(settings.config_dir)
+    series_id = await _make_series(db, root_folder_path, format_profile_id)
+    issues_list = [
+        issue(200 + i, str(i + 1), credits=[credit(i + 1, f"C{i}", "writer")])
+        for i in range(15)
+    ]
+    fake = FakeCV().volume(1).issues(1, issues_list)  # no stamp -> always a walk
+    # The 'issue' credit-detail path clamps to the floor of 10; the 15 credit
+    # fetches this run wants exceed it, so the phase defers after 10.
+    budgeted = flows_settings(config_dir, comicvine_hourly_path_budget=10)
+
+    ratelimit.reset_gate()
+    summary = await refresh_series(
+        db, budgeted, series_id, commands=commands,
+        factory=build_factory(budgeted, fake.handler()),
+    )
+    # Refresh succeeded (a complete walk) despite the credit deferral.
+    assert "partial=False" in summary
+    assert len(await _stamped_cv_ids(db, series_id)) == 10  # exactly the budget
+
+    # A later run, once the rolling hour has cleared, backfills the remainder.
+    ratelimit.reset_gate()
+    await refresh_series(
+        db, budgeted, series_id, commands=commands,
+        factory=build_factory(budgeted, fake.handler()),
+    )
+    assert len(await _stamped_cv_ids(db, series_id)) == 15  # remainder resumed
 
 
 # --- chained commands + restart-safety (FRG-SER-005) ------------------------
