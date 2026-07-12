@@ -40,6 +40,9 @@ async def running_app(tmp_path: Path):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
         ) as client:
+            # Auth: attach the bootstrap API key so requests pass the default-deny
+            # perimeter (FRG-AUTH-010); the app seeded it at lifespan startup above.
+            client.headers["X-Api-Key"] = app.state.bootstrap_api_key
             yield app, client
 
 

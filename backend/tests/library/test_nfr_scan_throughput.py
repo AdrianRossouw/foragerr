@@ -225,6 +225,9 @@ async def test_scan_5000_files_completes_within_budget_without_starving_api(
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
         ) as client:
+            # Auth: attach the bootstrap API key so requests pass the default-deny
+            # perimeter (FRG-AUTH-010); the app seeded it at lifespan startup above.
+            client.headers["X-Api-Key"] = app.state.bootstrap_api_key
             async with app.state.db.write_session() as session:
                 rf = await repo.create_root_folder(session, str(root))
                 rf_id = rf.id

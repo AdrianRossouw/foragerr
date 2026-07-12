@@ -25,6 +25,22 @@ from foragerr.ws.messages import map_event
 from foragerr.ws.router import ws_endpoint
 
 
+@pytest.fixture(autouse=True)
+def _ws_auth_pass(monkeypatch):
+    """These push/limits tests drive the endpoint with a fake socket + fake app
+    that carry no auth state; the WS handshake auth + Origin gate (FRG-AUTH-010,
+    FRG-SEC-005) is exercised by test_auth_ws_csrf.py, so stub it to pass here.
+    The endpoint imports the gate lazily, so patching the source module takes
+    effect."""
+    import foragerr.auth.perimeter as perimeter_mod
+
+    async def _pass(_ws):
+        return 1
+
+    monkeypatch.setattr(perimeter_mod, "authenticate_ws", _pass)
+    monkeypatch.setattr(perimeter_mod, "ws_origin_ok", lambda _ws, _settings: True)
+
+
 def _drain(conn: Connection) -> list[dict]:
     """Pull and JSON-decode everything currently queued for one connection."""
     out: list[dict] = []

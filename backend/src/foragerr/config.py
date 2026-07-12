@@ -52,6 +52,10 @@ CONFIG_FILENAME = "config.yaml"
 #: never flags this env-var NAME as a credential value.
 KEYSTORE_ENV_VAR = "FORAGERR_" + "SECRET_KEY"
 
+#: Secret settings that are environment-only: never written to, or read from,
+#: the config file (rendered as an env-only note, popped from file values).
+_ENV_ONLY_SECRETS = ("secret_key", "admin_password", "opds_password")
+
 _LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
 #: Core mount paths the configurable OPDS base must never collide with: the
@@ -192,6 +196,63 @@ class Settings(BaseSettings):
             "Generate a strong value, e.g. 'openssl rand -base64 32', and keep "
             "it stable across restarts; a changed/lost value costs re-entry of "
             "stored provider secrets, never data."
+        ),
+    )
+    admin_user: str = Field(
+        default="",
+        description=(
+            "Bootstrap operator username (FRG-AUTH-002). Set via the "
+            "FORAGERR_ADMIN_USER environment variable. Seeds the single "
+            "principal on first authed boot; a changed value on a later boot "
+            "re-seeds the account (lost-password recovery). Startup fails "
+            "without it (and FORAGERR_ADMIN_PASSWORD) when no principal exists."
+        ),
+    )
+    admin_password: SecretStr = Field(
+        default=SecretStr(""),
+        description=(
+            "Bootstrap operator password (secret; FRG-AUTH-002). Set via the "
+            "FORAGERR_ADMIN_PASSWORD environment variable — never read from, or "
+            "written to, this config file. Stored only as a scrypt hash "
+            "(FRG-AUTH-003); a changed value re-seeds the account at boot."
+        ),
+    )
+    opds_password: SecretStr = Field(
+        default=SecretStr(""),
+        description=(
+            "Optional OPDS HTTP-Basic password (secret; FRG-AUTH-002). Set via "
+            "FORAGERR_OPDS_PASSWORD; when empty the OPDS reader password equals "
+            "the admin password at seed time. Environment-only; stored only as a "
+            "scrypt hash. Independent OPDS-password change lands in a later "
+            "change."
+        ),
+    )
+    session_timeout_seconds: int = Field(
+        default=86_400,
+        ge=60,
+        description=(
+            "Standard session sliding-inactivity timeout in seconds (FRG-AUTH-004). "
+            "Default 24 h. Each authenticated request slides the expiry forward."
+        ),
+    )
+    remember_timeout_seconds: int = Field(
+        default=7_776_000,
+        ge=60,
+        description=(
+            "Remember-me session sliding timeout in seconds (FRG-AUTH-004). "
+            "Default 90 days; selected by the login-form 'remember me' checkbox. "
+            "A default, not a floor — lower it for shared devices."
+        ),
+    )
+    auth_origin_allowlist: str = Field(
+        default="",
+        description=(
+            "Comma-separated extra allowed Origins for the CSRF check and the "
+            "WebSocket handshake (FRG-SEC-005), in addition to the deployment's "
+            "own origin (derived from the request host). Empty (default) means "
+            "own-origin only; set it for a reverse-proxied deployment whose "
+            "browser Origin differs from the app's host, e.g. "
+            "'https://comics.example.org'."
         ),
     )
     host: str = Field(
@@ -1112,6 +1173,14 @@ class Settings(BaseSettings):
             max_member_bytes=DEFAULT_ARCHIVE_LIMITS.max_member_bytes,
         )
 
+    def auth_extra_origins(self) -> set[str]:
+        """Configured extra allowed Origins (CSRF + WS handshake, FRG-SEC-005)."""
+        return {
+            origin.strip()
+            for origin in self.auth_origin_allowlist.split(",")
+            if origin.strip()
+        }
+
     def secret_fields(self) -> dict[str, SecretStr]:
         """All secret-typed settings by field name."""
         return {
@@ -1152,11 +1221,11 @@ def render_documented_config(values: dict[str, Any] | None = None) -> str:
             lines.append(f"#config_dir: {DEFAULT_CONFIG_DIR}")
             lines.append("")
             continue
-        if name == "secret_key":
-            # Environment-only and secret: never emit a settable/placeholder line
-            # so the passphrase can never be captured into the config file.
+        if name in _ENV_ONLY_SECRETS:
+            # Environment-only secrets: never emit a settable/placeholder line so
+            # the value can never be captured into the config file.
             lines.append(
-                "# (not read from this file — set the FORAGERR_SECRET_KEY "
+                f"# (not read from this file — set the FORAGERR_{name.upper()} "
                 "environment variable only)"
             )
             lines.append("")
@@ -1263,6 +1332,10 @@ def load_settings() -> Settings:
             file_values.pop(key)
 
     file_values.pop("secret_key", None)  # environment-only (never read from file)
+    # Bootstrap credentials are environment-only too (never persisted to the
+    # config file — the password is stored only as a scrypt hash, FRG-AUTH-003).
+    file_values.pop("admin_password", None)
+    file_values.pop("opds_password", None)
     try:
         settings = Settings(config_dir=config_dir, **file_values)
     except ValidationError as exc:
@@ -1272,6 +1345,14 @@ def load_settings() -> Settings:
     # without it, BEFORE any migration or data access, so a keyless boot changes
     # nothing on the database. The message names the variable and the fix.
     ensure_secret_key_present(settings)
+
+    # Mandatory login bootstrap (FRG-AUTH-002): when no principal exists yet the
+    # admin env pair is required — refuse to start without it, ordered directly
+    # after the keystore gate and before any migration or data write. Lazy
+    # import avoids a config <-> auth import cycle.
+    from foragerr.auth.bootstrap import ensure_admin_bootstrap_present
+
+    ensure_admin_bootstrap_present(settings)
 
     # Redaction registry hook (FRG-NFR-008): the filter learns every secret
     # value at config-load time — including the FORAGERR_SECRET_KEY passphrase.
