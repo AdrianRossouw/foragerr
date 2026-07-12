@@ -148,6 +148,7 @@ describe('FRG-UI-023: sidebar nav lists only shipped screens', () => {
       '/settings/media-management',
       '/settings/indexers',
       '/settings/download-clients',
+      '/settings/security',
       '/system/status',
       '/system/health',
       '/system/tasks',
