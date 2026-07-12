@@ -31,4 +31,4 @@
 
 ## 5. Gate
 
-- [ ] 5.1 Full suite green; tiered review gate (security-touching → full fleet + adversarial angle with a tested leak scenario + Codex) per docs/process/commit-standard.md merge-gate checklist
+- [x] 5.1 Full suite green; tiered review gate (security-touching → full fleet + adversarial angle with a tested leak scenario + Codex) per docs/process/commit-standard.md merge-gate checklist
