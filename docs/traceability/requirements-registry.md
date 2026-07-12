@@ -355,9 +355,9 @@ source. Compatibility: pre-1.0 releases may break with migration notes; from
 | FRG-AUTH-002 | single-user web login | auth | implemented | M8 |
 | FRG-AUTH-003 | password storage with modern KDF | auth | implemented | M8 |
 | FRG-AUTH-004 | session management | auth | implemented | M8 |
-| FRG-AUTH-005 | HTTP Basic for OPDS realm | auth | approved | M8 |
-| FRG-AUTH-006 | API keys separate from session auth | auth | approved | M8 |
-| FRG-AUTH-007 | API key lifecycle | auth | approved | M8 |
+| FRG-AUTH-005 | HTTP Basic for OPDS realm | auth | implemented | M8 |
+| FRG-AUTH-006 | API keys separate from session auth | auth | implemented | M8 |
+| FRG-AUTH-007 | API key lifecycle | auth | implemented | M8 |
 | FRG-AUTH-008 | at-rest secret encryption | auth | implemented | M6 |
 | FRG-AUTH-009 | login rate limiting and audit | auth | approved | M8 |
 | FRG-AUTH-010 | uniform coverage of all surfaces | auth | implemented | M8 |

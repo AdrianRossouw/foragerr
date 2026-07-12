@@ -1509,6 +1509,41 @@ owned by `m8-rate-audit`); RISK-022 flips to **Mitigated**; RISK-003 notes the O
 Basic realm is live (credential-independence lifecycle flips with FRG-AUTH-005 in
 `m8-keys-opds`); RISK-043/044 close their RISK-020-lineage accept-residuals.
 
+### m8-keys-opds status (2026-07-12, v0.8.0)
+
+Credential lifecycle lands (FRG-AUTH-005/006/007 implemented): in-app admin
+password change (acting session preserved, all others invalidated), independent
+OPDS password change, API-key display-once rotation, logout-all. Security-relevant
+deltas on the shipped model:
+
+- **Uniform re-auth on credential writes.** Every credential-changing endpoint
+  requires the current admin password in the request body; a ridden session
+  alone cannot mint a durable credential or lock the operator out. Failures are
+  a single generic 403 with no field oracle, structured-logged
+  (`auth.reauth_failed`) for `m8-rate-audit`'s counters. Logout-all deliberately
+  requires no re-auth: it grants nothing (pure session destruction) and is the
+  shared-device recovery, where friction favours the attacker.
+- **Env re-seed fingerprints** (closes the core gate's deferred footgun): boot
+  re-seed now compares the env pair against a stored scrypt fingerprint of the
+  pair *as last seeded*, per credential (admin and OPDS decoupled). A stale env
+  var can no longer silently revert an in-app change (an unlogged credential
+  rollback + session wipe — an integrity/DoS hazard); recovery still works by
+  supplying a value the environment has not seeded before. The fingerprints are
+  scrypt hashes stored beside the live hashes — same protection class, no new
+  disclosure surface.
+- **OPDS Basic verify-cache.** Positive-only, in-process, 60 s TTL, capacity 8,
+  keyed by SHA-256 of the presented `username\0password`, cleared synchronously
+  on every credential write. Negative results are never cached (no
+  wrong-credential pinning, no stale-deny after a change). Residual: a
+  credential changed by DIRECT database edit (outside the app) could verify for
+  up to 60 s — out of threat model (arbitrary DB write is already game-over).
+  The wrong-username path still runs the KDF on cache misses, preserving the
+  timing uniformity shipped in core.
+- **Display-once API key.** The raw key exists only in the bootstrap one-shot
+  and the rotate response; at rest only its SHA-256. The frontend confines the
+  rotate response to component state (verified by a tagged test that the key is
+  absent from DOM, query cache, and localStorage after the dialog closes).
+
 ## Coverage summary
 
 - **Well covered by the five drafts** (mitigation named, no new requirement needed): OPDS
