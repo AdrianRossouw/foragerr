@@ -1,7 +1,9 @@
-"""Root-level, unauthenticated health endpoint (FRG-DEP-007, FRG-AUTH-001).
+"""Root-level, unauthenticated health endpoint (FRG-DEP-007, FRG-AUTH-010).
 
 ``GET /health`` — deliberately NOT under ``/api/v1`` (FRG-API-001 scenario
-explicitly excludes it) and carries zero credentials. Reports liveness plus
+explicitly excludes it) and carries zero credentials: it is on the default-deny
+perimeter's fixed exempt list (``foragerr.auth.perimeter.EXEMPT_PATHS``) so a
+Docker/monitoring probe reaches it without credentials. Reports liveness plus
 per-component readiness: database (``db.health()``), workers
 (``commands.health()``), scheduler (derived from ``scheduler.status()``
 succeeding), and migration state (current Alembic revision at head). 200

@@ -19,8 +19,8 @@ which are missing, and serves the library to your reading device over OPDS — f
 example an iPad over Tailscale. Filling gaps integrates with your existing usenet
 tooling (Newznab indexers, SABnzbd). There is no built-in reader.
 
-It runs on one operator's home server, ships with **no built-in
-authentication** — the only supported exposure model is tailnet-only (see
+It runs on one operator's home server behind a mandatory login, and is best
+deployed tailnet-only rather than exposed to the open internet (see
 Installation) — and it doubles as a working demonstration
 of regulated software development practice applied to a small, real project (see
 the formicary.ai context this project is developed under). That second purpose is
@@ -143,10 +143,10 @@ software project would treat as controlled artifacts:
 - **Threat modelling and a risk register.** New attack surface (a listener, a parser
   of untrusted input, credentials, an outbound integration) requires an update to
   `docs/security/threat-model.md` (STRIDE analysis) and `docs/security/risk-register.md`
-  in the same change that introduces it. Accepted risks (for example, foragerr
-  currently shipping with no application authentication — see
-  `docs/manual/admin/network.md`) are recorded there with an owner, a rationale, and
-  a review trigger, not silently deferred.
+  in the same change that introduces it. Accepted risks (for example, the
+  recommendation to keep foragerr on a tailnet rather than the open internet —
+  see `docs/manual/admin/network.md`) are recorded there with an owner, a
+  rationale, and a review trigger, not silently deferred.
 - **A SOUP register.** Third-party runtime dependencies are tracked as SOUP
   (Software of Unknown Provenance, in IEC 62304 terms) in
   `docs/security/soup-register.md`: version constraint, source, purpose, and
@@ -198,13 +198,17 @@ docker run -d --name foragerr \
 ```
 
 Bind the port to your **tailnet address** (`100.x.y.z`), never a public
-interface — foragerr has no authentication and its only supported exposure model
-is Tailscale-only (`RISK-020`). Full instructions, a compose example, secrets
+interface — foragerr does no TLS termination of its own, so Tailscale-only
+remains the recommended exposure model even though every surface now requires
+a login (`RISK-020`). foragerr also refuses to start on a fresh deployment
+without a `FORAGERR_ADMIN_USER` / `FORAGERR_ADMIN_PASSWORD` pair, which seeds
+the one operator account. Full instructions, a compose example, secrets
 handling, and the network posture live in the admin manual:
 
 - `docs/manual/admin/deployment.md` — image build, run, upgrade, health checks
 - `docs/manual/admin/configuration.md` — every setting and its env override
 - `docs/manual/admin/secrets.md` — API keys (ComicVine, indexers, SABnzbd)
+- `docs/manual/admin/authentication.md` — mandatory login, bootstrap credentials
 - `docs/manual/admin/network.md` — the Tailscale-only exposure model
 
 ## Roadmap

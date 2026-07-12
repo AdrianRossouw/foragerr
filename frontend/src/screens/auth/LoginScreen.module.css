@@ -1,0 +1,120 @@
+/* Login screen (m8-auth-core, FRG-AUTH-002). Minimal and tokens-compliant —
+ * a single centered card, no brand-specific chrome beyond the shared logo
+ * lockup. Visual polish is explicitly OUT of scope here (M9). */
+.page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-page);
+  padding: var(--spacing-lg);
+}
+
+.card {
+  width: 100%;
+  max-width: 340px;
+  background: var(--surface-card);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: var(--spacing-xl);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-lg);
+}
+
+.brandWord {
+  color: var(--text-bright);
+  font-size: var(--font-size-heading);
+  font-weight: var(--font-weight-normal);
+}
+
+.brandWordAccent {
+  color: var(--color-accent);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.label {
+  color: var(--text-primary);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+}
+
+.input {
+  width: 100%;
+  padding: var(--spacing-sm);
+  background: var(--surface-input);
+  color: var(--text-primary);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-base);
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.rememberRow {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.checkbox {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  accent-color: var(--color-accent);
+}
+
+.rememberLabel {
+  color: var(--text-secondary);
+  font-size: var(--font-size-base);
+}
+
+.submit {
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--color-accent);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  color: var(--color-accent-contrast);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+}
+
+.submit:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+}
+
+.submit:disabled {
+  background: var(--surface-card-hover);
+  border-color: var(--surface-border);
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.error {
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-sm);
+  color: var(--color-danger);
+  font-size: var(--font-size-base);
+}

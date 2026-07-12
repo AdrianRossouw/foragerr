@@ -84,13 +84,16 @@ def test_first_run_generates_documented_config(config_dir):
     text = (config_dir / CONFIG_FILENAME).read_text(encoding="utf-8")
     parsed = yaml.safe_load(text)
 
+    from foragerr.config import _ENV_ONLY_SECRETS
+
     secret_names = set(settings.secret_fields())
     for name, field in Settings.model_fields.items():
-        if name == "secret_key":
+        if name in _ENV_ONLY_SECRETS:
             # Environment-only AND secret: never emitted as a settable/placeholder
-            # line so the passphrase can't be captured into the file (m6-keystore).
-            assert "secret_key" not in parsed
-            assert "FORAGERR_SECRET_KEY" in text  # documented as env-only
+            # line so the value can't be captured into the file (secret_key from
+            # m6-keystore; admin/opds passwords from m8-auth-core).
+            assert name not in parsed
+            assert f"FORAGERR_{name.upper()}" in text  # documented as env-only
             continue
         assert name in text, f"setting {name} missing from generated config"
         assert field.description.splitlines()[0] in text, (
@@ -126,14 +129,17 @@ def test_secrets_have_no_baked_in_defaults(config_dir):
     settings = load_settings()
     secrets = settings.secret_fields()
     assert secrets, "expected secret-typed settings to exist"
+    from foragerr.config import _ENV_ONLY_SECRETS
+
     for name, value in secrets.items():
         field_default = Settings.model_fields[name].default
         assert isinstance(field_default, SecretStr)
         assert field_default.get_secret_value() == "", f"{name} has a baked-in default"
-        # secret_key is the mandatory env-supplied passphrase (FRG-AUTH-011): its
-        # DEFAULT is empty like the rest, but load_settings requires it non-empty,
-        # so the loaded value is populated from the environment (not baked in).
-        if name != "secret_key":
+        # Env-only secrets (secret_key/admin_password/opds_password) have an empty
+        # DEFAULT like the rest, but their LOADED value may be supplied from the
+        # environment (the keystore passphrase and bootstrap credentials), so only
+        # assert the loaded value is empty for the non-env-only secrets.
+        if name not in _ENV_ONLY_SECRETS:
             assert value.get_secret_value() == "", f"{name} has a baked-in default"
     # generated config carries only commented placeholders for secrets
     parsed = yaml.safe_load((config_dir / CONFIG_FILENAME).read_text(encoding="utf-8"))

@@ -5,6 +5,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { App } from './App';
 import { createQueryClient } from './queryClient';
 import { FetcherProvider, defaultFetcher } from './api/fetcher';
+import { AuthGate } from './auth/AuthGate';
 // Self-hosted fonts + icons (FRG-UI-002): Roboto (300/400/500/700) and Font
 // Awesome 6 Free are vendored from npm packages and bundled by Vite into the
 // SPA's own assets — no Google Fonts / Font Awesome CDN request is ever made at
@@ -32,7 +33,9 @@ createRoot(rootEl).render(
     <QueryClientProvider client={queryClient}>
       <FetcherProvider fetcher={defaultFetcher}>
         <BrowserRouter>
-          <App />
+          <AuthGate>
+            <App />
+          </AuthGate>
         </BrowserRouter>
       </FetcherProvider>
     </QueryClientProvider>

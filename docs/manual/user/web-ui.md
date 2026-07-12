@@ -12,6 +12,23 @@ a WebSocket connection pushes resource-change notifications (series, queue,
 commands), so grabs, imports, and refreshes appear without reloading the page. If
 the connection drops, the UI reconnects automatically with backoff.
 
+## Signing in
+
+Opening foragerr while signed out lands on a login screen: username,
+password, and a **"Remember this device"** checkbox. Leave the checkbox
+unchecked for a standard session; check it on your own devices for a
+much longer-lived session so you aren't prompted again for weeks. A wrong
+username or password shows the same generic "Invalid username or password"
+message either way — the app deliberately never reveals which one was wrong.
+Once signed in, a link you had open (or bookmarked) before signing in takes
+you straight back to where you were headed rather than dropping you on the
+library index.
+
+A **logout** button sits in the global header alongside the Health and
+System quick-access buttons; it ends your session immediately and returns
+you to the login screen. See `../admin/authentication.md` for how the
+operator account is set up and how a lost password is recovered.
+
 ## The shell
 
 Every screen renders inside a fixed three-part frame — the sidebar never moves,

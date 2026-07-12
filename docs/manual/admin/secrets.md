@@ -112,6 +112,17 @@ happens if `FORAGERR_SECRET_KEY` changes or the session itself expires on
 Humble's side (recovery is the same re-entry path described above — never
 data loss).
 
+### The environment trust class
+
+`FORAGERR_ADMIN_USER` / `FORAGERR_ADMIN_PASSWORD` (the mandatory bootstrap
+account, see `authentication.md`) and the optional `FORAGERR_OPDS_PASSWORD`
+belong to the same trust class as `FORAGERR_SECRET_KEY`: environment-only,
+never written to `config.yaml`, and only as safe as whoever can read or edit
+your deployment's environment (a compose file, an `.env` file, your process
+manager's config). Anyone who can set these variables can set the operator
+account outright — treat the environment the same way you'd treat a root
+credential, not as an ordinary setting.
+
 ### Backups
 
 A backup taken after this release requires the **same** `FORAGERR_SECRET_KEY` to

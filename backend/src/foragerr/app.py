@@ -31,10 +31,13 @@ from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from types import FrameType
 
 from foragerr.api import register_api
+from foragerr.auth import register_auth
+from foragerr.auth.bootstrap import ensure_admin_bootstrap_present
+from foragerr.auth.perimeter import perimeter
 from foragerr.commands import register_scheduler
 from foragerr.commands.service import OFFLOAD_THREAD_PREFIX
 from foragerr.config import (
@@ -105,6 +108,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # boot fails with the same typed ConfigError instead of proceeding without
         # a keystore passphrase.
         ensure_secret_key_present(settings)
+        # Mirror the FRG-AUTH-002 bootstrap gate on the injected-Settings path
+        # (load_settings enforces it on the uvicorn --factory path).
+        ensure_admin_bootstrap_present(settings)
     setup_logging(
         settings.config_dir,
         level=settings.log_level,
@@ -124,14 +130,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(
         title="foragerr",
         lifespan=_lifespan,
-        openapi_url="/api/v1/openapi.json",
-        docs_url="/api/v1/docs",
+        # FastAPI's built-in openapi/docs/redoc routes are PLAIN Starlette routes
+        # (not APIRoutes), so the app-level auth dependency below does not cover
+        # them — leaving them enabled would expose the API schema + Swagger UI
+        # unauthenticated, violating the FRG-AUTH-010 "every route refuses bare or
+        # is exempt" invariant. Disable them here and re-serve openapi.json as an
+        # authenticated APIRoute (see below); the interactive Swagger/redoc UIs
+        # are dropped (a single-operator tool does not need in-app API explorers).
+        openapi_url=None,
+        docs_url=None,
         redoc_url=None,
-        # FastAPI's oauth2-redirect helper route defaults to "/docs/..." even
-        # with a custom docs_url, and would be the one route outside
-        # /api/v1 (FRG-API-001). No auth/OAuth2 exists in M1 (FRG-AUTH-001)
-        # so the redirect helper is unused; disable it outright.
-        swagger_ui_oauth2_redirect_url=None,
+        # Default-deny perimeter (FRG-AUTH-010): the single root auth dependency,
+        # installed BEFORE any router is included so every mounted API/OPDS router
+        # inherits it by construction — routes are born protected, exemption is
+        # the explicit act (foragerr.auth.perimeter.EXEMPT_PATHS). The static SPA
+        # Mount is not reached by app-level dependencies and serves the
+        # unauthenticated shell; the WebSocket runs the same check in its
+        # handshake (foragerr.ws.router).
+        dependencies=[Depends(perimeter)],
     )
     app.state.settings = settings
     app.state.log_buffer = log_buffer_handler  # FRG-API-021 GET /api/v1/log
@@ -183,6 +199,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # the scheduler above has created app.state.scheduler.
     app.state.startup_hooks.append(_register_backup_database_task)
 
+    # --- auth area (m8-auth-core, FRG-AUTH-002/003/004/010, FRG-SEC-005): the
+    #     default-deny perimeter dependency was installed at FastAPI construction
+    #     above (so every router inherits it); register_auth mounts the login
+    #     routes and appends the env-bootstrap seeding hook (after the db area,
+    #     so app.state.db + the principal table exist) and the session-prune task
+    #     (after the scheduler area, so app.state.scheduler exists). ---
+    register_auth(app)
+
     # --- library flows (change 3): importing registers the chained
     #     refresh-series/scan-series/series-search commands + handlers
     #     (FRG-SER-005/006/007, FRG-META-008). A bare import for the decorator
@@ -190,7 +214,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from foragerr.library import flows as _library_flows  # noqa: F401
 
     # --- api area (tasks 5.x): error handling, health, version, command
-    #     routers (FRG-API-001/002, FRG-DEP-007/010, FRG-AUTH-001) ---
+    #     routers (FRG-API-001/002, FRG-DEP-007/010; auth via the root
+    #     perimeter, FRG-AUTH-010) ---
     register_api(app)
 
     # --- indexers area (m1-search-indexers): provider schema + test endpoints
@@ -454,6 +479,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from foragerr.opds import register_opds
 
     register_opds(app)
+
+    # --- openapi schema (FRG-API-001, authenticated): re-served as an APIRoute
+    #     so it inherits the default-deny perimeter (the framework's built-in
+    #     openapi route is a plain Route the dependency misses, FRG-AUTH-010). The
+    #     schema discloses the API surface, so it is behind auth like every other
+    #     non-exempt route. include_in_schema=False keeps it out of its own body. ---
+    @app.get("/api/v1/openapi.json", include_in_schema=False)
+    async def openapi_schema() -> dict:
+        return app.openapi()
 
     # --- spa area (m1-ui-opds-deploy, area: deploy): serve the built React SPA
     #     statically at "/" (FRG-DEP-001). Mounted LAST so the API / OPDS / health

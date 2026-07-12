@@ -6,12 +6,16 @@ an unauthenticated `/health` endpoint for the container health check, and a grac
 SIGTERM shutdown. The image serves everything on one port (`8789`): the web UI at `/`,
 the API at `/api`, the OPDS catalog at `/opds`, and the health probe at `/health`.
 
-> **Read `network.md` first.** foragerr has **no authentication**
-> (`FRG-AUTH-001`, an owner-accepted risk — `RISK-020`). Its only supported exposure
-> model is **Tailscale-only**. The compose example below binds the listener to the
-> host's tailnet address for that reason. Do **not** port-forward foragerr to the
-> public internet or an untrusted LAN. See "Network exposure" below and `network.md`
-> for the full posture.
+> **Read `authentication.md` first.** foragerr **requires login on every
+> surface** and, on a fresh deployment, refuses to start unless
+> `FORAGERR_ADMIN_USER` / `FORAGERR_ADMIN_PASSWORD` are set (BREAKING —
+> see "Environment variables" below). Its recommended exposure model is
+> still **Tailscale-only**, since foragerr does no TLS termination of its
+> own. The compose example below binds the listener to the host's tailnet
+> address for that reason. Do **not** port-forward foragerr to the public
+> internet or an untrusted LAN without your own TLS in front of it. See
+> "Network exposure" below, `network.md`, and `authentication.md` for the
+> full posture.
 
 ## Building the image
 
@@ -47,8 +51,10 @@ docker run -d \
 
 The port binding is deliberately prefixed with the host's **tailnet address**
 (substitute your own `100.x.y.z`) — a bare `-p 8789:8789` would publish the
-unauthenticated listener on every host interface. This is the RISK-020
-compensating control; it is not optional (see `network.md`).
+listener on every host interface. foragerr requires a login on every route,
+but it still does no TLS termination of its own, so the tailnet boundary
+remains the recommended default (see `network.md`); it is not optional in
+this manual's supported deployment model.
 
 Files created under `/config` are owned by the `PUID:PGID` you supply — the container
 drops root at startup and runs the application as that unprivileged user. See the
@@ -93,6 +99,15 @@ downloads, not application state, and their paths are whatever you configure. On
 > your container's environment, and keep it stable across restarts. A changed or
 > lost passphrase costs re-entry of your provider secrets (never data) — see
 > `secrets.md` → "At-rest encryption of stored provider secrets".
+
+> **BREAKING — set `FORAGERR_ADMIN_USER` / `FORAGERR_ADMIN_PASSWORD` before
+> upgrading.** From this release foragerr requires a login on every surface
+> and refuses to start on a fresh deployment without this pair — it seeds the
+> single operator account (web login, OPDS password, and an API key) on first
+> boot. A changed pair on a later boot re-seeds the account and signs out
+> every session — the lost-password recovery path. See `authentication.md`
+> for the full picture, including the OPDS/API-key credentials the same boot
+> provisions.
 
 ### Health and shutdown
 
@@ -173,24 +188,24 @@ Status screen (see `../user/web-ui.md`) lists the managed paths, including
 
 ## Network exposure
 
-### Tailscale-only is the compensating control
+### Tailscale-only is still the recommended default
 
-foragerr operates with **no authentication** on the UI, API, and OPDS surfaces.
-This is a deliberate, owner-approved decision recorded as **`RISK-020`** in
-`docs/security/risk-register.md` ("no auth, network-scoped exposure",
-accepted); adding authentication is tracked in
-[the roadmap](../../roadmap.md). The **compensating control** is that foragerr is reachable **only over the
-home server's Tailscale network** (`FRG-DEP-011`) — that is what keeps the no-auth
-posture inside its accepted-risk boundary. Transport security is provided by the
-tailnet; foragerr performs no TLS termination of its own.
+foragerr requires a login on every surface (`authentication.md`), but that does
+not by itself make wide-open exposure a good idea: foragerr performs no TLS
+termination of its own, so transport security still depends on the network
+you run it on. The recommended posture is that foragerr is reachable **only
+over the home server's Tailscale network** (`FRG-DEP-011`) — transport
+security is provided by the tailnet, and login rate limiting / lockout
+backoff are not shipped yet (planned for a follow-up release).
 
-### Do not port-forward foragerr
+### Do not port-forward foragerr without your own TLS
 
 **Do not** expose foragerr's port to the public internet, a shared/untrusted LAN, or a
-reverse proxy without its own access control. Widening exposure beyond the tailnet
-while foragerr has no authentication puts you outside the accepted-risk boundary
-in the risk register and is a decision that needs its own review — not an incidental
-config change. See `network.md` for the operational detail.
+reverse proxy without its own TLS termination and access control. Widening
+exposure beyond the tailnet is a decision that needs its own review — not an
+incidental config change — see `network.md` for the operational detail and
+`authentication.md` for the reverse-proxy Origin allowlist setting if you do
+run one.
 
 ### Tailnet-bound compose example
 
@@ -215,6 +230,15 @@ services:
       # without it. Generate a strong value once (openssl rand -base64 32) and
       # keep it stable across restarts. See secrets.md.
       FORAGERR_SECRET_KEY: "${FORAGERR_SECRET_KEY}"
+      # REQUIRED on first boot: the operator login. foragerr refuses to start
+      # without this pair when no account exists yet; a changed pair on a
+      # later boot re-seeds the account (lost-password recovery). See
+      # authentication.md.
+      FORAGERR_ADMIN_USER: "${FORAGERR_ADMIN_USER}"
+      FORAGERR_ADMIN_PASSWORD: "${FORAGERR_ADMIN_PASSWORD}"
+      # Optional: a separate OPDS reader password. Omit to use the admin
+      # password for OPDS too.
+      # FORAGERR_OPDS_PASSWORD: "${FORAGERR_OPDS_PASSWORD}"
       FORAGERR_COMICVINE_API_KEY: "${FORAGERR_COMICVINE_API_KEY}"
       # Download-client and indexer credentials (SABnzbd, DogNZB, NZB.su, …) are
       # per-provider settings entered in the UI, not app-wide env vars.
@@ -229,18 +253,20 @@ services:
 ```
 
 Because the port is bound to the tailnet interface, foragerr is unreachable from the
-public internet or the local LAN even though it has no authentication of its own — the
-network boundary is the control. The `FORAGERR_*` secrets are passed as environment
-variables (here from the host's environment or an `env_file`); they are never part of
-the image.
+public internet or the local LAN even with the login in place — the network
+boundary and the login are layered controls, not either/or. The `FORAGERR_*`
+secrets are passed as environment variables (here from the host's environment
+or an `env_file`); they are never part of the image.
 
 ## Related
 
-- `network.md` — the no-auth posture and Tailscale-only exposure model in full.
+- `authentication.md` — the mandatory login, bootstrap variables, and
+  credentials-by-surface in full.
+- `network.md` — the Tailscale-only exposure model in full.
 - `configuration.md` — every `FORAGERR_*` / `config.yaml` setting, including
   "Scheduled backups" (what a backup contains, retention, the plaintext-
   credentials caveat).
-- `secrets.md` — how to supply API keys.
+- `secrets.md` — how to supply API keys, and the environment trust class.
 - `../user/web-ui.md` — the System area (Status, Health, Tasks/"Back up now").
-- `docs/security/risk-register.md` — `RISK-020` and `RISK-041`, and their
-  review triggers.
+- `docs/security/risk-register.md` — `RISK-020`, `RISK-022`, and `RISK-041`,
+  and their review triggers.

@@ -8,9 +8,12 @@ and the scratchpad drafts `baseline/{library-domain,acquisition,files-domain,int
 
 - **Deployment**: single Docker container (linuxserver.io conventions) on a home server;
   Python/FastAPI + SQLite + React. All persistent state under `/config`.
-- **Network posture**: reachable only over Tailscale. **M1 ships with NO application auth** — a
-  deliberate, owner-accepted risk whose sole compensating control is the tailnet boundary
-  (RISK-020). Auth (session/API-key/OPDS-Basic) lands M8 (2026-07-10 reshape; at-rest secret encryption decouples to M6).
+- **Network posture**: reachable only over Tailscale. **M1 shipped with NO application auth** — a
+  deliberate, owner-accepted risk whose sole compensating control was the tailnet boundary
+  (RISK-020). **Since m8-auth-core (2026-07-12) authentication is MANDATORY on every surface**
+  (session/API-key/OPDS-Basic behind a default-deny perimeter, FRG-AUTH-010); the tailnet
+  boundary remains as deployment defense-in-depth, no longer a compensating control. At-rest
+  secret encryption landed at M6 (FRG-AUTH-008).
 - **Users**: single trusted operator + iPad OPDS reader apps (also on the tailnet).
 - **Untrusted inputs crossing a trust boundary**:
   1. Comic archives (CBZ/CBR/CB7/PDF) from the internet (usenet, DDL, existing library).
@@ -1426,6 +1429,86 @@ RISK-045, RISK-047, and RISK-048 are added as **Mitigate**; RISK-046 is added as
 **Accept (residual)**. No new STRIDE category beyond Spoofing/Info
 disclosure/Tampering/DoS/SSRF, all already modeled elsewhere in this document.
 
+### 2026-07-12 — m8-auth-core (M8 change 1)
+
+The milestone that ends the RISK-020 acceptance. New attack surface: a credential
+parser on an exempt route (login), a session store, cookies in the browser, and a
+bootstrap path that consumes credentials from the environment. New session/cookie/
+CSRF rows; G-5 closed; FRG-AUTH-001 retired. Disposition:
+
+- **T-AUTH-1 (Spoofing — credential guessing at the exempt login route)**: the only
+  unauthenticated POST surface in the application. Mitigations in this change:
+  scrypt verification cost (~170 ms, n=2^17) bounds online guessing throughput per
+  connection; failures are uniform (`401 {"message":"invalid credentials"}` for
+  unknown-user and wrong-password alike, with one KDF operation on every path, so
+  neither response body nor timing distinguishes them). **Residual → `m8-rate-audit`**:
+  per-IP/principal failure counters with exponential backoff and structured audit
+  events (FRG-AUTH-009) — tracked on RISK-020's residual note, acceptable inside the
+  tailnet posture meanwhile.
+- **T-AUTH-2 (Spoofing/Elevation — session token theft or fixation)**: tokens are
+  256-bit random, stored server-side only as SHA-256 (a DB/backup leak reveals no
+  usable token); the raw token exists only in an HttpOnly SameSite=Lax cookie
+  (script-unreadable, cross-site-unsent); login regenerates the token so a
+  pre-login fixated cookie never authenticates; logout and password re-seed delete
+  rows server-side (replay after logout is a tagged test). Remember-me (90 d
+  sliding) widens the theft window by design — owner-accepted comfort decision,
+  default-not-floor, configurable down. `Secure` flag is conditional on transport;
+  TLS remains DEP's story (documented in the manual).
+- **T-AUTH-3 (Elevation/CSRF — riding the operator's ambient session)**: closed by
+  FRG-SEC-005 (see RISK-022): Origin/Referer check on cookie-authenticated unsafe
+  methods (foreign AND absent Origin refused, 403 before any side effect),
+  SameSite=Lax as the second layer, API-key surface immune by construction, WS
+  Origin allowlist pre-upgrade. T-API-6 and the COMP-2 WS Origin gap both resolve
+  here.
+- **T-AUTH-4 (Info disclosure — credential material at rest / in logs)**: passwords
+  and the OPDS password stored only as salted scrypt strings; the API key only as
+  SHA-256 (high-entropy input needs no KDF); bootstrap env values are
+  redaction-registered for the process lifetime (FRG-NFR-008), and a tagged test
+  captures logs across seed/login/failure/re-seed asserting no credential material.
+  The one-shot `bootstrap-key` endpoint holds the raw API key in process memory
+  only, requires an authenticated session, and 404s after first read and after
+  restart.
+- **T-AUTH-5 (Elevation — a route that forgot the perimeter)**: the classic
+  regression is prevented three ways (FRG-AUTH-010): the dependency is installed at
+  the application root so new routers are born covered; an exhaustive
+  route-inventory test walks `app.routes` asserting every route is exempt-listed
+  (exactly `/health` + `/api/v1/auth/login`) or refuses bare requests; e2e negative
+  paths exercise each surface. FastAPI's built-in Swagger/redoc routes (plain
+  Starlette routes the dependency cannot cover) were removed and `openapi.json`
+  re-served as an authenticated route — the schema no longer leaks unauthenticated.
+  Static SPA mounts stay exempt by construction and serve only static UI code.
+- **T-AUTH-6 (Tampering/DoS — hostile input to the auth parsers)**: login accepts a
+  small JSON body on an exempt route; body size is bounded by the existing listener
+  limits (G-1 controls), pydantic-validated, and touches only the principal row.
+  Basic-auth parsing on OPDS uses the standard header decode with the same uniform
+  failure. The scrypt cost that defends T-AUTH-1 also bounds attacker-imposed CPU
+  per request (one KDF op, no amplification).
+- **Bootstrap env credentials (environment trust class)**: `FORAGERR_ADMIN_USER`/
+  `FORAGERR_ADMIN_PASSWORD` (+ optional `FORAGERR_OPDS_PASSWORD`) join
+  `FORAGERR_SECRET_KEY` in the same trust class — visible to whoever can read the
+  compose file/environment, which is already the deployment's root of trust
+  (documented together in the manual's secrets page). Re-seed-on-change is the
+  deliberate lockout-recovery path; it invalidates all sessions and logs a
+  structured event without credential material.
+- **New dependency: none.** scrypt comes from the already-SOUP'd `cryptography`;
+  sessions/principal ride SQLite; no SOUP register change.
+- **Gate-round hardenings (full 8-angle fleet + Codex, 2026-07-12)**: the KDF is
+  offloaded off the event loop (`anyio.to_thread.run_sync`) so the every-request
+  OPDS Basic verify cannot head-of-line-block the server (T-AUTH-6 amplification
+  bound); `bootstrap-key` moved GET→POST so the consuming one-shot read carries
+  the CSRF Origin check (a cross-site GET could otherwise burn the operator's
+  retrieval); the `principal` table gained a `CHECK (id = 1)` singleton so two
+  instances on one DB cannot both seed a valid account; the login-redirect
+  `?return=` guard resolves against the real origin (a substring guard let
+  `/\evil.com` through and crashed the SPA on a cross-origin history mutation);
+  logout now returns the cookie-deletion response so the stale cookie is cleared
+  client-side. All five are covered by tagged tests.
+
+RISK-020 flips **Accept → Mitigated** (rate-limit/audit residual noted on the row,
+owned by `m8-rate-audit`); RISK-022 flips to **Mitigated**; RISK-003 notes the OPDS
+Basic realm is live (credential-independence lifecycle flips with FRG-AUTH-005 in
+`m8-keys-opds`); RISK-043/044 close their RISK-020-lineage accept-residuals.
+
 ## Coverage summary
 
 - **Well covered by the five drafts** (mitigation named, no new requirement needed): OPDS
@@ -1440,4 +1523,7 @@ disclosure/Tampering/DoS/SSRF, all already modeled elsewhere in this document.
     not only DDL.
   - **G-4 / G-4a** cross-cutting archive-processing safety (bomb/zip-slip limits at import,
     cover extraction, tagging) and central filesystem path confinement/safe-join.
-  - **G-5** CSRF stance + WebSocket Origin validation (CSWSH).
+  - **G-5** CSRF stance + WebSocket Origin validation (CSWSH). **CLOSED (m8-auth-core,
+    2026-07-12)**: FRG-SEC-005 implemented — Origin/Referer check on cookie-authenticated
+    unsafe methods, API-key surface CSRF-immune by construction, WS Origin allowlist enforced
+    pre-upgrade. RISK-022 Mitigated.

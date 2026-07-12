@@ -1,7 +1,7 @@
-import { test, expect, request as pwRequest, type APIRequestContext, type Page } from '@playwright/test';
+import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { nudgeImport, until } from './helpers';
+import { newApiContext, nudgeImport, until } from './helpers';
 
 /**
  * Daily-spine assertions deferred from m2-daily-surfaces (ch4) to this change
@@ -80,7 +80,7 @@ let sagaId = 0;
 test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async () => {
-  api = await pwRequest.newContext({ baseURL: BASE_URL, ignoreHTTPSErrors: true });
+  api = await newApiContext(BASE_URL);
   // The spine has already added Saga and imported #1; resolve its id from the
   // real API rather than sharing the spine module's state (separate file).
   sagaId = await until(

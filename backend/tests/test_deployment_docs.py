@@ -1,11 +1,13 @@
 """Labelling-control checks for the Tailscale-only exposure posture (FRG-DEP-011).
 
-foragerr ships with no authentication in M1 (FRG-AUTH-001, accepted RISK-020);
-the ONLY compensating control is Tailscale-scoped exposure, and the deployment
-manual is the artifact that makes that control operational. These tests pin the
-manual to the posture so a docs edit cannot silently reintroduce an example
-that publishes the unauthenticated listener on every interface — the
-documentation here is a controlled artifact, and this is its regression test.
+Authentication is mandatory since m8-auth-core (FRG-AUTH-001 withdrawn,
+RISK-020 Mitigated), so Tailscale-scoped exposure is now deployment
+defense-in-depth (no TLS termination of our own, rate limiting pending
+m8-rate-audit) rather than the sole compensating control it once was. The
+deployment manual still carries the do-not-publish posture, and these tests
+pin it so a docs edit cannot silently reintroduce an example that publishes
+the listener on every interface — the documentation here is a controlled
+artifact, and this is its regression test.
 """
 
 import re
@@ -41,8 +43,10 @@ def test_no_deployment_example_publishes_the_port_on_all_interfaces():
 def test_network_manual_states_the_exposure_rule():
     text = (_DOCS / "network.md").read_text()
     assert "Do not" in text and "public internet" in text, (
-        "network.md must carry the explicit do-not-publish warning — it is "
-        "the RISK-020 compensating-control statement"
+        "network.md must carry the explicit do-not-publish warning — since "
+        "m8-auth-core it is defense-in-depth (no TLS termination, rate "
+        "limiting pending m8-rate-audit), not the RISK-020 compensating "
+        "control it originated as"
     )
     assert "Tailscale" in text or "tailnet" in text
 

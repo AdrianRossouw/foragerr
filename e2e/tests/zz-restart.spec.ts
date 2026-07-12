@@ -1,5 +1,6 @@
 import { test, expect, request as pwRequest } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
+import { newApiContext } from './helpers';
 
 /**
  * Restart-resilience scenario (FRG-PROC-010, FRG-SCHED-002), isolated in its own
@@ -30,7 +31,7 @@ test('FRG-PROC-010 FRG-SCHED-002: library and command queue survive a container 
   // and rebuilt the tables could satisfy a bare "count >= prior" while losing
   // the very rows that are supposed to persist. Persistence means THESE rows
   // survive by identity.
-  const api = await pwRequest.newContext({ baseURL: BASE_URL, ignoreHTTPSErrors: true });
+  const api = await newApiContext(BASE_URL);
   const series = await (await api.get('/api/v1/series?page=1&pageSize=200')).json();
   const seriesId = series.records.find((s: any) => s.cv_volume_id === 18166)?.id;
   expect(seriesId, 'the imported series exists before restart').toBeTruthy();
@@ -66,7 +67,7 @@ test('FRG-PROC-010 FRG-SCHED-002: library and command queue survive a container 
   }
   expect(await healthy(newBase), 'app healthy after restart').toBe(true);
 
-  const api2 = await pwRequest.newContext({ baseURL: newBase, ignoreHTTPSErrors: true });
+  const api2 = await newApiContext(newBase);
   // Persisted library survives the restart — asserted by identity: the SAME
   // issue-file id is still served from the series' OPDS acquisition feed.
   const detail = await (await api2.get(`/api/v1/series/${seriesId}`)).json();

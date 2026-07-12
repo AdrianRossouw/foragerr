@@ -4,6 +4,7 @@ import { HeaderQuickSearch } from './HeaderQuickSearch';
 import { GlobalBanner } from './GlobalBanner';
 import { WebSocketBridge } from '../ws/WebSocketBridge';
 import { useHasExpiredSource } from '../api/sourceHooks';
+import { LogoutButton } from './LogoutButton';
 import type { SocketFactory } from '../ws/socket';
 import styles from './AppShell.module.css';
 
@@ -11,11 +12,13 @@ import styles from './AppShell.module.css';
  * Application shell (FRG-UI-023): the fixed three-part frame every screen
  * renders inside — a 212px sidebar (nav + counts + system section + status
  * footer), a 60px global header (the relocated quick-search FRG-UI-019 on the
- * left, health/system icon buttons on the right), and the main column whose
- * per-screen toolbar + content region is the only scrolling area. Mounts the
- * single WebSocketBridge so cache invalidation/patch and connection state are
- * wired app-wide; `socketFactory` is injectable so tests can drive a fake
- * socket.
+ * left, health/system/logout icon buttons on the right), and the main column
+ * whose per-screen toolbar + content region is the only scrolling area.
+ * Mounts the single WebSocketBridge so cache invalidation/patch and
+ * connection state are wired app-wide; `socketFactory` is injectable so tests
+ * can drive a fake socket. Only ever mounted inside `AuthGate`'s
+ * authenticated tree (m8-auth-core) — logging out or a 401 mid-session
+ * unmounts it, which is what closes the socket.
  */
 export function AppShell({ socketFactory }: { socketFactory?: SocketFactory }) {
   const navigate = useNavigate();
@@ -63,6 +66,7 @@ export function AppShell({ socketFactory }: { socketFactory?: SocketFactory }) {
             >
               <i className="fa-solid fa-server" aria-hidden />
             </button>
+            <LogoutButton />
           </div>
         </header>
         <div className={styles.outlet} id="main-content">

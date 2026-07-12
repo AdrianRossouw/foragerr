@@ -1,9 +1,10 @@
 """The ``/api/v1/ws`` WebSocket endpoint (FRG-API-010).
 
-No auth in M1 (FRG-AUTH-001; Origin validation deferred to FRG-SEC-005/M3,
-recorded as a residual risk): the endpoint accepts any connection. It holds no
-server data — it just bridges the shared :class:`WsBroadcaster` on
-``app.state.ws_broadcaster`` to one socket:
+Auth (FRG-AUTH-010, FRG-SEC-005): the handshake runs the same credential check
+(session cookie or ``X-Api-Key``) plus the Origin allowlist BEFORE ``accept()``,
+refusing an unauthenticated or cross-origin connection pre-upgrade. Past that
+gate it holds no server data — it just bridges the shared :class:`WsBroadcaster`
+on ``app.state.ws_broadcaster`` to one socket:
 
 * :func:`pump` drains this socket's send queue to the wire;
 * a read loop turns the (unused) inbound channel into a disconnect detector;
@@ -98,6 +99,22 @@ async def _drain_incoming(
 async def ws_endpoint(websocket: WebSocket) -> None:
     broadcaster = websocket.app.state.ws_broadcaster
     settings = websocket.app.state.settings
+    # Default-deny perimeter on the socket (FRG-AUTH-010, FRG-SEC-005): run the
+    # same credential check (session cookie or X-Api-Key) and the Origin
+    # allowlist BEFORE accept(), refusing cross-origin or unauthenticated
+    # handshakes pre-upgrade so no socket is ever established. 1008 = policy
+    # violation. Origin is checked first (a cross-site page must not even learn
+    # whether a credential would have worked).
+    from foragerr.auth.perimeter import authenticate_ws, ws_origin_ok
+
+    if not ws_origin_ok(websocket, settings):
+        with contextlib.suppress(BaseException):
+            await websocket.close(code=1008)
+        return
+    if await authenticate_ws(websocket) is None:
+        with contextlib.suppress(BaseException):
+            await websocket.close(code=1008)
+        return
     # Concurrent-connection cap (FRG-NFR-014): refuse over-cap sockets BEFORE
     # accept() and WITHOUT registering, so the registry and every live socket
     # are untouched. 1013 = Try Again Later — a clean handshake refusal. Below

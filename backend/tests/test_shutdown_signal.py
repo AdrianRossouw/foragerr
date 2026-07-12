@@ -68,19 +68,44 @@ def _spawn_blocking_offload_app(config_dir: Path, port: int, grace: str):
     )
 
 
-def _enqueue_noop(port: int) -> int:
+def _login(port: int) -> httpx.Cookies:
+    """Authenticate against the live subprocess through the exempt login route
+    (mandatory auth, FRG-AUTH-002) and return the session cookie jar. The admin
+    credentials are the ones the parent env passed to the subprocess."""
     response = httpx.post(
-        f"http://127.0.0.1:{port}/api/v1/command", json={"name": "noop"}, timeout=5.0
+        f"http://127.0.0.1:{port}/api/v1/auth/login",
+        json={
+            "username": os.environ["FORAGERR_ADMIN_USER"],
+            "password": os.environ["FORAGERR_ADMIN_PASSWORD"],
+        },
+        timeout=5.0,
+    )
+    assert response.status_code == 200, response.text
+    return response.cookies
+
+
+def _enqueue_noop(port: int) -> int:
+    cookies = _login(port)
+    response = httpx.post(
+        f"http://127.0.0.1:{port}/api/v1/command",
+        json={"name": "noop"},
+        cookies=cookies,
+        # Same-origin Origin so the cookie-authed POST passes the CSRF check.
+        headers={"Origin": f"http://127.0.0.1:{port}"},
+        timeout=5.0,
     )
     assert response.status_code == 201, response.text
     return response.json()["id"]
 
 
 def _wait_status(port: int, command_id: int, target: str, timeout: float = 10.0) -> None:
+    cookies = _login(port)
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         response = httpx.get(
-            f"http://127.0.0.1:{port}/api/v1/command/{command_id}", timeout=2.0
+            f"http://127.0.0.1:{port}/api/v1/command/{command_id}",
+            cookies=cookies,
+            timeout=2.0,
         )
         if response.status_code == 200 and response.json()["status"] == target:
             return
