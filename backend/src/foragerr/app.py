@@ -323,6 +323,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.state.startup_hooks.append(_register_pull_refresh_task)
 
+    # --- creators backbone (m5-creators-backbone): importing the module
+    #     registers the creators-backfill command + handler (FRG-CRTR-003); mount
+    #     the creators read + follow-toggle router (FRG-API-023) under /api/v1.
+    #     The one-time credits backfill is a marker-gated startup hook that also
+    #     registers the (non-recurring) force-runnable task — appended after
+    #     register_scheduler above (which creates app.state.scheduler/commands)
+    #     and after the db area's migration hook (so app_state + library tables
+    #     exist). Reconciliation is already wired into refresh-series (change 1),
+    #     so the backfill only has to fan out one deduplicated refresh per
+    #     series. ---
+    import foragerr.creators.commands  # noqa: F401 — command/handler registration
+    import foragerr.creators.bibliography  # noqa: F401 — registers the bibliography-fetch command (FRG-CRTR-005)
+    from foragerr.api.creators import router as creators_router
+    from foragerr.creators.commands import (
+        creators_backfill_startup_hook,
+        creators_unseed_startup_hook,
+    )
+
+    app.include_router(creators_router, prefix="/api/v1")
+    # The one-time unseed data fix (FRG-CRTR-004) MUST run BEFORE the backfill
+    # hook: clearing v0.5.0-derived follows precedes any credit ingest the
+    # backfill fans out, so a first-boot-after-upgrade can never seed-then-unseed
+    # within one start (ordering asserted in tests).
+    app.state.startup_hooks.append(creators_unseed_startup_hook)
+    app.state.startup_hooks.append(creators_backfill_startup_hook)
+
     # --- import flows (m1-import-pipeline, area: flows): importing the module
     #     registers ProcessImportsCommand + handler (FRG-DL-009/010); register
     #     the ~1-minute pp-pool drain that runs the completed downloads through

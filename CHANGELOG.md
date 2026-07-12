@@ -9,6 +9,125 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.5.5] — 2026-07-11
+
+m5-creator-suggestions: "More from" a creator — M5 complete.
+
+### Added
+- **More from <creator>** (FRG-CRTR-005, FRG-API-024, FRG-UI-028): a
+  creator's profile now shows their wider ComicVine bibliography that
+  isn't in your library — gathered on first view by a bounded background
+  fetch (newest 24 volumes, refreshed weekly, served from a local cache
+  so profile loads never wait on ComicVine), each entry carrying an
+  **Add to library** button into the normal add flow. foragerr never adds
+  a series by itself.
+
+This closes M5 (creators & follows): credits, the Creators screens,
+explicit-only follows, live ingest, and discovery suggestions.
+
+## [v0.5.4] — 2026-07-11
+
+calendar-discovery-default: the Calendar opens on the whole week.
+
+### Changed
+- **Calendar defaults to All releases** (FRG-UI-018, owner decision): the
+  weekly view doubles as discovery of books you don't follow yet — the
+  Mylar pull-list philosophy — so it now opens on the full week, with the
+  Following scope one click away to narrow to your library.
+
+## [v0.5.3] — 2026-07-11
+
+m5-credits-live-fetch: creator credits now actually arrive — fixes the
+v0.5.2 known issue.
+
+### Fixed
+- **Live credit ingest** (FRG-CRTR-001/002): ComicVine only serves credits
+  on per-issue detail requests (its list API returns none — the cause of
+  the v0.5.2 known issue), so series refresh now fetches a bounded batch
+  of issue details per run (newest first, 25 by default via
+  `credits_fetch_per_refresh`, through the normal rate limit). Issues are
+  marked once covered — including issues with genuinely no credits — so
+  nothing refetches forever, and a failed fetch simply retries on a later
+  run. Repeated refreshes (or force-running `creators-backfill`) walk the
+  whole library over time.
+- Test fixtures now mirror the real ComicVine shape (no credits on list
+  responses) with a tripwire so this class of masking can't recur; the
+  end-to-end suite proves credits render on the Creators screen.
+- The README tour regains the Creators screen, captured from real
+  ingested credits.
+
+## [v0.5.2] — 2026-07-11
+
+m5-creators-screens: the Creators pages arrive, and follows become
+explicit-only.
+
+### Added
+- **Creators screen** (FRG-UI-027): a grid of everyone credited on your
+  comics — roles, series counts, covers of their work in your library, and
+  a Follow pill. Filter to followed creators, or arrive from a series page
+  focused on just its creators. Creators joins the sidebar.
+- **Creator profiles** (FRG-UI-028): roles, publishers, how much of a
+  creator's work you own, and per-series role chips — each work linking
+  back to its series.
+- **Series credits** (FRG-UI-004): series pages show their credited
+  creators, linking into the creator pages.
+
+### Known issue
+- Real-world credit ingest is currently empty: ComicVine's issue *list*
+  API does not serve `person_credits` (only the per-issue detail endpoint
+  does), which surfaced while capturing these screens against live data.
+  The Creators pages render their honest empty state until the follow-up
+  release switches ingest to per-issue detail fetches.
+
+### Changed
+- **Follows are explicit-only** (FRG-CRTR-004, owner decision): v0.5.0's
+  "auto-follow anyone credited on 2+ of your series" seeding is removed,
+  and follows it created are cleared on upgrade — follows you set yourself
+  are untouched. Following someone is always your action, and it never
+  downloads anything.
+
+## [v0.5.1] — 2026-07-11
+
+pull-enabled-default: the weekly-pull source is on by default.
+
+### Changed
+- **Weekly pull enabled out of the box** (FRG-PULL-002, owner decision):
+  `pull_enabled` now defaults to `true`, so a fresh install's Calendar
+  carries the week's releases without configuration. Set
+  `pull_enabled: false` (or `FORAGERR_PULL_ENABLED=false`) to opt out —
+  no third-party traffic is issued when disabled, and the calendar keeps
+  working from your library's own metadata either way. A source outage
+  only degrades health; it never empties the view. **Existing installs are
+  not flipped**: first-run config rendering wrote `pull_enabled: false`
+  into `config.yaml` under the old default, and a value present in the
+  file always wins — set it to `true` (or remove the line) to enable the
+  source on an install created before v0.5.1.
+
+## [v0.5.0] — 2026-07-11
+
+m5-creators-backbone: creator credits arrive — the data layer for M5's
+creators & follows. No new screens yet; the Creators pages build on this in
+the next releases.
+
+### Added
+- **Creator credits ingest** (FRG-CRTR-001): writers, artists, and the rest
+  of each issue's credits now come along with ComicVine metadata — on the
+  same requests foragerr already made, at no extra API cost. Names are
+  sanitized like all ComicVine text; roles are normalized to a fixed set
+  with the original spelling kept.
+- **Creators storage** (FRG-CRTR-002): new `creators` and `issue_credits`
+  tables (migration 0016), kept in sync by the normal series refresh —
+  idempotent, tolerant of partial fetches, and self-pruning.
+- **One-time backfill** (FRG-CRTR-003): existing libraries pick up credits
+  automatically via a one-shot `creators-backfill` task (visible under
+  System → Tasks, re-runnable safely).
+- **Follows** (FRG-CRTR-004): each creator carries a followed flag; anyone
+  credited across two or more of your series starts followed, and your own
+  follow/unfollow choices are never overwritten.
+- **Creators API** (FRG-API-023): `GET /api/v1/creators` (paged, with
+  library stats), creator profiles, and a follow toggle — the read surface
+  the upcoming Creators screens consume.
+
 ## [v0.4.7] — 2026-07-11
 
 m4-pull-experience: the weekly pull Calendar — the final M4 chapter.

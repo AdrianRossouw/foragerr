@@ -131,9 +131,11 @@ given store week, not a month grid — comics land in one Wednesday drop, and th
 layout embraces that with a "New Comic Day" badge on Wednesday and a "Today"
 marker. Navigate weeks with ‹ / › and jump back with **This Week**; the week you
 are viewing is in the URL, so back/forward and reloads keep your place. The view
-defaults to **Following** — releases from series in your library, with a
-"+N more titles shipping" note for everything else — and flips to
-**All releases** to show the full week, publisher-filterable either way. Each
+defaults to **All releases** — the whole week's books, so the calendar reads as a
+discovery surface first, with an "N followed" marker on days carrying series you
+already track. Switch to **Following** to narrow to just your library, where a
+"+N more titles shipping" note stands in for everything else; either scope is
+publisher-filterable. Each
 release card carries its live state (wanted, downloading, downloaded,
 unmonitored), computed from the issue and queue exactly like everywhere else;
 nothing is stored on the calendar itself. Cards for issues in your library offer
@@ -144,6 +146,28 @@ foragerr never adds a series by itself. Next week's solicited releases appear
 under forward navigation once the pull source has published them, marked as not
 yet released, and the whole view keeps working from your local metadata when the
 external pull source is unconfigured or down.
+
+## Creators
+
+The Creators screen lists the writers, artists, and other people credited on
+the comics in your library, gathered automatically from ComicVine metadata.
+Each card shows the creator's initials, their roles, how many of your series
+they worked on, covers of those series, and a **Follow** pill. Following is
+always your explicit choice — foragerr never follows anyone for you — and
+following someone changes nothing but the flag today (it feeds upcoming
+discovery features; it never downloads anything). Filter to followed
+creators, or arrive from a series page to see just that series' creators
+(a dismissible chip shows the focus). Click through to a creator's profile
+for their roles, publishers, per-series role chips, and how much of their
+work you own — each work card links back to its series. Below that, a
+**More from** section shows the creator's wider ComicVine bibliography
+that isn't in your library yet (gathered on first view, refreshed weekly,
+newest first), each with an **Add to library** button into the normal add
+flow — nothing is ever added for you. Series pages carry
+a matching credits strip. If the screen is empty, credits simply haven't
+been gathered yet: they arrive with metadata refreshes, and the one-time
+`creators-backfill` task (System → Tasks) gathers them for series added
+before the feature existed.
 
 ## Queue
 
@@ -288,7 +312,11 @@ with no need to reload the page or restart the container.
 ### Tasks
 
 The Tasks screen lists every scheduled task — including the daily
-`backup-database` task — with its interval and its last/next run time. Every
+`backup-database` task — with its interval and its last/next run time. The
+`creators-backfill` row is a one-time job (it gathers creator credits for
+series added before the feature existed): it runs by itself once and then
+sits with a far-future next run; its **Run Now** button re-runs it safely
+if you ever want to. Every
 row has a **Run Now** button to force-run it immediately (resetting its
 timer); the `backup-database` row's button is labelled **"Back up now"**
 instead, but it is the exact same force-run action. A running task shows its

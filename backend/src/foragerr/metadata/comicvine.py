@@ -25,7 +25,7 @@ from __future__ import annotations
 import json
 import logging
 from functools import lru_cache
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Sequence
 
 from foragerr.db.migrations import app_version
 from foragerr.http import HttpClientFactory, OutboundHttpError, parse_retry_after
@@ -36,14 +36,17 @@ from foragerr.metadata.errors import (
     ComicVineRateLimited,
     ComicVineUnavailable,
 )
-from foragerr.metadata.mapping import map_issue, map_volume
+from foragerr.metadata.credits import map_person_credits
+from foragerr.metadata.mapping import map_issue, map_volume, map_volume_stubs
 from foragerr.metadata.models import (
+    CreditRecord,
     IssueRecord,
     Page,
     SearchResult,
     SeriesCandidate,
     SeriesRecord,
     SuggestResult,
+    VolumeStub,
 )
 from foragerr.metadata.ratelimit import effective_interval, gate
 from foragerr.metadata.search import plausibility
@@ -62,7 +65,25 @@ SEARCH_VOLUME_FIELDS = (
     "id,name,publisher,imprint,start_year,count_of_issues,aliases,description,"
     "site_detail_url,first_issue,image"
 )
-ISSUE_FIELDS = "id,name,issue_number,cover_date,store_date,image,volume"
+ISSUE_FIELDS = "id,name,issue_number,cover_date,store_date,image,volume,person_credits"
+
+#: Minimal field list for the per-issue credit detail fetch (FRG-CRTR-001).
+#: ComicVine serves ``person_credits`` only on the issue DETAIL endpoint
+#: (``issue/4000-{id}/``) — the list endpoint returns null regardless of
+#: ``field_list`` (verified live 2026-07-11) — so this is the credit source.
+ISSUE_CREDITS_FIELDS = "id,person_credits"
+
+#: Field list for the person-detail bibliography probe (FRG-CRTR-005). The
+#: person endpoint (``person/4040-{id}/``, type prefix 4040 = PERSON, verified
+#: live 2026-07-11 — the real API 102s a wrong prefix) serves ``volume_credits``
+#: as STUBS (id + name only); the full rows come from a batched volumes hydration.
+PERSON_VOLUMES_FIELDS = "id,name,volume_credits"
+
+#: Max volume ids per batched ``volumes/?filter=id:a|b|c`` hydration request
+#: (FRG-CRTR-005). CV's per-request result limit is 100, so one request per chunk
+#: (``limit=len(chunk)``) returns every matching row in a single page — keeping
+#: an upstream failure a raised typed error rather than a silently-partial walk.
+VOLUMES_FILTER_CHUNK = 100
 
 #: JSON-response byte cap (lower than the factory ceiling; ample per page).
 JSON_MAX_BYTES = 16_000_000
@@ -156,6 +177,92 @@ class ComicVineClient:
             "sort": "cover_date:asc",
         }
         return await self._paginate("issues/", base_params, map_issue)
+
+    async def get_issue_credits(self, issue_id: int) -> tuple[CreditRecord, ...]:
+        """Fetch ONE issue's per-issue person credits from the detail endpoint.
+
+        ComicVine serves ``person_credits`` only on ``issue/4000-{id}/`` (the
+        list endpoint returns null — verified live 2026-07-11), so this
+        per-issue detail fetch is the sole credit source (FRG-CRTR-001). Like
+        every other call it passes through the process-global rate gate, so a
+        refresh's bounded fan-out of these fetches is automatically serialized
+        to the configured min-interval. The result is mapped/sanitized exactly
+        as the opportunistic list path would map it (:func:`map_person_credits`
+        — total by contract, empty on absent/malformed credits, never raising);
+        a transport/HTTP/malformed failure raises the usual typed
+        :class:`~foragerr.metadata.errors.ComicVineError`, which the refresh
+        fetch phase degrades to retry-later.
+        """
+        data = await self._request(
+            f"issue/4000-{int(issue_id)}/", {"field_list": ISSUE_CREDITS_FIELDS}
+        )
+        results = data.get("results")
+        if not isinstance(results, dict):
+            raise ComicVineMalformedResponse(
+                "comicvine issue response missing a results object"
+            )
+        return map_person_credits(results.get("person_credits"))
+
+    async def get_person_volumes(self, cv_person_id: int) -> tuple[VolumeStub, ...]:
+        """Fetch a person's credited-volume STUBS from the person detail endpoint.
+
+        Hits ``person/4040-{id}/`` (type prefix 4040 = PERSON — the real API 102s
+        a wrong prefix) with a minimal ``id,name,volume_credits`` field list and
+        maps ``volume_credits`` to typed :class:`VolumeStub`s (id + sanitized name
+        only — the batched hydration fills the rest, FRG-CRTR-005). Like the credit
+        mapper the stub mapping is total: an absent/empty/malformed
+        ``volume_credits`` yields ``()`` and never raises. A missing ``results``
+        object is a genuine malformed response and raises, exactly as
+        :meth:`get_issue_credits` does; transport/HTTP failures raise the usual
+        typed :class:`~foragerr.metadata.errors.ComicVineError`.
+        """
+        data = await self._request(
+            f"person/4040-{int(cv_person_id)}/", {"field_list": PERSON_VOLUMES_FIELDS}
+        )
+        results = data.get("results")
+        if not isinstance(results, dict):
+            raise ComicVineMalformedResponse(
+                "comicvine person response missing a results object"
+            )
+        return map_volume_stubs(results.get("volume_credits"))
+
+    async def get_volumes_by_ids(
+        self, ids: Sequence[int]
+    ) -> tuple[SeriesRecord, ...]:
+        """Batch-hydrate full volume records by id (FRG-CRTR-005).
+
+        Queries ``volumes/?filter=id:a|b|c`` in chunks of at most
+        :data:`VOLUMES_FILTER_CHUNK` ids (deduplicated, order preserved), reusing
+        :data:`SEARCH_VOLUME_FIELDS` + :func:`map_volume` so each row carries the
+        publisher/start_year/count_of_issues the stubs lack. ``limit=len(chunk)``
+        keeps every chunk a single page, so an upstream failure PROPAGATES as a
+        typed error (the caller — the bibliography fetch — must preserve its cache
+        on failure, not proceed on a silently-partial result) rather than being
+        degraded to a partial walk the way :meth:`_paginate` does. Every request
+        rides the shared rate gate. An empty ``ids`` performs no request.
+        """
+        unique = list(dict.fromkeys(int(i) for i in ids))
+        out: list[SeriesRecord] = []
+        for start in range(0, len(unique), VOLUMES_FILTER_CHUNK):
+            chunk = unique[start : start + VOLUMES_FILTER_CHUNK]
+            filter_value = "id:" + "|".join(str(i) for i in chunk)
+            data = await self._request(
+                "volumes/",
+                {
+                    "field_list": SEARCH_VOLUME_FIELDS,
+                    "filter": filter_value,
+                    "limit": len(chunk),
+                },
+            )
+            results = data.get("results")
+            if not isinstance(results, list):
+                raise ComicVineMalformedResponse(
+                    "comicvine volumes filter response missing a results list"
+                )
+            for raw in results:
+                if isinstance(raw, dict):
+                    out.append(map_volume(raw))
+        return tuple(out)
 
     async def search_series(
         self, term: str, *, target_issue: str | int | None = None

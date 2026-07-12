@@ -1,7 +1,13 @@
 import type {
   ApiPage,
+  BibliographyEntry,
   BlocklistRecord,
   CommandResource,
+  CreatorBibliography,
+  CreatorPage,
+  CreatorProfileResource,
+  CreatorResource,
+  CreatorSeriesStat,
   FormatProfileResource,
   HealthWarningItem,
   HistoryRecord,
@@ -678,4 +684,108 @@ export function makeLogRecord(
     message: 'Grabbed release "Saga 041 (2017)"',
     ...overrides,
   };
+}
+
+/*
+ * Creators surface fixtures (FRG-UI-027/028 / FRG-API-023). Builders for the
+ * grid rows, the paging+aggregates envelope, and the profile response.
+ */
+
+export function makeCreator(overrides: Partial<CreatorResource> = {}): CreatorResource {
+  return {
+    id: 1,
+    name: 'Robert Kirkman',
+    roles: ['writer'],
+    seriesCount: 2,
+    followed: false,
+    works: [
+      { seriesId: 7, title: 'Invincible', coverAvailable: true },
+      { seriesId: 8, title: 'The Walking Dead', coverAvailable: false },
+    ],
+    ...overrides,
+  };
+}
+
+/** Wrap creator rows in the grid paging+aggregates envelope (FRG-API-023). */
+export function creatorPageOf(
+  records: CreatorResource[],
+  overrides: Partial<CreatorPage> = {},
+): CreatorPage {
+  const followed = records.filter((c) => c.followed).length;
+  return {
+    page: 1,
+    pageSize: 200,
+    sortKey: 'name',
+    sortDirection: 'asc',
+    totalRecords: records.length,
+    records,
+    totalCreators: records.length,
+    followedCreators: followed,
+    ...overrides,
+  };
+}
+
+export function makeCreatorSeriesStat(
+  overrides: Partial<CreatorSeriesStat> = {},
+): CreatorSeriesStat {
+  return {
+    seriesId: 7,
+    title: 'Invincible',
+    publisher: 'Image',
+    roles: ['writer'],
+    ownedIssues: 3,
+    totalIssues: 12,
+    ...overrides,
+  };
+}
+
+export function makeCreatorProfile(
+  overrides: Partial<CreatorProfileResource> = {},
+): CreatorProfileResource {
+  const series = overrides.series ?? [
+    makeCreatorSeriesStat(),
+    makeCreatorSeriesStat({
+      seriesId: 8,
+      title: 'The Walking Dead',
+      publisher: 'Image',
+      roles: ['writer'],
+      ownedIssues: 5,
+      totalIssues: 20,
+    }),
+  ];
+  return {
+    id: 1,
+    name: 'Robert Kirkman',
+    roles: ['writer'],
+    followed: false,
+    stats: {
+      seriesCount: series.length,
+      ownedIssues: series.reduce((n, s) => n + s.ownedIssues, 0),
+      totalIssues: series.reduce((n, s) => n + s.totalIssues, 0),
+      publisherCount: new Set(series.map((s) => s.publisher).filter(Boolean)).size,
+    },
+    series,
+    ...overrides,
+  };
+}
+
+export function makeBibliographyEntry(
+  overrides: Partial<BibliographyEntry> = {},
+): BibliographyEntry {
+  return {
+    cvVolumeId: 4050,
+    title: 'Oblivion Song',
+    publisher: 'Image',
+    startYear: 2018,
+    countOfIssues: 36,
+    ...overrides,
+  };
+}
+
+/** Wrap bibliography entries in the FRG-API-024 response (state + records). */
+export function makeCreatorBibliography(
+  records: BibliographyEntry[] = [makeBibliographyEntry()],
+  state: CreatorBibliography['state'] = 'fresh',
+): CreatorBibliography {
+  return { state, records };
 }

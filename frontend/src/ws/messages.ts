@@ -66,6 +66,28 @@ export function isPullRefreshComplete(msg: WsMessage): boolean {
   return !!r && r.name === PULL_REFRESH_COMMAND && r.status === 'completed';
 }
 
+/**
+ * The creator-bibliography fetch command name (backend
+ * `BIBLIOGRAPHY_FETCH_COMMAND`, backend/src/foragerr/creators/bibliography.py).
+ */
+export const BIBLIOGRAPHY_FETCH_COMMAND = 'creator-bibliography-fetch';
+
+/**
+ * True only for a `command` message reporting the creator-bibliography fetch
+ * reaching `completed` — the transition that rewrites a creator's cached
+ * suggestions (FRG-UI-028). Mirrors `isPullRefreshComplete`: the backend pushes
+ * a `command` message on EVERY lifecycle transition of EVERY command, so the
+ * bridge must invalidate the bibliography cache only on this one (and the WS
+ * payload carries no creator id, so the whole bibliography family is swept).
+ */
+export function isBibliographyFetchComplete(msg: WsMessage): boolean {
+  if (msg.name !== 'command') return false;
+  const r = msg.resource as Partial<CommandResource> | null;
+  return (
+    !!r && r.name === BIBLIOGRAPHY_FETCH_COMMAND && r.status === 'completed'
+  );
+}
+
 export function parseWsMessage(raw: string): WsMessage | null {
   try {
     const parsed = JSON.parse(raw) as Partial<WsMessage>;

@@ -119,9 +119,11 @@ async def _seed_issues(config_dir: Path, *, series_count: int, issue_count: int)
     Runs in the test's setup phase only — never inside the measured window. Rows
     are added in a single write transaction to keep seeding fast.
     """
-    from sqlalchemy import select
+    from sqlalchemy import select, text
 
+    from foragerr.creators.commands import BACKFILL_MARKER_KEY
     from foragerr.db import Database, prepare_database
+    from foragerr.db.first_run import APP_STATE_TABLE
     from foragerr.library.models import IssueRow, RootFolderRow, SeriesRow
     from foragerr.library.ordering import ordering_key_for
     from foragerr.parser.normalize import matching_key
@@ -184,6 +186,21 @@ async def _seed_issues(config_dir: Path, *, series_count: int, issue_count: int)
                     )
                     cv_issue += 1
                     issues_left -= 1
+        # Mark the one-time credits backfill (FRG-CRTR-003) as already done for
+        # this seeded library. The backfill is a marker-gated startup hook that,
+        # on an as-yet-unbackfilled non-empty library, enqueues deduplicated
+        # refresh-series that a worker later runs — a legitimate, queue-driven
+        # (post-startup, NOT startup-hook) ComicVine trigger, covered by
+        # tests/creators/test_backfill.py. Setting the marker keeps THIS guard
+        # focused on its actual invariant (no startup HOOK touches outbound) and
+        # the budget soak on pure startup cost, rather than the one-time backfill.
+        async with db.write_session() as session:
+            await session.execute(
+                text(
+                    f"INSERT INTO {APP_STATE_TABLE} (key, value) VALUES (:k, 'done')"
+                ),
+                {"k": BACKFILL_MARKER_KEY},
+            )
     finally:
         await db.close()
 

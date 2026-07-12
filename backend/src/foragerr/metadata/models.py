@@ -49,12 +49,49 @@ class SeriesRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class VolumeStub:
+    """A lightweight ComicVine volume reference (FRG-CRTR-005).
+
+    The ``volume_credits`` a person-detail response lists are STUBS — a cv volume
+    id plus a (sanitized) name only; they carry no publisher/start_year/issue
+    count. Those full fields come from a later batched hydration
+    (:meth:`ComicVineClient.get_volumes_by_ids`) that maps each row to a full
+    :class:`SeriesRecord`. ``name`` is ``None`` when the stub had no usable name.
+    """
+
+    cv_volume_id: int
+    name: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class CreditRecord:
+    """One per-issue person credit mapped from ComicVine (FRG-CRTR-001).
+
+    ``name`` has already passed through
+    :func:`foragerr.metadata.sanitize.sanitize_cv_text` (untrusted CV wiki
+    content). ``role_verbatim`` retains the original (sanitized) role token so
+    nothing is lost for later refinement; ``role_normalized`` is one slot of the
+    fixed vocabulary (:data:`foragerr.metadata.credits.ROLE_VOCABULARY`) the UI
+    chips and the ``issue_credits`` CHECK constraint key off. One record per
+    ``(cv_person_id, role_normalized)`` — a compound CV role like
+    ``"penciler, inker"`` yields two records.
+    """
+
+    cv_person_id: int
+    name: str
+    role_verbatim: str
+    role_normalized: str
+
+
+@dataclass(frozen=True, slots=True)
 class IssueRecord:
     """A ComicVine issue mapped to an issue-shaped record (FRG-META-006).
 
     ``issue_number`` is verbatim TEXT or ``None`` when ComicVine supplied no
     number; ``is_unnumbered`` mirrors that so callers can surface (not drop)
     unnumbered issues. Dates are kept as verbatim ISO ``str`` or ``None``.
+    ``credits`` carries the issue's typed person credits (empty when the CV row
+    had no ``person_credits`` field, or an empty/malformed one — FRG-CRTR-001).
     """
 
     cv_issue_id: int
@@ -63,6 +100,7 @@ class IssueRecord:
     cover_date: str | None
     store_date: str | None
     image_url: str | None
+    credits: tuple[CreditRecord, ...] = ()
 
     @property
     def is_unnumbered(self) -> bool:

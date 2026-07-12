@@ -152,17 +152,25 @@ issue number, release date, status pill (file present = success, missing =
 warn, unreleased = neutral), collected-in chips (FRG-SER-020 memberships,
 book-type-toned), file size, and per-row automatic + interactive search
 actions. Covers come exclusively from the local cover endpoint, including
-the backdrop.
+the backdrop. The screen SHALL additionally surface the series' credited
+creators (from the stored credits, FRG-CRTR-002) as a compact creators
+strip — each entry showing the creator's name and normalized roles and
+navigating to the creator profile (FRG-UI-028) or to the creators grid
+focused on this series (FRG-UI-027); the strip is absent when the series
+has no ingested credits.
 
 - **Milestone**: M1 (redesigned to the owner's design in M4,
-  m4-series-detail)
+  m4-series-detail; creators strip added in M5, m5-creators-screens)
 - **Source**: sonarr-architecture.md §7.4 (Series details), §7.2 command
-  endpoint; owner design handoff §2, reviewed 2026-07-10.
+  endpoint; owner design handoff §2, reviewed 2026-07-10; handoff §8
+  (credits open creator pages).
 - **Notes**: The M4 redesign supersedes the M1 visual language; command
   dispatch, per-issue monitor semantics, verbatim issue numbers
   (never coerced), and the e2e selector contract (`issue-row-<issueId>`,
   per-row search accessible names, `interactive-search-overlay`,
-  `command-status`) are unchanged. Creator credits await M5.
+  `command-status`) are unchanged. m5-creators-screens delivers the
+  creators strip this requirement previously deferred ("Creator credits
+  await M5").
 
 #### Scenario: Hero renders from local covers with actions
 
@@ -183,6 +191,14 @@ the backdrop.
 
 - **WHEN** the operator toggles an issue's monitored flag, runs an automatic search, and opens interactive search from a row
 - **THEN** each behaves exactly as before the redesign (same endpoints, same command-status surface, same overlay)
+
+#### Scenario: Creators strip surfaces stored credits
+
+- **WHEN** the detail screen renders a series with ingested credits, and
+  separately one with none
+- **THEN** the credited series shows the creators strip (names + roles)
+  whose entries navigate into the creator surfaces, and the creditless
+  series renders no strip and no placeholder
 
 ### Requirement: FRG-UI-005 — Add-series search screen
 
@@ -590,8 +606,11 @@ handoff (§4 Calendar) — one week at a time, days as vertical groups, never a
   with the target ISO week (the server holds no navigation state). "This
   Week" SHALL return to the current store-date week from any offset.
 - **Scope toggle**: a `Following / All releases` segmented control,
-  defaulting to Following. Following shows only entries linked to library
-  series (matched or pending-refresh); All releases shows every entry.
+  **defaulting to All releases** — the weekly view doubles as discovery of
+  unfollowed books (owner decision 2026-07-11; Mylar pull-list philosophy,
+  superseding the handoff's Following default). Following shows only
+  entries linked to library series (matched or pending-refresh); All
+  releases shows every entry.
   In Following scope, a day with hidden entries SHALL show a
   "+N more titles shipping" note; in All releases scope, a day with followed
   entries SHALL show an "N followed" count.
@@ -629,13 +648,13 @@ strip are governed by FRG-PULL-007 and FRG-PULL-008.
   to 200 rows; the client aggregates pages when a week exceeds one page).
   No iCal feed (non-goal).
 
-#### Scenario: Default load shows the current week in Following scope
+#### Scenario: Default load shows the current week's ALL releases
 
 - **WHEN** the Calendar screen loads with no navigation state
-- **THEN** it requests the current store-date week (no `week` param needed),
-  renders only entries linked to library series grouped by day with the
-  range label, and marks Wednesday "New Comic Day" and the current date
-  "Today"
+- **THEN** it requests the current store-date week (no `week` param needed)
+  and renders every entry — followed and unfollowed alike — grouped by day
+  with the range label, marking Wednesday "New Comic Day" and the current
+  date "Today", so the week reads as a discovery surface first
 
 #### Scenario: Week navigation is parameterised and reversible
 
@@ -644,13 +663,13 @@ strip are governed by FRG-PULL-007 and FRG-PULL-008.
   week (+1, +2, then current), the range label follows, and no server-side
   navigation state is involved
 
-#### Scenario: All-releases scope reveals unfollowed entries
+#### Scenario: Following scope narrows to library entries
 
-- **WHEN** the user switches the scope toggle to "All releases" on a week
+- **WHEN** the user switches the scope toggle to "Following" on a week
   containing both linked and unmatched entries
-- **THEN** unmatched entries become visible in their day groups, days show
-  their "N followed" count where applicable, and switching back to Following
-  hides them again behind a "+N more titles shipping" note
+- **THEN** only entries linked to library series remain, days show the
+  "+N more titles shipping" note for what was hidden, and switching back to
+  All releases restores the full week with its "N followed" day counts
 
 #### Scenario: Derived state is projected, never stored
 
@@ -915,3 +934,122 @@ state SHALL explain that collections appear when containment is declared.
 - **WHEN** a series has no declared containment
 - **THEN** the Collections tab shows an explanatory empty state (never a silent blank), with the toggle count reading 0
 
+### Requirement: FRG-UI-027 — Creators grid screen
+
+The UI SHALL provide a Creators screen at `/creators` rendered to the design
+handoff (§7): a responsive card grid where each card carries a circular
+green-gradient initials avatar, the creator's name, a `roles · N series`
+line, a Follow/Following pill (green when following) that toggles via the
+canonical follow endpoint (FRG-API-023), and a row of small cover spines
+for the creator's library works (clicking a spine navigates to that series'
+detail). The screen header SHALL show the aggregate count line
+(`N creators · M followed`) and a followed-only filter. When navigated to
+with a series focus (from a series-detail credit), the screen SHALL show a
+dismissible focus chip and list only that series' creators until cleared.
+The Creators nav entry SHALL enter the sidebar in this change
+(shipped-screens rule, FRG-UI-023). The grid SHALL render an empty state
+when no credits exist yet (e.g. backfill still running) that says credits
+are still being gathered rather than implying the feature is broken.
+
+- **Milestone**: M5
+- **Source**: design handoff §7 (creators.png + dc.html creators region);
+  FRG-API-023 (the read surface); owner decision 2026-07-11 (follows
+  explicit-only — the pill is the ONLY follow entry point besides the
+  profile button).
+- **Notes**: Cards show library-derived data only; no ComicVine call.
+  Initials avatars per the design — no person images. Follow toggle
+  optimistic-updates the card and invalidates the creators queries.
+
+#### Scenario: Grid renders cards to the design from the API
+
+- **WHEN** the Creators screen loads for a library with ingested credits
+- **THEN** each card shows the initials avatar, name, roles · series
+  count, Follow/Following pill, and its library work spines, and the
+  header shows `N creators · M followed` matching the API aggregates
+
+#### Scenario: Follow pill toggles explicitly and only via the endpoint
+
+- **WHEN** the user clicks an unfollowed creator's pill
+- **THEN** exactly one `PUT /api/v1/creators/{id}/follow` request is made
+  with `{followed: true}`, the pill flips to Following, and no other write
+  occurs
+
+#### Scenario: Followed filter and focus chip
+
+- **WHEN** the user enables the followed-only filter, and separately
+  arrives with a series focus from series detail
+- **THEN** the grid shows only followed creators (filter), respectively
+  only that series' creators with a dismissible chip naming the series
+  (focus), and clearing either restores the full grid
+
+#### Scenario: Empty state during backfill
+
+- **WHEN** the screen loads while no credits are ingested yet
+- **THEN** it renders the credits-still-gathering empty state, not an
+  error and not a bare zero-count grid
+
+### Requirement: FRG-UI-028 — Creator profile screen
+
+The UI SHALL provide a creator profile at `/creators/{id}` rendered to the
+design handoff (§8): a gradient header carrying the large initials avatar,
+the creator's name, roles line, publishers line, and a Follow/Following
+button; three stat columns (Series · Issues in library as owned-of-total ·
+Publishers) from the profile aggregates (FRG-API-023); and an "In your
+library" section of work cards — cover (local endpoint), series title,
+volume label where applicable, this creator's role chips for that series,
+a meta line, and an owned/total progress bar — each card navigating to the
+series detail. The profile SHALL additionally render the
+**"More from <name>"** section (handoff §8): the creator's cached external
+bibliography (FRG-API-024) as work cards — title, publisher/year meta line,
+role chip where known — each carrying an **Add to library** button that
+routes into the standard user-driven add flow prefilled for that volume;
+the system SHALL never add a series from this section by itself. While the
+first fetch is pending the section SHALL show an unobtrusive
+gathering state; a creator whose fetched bibliography is empty (or entirely
+in-library) SHALL render no section rather than an empty shell. An unknown
+creator id SHALL render the standard not-found state.
+
+- **Milestone**: M5
+- **Source**: design handoff §8 (creator profile region incl. "More
+  from"); FRG-API-023 profile aggregates; FRG-API-024 bibliography
+  (m5-creator-suggestions).
+- **Notes**: Role chips reuse the normalized-role vocabulary; progress
+  bars reuse the house progress styling (series detail's owned/total).
+  Back navigation returns to the grid preserving its filter state.
+
+#### Scenario: Profile header and stats match the API
+
+- **WHEN** the profile loads for a creator credited in two library series
+- **THEN** the header shows avatar/name/roles/publishers and a working
+  Follow button, and the three stat columns equal the API's seriesCount,
+  ownedIssues-of-totalIssues, and publisherCount
+
+#### Scenario: Library work cards render and navigate
+
+- **WHEN** the "In your library" section renders
+- **THEN** each card shows the local cover, title, this creator's role
+  chips, and the whole-series owned/total progress bar, and clicking it
+  navigates to that series' detail screen
+
+#### Scenario: Unknown creator is a not-found state
+
+- **WHEN** `/creators/{id}` is opened for an id the API 404s
+- **THEN** the screen renders the standard not-found state rather than an
+  error boundary or blank page
+
+#### Scenario: More-from cards render from the cache with add hand-offs
+
+- **WHEN** the profile renders for a creator with a fresh cached
+  bibliography containing volumes not in the library
+- **THEN** the "More from" section lists their cards (title,
+  publisher/year), each Add button routes into the standard add flow
+  prefilled for that volume, and no series is created without the user
+  completing that flow
+
+#### Scenario: Pending and empty bibliography states
+
+- **WHEN** the profile renders while the first bibliography fetch is
+  pending, and separately for a creator whose fetched bibliography is
+  empty
+- **THEN** the pending profile shows the gathering state in place of the
+  section, and the empty case renders no section at all

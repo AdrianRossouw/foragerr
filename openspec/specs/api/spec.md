@@ -665,3 +665,98 @@ containment records (no series/issue/file mutation).
 
 - **WHEN** containment records are declared, replaced, or deleted for a trade issue
 - **THEN** only containment rows change — no issue, series, file, monitored flag, or wanted result is affected
+
+### Requirement: FRG-API-023 — Creators resource and follow toggle
+
+The API SHALL expose the creators backbone read surface using the standard
+paging envelope and resource/error conventions (FRG-API-002/006):
+
+- `GET /api/v1/creators` — paged creator rows, each carrying the creator id,
+  display name, normalized role set, distinct-library-series count, the
+  `followed` flag, and up to a bounded number of library work references
+  (series id, title, cover availability) for card spines. Sortable by name
+  and series count; filterable to followed-only. The response SHALL include
+  the week's aggregate counts (total creators, followed count) needed by the
+  grid header.
+- `GET /api/v1/creators/{id}` — profile aggregates: per-series roles for
+  every library series the creator credits, owned/total issue counts across
+  those series, and the distinct publisher list.
+- `PUT /api/v1/creators/{id}/follow` — body `{followed: bool}`; sets the
+  user-owned flag, marks it user-touched (FRG-CRTR-004), and returns the
+  updated resource. It SHALL trigger no side effects beyond the flag write.
+
+All three SHALL expose no secret and no raw (unsanitized) ComicVine string.
+Aggregates are computed from stored credits — the endpoints SHALL issue no
+ComicVine request.
+
+- **Milestone**: M5
+- **Source**: design handoff §7/8 (grid fields, profile stats); FRG-CRTR-001..004
+  (the data these expose).
+- **Notes**: The "More from <name>" external bibliography deliberately has no
+  endpoint here — it is m5-creator-suggestions scope with its own egress
+  spec. Follow toggle is a PUT on a sub-resource to mirror the issue
+  monitored toggle's shape.
+
+#### Scenario: Grid rows carry the card fields without external calls
+
+- **WHEN** `GET /api/v1/creators?page=1` is requested for a library with
+  ingested credits
+- **THEN** the response is a standard paging envelope whose rows carry name,
+  roles, distinct-series count, `followed`, and bounded work refs, plus the
+  total/followed aggregate counts — and no ComicVine request was issued
+
+#### Scenario: Profile aggregates match stored credits
+
+- **WHEN** `GET /api/v1/creators/{id}` is requested for a creator credited
+  in two library series
+- **THEN** the response carries both series with that creator's per-series
+  roles, owned/total issue counts derived from issue/file records, and the
+  distinct publisher list
+
+#### Scenario: Follow toggle writes the flag and nothing else
+
+- **WHEN** `PUT /api/v1/creators/{id}/follow` is called with
+  `{followed: false}` on a seeded-followed creator
+- **THEN** the flag flips off and is marked user-touched, the response
+  reflects it, and no series/issue/search state changes anywhere
+
+### Requirement: FRG-API-024 — Creator bibliography resource
+
+The API SHALL expose `GET /api/v1/creators/{id}/bibliography` serving the
+cached bibliography (FRG-CRTR-005): rows carrying the CV volume id, title,
+publisher, start year, and issue count, **excluding volumes whose CV id
+matches a library series at read time**, plus a `state` field —
+`fresh` (cache within TTL, no refresh needed) or `pending` (a fetch is
+enqueued/running — a never-fetched creator is always `pending`, because
+the handler enqueues before responding). When the cache is absent or older
+than the documented TTL (default 7 days), the GET SHALL enqueue the
+deduplicated fetch command and report `pending`/stale-but-served — the
+request itself SHALL issue **no** ComicVine call (FRG-API-023's
+no-CV-in-API discipline extends to this sub-resource). Unknown creator id
+is a 404; no secret and no unsanitized string is exposed.
+
+- **Milestone**: M5
+- **Source**: FRG-CRTR-005 (the cache this reads); FRG-API-023 (shape and
+  discipline it extends); FRG-SCHED-003 (command dedup).
+- **Notes**: Serving stale-while-revalidating keeps the profile usable on
+  a flaky third party; the WS command push invalidates the client when
+  the fetch lands.
+
+#### Scenario: Cold cache triggers a fetch and reports pending
+
+- **WHEN** the bibliography is requested for a creator never fetched
+- **THEN** the response is an empty list with `state: "pending"`, exactly
+  one deduplicated fetch command is enqueued, and no ComicVine request is
+  issued by the API handler
+
+#### Scenario: Fresh cache serves without side effects
+
+- **WHEN** the bibliography is requested within the TTL
+- **THEN** the cached rows are served with `state: "fresh"`, in-library
+  volumes are excluded by the live join, and no command is enqueued
+
+#### Scenario: Stale cache serves while revalidating
+
+- **WHEN** the bibliography is requested after the TTL has lapsed
+- **THEN** the stale rows are still served (state reflects the refresh in
+  flight), and one deduplicated fetch command is enqueued

@@ -218,6 +218,88 @@
 
 /* --- panel -------------------------------------------------------------- */
 
+/* --- Creators strip (FRG-UI-004 amendment): credited creators, absent when the
+ *     series has no ingested credits. Names + roles open the creator surfaces. */
+.creatorsStrip {
+  display: flex;
+  align-items: baseline;
+  gap: var(--spacing-md);
+  flex-wrap: wrap;
+  padding: 0 30px 6px;
+}
+
+.creatorsLabel {
+  font-size: var(--font-size-xs);
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  flex: none;
+}
+
+.creatorsList {
+  display: flex;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.creatorEntry {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--spacing-sm);
+  padding: 6px 12px;
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-pill);
+  background: var(--surface-card);
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.creatorEntry:hover {
+  border-color: var(--color-accent);
+  background: var(--surface-card-hover);
+}
+
+.creatorEntry:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.creatorName {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+}
+
+.creatorRoles {
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+}
+
+.creatorsViewAll {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-accent-light);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+.creatorsViewAll:hover {
+  background: var(--color-accent-tint);
+}
+
+.creatorsViewAll:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
 .panelWrap {
   padding: 22px 30px 46px;
 }

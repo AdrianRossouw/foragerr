@@ -162,6 +162,25 @@ export const queryKeys = {
     health: () => ['system', 'health'] as const,
     tasks: () => ['system', 'task'] as const,
   },
+  // Creators surface (FRG-UI-027/028 / FRG-API-023/024), mirroring
+  //   ['creators', 'list', hash]          <-> GET /api/v1/creators?<params>
+  //   ['creators', id]                    <-> GET /api/v1/creators/{id}
+  //   ['creators', 'bibliography', id]    <-> GET /api/v1/creators/{id}/bibliography
+  // The list family is keyed by a params hash (followed/seriesId/sort) so each
+  // filtering + focus is its own cache entry; the follow toggle invalidates the
+  // bare family key (`creators.all()`) so every loaded grid/profile re-derives.
+  // 'list'/'bibliography' (strings) and the numeric id never collide under the
+  // prefix. Bibliography lives under its OWN 'bibliography' sub-prefix so the WS
+  // command-completion invalidation (`bibliographyAll()`) sweeps every loaded
+  // bibliography without touching the grids/profiles — the WS command payload
+  // carries no creator id, so it can only invalidate the family, not one row.
+  creators: {
+    all: () => ['creators'] as const,
+    list: (paramsHash: string) => ['creators', 'list', paramsHash] as const,
+    detail: (id: number) => ['creators', id] as const,
+    bibliography: (id: number) => ['creators', 'bibliography', id] as const,
+    bibliographyAll: () => ['creators', 'bibliography'] as const,
+  },
   // The actionable warnings list is deliberately its OWN top-level family
   // (not nested under `system`): it mirrors GET /api/v1/health, distinct from
   // both the root liveness `/health` (no query key — never fetched via React

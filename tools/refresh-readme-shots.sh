@@ -83,6 +83,10 @@ if [ "${REUSING:-}" != "1" ]; then
   export FORAGERR_LOG_LEVEL=WARNING
   export FORAGERR_LIBRARY_IMPORT_MODE=move
   export FORAGERR_STATIC_DIR="${REPO}/frontend/dist"
+  # The weekly-pull source is ON by default (pull-enabled-default): pin it OFF
+  # for the capture instance so shots never depend on a third-party's uptime
+  # (same hermetic posture as e2e/compose.yaml).
+  export FORAGERR_PULL_ENABLED=false
 
   log "starting backend on ${BASE_URL}…"
   ( cd "${REPO}/backend" && exec uv run foragerr ) &
@@ -178,7 +182,12 @@ for g in json.load(sys.stdin).get("records",[]):
 
   # Give the chained refresh/scan a moment to land covers + issues.
   EXPECTED="$(echo "${GROUP_IDS}" | awk -F, '{print NF}')"
-  for _ in $(seq 1 90); do
+  # Import-chained refreshes now include up to credits_fetch_per_refresh
+  # (default 25) rate-gated per-issue credit detail fetches each
+  # (m5-credits-live-fetch): ~50s extra per series through the single 2s
+  # gate, serialized. Budget ~2.5 min per series rather than the old 3 min
+  # total, or a large final series (Fables) times the whole run out at 5/6.
+  for _ in $(seq 1 $((EXPECTED * 75))); do
     [ "$(series_count)" -ge "${EXPECTED}" ] && break
     sleep 2
   done
