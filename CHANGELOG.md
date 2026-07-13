@@ -9,6 +9,22 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.9.4] — 2026-07-13
+
+logout-failure-handling: a security bugfix from dogfooding — the logout
+control no longer reports success when the server did not confirm it.
+
+### Fixed
+- **Logout signals success only on server-confirmed termination**
+  (FRG-AUTH-004). The control previously cleared client auth state and
+  returned to the login screen on every attempt, even when the logout request
+  failed — presenting a signed-out UI while the HttpOnly session cookie stayed
+  live, so a reload silently re-authenticated (a shared-device exposure). Now
+  a confirmed logout clears and returns to login; a failed one keeps you
+  signed in and shows a retryable "try again" message. No server change — the
+  endpoint already terminated the session and 204s; this closes the
+  client-side false-success.
+
 ## [v0.9.3] — 2026-07-13
 
 cbr-support: the second 0.9.x dogfood-series change — CBR comics become

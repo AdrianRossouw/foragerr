@@ -278,6 +278,16 @@
   animation: healthPulse 2s ease-in-out infinite;
 }
 
+/* Retryable logout failure (logout-failure-handling): a compact danger-toned
+ * message left of the logout button when a logout request did not confirm
+ * server-side termination — the operator stays signed in and can retry. */
+.logoutError {
+  font-size: var(--font-size-sm);
+  color: var(--color-danger);
+  white-space: nowrap;
+  align-self: center;
+}
+
 .iconButtonWarn:hover {
   color: var(--color-warning);
 }
