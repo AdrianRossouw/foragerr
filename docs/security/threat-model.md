@@ -132,6 +132,16 @@ allocated yet).
     `OPDS — Resource limits on archive and image handling`, IF `OPDS — Cached page counts and
     page index` (no open-every-archive), IF `OPDS — Acquisition feeds…` (no archive I/O at feed
     time). RISK-005.
+  - **T-OPDS-7 (DoS/Tampering — malicious RAR, cbr-support)**: CBR page streaming adds a
+    RAR parser over untrusted archives. Surface shape: `rarfile` (pure-Python metadata
+    parse) + an external `unrar-free` subprocess for member extraction — decompression
+    never runs in-process. Coverage: the same archive-limits framework as ZIP
+    (member-count / per-member / total declared-size caps enforced from archive metadata
+    before any read; single-member streaming extraction only, never full-archive
+    extraction to disk; zip-slip/symlink member rejection), magic-byte dispatch (an
+    archive is routed by content, never extension), and hard degradation — encrypted,
+    zero-member, or unparseable RAR falls back to the non-listable path (no PSE link,
+    stream 404) rather than erroring. Backend absence degrades identically. RISK-049.
   - **T-OPDS-6 (Information disclosure — egress)**: hotlinked ComicVine cover URLs leak iPad
     client requests to a third-party CDN. Coverage: IF `OPDS — Cover and thumbnail links with
     local fallback` (served locally). RISK-023.

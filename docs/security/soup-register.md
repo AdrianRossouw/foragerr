@@ -52,6 +52,7 @@ When live tooling becomes available, anomaly review is introduced in its own cha
 | pyyaml | `>=6.0` | PyPI | YAML parsing/serialization of `/config/config.yaml` | FRG-DEP-003 (configuration via environment variables and config file) | MIT | Deferred — see methodology |
 | defusedxml | `>=0.7` | PyPI | Hardened XML parsing (guards against XXE, billion-laughs/entity-expansion, external-entity SSRF) for untrusted Newznab/RSS indexer responses | FRG-IDX-006 (Newznab response parsing and error mapping), FRG-SEC-* (untrusted-input handling), the STRIDE disposition in `docs/security/threat-model.md` for indexer response parsing | PSF-2.0 | Deferred — see methodology |
 | pillow | `>=11,<12` | PyPI | Image decode/downscale for OPDS-PSE page streaming and local first-page cover extraction; used only on the OPDS stream/cover paths under strict pixel/byte caps (`MAX_IMAGE_PIXELS` set, truncated-image loading disabled) — never wired into import/metadata/UI | FRG-OPDS-008 (PSE page streaming), FRG-OPDS-011 (local cover/thumbnail fallback), FRG-OPDS-012 (archive/image resource limits), the STRIDE disposition in `docs/security/threat-model.md` for the OPDS archive/image-decode surface | MIT-CMU (HPND) | Deferred — see methodology |
+| rarfile | `>=4.3,<5` | PyPI | RAR archive listing and single-member extraction for OPDS-PSE CBR page streaming; pure-Python parser that shells out to an external unrar-compatible binary (subprocess boundary — no in-process decompression), used only behind the archive-limits framework (member/size caps enforced from archive metadata before any read) | FRG-OPDS-016 (RAR-backed archive access), FRG-OPDS-008/009 (PSE streaming + cached counts now covering CBR), the STRIDE disposition for the RAR surface (T-OPDS-7) | ISC | Deferred — see methodology |
 | cryptography | `>=43,<47` | PyPI | Authenticated-encryption + KDF primitives for the at-rest secret keystore: Fernet (AES-128-CBC + HMAC-SHA256) via MultiFernet, and scrypt to derive the Fernet key from the `FORAGERR_SECRET_KEY` passphrase. Encrypts UI-entered provider secrets in the SQLite `settings` JSON (`enc:v1:` framing); stdlib has no authenticated-encryption primitive | FRG-AUTH-008 (at-rest secret encryption), FRG-AUTH-011 (mandatory env key), FRG-AUTH-012 (decrypt-fail-soft), FRG-AUTH-013 (plaintext migration), RISK-041 mitigation, the STRIDE disposition in `docs/security/threat-model.md` for the secrets-at-rest surface | Apache-2.0 OR BSD-3-Clause | Deferred — see methodology |
 
 ## Development/test tooling (backend)
@@ -88,6 +89,16 @@ When live tooling becomes available, anomaly review is introduced in its own cha
 | typescript | `^5.6.2` | TypeScript compiler/type-checker (`tsc -b`, `npm run typecheck`) |
 | vite | `^5.4.8` | Dev server and production build tool for the SPA |
 | vitest | `^2.1.2` | Test runner for the frontend test suite (`frontend/src/**/*.test.tsx`) |
+
+## Container-image binaries (deployment)
+
+Binaries installed into the Docker image at build time — not present in any
+language manifest, so listed here for disclosure (`tools/soup_check.py`
+deliberately does not cross-check this section against a manifest).
+
+| Name | Version constraint | Source | Intended purpose | License |
+|---|---|---|---|---|
+| unrar-free | Debian `main` (trixie), `>=0.3` | apt | External RAR4/RAR5 extraction backend invoked by `rarfile` as a subprocess (registers `/usr/bin/unrar` via update-alternatives); probe-verified 2026-07-13 against both formats in the `python:3.12-slim` base image. RARLAB's proprietary `unrar` remains a documented compatibility alternative (non-OSI, freeware; would be recorded here verbatim) only if the real-library corpus run surfaces archives unrar-free mishandles. | GPL-2+ |
 
 ## Development/test tooling (e2e)
 

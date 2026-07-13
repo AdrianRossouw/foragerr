@@ -2,20 +2,20 @@
 
 ## 1. Registry, SOUP, security (change-wide prerequisites)
 
-- [ ] 1.1 Registry: allocate FRG-OPDS-016 (proposed, 0.9.x); update FRG-PP-018 milestone B → 0.9.x
-- [ ] 1.2 SOUP register: add `rarfile` (ISC) and `unrar` binary (RARLAB freeware license verbatim, non-OSI flagged, subprocess-boundary note, libarchive fallback documented); tools/soup_check.py green
-- [ ] 1.3 Security docs (FRG-PROC-006): STRIDE entries + risk register for untrusted RAR input (subprocess isolation, resource limits, encrypted/solid archive handling); note the misnamed-archive content-sniff in the parser surface inventory
-- [ ] 1.4 Dockerfile: install `unrar` (linuxserver convention); build note for the libarchive fallback
+- [x] 1.1 Registry: allocate FRG-OPDS-016 (proposed, 0.9.x); update FRG-PP-018 milestone B → 0.9.x
+- [x] 1.2 SOUP register: add `rarfile` (ISC) and `unrar` binary (RARLAB freeware license verbatim, non-OSI flagged, subprocess-boundary note, libarchive fallback documented); tools/soup_check.py green
+- [x] 1.3 Security docs (FRG-PROC-006): STRIDE entries + risk register for untrusted RAR input (subprocess isolation, resource limits, encrypted/solid archive handling); note the misnamed-archive content-sniff in the parser surface inventory
+- [x] 1.4 Dockerfile: install `unrar` (linuxserver convention); build note for the libarchive fallback
 
 ## 2. Phase 1 — archive opener seam + RAR backend
 
-- [ ] 2.1 Refactor the zip-only archive open path into a single dispatcher seam (extension first, content-sniff fallback both directions); no behavior change for zip (FRG-OPDS-008/009/010 tests stay green untouched)
-- [ ] 2.2 Add the rarfile backend behind the seam: listing, natural ordering, single-member streaming reads; same member-count/size/decode limits as zip
-- [ ] 2.3 Test (FRG-OPDS-016): CBR fixture streams page-by-page — PSE link, accurate pse:count, in-range/out-of-range, width cap — mirroring the CBZ test matrix
-- [ ] 2.4 Test (FRG-OPDS-016): pre-existing CBR row with NULL page_count heals lazily on first stream and renders PSE with zero archive I/O afterwards
-- [ ] 2.5 Test (FRG-OPDS-016): zip-renamed-.cbr and rar-renamed-.cbz open by content detection
-- [ ] 2.6 Test (FRG-OPDS-016): backend missing/failing → download-only entry, stream 404, no error feed; encrypted-rar fixture degrades the same way
-- [ ] 2.7 Test (FRG-OPDS-016): oversized/bomb rar fixtures refused within the limit framework
+- [x] 2.1 Refactor the zip-only archive open path into a single dispatcher seam (extension first, content-sniff fallback both directions); no behavior change for zip (FRG-OPDS-008/009/010 tests stay green untouched)
+- [x] 2.2 Add the rarfile backend behind the seam: listing, natural ordering, single-member streaming reads; same member-count/size/decode limits as zip
+- [x] 2.3 Test (FRG-OPDS-016): CBR fixture streams page-by-page — PSE link, accurate pse:count, in-range/out-of-range, width cap — mirroring the CBZ test matrix
+- [x] 2.4 Test (FRG-OPDS-016): pre-existing CBR row with NULL page_count heals lazily on first stream and renders PSE with zero archive I/O afterwards
+- [x] 2.5 Test (FRG-OPDS-016): zip-renamed-.cbr and rar-renamed-.cbz open by content detection
+- [x] 2.6 Test (FRG-OPDS-016): backend missing/failing → download-only entry, stream 404, no error feed; encrypted-rar fixture degrades the same way
+- [x] 2.7 Test (FRG-OPDS-016): oversized/bomb rar fixtures refused within the limit framework
 - [ ] 2.8 Gated corpus run (not CI): stream-check across sample-comics' 366 .cbr files; record pass rate + failure classes in the change notes; re-verify the libarchive fallback claim on the same corpus
 
 ## 3. Phase 2 — opt-in convert-at-import (FRG-PP-018)
