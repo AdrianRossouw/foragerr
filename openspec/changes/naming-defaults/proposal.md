@@ -32,4 +32,4 @@ The first real dogfooding session (2026-07-12) exposed that foragerr's shipped d
 
 ## Approval
 
-Pending — Adrian.
+Approved — Adrian, 2026-07-13 (in-session, alongside cbr-support; both queued as the next development).
