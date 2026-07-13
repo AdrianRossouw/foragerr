@@ -95,6 +95,13 @@ class ImportContext:
     #: (defined by the tagging area). The embedded-metadata READ (FRG-IMP-024) is
     #: always active and is NOT gated by this flag.
     comicinfo_tag_enabled: bool = False
+    #: Whether a successfully imported CBR is converted to CBZ at import time
+    #: (FRG-PP-018). OFF by default (the non-destructive stance); surfaced with
+    #: the format-preference configuration. Consumed only by the convert-at-import
+    #: step, which verifies the produced CBZ before discarding the original and
+    #: keeps the original on any verification failure (the import still succeeds).
+    #: On-demand per-issue/per-series conversion does NOT read this flag.
+    convert_cbr_to_cbz: bool = False
     now: dt.datetime | None = None
     #: Free-space probe seam (path → free bytes); default is the real probe.
     free_space_probe: Callable[[str], int] = field(default=fileops.free_bytes)
@@ -121,6 +128,7 @@ _SETTINGS_TO_CTX: dict[str, str] = {
     "recycle_bin_path": "recycle_bin_path",
     "recycle_bin_retention_days": "recycle_bin_retention_days",
     "comicinfo_tag_on_import": "comicinfo_tag_enabled",
+    "convert_cbr_to_cbz": "convert_cbr_to_cbz",
     "duplicate_constraint": "duplicate_constraint",
     "duplicate_dump_path": "duplicate_dump_path",
     "library_import_mode": "library_import_mode",

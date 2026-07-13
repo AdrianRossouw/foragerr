@@ -860,6 +860,19 @@ class Settings(BaseSettings):
             "and is not gated by this toggle."
         ),
     )
+    convert_cbr_to_cbz: bool = Field(
+        default=False,
+        description=(
+            "Convert CBR (RAR) archives to CBZ (ZIP) at import time as an explicit "
+            "format-preference policy (FRG-PP-018). Off by default (the "
+            "non-destructive stance): a CBR imports as-is. When on, a successfully "
+            "imported CBR is converted to a CBZ that is verified (member count "
+            "matches the source; the final page decodes as an image) BEFORE the "
+            "original is discarded; a failed verification keeps the original CBR "
+            "and the import still succeeds. On-demand per-issue/per-series "
+            "conversion is available regardless of this toggle."
+        ),
+    )
     config_backup_retention: int = Field(
         default=3,
         ge=1,

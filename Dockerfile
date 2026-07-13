@@ -33,13 +33,17 @@ FROM python:3.12-slim AS runtime
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
 # Runtime OS deps: gosu (privilege drop), curl (HEALTHCHECK), tzdata (TZ),
-# passwd (usermod/groupmod for PUID/PGID remap). Kept minimal; caches removed.
+# passwd (usermod/groupmod for PUID/PGID remap), unrar-free (RAR extraction
+# backend for CBR page streaming, FRG-OPDS-016 — GPL, Debian main; registers
+# /usr/bin/unrar via update-alternatives so rarfile auto-detects it; see the
+# container section of docs/security/soup-register.md). Kept minimal.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         gosu \
         curl \
         tzdata \
         passwd \
+        unrar-free \
     && rm -rf /var/lib/apt/lists/*
 
 # Unprivileged runtime user (linuxserver convention: "abc", default 911:911).
