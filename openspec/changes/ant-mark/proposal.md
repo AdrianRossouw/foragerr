@@ -24,7 +24,7 @@ The owner selected a new brand mark from the Claude Design logo exploration (pro
 ## Impact
 
 - **Code**: `frontend/src/components/icons.tsx` (LogoMarkIcon paths), `frontend/src/components/AppShell.module.css` + `frontend/src/screens/auth/LoginScreen.module.css` (lockup treatment), `frontend/src/theme/tokens.css` + `tokens.test.ts` palette list (retired tokens), `frontend/public/favicon.svg`.
-- **Docs**: README screenshot refresh (FRG-PROC-017) queued as a post-merge step — screenshots show the old mark until regenerated.
+- **Docs**: README gains a centered logo masthead (docs/assets/foragerr-mark.svg) and a tightened intro, so the project reads as a real project (FRG-PROC-014 labelling). README screenshot refresh (FRG-PROC-017) queued as a post-merge step — screenshots show the old mark until regenerated.
 - **Dependencies / SOUP / security / registry**: none.
 - **Design provenance**: vector paths transplanted from the owner's design project (variants `appmarkant` / `faviconant`), not redrawn.
 
