@@ -44,9 +44,9 @@ document ended up that way and what stops it recurring.
 ## Corrective actions (this change)
 
 - **Register compacted**: every row reduced to current state — a Status cell
-  (status word + provenance: change id, version) and a present-tense Current
-  mitigation cell citing governing requirement ids; review triggers kept for
-  accepted risks. Preamble rewritten to describe the current register and to
+  (status word, with change-id/version provenance where a change flipped it)
+  and a present-tense Current mitigation cell citing governing requirement
+  ids; review triggers kept for accepted risks. Preamble rewritten to describe the current register and to
   state the history convention explicitly (`git log --follow` reconstructs any
   risk's journey).
 - **Commit-standard amendment** (merge-gate item 5): status-bearing living
