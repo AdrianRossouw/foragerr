@@ -25,9 +25,13 @@ you straight back to where you were headed rather than dropping you on the
 library index.
 
 A **logout** button sits in the global header alongside the Health and
-System quick-access buttons; it ends your session immediately and returns
-you to the login screen. See `../admin/authentication.md` for how the
-operator account is set up and how a lost password is recovered.
+System quick-access buttons; on success it ends your session immediately and
+returns you to the login screen. If the logout can't be confirmed (for
+example the server is briefly unreachable), it does **not** pretend you are
+signed out — it keeps you signed in and shows a "try again" message, because
+your session is only truly ended once the server confirms it. See
+`../admin/authentication.md` for how the operator account is set up and how a
+lost password is recovered.
 
 ## The shell
 
