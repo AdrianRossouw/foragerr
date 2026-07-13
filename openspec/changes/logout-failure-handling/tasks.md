@@ -10,5 +10,5 @@
 ## 2. Docs, gate, merge
 
 - [x] 2.1 Manual (FRG-PROC-011): docs/manual/user note that a failed logout keeps you signed in and to retry
-- [ ] 2.2 Frontend suite + tsc green; regenerate traceability matrix; soup_check + risk_register_check exit 0 (no dep/security-doc changes)
-- [ ] 2.3 Tiered review gate (small, auth-touching: 2-3 angles + a security angle + Codex); merge --no-ff; tag; delete branch
+- [x] 2.2 Frontend suite + tsc green; regenerate traceability matrix; soup_check + risk_register_check exit 0 (no dep/security-doc changes)
+- [x] 2.3 Tiered review gate (small, auth-touching: 2-3 angles + a security angle + Codex); merge --no-ff; tag; delete branch
