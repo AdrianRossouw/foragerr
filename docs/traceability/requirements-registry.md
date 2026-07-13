@@ -229,8 +229,9 @@ source. Compatibility: pre-1.0 releases may break with migration notes; from
 | FRG-PP-015 | Failed-download blocklist and auto re-search | pp | withdrawn | — |
 | FRG-PP-016 | Manual import resolution | pp | implemented | M2 |
 | FRG-PP-017 | ComicInfo.xml tagging on import | pp | implemented | M2 |
-| FRG-PP-018 | CBR-to-CBZ conversion and library-wide retagging | pp | approved | B |
+| FRG-PP-018 | CBR-to-CBZ conversion and library-wide retagging | pp | implemented | 0.9.x |
 | FRG-PP-019 | Permissions and ownership enforcement | pp | approved | B |
+| FRG-PP-020 | Non-destructive defaults (no rename, no internal-id tags) | pp | implemented | 0.9.x |
 | FRG-API-001 | Versioned, OpenAPI-documented REST API | api | implemented | M1 |
 | FRG-API-002 | Standard error and resource conventions | api | implemented | M1 |
 | FRG-API-003 | Series resources with ComicVine lookup | api | implemented | M1 |
@@ -306,6 +307,7 @@ source. Compatibility: pre-1.0 releases may break with migration notes; from
 | FRG-OPDS-013 | Recent Additions shelf | opds | implemented | M2 |
 | FRG-OPDS-014 | Publisher browse shelf | opds | approved | B |
 | FRG-OPDS-015 | Single OPDS version; no OPDS 2.0 | opds | approved | B |
+| FRG-OPDS-016 | RAR-backed archive access for page streaming | opds | implemented | 0.9.x |
 | FRG-NOTIF-001 | Generic notifier provider abstraction | notif | approved | B |
 | FRG-NOTIF-002 | Event catalog with per-connection opt-in | notif | approved | B |
 | FRG-NOTIF-003 | Event payload content | notif | approved | B |

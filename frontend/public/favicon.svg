@@ -1,29 +1,21 @@
-<!-- Favicon per the design handoff (assets/foragerr-ant.svg): the bare ant
-     silhouette — no hexagon at favicon sizes — knocked out in the brand dark
-     green on the green family tile so it reads on light and dark tabs. -->
+<!-- Favicon: a SIMPLIFIED ant-in-speech-bubble for 16px browser tabs. The
+     detailed vector mark (LogoMarkIcon) turns to mud at tab size, so the tab
+     glyph drops the comic and interior detail to a bold filled bubble with a
+     clean ant silhouette knocked out — recognizable on light and dark tabs.
+     Keep in step with the brand accent (#57b877) and app-surface dark. -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Foragerr">
-  <defs>
-    <linearGradient id="tile" x1="0" y1="0" x2="0.47" y2="1">
-      <stop offset="0" stop-color="#63c483"/>
-      <stop offset="1" stop-color="#3a8455"/>
-    </linearGradient>
-  </defs>
-  <rect width="100" height="100" rx="23" fill="url(#tile)"/>
-  <svg x="13" y="22" width="74" height="55" viewBox="0 0 140 104" overflow="visible" fill="none">
-    <g stroke="#123018" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M62 56 L54 76 L44 90"/>
-      <path d="M78 57 L76 78 L70 92"/>
-      <path d="M92 56 L100 78 L102 92"/>
-    </g>
-    <g stroke="#123018" stroke-width="5" stroke-linecap="round">
-      <path d="M112 34 Q126 22 121 11"/>
-      <path d="M116 39 Q131 31 130 19"/>
-    </g>
-    <g fill="#123018">
-      <ellipse cx="40" cy="46" rx="24" ry="17"/>
-      <circle cx="68" cy="47" r="5"/>
-      <ellipse cx="82" cy="46" rx="13" ry="10.5"/>
-      <circle cx="106" cy="43" r="13"/>
-    </g>
-  </svg>
+  <path d="M32 60 L26 80 L48 62 Z" fill="#57b877"/>
+  <rect x="14" y="12" width="72" height="54" rx="18" fill="#57b877"/>
+  <ellipse cx="40" cy="40" rx="12" ry="9" fill="#202020"/>
+  <circle cx="54" cy="39" r="5.5" fill="#202020"/>
+  <circle cx="65" cy="35" r="8.5" fill="#202020"/>
+  <circle cx="67" cy="33" r="2.6" fill="#57b877"/>
+  <g fill="none" stroke="#202020" stroke-width="3.2" stroke-linecap="round">
+    <path d="M71 27 Q79 19 76 13"/>
+    <path d="M74 29 Q82 23 81 17"/>
+  </g>
+  <g fill="none" stroke="#202020" stroke-width="3.4" stroke-linecap="round">
+    <path d="M48 47 L44 58"/>
+    <path d="M58 46 L62 58"/>
+  </g>
 </svg>

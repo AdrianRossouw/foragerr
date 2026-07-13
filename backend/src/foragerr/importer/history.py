@@ -47,6 +47,15 @@ EVENT_UPGRADE_REPLACED = "upgrade_replaced"
 #: (FRG-PP-017). The file lands untagged and the import is NOT failed — this
 #: warning event records the degraded outcome so the tag failure is visible.
 EVENT_COMICINFO_TAG_FAILED = "comicinfo_tag_failed"
+#: A CBR was converted to CBZ (FRG-PP-018): the verified-before-discard
+#: format-shift at import (opt-in policy) or an on-demand per-issue/per-series
+#: conversion. The ``issue_files`` row swapped path/size/page-count and the
+#: original CBR was removed in the same transaction as this event.
+EVENT_CONVERTED = "converted"
+#: A CBR→CBZ conversion FAILED verification (or the write/promote raised) so the
+#: original CBR was kept untouched (FRG-PP-018). A warning event only — the
+#: surrounding import (or on-demand run) still succeeds; the file is not lost.
+EVENT_CONVERT_FAILED = "convert_failed"
 
 #: The full event-type vocabulary written to ``import_history.event_type``.
 IMPORT_EVENT_TYPES: frozenset[str] = frozenset(
@@ -60,6 +69,8 @@ IMPORT_EVENT_TYPES: frozenset[str] = frozenset(
         EVENT_FILE_RENAMED,
         EVENT_UPGRADE_REPLACED,
         EVENT_COMICINFO_TAG_FAILED,
+        EVENT_CONVERTED,
+        EVENT_CONVERT_FAILED,
     }
 )
 
@@ -285,6 +296,8 @@ async def all_events(
 
 __all__ = [
     "EVENT_COMICINFO_TAG_FAILED",
+    "EVENT_CONVERTED",
+    "EVENT_CONVERT_FAILED",
     "EVENT_DOWNLOAD_FAILED",
     "EVENT_FILE_DELETED",
     "EVENT_FILE_RENAMED",

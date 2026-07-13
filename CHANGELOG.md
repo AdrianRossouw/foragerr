@@ -9,6 +9,104 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.9.5] — 2026-07-13
+
+ant-mark: brand refresh — the forager ant in a speech bubble.
+
+### Changed
+- **New brand mark** (FRG-UI-002, FRG-UI-023): the logo becomes the owner's
+  finished vector — a forager ant carrying a comic in a speech bubble — as the
+  in-app `LogoMarkIcon` (sidebar + login lockups), with a simplified variant as
+  the 16px browser-tab favicon where the detailed mark would be illegible. The
+  lockup drops its gradient tile (the mark renders in the brand accent on the
+  chrome); the retired tile tokens are removed. The README gains a centered
+  logo masthead and a tightened intro.
+
+## [v0.9.4] — 2026-07-13
+
+logout-failure-handling: a security bugfix from dogfooding — the logout
+control no longer reports success when the server did not confirm it.
+
+### Fixed
+- **Logout signals success only on server-confirmed termination**
+  (FRG-AUTH-004). The control previously cleared client auth state and
+  returned to the login screen on every attempt, even when the logout request
+  failed — presenting a signed-out UI while the HttpOnly session cookie stayed
+  live, so a reload silently re-authenticated (a shared-device exposure). Now
+  a confirmed logout clears and returns to login; a failed one keeps you
+  signed in and shows a retryable "try again" message. No server change — the
+  endpoint already terminated the session and 204s; this closes the
+  client-side false-success.
+
+## [v0.9.3] — 2026-07-13
+
+cbr-support: the second 0.9.x dogfood-series change — CBR comics become
+readable on the iPad, closing the biggest daily-usability gap (69% of the
+owner's real library was CBR, unreadable in Panels).
+
+### Added
+- **CBR (RAR) page streaming over OPDS** (FRG-OPDS-016): the archive layer
+  gains a RAR backend (`rarfile` + `unrar-free`, both OSI-licensed, shipped in
+  the Docker image) behind a single magic-byte-dispatched opener seam, with the
+  same resource-limit and path-confinement posture as ZIP. Every `.cbr` now
+  page-streams like a `.cbz`; a CBR imported before this support heals lazily
+  (its page count is computed on first open — no re-import). A zip renamed
+  `.cbr` (and the reverse) opens by content. Encrypted/damaged archives degrade
+  to download-only, never an error.
+- **Opt-in CBR→CBZ conversion** (FRG-PP-018, off by default): `convert_cbr_to_cbz`
+  converts at import under verify-before-discard (the produced CBZ is verified
+  before the original is removed, and the swap is crash-safe — the original is
+  deleted only after the DB commit is durable). On-demand per-series/per-issue
+  conversion via `POST /api/v1/convert/...`.
+
+### Security
+- The RAR parser is new attack surface over untrusted input (T-OPDS-7,
+  RISK-049): STRIDE analysis + risk register updated; the convert path re-gates
+  on the same `inspect_archive`/`safe_to_extract` vetting as streaming, on both
+  import-time and on-demand routes. Adversarially reviewed (metadata-lie
+  decompression bomb, path traversal, symlink, encrypted, forged magic — all
+  contained) and corpus-validated (473/473 of the owner's real CBRs stream via
+  `unrar-free`; libarchive refuted as a fallback).
+
+### Notes
+- PDFs remain download-only (readers open a downloaded PDF fine); PDF→CBZ is
+  deferred to a later format-preferences change.
+
+## [v0.9.2] — 2026-07-13
+
+naming-defaults: the first 0.9.x dogfood-series change — library adoption
+becomes non-destructive by default, and filename identity tags become durable.
+
+### Changed
+- **Renaming is off by default** (FRG-PP-020, **BREAKING for fresh installs
+  only**): a new install adopts an existing library byte-for-byte and
+  name-for-name; downloads keep their release names unless renaming is
+  enabled. Existing installs keep their persisted configuration unchanged.
+- **Default naming template drops the internal-id tag** (FRG-PP-009): now
+  `{Series Title} {Issue Number:000} ({Year})`. The round-trip validation
+  (rendered names must re-parse to the same issue) is unchanged.
+
+### Added
+- **`{CvIssueId}` naming token** (FRG-PP-009): renders the ComicVine issue id
+  as `[cvid-<ID>]` — the durable identity tag that survives database resets
+  and reinstalls; recognized by the parser into the existing ComicVine-id
+  evidence path. `{IssueId}` remains supported for already-stamped libraries.
+
+### Fixed
+- **Stale identity tags can no longer override a disagreeing filename**
+  (FRG-PP-003): a `[__id__]` tag whose issue contradicts the parsed filename
+  (different series, or a contradicted issue number) now falls through to the
+  filename heuristics on every import path — closing the reinstall hazard
+  where old tags point at arbitrary rows in a new database. Tag-only
+  unparseable names (the DDL convention) still resolve by tag.
+
+### Upgrade notes
+- Existing installs: no action; persisted config wins. To adopt the new
+  defaults, set `rename_enabled: false` / clear the template override.
+- Libraries stamped under the old default keep their `[__id__]` filenames;
+  they are harmless under the new guard, and a rename pass with the new
+  template (plus `{CvIssueId}` if you want durable tags) cleans them up.
+
 ## [v0.9.1] — 2026-07-12
 
 m8-rate-audit-followups: fixes and hardening from a full eight-angle + Codex

@@ -1,4 +1,10 @@
-# foragerr
+<p align="center">
+  <img src="docs/assets/foragerr-mark.svg" width="88" alt="">
+</p>
+
+<h1 align="center">foragerr</h1>
+
+<p align="center"><em>A self-hosted, Sonarr-style manager for a comic library you own.</em></p>
 
 > **AI-built, human-directed.** foragerr's code, tests, and documentation are
 > written almost entirely by AI (Anthropic's Claude), working under the
@@ -12,19 +18,18 @@
 > how it was made.
 
 foragerr is a self-hosted, Sonarr-style manager for a comic library you own. It
-imports and renames an existing collection (DRM-free purchases such as Humble
-Bundle drops, public-domain scans from the Digital Comic Museum and the Internet
-Archive), matches it against ComicVine metadata, tracks which issues you have and
-which are missing, and serves the library to your reading device over OPDS — for
-example an iPad over Tailscale. Filling gaps integrates with your existing usenet
-tooling (Newznab indexers, SABnzbd). There is no built-in reader.
+imports and renames an existing collection — DRM-free purchases like Humble
+Bundle drops and public-domain scans from the Digital Comic Museum and the
+Internet Archive — matches it against ComicVine metadata, tracks which issues you
+have and which are missing, fills gaps through your usenet tooling (Newznab
+indexers, SABnzbd), and serves the library to a reading device over OPDS, such as
+an iPad over Tailscale. There is no built-in reader.
 
-It runs on one operator's home server behind a mandatory login, and is best
-deployed tailnet-only rather than exposed to the open internet (see
-Installation) — and it doubles as a working demonstration
-of regulated software development practice applied to a small, real project (see
-the formicary.ai context this project is developed under). That second purpose is
-why the tour below links every screen to the requirements that govern it.
+It runs on one operator's home server behind a mandatory login and is best kept
+tailnet-only rather than exposed to the open internet (see Installation). It also
+doubles as a working demonstration of regulated software-development practice on
+a small, real project (the formicary.ai context it is built under) — which is why
+the tour below links every screen to the requirements that govern it.
 
 This file is foragerr's top-level labelling and technical documentation: what the
 project is, how it is developed and secured, and where to find more detail. For
