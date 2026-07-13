@@ -231,7 +231,7 @@ source. Compatibility: pre-1.0 releases may break with migration notes; from
 | FRG-PP-017 | ComicInfo.xml tagging on import | pp | implemented | M2 |
 | FRG-PP-018 | CBR-to-CBZ conversion and library-wide retagging | pp | approved | B |
 | FRG-PP-019 | Permissions and ownership enforcement | pp | approved | B |
-| FRG-PP-020 | Non-destructive defaults (no rename, no internal-id tags) | pp | proposed | 0.9.x |
+| FRG-PP-020 | Non-destructive defaults (no rename, no internal-id tags) | pp | implemented | 0.9.x |
 | FRG-API-001 | Versioned, OpenAPI-documented REST API | api | implemented | M1 |
 | FRG-API-002 | Standard error and resource conventions | api | implemented | M1 |
 | FRG-API-003 | Series resources with ComicVine lookup | api | implemented | M1 |
