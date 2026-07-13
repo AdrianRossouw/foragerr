@@ -86,8 +86,8 @@ under the top level of `config.yaml`.
 | `opds_pse_max_pixels` | `FORAGERR_OPDS_PSE_MAX_PIXELS` | `64000000` (64 MP) | OPDS page streaming: max decoded pixel count (width×height) accepted **before** an image is decoded (decompression-bomb guard). |
 | `opds_pse_max_width` | `FORAGERR_OPDS_PSE_MAX_WIDTH` | `2048` | OPDS page streaming: hard ceiling on the page `width` a reader may request; larger requests are clamped. Pages are never upscaled. |
 | `opds_pse_request_timeout_seconds` | `FORAGERR_OPDS_PSE_REQUEST_TIMEOUT_SECONDS` | `20` | OPDS page streaming: per-request wall-clock budget for decoding/resizing one page or cover; an over-budget request returns 503 rather than pinning CPU. |
-| `rename_enabled` | `FORAGERR_RENAME_ENABLED` | `true` | Rename files on import per the naming template. Off = keep source filenames. |
-| `file_naming_template` | `FORAGERR_FILE_NAMING_TEMPLATE` | `{Series Title} {Issue Number:000} ({Year}) [__{IssueId}__]` | Token template for imported file names. Must render a name that re-parses to the same issue (validated at startup/save). |
+| `rename_enabled` | `FORAGERR_RENAME_ENABLED` | `false` | Rename files on import per the naming template. Off (the default) = keep source filenames; imports never modify adopted files. Persisted configs from earlier releases keep their stored value. |
+| `file_naming_template` | `FORAGERR_FILE_NAMING_TEMPLATE` | `{Series Title} {Issue Number:000} ({Year})` | Token template for imported file names (used only when renaming is on). Must render a name that re-parses to the same issue (validated at startup/save). `{CvIssueId}` is the durable opt-in identity tag. |
 | `folder_naming_template` | `FORAGERR_FOLDER_NAMING_TEMPLATE` | `{Series Title} ({Year})` | Token template for series folders. |
 | `replace_illegal_characters` | `FORAGERR_REPLACE_ILLEGAL_CHARACTERS` | `true` | Replace filesystem-illegal characters in rendered names (off = strip). |
 | `import_transfer_mode` | `FORAGERR_IMPORT_TRANSFER_MODE` | `move` | How download imports place files: `move`, `copy`, or `hardlink` (falls back to copy across volumes). |
