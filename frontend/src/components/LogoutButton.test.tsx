@@ -5,6 +5,7 @@ import { Routes, Route } from 'react-router-dom';
 import { renderWithProviders } from '../test/renderWithProviders';
 import { fakeFetcher } from '../test/fakeFetcher';
 import { useAuthStore } from '../store/authStore';
+import { ApiRequestError } from '../api/fetcher';
 import { LogoutButton } from './LogoutButton';
 
 function renderButton(resolver: () => unknown = () => undefined) {
@@ -59,6 +60,19 @@ describe('FRG-AUTH-004: header logout control', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/try again/i);
     // ...and the operator is NOT stranded as signed-out: still authenticated,
     // still on the app view (no navigation to the login stub).
+    expect(useAuthStore.getState().status).toBe('authenticated');
+    expect(screen.queryByTestId('login-stub')).not.toBeInTheDocument();
+  });
+
+  it('FRG-AUTH-004: a 403 (real ApiRequestError, not a bare throw) keeps the session and does not navigate', async () => {
+    renderButton(() => {
+      throw new ApiRequestError(403, null, '/api/v1/auth/logout');
+    });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: 'Log out' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/try again/i);
     expect(useAuthStore.getState().status).toBe('authenticated');
     expect(screen.queryByTestId('login-stub')).not.toBeInTheDocument();
   });

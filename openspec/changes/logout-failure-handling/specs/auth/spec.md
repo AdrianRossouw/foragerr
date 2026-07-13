@@ -43,7 +43,7 @@ The system SHALL issue authenticated sessions as DB-backed opaque tokens deliver
 #### Scenario: User-initiated password change preserves the acting session
 
 - **WHEN** the operator changes the admin password from Settings (supplying the current password) while other sessions — including a remember-me session on another device — exist
-- **THEN** every other session is invalidated while the acting session remains valid
+- **THEN** every other session row is deleted and returns 401 on next use, while the acting session continues uninterrupted, and the change is logged as a structured event without credential material
 
 #### Scenario: Logout-all destroys every session
 

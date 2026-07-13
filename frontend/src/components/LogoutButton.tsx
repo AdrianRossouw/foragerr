@@ -29,6 +29,7 @@ export function LogoutButton() {
   const [failed, setFailed] = useState(false);
 
   const onLogout = () => {
+    if (logout.isPending) return; // guard a same-tick double activation
     setFailed(false);
     logout.mutate(undefined, {
       onSuccess: () => {
