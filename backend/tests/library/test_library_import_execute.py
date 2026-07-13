@@ -201,6 +201,50 @@ async def test_in_place_registers_files_without_moving_them(
     assert "imported=1" in (after["saga"].message or "")
 
 
+@pytest.mark.req("FRG-PP-020")
+async def test_fresh_settings_in_place_import_renames_nothing(
+    db, tmp_path, root_folder_id, root_folder_path
+):
+    """A fresh-settings instance (no persisted config, no overrides) SHALL NOT
+    modify adopted files: rename_enabled now defaults to off (naming-defaults),
+    so an in_place library import registers every file at its exact original
+    path and name — byte-identical before and after, and untouched even though
+    it doesn't match the naming template's canonical output."""
+    cfg = tmp_path / "cfg-freshdefaults"
+    cfg.mkdir()
+    settings = flows_settings(cfg)  # no rename_enabled override: real default
+    assert settings.rename_enabled is False  # sanity: exercising the shipped default
+
+    # Deliberately NOT template-shaped, so a mistaken rename would be visible.
+    original = make_large_cbz(
+        root_folder_path / "Saga (2012)" / "saga_001_scanlated (2012).cbz"
+    )
+    path_before = str(original)
+    stat_before = original.stat()
+
+    cv = (
+        FakeCV()
+        .volume(101, name="Saga", start_year=2012)
+        .issues(101, [issue(9101, "1", cover_date="2012-03-01")])
+    )
+    factory = build_factory(settings, cv.handler())
+    commands = CommandService(db, settings)
+    await scan_library_root(db, settings, root_folder_id, factory=factory)
+    groups = await _groups_by_key(db, root_folder_id)
+    await _confirm(db, groups["saga"].id, 101)
+
+    summary = await execute_library_import(
+        db, settings, [groups["saga"].id], commands=commands, factory=factory
+    )
+
+    assert "imported=1" in summary
+    paths = await _issue_file_paths(db, 101)
+    assert paths == [path_before]  # byte-identical original path+name
+    stat_after = original.stat()
+    assert stat_after.st_ino == stat_before.st_ino  # same inode: never moved
+    assert stat_after.st_mtime_ns == stat_before.st_mtime_ns  # never rewritten
+
+
 @pytest.mark.req("FRG-IMP-023")
 async def test_move_mode_routes_through_normal_placement(
     db, tmp_path, root_folder_id, root_folder_path

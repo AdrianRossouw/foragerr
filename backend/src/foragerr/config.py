@@ -36,10 +36,21 @@ from foragerr.config_migrations import (
     migrate_config,
 )
 from foragerr.logging import register_secret
-from foragerr.naming import DEFAULT_FILE_TEMPLATE, DEFAULT_FOLDER_TEMPLATE
+from foragerr.naming import DEFAULT_FOLDER_TEMPLATE
 from foragerr.security.archives import DEFAULT_ARCHIVE_LIMITS, ArchiveLimits
 
 logger = _stdlog.getLogger("foragerr.config")
+
+#: Fresh-install default file-naming template (FRG-PP-020, naming-defaults):
+#: no internal-identifier token. Adopting an existing library must never stamp
+#: a database row id — meaningless (and silently mis-mappable) after a
+#: reinstall or the planned 1.0 clean slate — into a filename. Deliberately
+#: NOT the same object as :data:`foragerr.naming.DEFAULT_FILE_TEMPLATE` (the
+#: token engine's own illustrative default, still tag-suffixed, consumed
+#: directly by ``importer.context``/``config_resources`` outside this
+#: Settings model); unifying the two is tracked as naming-defaults follow-up
+#: work, not this task's scope.
+DEFAULT_FILE_NAMING_TEMPLATE = "{Series Title} {Issue Number:000} ({Year})"
 
 CONFIG_DIR_ENV = "FORAGERR_CONFIG_DIR"
 DEFAULT_CONFIG_DIR = Path("/config")
@@ -119,7 +130,7 @@ def ensure_secret_key_present(settings: "Settings") -> None:
 
 def _file_template_round_trips(template: str) -> bool:
     """True if ``template`` both round-trips a probe identity AND is injective over
-    distinct issues (the FRG-PP-009 contract + its data-loss corollary).
+    distinct issue numbers (the FRG-PP-009 contract + its data-loss corollary).
 
     Two properties are checked, because a single-identity probe misses the worst
     failure: a template that renders the SAME name for DISTINCT issues silently
@@ -127,11 +138,15 @@ def _file_template_round_trips(template: str) -> bool:
 
     1. **Round-trip.** A rendered probe re-parses back to the same series matching
        key and issue ordering key — so a renamed file stays reconcilable.
-    2. **Injectivity.** Two probes differing only in issue number, and two probes
-       differing only in the ``[__{IssueId}__]`` identity, must each render
-       DIFFERENT names. This rejects a template that drops the issue number (issues
-       7 and 8 would collide) or the id tag (two issues sharing a display number
-       would collide) — the tokens that guarantee one file per issue.
+    2. **Injectivity.** Two probes differing only in issue number must render
+       DIFFERENT names — this rejects a template that drops the issue number
+       (issues 7 and 8 would collide), the one collision every template risks
+       regardless of configuration.
+
+    An identity tag (``{IssueId}``/``{CvIssueId}``) is NOT required for this
+    check to pass (naming-defaults, FRG-PP-020): it is an operator opt-in for the
+    rarer same-series-same-number collision (variant/reprint rows), not a
+    property of the shipped default, which carries no tag at all.
 
     Imports are deferred to avoid an import cycle (``config`` is imported early).
     """
@@ -155,13 +170,12 @@ def _file_template_round_trips(template: str) -> bool:
 
     try:
         rendered = _render("7", "424242")
-        # Injectivity: distinct issue numbers and distinct ids must not collide.
+        # Injectivity: distinct issue numbers must not collide.
         differs_by_number = _render("8", "424242") != rendered
-        differs_by_id = _render("7", "424243") != rendered
         reparsed = parse(rendered, reference_year=2016)
     except Exception:
         return False
-    if not (differs_by_number and differs_by_id):
+    if not differs_by_number:
         return False
     if not reparsed.success or reparsed.issue is None:
         return False
@@ -730,19 +744,24 @@ class Settings(BaseSettings):
     )
 
     rename_enabled: bool = Field(
-        default=True,
+        default=False,
         description=(
-            "Rename imported files to the file naming template. When off, an "
+            "Rename imported files to the file naming template. Off by default "
+            "(FRG-PP-020): a fresh install adopts an existing library without "
+            "touching any file name or path; renaming is opt-in. When off, an "
             "imported file keeps its original name (FRG-PP-012)."
         ),
     )
     file_naming_template: str = Field(
-        default=DEFAULT_FILE_TEMPLATE,
+        default=DEFAULT_FILE_NAMING_TEMPLATE,
         description=(
-            "Token template for imported/renamed file names (FRG-PP-009). Tokens "
-            "like {Series Title} {Issue Number:000} ({Year}) are substituted; the "
-            "template must round-trip a probe identity back through the parser so a "
-            "renamed file stays reconcilable to its issue."
+            "Token template for imported/renamed file names (FRG-PP-009), applied "
+            "only when rename_enabled is on. Tokens like {Series Title} "
+            "{Issue Number:000} ({Year}) are substituted; the template must "
+            "round-trip a probe identity back through the parser so a renamed "
+            "file stays reconcilable to its issue. The shipped default carries no "
+            "internal-id tag (FRG-PP-020); add {CvIssueId} to opt into a durable "
+            "identity tag that survives a database reinstall."
         ),
     )
     folder_naming_template: str = Field(
@@ -1078,8 +1097,8 @@ class Settings(BaseSettings):
         if not _file_template_round_trips(value):
             raise ValueError(
                 "file naming template must render a name that round-trips back to "
-                "the same series and issue — keep {Series Title}, {Issue Number} "
-                "and the [__{IssueId}__] identity tag"
+                "the same series and issue, and that stays distinct across issue "
+                "numbers — keep {Series Title} and {Issue Number}"
             )
         return value
 

@@ -136,6 +136,12 @@ class ParseResult:
     #: `f1` inside a series title never sets this.
     fix_revision: int | None = None
     issue_id: str | None = None
+    #: `[cvid-<digits>]` durable ComicVine identity tag (naming-defaults,
+    #: FRG-PP-009): the reinstall-surviving counterpart to the internal-row-id
+    #: `[__id__]` tag. Feeds the importer's existing cv-issue-id evidence
+    #: namespace (``IssueRow.cv_issue_id`` lookup) — a distinct field so it never
+    #: overloads ``issue_id``. ``None`` when the name carries no cvid tag.
+    cv_issue_id: int | None = None
     type: str | None = None
     mode: ParseMode = ParseMode.FILENAME
     confidence: float = 0.0
@@ -192,6 +198,7 @@ class ParseResult:
             "scan_group": self.scan_group,
             "fix_revision": self.fix_revision,
             "issue_id": self.issue_id,
+            "cv_issue_id": self.cv_issue_id,
             "type": self.type,
             "mode": self.mode.value,
             "confidence": self.confidence,

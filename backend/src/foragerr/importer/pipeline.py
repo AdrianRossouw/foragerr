@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 
@@ -74,6 +74,7 @@ from foragerr.importer.sources import (
 from foragerr.library import matching, repo
 from foragerr.library.models import IssueFileRow, IssueRow, SeriesRow
 from foragerr.metadata.comicinfo import (
+    EmbeddedMetadata,
     build_comicinfo_bytes,
     read_embedded_metadata,
     tag_cbz,
@@ -403,6 +404,43 @@ async def reconcile(
     return base_series, base_issue
 
 
+async def _tag_disagrees_with_filename(
+    session: AsyncSession,
+    tagged: IssueRow,
+    evidence: Evidence,
+) -> bool:
+    """Whether the filename parse contradicts an issue-id tag's target issue.
+
+    The universal stale-tag guard (FRG-PP-003): a parsed ``[__issueid__]`` tag is
+    honored only when it does not disagree with the filename parse, on scoped AND
+    unscoped imports. Disagreement is judged **only on a concrete parsed comic
+    identity** — a filename that yields no issue number (a tag-only DDL name, or a
+    bare series fragment) carries nothing resolvable to contradict the tag, so the
+    tag stays the file's only signal and resolves it (the legitimate DDL
+    convention; falling through would merely block it since the heuristic itself
+    needs an issue number). When the filename DOES parse to an issue, the tag is
+    discarded if that issue is not the one the tag names (:func:`match_issue_id`,
+    the shared identity equality), or if the filename's series matching key is not
+    the tagged issue's series (:func:`series_title_matches`, the pipeline's shared
+    loose-subset rule). This generalizes the scoped-rescan series check
+    (FRG-SER-010) to every import path: after a database reinstall a stale tag
+    points at an arbitrary row, and the default template stamps the issue number
+    into the name, so any such parseable name wins over the meaningless tag.
+    """
+    if evidence.issue is None:
+        return False
+    if tagged.issue_number:
+        index = matching.build_issue_index([tagged])
+        if matching.match_issue_id(evidence.issue, index) is None:
+            return True
+    if evidence.matching_key is not None:
+        series = await session.get(SeriesRow, tagged.series_id)
+        series_key = series.matching_key if series is not None else None
+        if not matching.series_title_matches(evidence.matching_key, series_key):
+            return True
+    return False
+
+
 async def _reconcile_base(
     session: AsyncSession,
     candidate: ImportCandidate,
@@ -426,13 +464,23 @@ async def _reconcile_base(
         if iid is not None:
             issue_row = await session.get(IssueRow, iid)
             if issue_row is not None:
-                # On a scoped rescan the tag is only trustworthy for THIS series:
-                # a file carrying another series' id tag (misfiled, or a stale
-                # tag) must not be dragged into the scoped series' folder
-                # (FRG-SER-010). Fall through to the heuristic when it disagrees.
-                if (
+                # Universal stale-tag guard (FRG-PP-003). Honor the tag only when
+                # it does not disagree with the filename parse — on scoped AND
+                # unscoped imports. Two disagreements discard it: (1) a scoped
+                # rescan whose tag targets another series (a misfiled/stale tag
+                # must not be dragged into the scoped folder, FRG-SER-010), and
+                # (2) any import where the filename parse names a different series
+                # matching key or a contradicted issue identity — an internal row
+                # id embedded by an earlier database is meaningless after a
+                # reinstall and must never override a parseable name. A tag-only
+                # (unparseable) name disagrees with nothing and still resolves by
+                # the tag (the DDL convention).
+                scope_ok = (
                     candidate.series_scope_id is None
                     or issue_row.series_id == candidate.series_scope_id
+                )
+                if scope_ok and not await _tag_disagrees_with_filename(
+                    session, issue_row, evidence
                 ):
                     return issue_row.series_id, issue_row.id, _BASE_TAG
 
@@ -520,6 +568,17 @@ async def build_evaluation(
         embedded = await _run_fs(
             ctx, read_embedded_metadata, candidate.local_path, archive
         )
+
+    # Durable [cvid-<ID>] filename tag (naming-defaults, FRG-PP-009): feed a
+    # parsed cv-issue-id into the SAME cv-issue-id namespace the embedded
+    # ComicInfo read uses, so reconcile() resolves it via the EXISTING cv lookup
+    # (no new resolution path). Archive metadata still wins: we only fall back to
+    # the filename tag when the ComicInfo read carries no cv id of its own.
+    if evidence.cv_issue_id is not None:
+        if embedded is None:
+            embedded = EmbeddedMetadata(cv_issue_id=evidence.cv_issue_id)
+        elif embedded.parse_error is None and embedded.cv_issue_id is None:
+            embedded = replace(embedded, cv_issue_id=evidence.cv_issue_id)
 
     series_id, issue_id = await reconcile(
         session,
@@ -630,6 +689,11 @@ def build_fields(series: SeriesRow, issue: IssueRow, evidence: Evidence) -> Rena
         # ``[__issueid__]`` handshake tag and that :func:`reconcile` looks up by
         # primary key, so a renamed file re-imports to the same issue.
         issue_id=str(issue.id),
+        # Durable ComicVine identity for the ``{CvIssueId}`` token (FRG-PP-009):
+        # survives a reinstall/db-reset (unlike the internal row id above), so an
+        # operator who opts into a ``[cvid-<ID>]`` template gets a tag the parser
+        # re-recognizes into the cv-issue-id namespace.
+        cv_issue_id=str(issue.cv_issue_id),
         publisher=series.publisher,
     )
 

@@ -272,19 +272,60 @@ def test_invalid_config_reports_all_fields_in_one_pass(config_dir):
     "template",
     [
         "{Series Title} ({Year})",  # no issue token at all → issues 7 and 8 collide
-        "{Series Title} {Issue Number:000} ({Year})",  # no id tag → same-number collision
     ],
 )
 def test_file_template_without_issue_identity_is_rejected(config_dir, template):
-    """A naming template that renders the SAME name for distinct issues would
-    silently overwrite one library file with another on rename, so config rejects
-    it (injectivity guard, FRG-PP-009 data-loss corollary)."""
+    """A naming template that renders the SAME name for distinct issue NUMBERS
+    would silently overwrite one library file with another on rename, so config
+    rejects it (injectivity guard, FRG-PP-009 data-loss corollary). An identity
+    tag is no longer required to pass this guard (naming-defaults, FRG-PP-020):
+    see test_tag_free_default_template_is_accepted below."""
     (config_dir / CONFIG_FILENAME).write_text(
         f"file_naming_template: {template!r}\n", encoding="utf-8"
     )
     with pytest.raises(ConfigError) as excinfo:
         load_settings()
     assert "file_naming_template" in str(excinfo.value)
+
+
+@pytest.mark.req("FRG-PP-020")
+def test_tag_free_default_template_is_accepted(config_dir):
+    """The shipped tag-free default template (no {IssueId}/{CvIssueId}) is a
+    valid, accepted file_naming_template — the round-trip/injectivity guard no
+    longer requires an identity tag (naming-defaults). This also covers the
+    real boot sequence: first run WRITES this exact string into config.yaml as
+    an active value (test_first_run_generates_documented_config), so it must
+    also pass validation on every subsequent load, not just as a bypassed
+    field default."""
+    from foragerr.config import DEFAULT_FILE_NAMING_TEMPLATE
+
+    assert "IssueId" not in DEFAULT_FILE_NAMING_TEMPLATE
+    (config_dir / CONFIG_FILENAME).write_text(
+        f"file_naming_template: {DEFAULT_FILE_NAMING_TEMPLATE!r}\n", encoding="utf-8"
+    )
+    settings = load_settings()
+    assert settings.file_naming_template == DEFAULT_FILE_NAMING_TEMPLATE
+
+
+@pytest.mark.req("FRG-PP-020")
+def test_persisted_v091_style_config_keeps_its_values_over_the_new_defaults(
+    config_dir,
+):
+    """A config.yaml persisted by an earlier (v0.9.1-shaped) install —
+    ``rename_enabled: true`` with the old tagged template — loads with those
+    values intact on a build shipping the new non-destructive defaults.
+    Persisted configuration always wins over shipped defaults, so a default
+    change never alters an existing install's effective behavior."""
+    old_tagged_template = "{Series Title} {Issue Number:000} ({Year}) [__{IssueId}__]"
+    (config_dir / CONFIG_FILENAME).write_text(
+        "rename_enabled: true\n"
+        f"file_naming_template: {old_tagged_template!r}\n",
+        encoding="utf-8",
+    )
+    settings = load_settings()
+
+    assert settings.rename_enabled is True
+    assert settings.file_naming_template == old_tagged_template
 
 
 @pytest.mark.req("FRG-NFR-009")

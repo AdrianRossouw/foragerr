@@ -13,8 +13,11 @@ decision 7). A template is literal text interleaved with:
 
 - **tokens** — ``{Series Title}``, ``{Issue Number:000}``, ``{Year}``,
   ``{Release Group}``, ``{Classification}``, ``{Booktype}``, ``{Volume}``,
-  ``{Publisher}``, ``{Issue Title}``, ``{Series CleanTitle}``, ``{IssueId}`` —
-  resolved from a :class:`RenameFields` value. A ``:pad`` suffix
+  ``{Publisher}``, ``{Issue Title}``, ``{Series CleanTitle}``, ``{IssueId}``,
+  ``{CvIssueId}`` (the durable, reinstall-surviving ComicVine identity, rendered
+  ``[cvid-<ID>]`` and recognized back by the parser — unlike ``{IssueId}``, which
+  embeds an internal row id) — resolved from a :class:`RenameFields` value. A
+  ``:pad`` suffix
   (``{Issue Number:000}``) zero-pads the integer part decimal-safely, so
   ``15.5`` renders ``015.5`` and ``1.MU`` renders ``001.MU``. The **case** of
   the token name's letters controls the output case: an all-lower token name
@@ -84,6 +87,8 @@ _TOKEN_ALIASES: dict[str, str] = {
     "release group": "release_group",
     "issueid": "issue_id",
     "issue id": "issue_id",
+    "cvissueid": "cv_issue_id",
+    "cv issue id": "cv_issue_id",
     "publisher": "publisher",
 }
 
@@ -106,6 +111,9 @@ class RenameFields:
     booktype: str | None = None
     release_group: str | None = None
     issue_id: str | None = None
+    #: ComicVine issue id — the durable identity that survives a reinstall (unlike
+    #: ``issue_id``, an internal row id). Rendered ``[cvid-<ID>]`` by ``{CvIssueId}``.
+    cv_issue_id: str | None = None
     publisher: str | None = None
 
     def as_map(self) -> dict[str, str | None]:
@@ -120,6 +128,7 @@ class RenameFields:
             "booktype": self.booktype,
             "release_group": self.release_group,
             "issue_id": self.issue_id,
+            "cv_issue_id": self.cv_issue_id,
             "publisher": self.publisher,
         }
 
