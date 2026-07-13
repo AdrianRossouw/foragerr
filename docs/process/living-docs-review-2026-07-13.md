@@ -53,12 +53,13 @@ document ended up that way and what stops it recurring.
   documents are updated by *replacing* current-state content, never by
   appending narrations; history is git's job.
 
-## Recommendations (not implemented here — owner's call)
+## Recommendations
 
-1. A ~30-line `tools/risk_register_check.py` at the merge gate mirroring
-   `soup_check.py`: fixed status vocabulary, per-cell length ceiling,
-   one-Status-marker-per-row. Root cause 3 says a validator is what actually
-   keeps a register clean; the two clean documents prove it.
+1. **[BUILT — owner-approved 2026-07-13]** `tools/risk_register_check.py` at the
+   merge gate mirroring `soup_check.py`: fixed status vocabulary, one status
+   per row, no narration markers, row-length ceiling. Root cause 3 says a
+   validator is what actually keeps a register clean; the two clean documents
+   prove it. (Its first run caught a narration remnant on RISK-041.)
 2. A once-per-milestone "consumer read": one living document read cold at each
    milestone close, findings filed like any other gate finding.
 3. An eventual threat-model skim for the same disease in narrative form

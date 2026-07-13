@@ -31,7 +31,10 @@ Governed by **FRG-PROC-001** and **FRG-PROC-002** (message format) and
    documents — the risk register, SOUP register, requirements registry — are
    updated by **replacing** the row's current-state content, never by appending
    dated narrations. A row answers "what is true now"; history is git's job
-   (`git log --follow` on the document).
+   (`git log --follow` on the document). `tools/risk_register_check.py` must
+   exit 0 at every merge gate (owner-approved 2026-07-13) — it enforces the
+   status vocabulary, one-state-per-row, no narration markers, and row
+   length on the risk register, mirroring `tools/soup_check.py`.
 6. Code review + simplify pass on the branch diff, including an
    independent-model (Codex) full-diff review as a required independent
    perspective (owner instruction 2026-07-10). The review fleet is
