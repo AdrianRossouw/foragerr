@@ -27,6 +27,11 @@ Governed by **FRG-PROC-001** and **FRG-PROC-002** (message format) and
    (a required section of every proposal — sections touched, or "none" with
    rationale) was carried out in `docs/manual/` / `README.md`.
 5. Security docs updated if the change added attack surface (FRG-PROC-006).
+   **Living-register discipline** (living-docs review, 2026-07-13): status-bearing
+   documents — the risk register, SOUP register, requirements registry — are
+   updated by **replacing** the row's current-state content, never by appending
+   dated narrations. A row answers "what is true now"; history is git's job
+   (`git log --follow` on the document).
 6. Code review + simplify pass on the branch diff, including an
    independent-model (Codex) full-diff review as a required independent
    perspective (owner instruction 2026-07-10). The review fleet is
@@ -53,7 +58,7 @@ Governed by **FRG-PROC-001** and **FRG-PROC-002** (message format) and
    synthetic `backend/tests/**` secrets from re-flagging under that rule.
 8. Registry rows flipped, matrix regenerated, change archived, branch deleted
    after merge.
-8. Release record per FRG-PROC-013 (`openspec/specs/dev-process/spec.md` owns the
+9. Release record per FRG-PROC-013 (`openspec/specs/dev-process/spec.md` owns the
    scheme), from change 7 / v0.1.0 onward:
    - **Pre-merge** (in the change itself): the release version's `CHANGELOG.md`
      entry (Added/Changed/Fixed/Security + FRG refs + upgrade notes) is written, and
