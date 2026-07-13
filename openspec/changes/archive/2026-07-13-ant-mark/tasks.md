@@ -10,5 +10,5 @@
 
 ## 2. Downstream
 
-- [ ] 2.1 Design-system re-sync (LogoMarkIcon + chrome components re-verify; anchored driver upload)
-- [ ] 2.2 Post-merge: README screenshot refresh (FRG-PROC-017)
+- [x] 2.1 Design-system re-sync (LogoMarkIcon + chrome components re-verify; anchored driver upload)
+- [x] 2.2 Post-merge: README screenshot refresh (FRG-PROC-017)
