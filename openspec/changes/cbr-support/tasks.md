@@ -20,14 +20,14 @@
 
 ## 3. Phase 2 — opt-in convert-at-import (FRG-PP-018)
 
-- [ ] 3.1 Conversion step in the import pipeline behind the off-by-default policy flag (surfaced with format-preference config); verify-before-discard (member count + final-member decode); atomic issue_files swap; history event
-- [ ] 3.2 On-demand convert commands per issue and per series (skip non-CBR as no-ops)
-- [ ] 3.3 Test (FRG-PP-018): enabled-policy import converts + verifies + swaps + records; default import leaves .cbr byte-identical
-- [ ] 3.4 Test (FRG-PP-018): failed verification keeps the original and the import still succeeds
-- [ ] 3.5 Test (FRG-PP-018): per-series on-demand conversion under verify-before-discard
+- [x] 3.1 Conversion step in the import pipeline behind the off-by-default policy flag (surfaced with format-preference config); verify-before-discard (member count + final-member decode); atomic issue_files swap; history event
+- [x] 3.2 On-demand convert commands per issue and per series (skip non-CBR as no-ops)
+- [x] 3.3 Test (FRG-PP-018): enabled-policy import converts + verifies + swaps + records; default import leaves .cbr byte-identical
+- [x] 3.4 Test (FRG-PP-018): failed verification keeps the original and the import still succeeds
+- [x] 3.5 Test (FRG-PP-018): per-series on-demand conversion under verify-before-discard
 
 ## 4. Docs, gate, and merge
 
-- [ ] 4.1 Manual: user reading/OPDS section (CBR streams now; PDF = download-only, Panels reads it; pdf→cbz deferred to format-preferences) + admin configuration (policy flag, backend selection/fallback)
-- [ ] 4.2 Regenerate traceability matrix
+- [x] 4.1 Manual: user reading/OPDS section (CBR streams now; PDF = download-only, Panels reads it; pdf→cbz deferred to format-preferences) + admin configuration (policy flag, backend selection/fallback)
+- [x] 4.2 Regenerate traceability matrix
 - [ ] 4.3 Full suite green; security-touching change → full 8-angle review gate + Codex (per tiered-gates standard, new parser surface); merge --no-ff; delete branch

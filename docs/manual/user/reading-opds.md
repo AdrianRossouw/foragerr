@@ -65,9 +65,17 @@ non-streaming reader just downloads the file as before, nothing changes for it.
 
 A few things worth knowing:
 
-- Streaming works for **`.cbz` (zip) comics**. A `.cbr` (rar) comic can still be
-  **downloaded** whole, but it is not page-streamed (foragerr does not bundle an
-  unrar tool); if you want streaming for a title, keep it as `.cbz`.
+- Streaming works for **`.cbz` (zip) and `.cbr` (rar) comics** alike — the Docker
+  image bundles a RAR extraction tool, so your whole library streams regardless of
+  container. A `.cbr` imported before this support streams too: its page count is
+  computed the first time a reader opens it, no re-import needed. Only an
+  **encrypted or damaged** archive falls back to download-only. PDFs remain
+  download-only (readers like Panels open a downloaded PDF fine; page streaming is
+  a comic-archive feature).
+- If you prefer a uniform zip library, an **opt-in** setting converts `.cbr` to
+  `.cbz` at import time (off by default; the converted file is verified before the
+  original is removed) — see `convert_cbr_to_cbz` in `admin/configuration.md`.
+  On-demand conversion is also available per series and per issue.
 - Every issue also shows a **cover**: if there's no ComicVine cover on file,
   foragerr generates one from the comic's first page and serves it itself — so
   covers and thumbnails always appear, and your reader never has to reach out to a
