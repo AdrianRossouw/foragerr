@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from fractions import Fraction
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
@@ -29,9 +30,10 @@ from foragerr.parser.result import Issue
 from foragerr.library.ordering import encode_sort_key
 
 
-def _correct_name(issue_number: int, issue_id: int) -> str:
-    """The default-template rendering for a Batman (1987) issue."""
-    return f"Batman {issue_number:03d} (1987) [__{issue_id}__].cbz"
+def _correct_name(issue_number: int) -> str:
+    """The default-template rendering for a Batman (1987) issue (FRG-PP-020: the
+    shipped default is tag-free, so no internal-row-id segment appears)."""
+    return f"Batman {issue_number:03d} (1987).cbz"
 
 
 async def _add_issue_file(db, series_id, *, issue_number, cv_issue_id, filename, folder):
@@ -62,7 +64,7 @@ async def test_preview_touches_no_disk(db, seed, import_ctx):
         db, s.series_id, issue_number=404, cv_issue_id=5001,
         filename="batman #404 dodgy scan.cbz", folder=s.series_path,
     )
-    ctx = import_ctx()
+    ctx = import_ctx(rename_enabled=True)
     series, files = await _inputs(db, s.series_id)
 
     before = {p.name: p.stat().st_mtime_ns for p in s.series_path.iterdir()}
@@ -73,7 +75,7 @@ async def test_preview_touches_no_disk(db, seed, import_ctx):
     assert len(plan.entries) == 1
     entry = plan.entries[0]
     assert entry.current_path == str(wrong)
-    assert entry.changed and Path(entry.new_path).name == _correct_name(404, entry.issue_id)
+    assert entry.changed and Path(entry.new_path).name == _correct_name(404)
 
 
 @pytest.mark.req("FRG-PP-012")
@@ -93,7 +95,7 @@ async def test_execute_performs_exactly_the_previewed_operations(db, seed, impor
         db, s.series_id, issue_number=406, cv_issue_id=5003,
         filename="placeholder.cbz", folder=s.series_path,
     )
-    correct = s.series_path / _correct_name(406, id_c)
+    correct = s.series_path / _correct_name(406)
     (s.series_path / "placeholder.cbz").rename(correct)
     async with db.write_session() as session:
         row = (
@@ -101,7 +103,7 @@ async def test_execute_performs_exactly_the_previewed_operations(db, seed, impor
         ).scalar_one()
         row.path = str(correct)
 
-    ctx = import_ctx()
+    ctx = import_ctx(rename_enabled=True)
     async with db.read_session() as session:
         series = await repo.get_series(session, s.series_id)
     plan = await execute_renames(db, series, ctx)
@@ -132,7 +134,7 @@ async def test_one_rename_event_per_renamed_file_in_the_same_transaction(
             db, s.series_id, issue_number=n, cv_issue_id=cv,
             filename=f"wrong-{n}.cbz", folder=s.series_path,
         )
-    ctx = import_ctx()
+    ctx = import_ctx(rename_enabled=True)
     async with db.read_session() as session:
         series = await repo.get_series(session, s.series_id)
     await execute_renames(db, series, ctx)
@@ -155,7 +157,7 @@ async def test_template_change_bulk_preview_marks_no_ops_unchanged(db, seed, imp
         db, s.series_id, issue_number=404, cv_issue_id=5001, filename="tmp.cbz",
         folder=s.series_path,
     )
-    correct = s.series_path / _correct_name(404, id_ok)
+    correct = s.series_path / _correct_name(404)
     (s.series_path / "tmp.cbz").rename(correct)
     async with db.write_session() as session:
         row = (
@@ -168,7 +170,7 @@ async def test_template_change_bulk_preview_marks_no_ops_unchanged(db, seed, imp
         folder=s.series_path,
     )
 
-    ctx = import_ctx()
+    ctx = import_ctx(rename_enabled=True)
     series, files = await _inputs(db, s.series_id)
     plan = preview_renames(series, files, ctx)
 
@@ -180,7 +182,7 @@ async def test_template_change_bulk_preview_marks_no_ops_unchanged(db, seed, imp
 
 
 @pytest.mark.req("FRG-PP-012")
-async def test_flow_previews_without_disk_then_executes(db, seed):
+async def test_flow_previews_without_disk_then_executes(db, seed, tmp_path):
     """The SER-owned flow: preview is disk-free, execute applies the moves."""
     from foragerr.library.flows.rename import preview_series_renames, rename_series
 
@@ -189,12 +191,16 @@ async def test_flow_previews_without_disk_then_executes(db, seed):
         db, s.series_id, issue_number=404, cv_issue_id=5001,
         filename="messy rip.cbz", folder=s.series_path,
     )
+    # ``_build_ctx`` duck-types the settings it's handed (media_management_fields
+    # reads by hasattr); a minimal stub with rename_enabled=True is enough to
+    # exercise renaming here (ImportContext.rename_enabled now defaults False).
+    settings = SimpleNamespace(config_dir=str(tmp_path), rename_enabled=True)
 
-    plan = await preview_series_renames(db, None, s.series_id)
+    plan = await preview_series_renames(db, settings, s.series_id)
     assert len(plan.changed) == 1
     assert (s.series_path / "messy rip.cbz").exists()  # preview moved nothing
 
-    result = await rename_series(db, None, s.series_id)
+    result = await rename_series(db, settings, s.series_id)
     assert len(result.changed) == 1
     assert not (s.series_path / "messy rip.cbz").exists()  # executed the move
     assert Path(result.changed[0].new_path).exists()
@@ -218,7 +224,7 @@ async def test_duplicate_target_blocks_both_files_with_reasons(db, seed, import_
         await repo.add_issue_file(session, issue_id=issue.id, path=str(x), size=x.stat().st_size)
         await repo.add_issue_file(session, issue_id=issue.id, path=str(y), size=y.stat().st_size)
 
-    ctx = import_ctx()
+    ctx = import_ctx(rename_enabled=True)
     series, files = await _inputs(db, s.series_id)
     plan = preview_renames(series, files, ctx)
 
@@ -245,8 +251,8 @@ async def test_swap_chain_renames_both_files_without_byte_loss(db, seed, import_
         db, s.series_id, issue_number=501, cv_issue_id=6002,
         filename="tmp-b.cbz", folder=s.series_path,
     )
-    target_a = s.series_path / _correct_name(500, id1)  # fileA's new_path
-    target_b = s.series_path / _correct_name(501, id2)  # fileB's new_path
+    target_a = s.series_path / _correct_name(500)  # fileA's new_path
+    target_b = s.series_path / _correct_name(501)  # fileB's new_path
     # Set up the swap: fileA currently sits AT B's target, fileB AT A's target.
     tmp_a.replace(target_b)
     target_b.write_bytes(b"AAA-content")
@@ -256,7 +262,7 @@ async def test_swap_chain_renames_both_files_without_byte_loss(db, seed, import_
         (await session.get(IssueFileRow, row_a)).path = str(target_b)
         (await session.get(IssueFileRow, row_b)).path = str(target_a)
 
-    ctx = import_ctx()
+    ctx = import_ctx(rename_enabled=True)
     async with db.read_session() as session:
         series = await repo.get_series(session, s.series_id)
     plan = await execute_renames(db, series, ctx)
@@ -291,11 +297,11 @@ async def test_mid_batch_vanished_file_isolates_to_that_file(db, seed, import_ct
         series = await repo.get_series(session, s.series_id)
     gone_file.unlink()  # vanishes before execution
 
-    ctx = import_ctx()
+    ctx = import_ctx(rename_enabled=True)
     await execute_renames(db, series, ctx)
 
     # The healthy file renamed and its row was committed-updated...
-    ok_target = s.series_path / _correct_name(700, id_ok)
+    ok_target = s.series_path / _correct_name(700)
     assert ok_target.exists() and not ok_file.exists()
     async with db.read_session() as session:
         paths = {
@@ -314,7 +320,13 @@ async def test_every_previewed_name_round_trips(db, seed, import_ctx):
         db, s.series_id, issue_number=404, cv_issue_id=5001,
         filename="batman 404 rescan.cbz", folder=s.series_path,
     )
-    ctx = import_ctx()
+    # This test's subject includes the internal-id tag round-tripping (below),
+    # which the shipped tag-free default (FRG-PP-020) no longer carries — pin
+    # the tagged template explicitly so that coverage stays exercised.
+    ctx = import_ctx(
+        rename_enabled=True,
+        file_template="{Series Title} {Issue Number:000} ({Year}) [__{IssueId}__]",
+    )
     series, files = await _inputs(db, s.series_id)
     plan = preview_renames(series, files, ctx)
 

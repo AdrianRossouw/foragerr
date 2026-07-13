@@ -64,6 +64,12 @@ class Evidence:
     #: `(fN)` fixed-release marker revision (FRG-PP-014); ``None`` = unfixed.
     fix_revision: int | None = None
     issue_id: str | None = None
+    #: `[cvid-<ID>]` durable ComicVine identity tag parsed from a name layer
+    #: (naming-defaults, FRG-PP-009). Distinct from the internal-row-id
+    #: ``issue_id`` tag: it feeds the importer's EXISTING cv-issue-id namespace
+    #: (``IssueRow.cv_issue_id`` lookup, the same one the embedded ComicInfo layer
+    #: uses), so a reinstall-surviving tag resolves without a new resolution path.
+    cv_issue_id: int | None = None
     #: field name → layer that supplied it (LAYER_* / PROV_ISSUE_ID_TAG).
     provenance: dict[str, str] = field(default_factory=dict)
     #: layer name → its full ParseResult, for the decision trace/diagnostics.
@@ -136,6 +142,16 @@ def aggregate(
             provenance["issue_id"] = PROV_ISSUE_ID_TAG
             break
 
+    # Durable [cvid-<ID>] tag (FRG-PP-009): highest-confidence layer carrying one
+    # wins, mirroring the issue-id-tag capture above. The pipeline feeds this into
+    # the EXISTING cv-issue-id namespace (no new resolution path).
+    cv_issue_id: int | None = None
+    for layer_name in _LAYER_ORDER:
+        result = layers.get(layer_name)
+        if result is not None and result.cv_issue_id is not None:
+            cv_issue_id = result.cv_issue_id
+            break
+
     return Evidence(
         matching_key=matching_key,
         issue=issue,
@@ -147,6 +163,7 @@ def aggregate(
         release_group=release_group,
         fix_revision=fix_revision,
         issue_id=issue_id,
+        cv_issue_id=cv_issue_id,
         provenance=provenance,
         layers=layers,
     )

@@ -99,20 +99,34 @@ a replacement search is queued immediately (`downloads.md`).
 
 ## Renaming
 
-Imported files are named by a token template. The M1 default is:
+**Renaming is off by default.** A fresh install never modifies your files: library
+imports adopt files byte-for-byte under their original names, and downloads keep
+their release names when moved into the library. Turn renaming on
+(`rename_enabled`) if you want foragerr to apply its naming template.
+(Installs configured under earlier releases keep whatever they had set —
+persisted configuration always wins over shipped defaults.)
+
+When enabled, imported files are named by a token template. The default is:
 
 ```
-{Series Title} {Issue Number:000} ({Year}) [__{IssueId}__]
+{Series Title} {Issue Number:000} ({Year})
 ```
 
-which produces names like `Saga 001 (2012) [__4050-12345__].cbz`. Available tokens
-include `{Series Title}`, `{Issue Number}` (with zero-padding control:
+which produces names like `Saga 001 (2012).cbz`. Available tokens include
+`{Series Title}`, `{Issue Number}` (with zero-padding control:
 `{Issue Number:000}` renders issue 5 as `005`, and decimal issues like `5.1` pad
 only the integer part), `{Year}`, `{Volume}`, `{Publisher}`, `{Issue Title}`,
-`{Release Group}`, `{Classification}`, `{Booktype}`, and `{IssueId}`. Optional
-groups in `(...)` / `[...]` drop out cleanly when their tokens have no value — a
-series with no known year simply omits the `(Year)` part rather than rendering
-`()`.
+`{Release Group}`, `{Classification}`, `{Booktype}`, `{IssueId}`, and
+`{CvIssueId}`. Optional groups in `(...)` / `[...]` drop out cleanly when their
+tokens have no value — a series with no known year simply omits the `(Year)` part
+rather than rendering `()`.
+
+Two identity tokens exist for operators who want tagged filenames: `{CvIssueId}`
+renders the ComicVine issue id (as `[cvid-12345]`) and is the durable choice — it
+survives database resets and reinstalls. `{IssueId}` renders foragerr's internal
+row id and is kept for compatibility with libraries named under earlier defaults;
+internal ids are only meaningful to the database that assigned them, so prefer
+`{CvIssueId}` for new templates.
 
 Series folders are created from a folder template (default
 `{Series Title} ({Year})`, matching how the library organized folders before this
@@ -124,8 +138,11 @@ be written outside the library.
 **The round-trip guarantee:** every name foragerr renders is required to parse back
 to the same series and issue through its own filename parser. This is enforced by
 tests across the whole parser corpus, so renaming can never produce a file that
-foragerr would later fail to recognize. The `[__{IssueId}__]` tag in the default
-template makes re-recognition exact even if a series is later retitled.
+foragerr would later fail to recognize. Adding `{CvIssueId}` to your template makes
+re-recognition exact even if a series is later retitled — and unlike the internal
+`{IssueId}` tag, it still identifies the right issue after a database rebuild.
+Identity tags found in filenames are never trusted blindly: a tag that disagrees
+with what the filename itself says is ignored in favor of the filename.
 
 ### Safe file handling
 

@@ -35,15 +35,24 @@ sys.modules[_spec.name] = _corpus_mod  # dataclass field introspection needs thi
 _spec.loader.exec_module(_corpus_mod)
 CORPUS = _corpus_mod.CORPUS
 
-# Identity-preserving template variants: dropping the id/year and changing token
-# case never alters the series matching key or the issue ordering key.
+# Identity-preserving template variants: dropping/adding the id/cvid/year and
+# changing token case never alters the series matching key or the issue ordering
+# key. The ``[cvid-{CvIssueId}]`` durable-identity tag (FRG-PP-009) is stripped by
+# the parser exactly like ``[__{IssueId}__]``, so it too must leave the round-trip
+# identity untouched.
 _VARIANTS = (
     "{Series Title} {Issue Number:000} ({Year}) [__{IssueId}__]",
+    "{Series Title} {Issue Number:000} ({Year}) {CvIssueId}",
     "{Series Title} {Issue Number:000} ({Year})",
     "{series title} {issue number:000} ({year})",
     "{SERIES TITLE} {ISSUE NUMBER:000} ({YEAR})",
     "{Series Title} {Issue Number:0000}",
 )
+
+
+def _cv_id_for(row) -> str:
+    """A plausible, row-stable ComicVine id (disjoint from the internal-id space)."""
+    return str(4_000_000 + row.n)
 
 
 def _eligible(row) -> bool:
@@ -120,7 +129,14 @@ def test_oversized_series_title_preserves_identity_tag_and_issue_number():
         year="1987",
         issue_id=str(issue_id),
     )
-    rendered = render_filename(fields, ext=".cbz")
+    # The tag isn't in the shipped default any more (FRG-PP-020); this test's
+    # subject is that truncation preserves a TRAILING identity tag, so pin the
+    # tagged template explicitly.
+    rendered = render_filename(
+        fields,
+        ext=".cbz",
+        template="{Series Title} {Issue Number:000} ({Year}) [__{IssueId}__]",
+    )
 
     assert len(rendered.encode("utf-8")) <= 255  # respects the byte ceiling
     assert f"[__{issue_id}__]" in rendered  # identity tag survived truncation
@@ -142,6 +158,7 @@ def test_seeded_template_variants_round_trip():
             issue=row.display,
             year=str(row.year) if row.year is not None else None,
             issue_id=str(1000 + row.n),
+            cv_issue_id=_cv_id_for(row),
         )
         rendered = render_filename(fields, template=template, ext=".cbz")
         reparsed = parse(rendered, reference_year=2026)
@@ -157,3 +174,36 @@ def test_seeded_template_variants_round_trip():
             template,
             rendered,
         )
+        # The durable cvid tag round-trips whenever the template carries it.
+        if "cvid" in template:
+            assert reparsed.cv_issue_id == int(_cv_id_for(row)), (
+                row.n,
+                template,
+                rendered,
+            )
+
+
+@pytest.mark.req("FRG-PP-009")
+def test_cvid_variant_round_trips_identity_and_cv_id_over_the_corpus():
+    """The ``[cvid-{CvIssueId}]`` template preserves the round-trip identity AND
+    recovers the durable ComicVine id for every eligible corpus identity."""
+    template = "{Series Title} {Issue Number:000} ({Year}) {CvIssueId}"
+    checked = 0
+    for row in CORPUS:
+        if not _eligible(row):
+            continue
+        checked += 1
+        fields = RenameFields(
+            series_title=row.series,
+            issue=row.display,
+            year=str(row.year) if row.year is not None else None,
+            cv_issue_id=_cv_id_for(row),
+        )
+        rendered = render_filename(fields, template=template, ext=".cbz")
+        reparsed = parse(rendered, reference_year=2026)
+        assert reparsed.success, (row.n, rendered)
+        assert reparsed.matching_key == matching_key(row.series), (row.n, rendered)
+        assert reparsed.issue is not None, (row.n, rendered)
+        assert _order_key(reparsed.issue) == _expected_order_key(row), (row.n, rendered)
+        assert reparsed.cv_issue_id == int(_cv_id_for(row)), (row.n, rendered)
+    assert checked >= 40

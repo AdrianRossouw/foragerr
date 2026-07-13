@@ -32,6 +32,9 @@ from foragerr.importer import (
 from foragerr.importer.pipeline import gather
 from foragerr.library import repo
 from foragerr.library.models import IssueFileRow
+from foragerr.naming import RenameFields, render_filename
+
+_CVID_TEMPLATE = "{Series Title} {Issue Number:000} ({Year}) {CvIssueId}"
 
 from importer._archives import (
     comicinfo_xml,
@@ -182,6 +185,53 @@ async def test_oversized_comicinfo_pipeline_imports_on_filename(
     )
     assert [o.status for o in outcomes] == [ImportStatus.IMPORTED]
     assert outcomes[0].issue_id == s.issue_id
+
+
+# --- FRG-PP-009: the durable [cvid-<ID>] filename tag feeds the cv namespace ---
+
+
+@pytest.mark.req("FRG-PP-009")
+async def test_cvid_filename_tag_resolves_via_cv_namespace_after_reinstall(
+    db, seed, import_ctx, tmp_path
+):
+    """A ``[cvid-<ID>]`` tag rendered by ``{CvIssueId}`` resolves to the right
+    issue by ComicVine id even when internal row ids differ from the cv ids and
+    the filename number is misleading — the reinstall-survival contract.
+
+    Two real issues get internal row ids in insertion order, unrelated to their
+    ComicVine ids (exactly the post-reinstall / clean-slate state where an
+    internal-row-id ``[__id__]`` tag would silently mis-map). The name is rendered
+    for cv 9001 (#404) but deliberately misstates the issue number as 405, so only
+    the cvid tag — fed into the EXISTING cv-issue-id namespace — can pin #404.
+    """
+    s = await seed(title="Batman", issue_number="404", cv_issue_id=9001)
+    id_405 = await _add_issue(db, s.series_id, cv_issue_id=9002, issue_number="405")
+    ctx = import_ctx()
+
+    dl = tmp_path / "dl"
+    fields = RenameFields(
+        series_title="Batman",
+        issue="405",  # misleading: the filename heuristic alone would pick #405
+        year="1987",
+        cv_issue_id=str(s.cv_issue_id),  # durable identity → #404
+    )
+    name = render_filename(fields, template=_CVID_TEMPLATE, ext=".cbz")
+    assert "[cvid-9001]" in name
+    make_cbz(dl / name)
+
+    outcomes = await _run(
+        db, CompletedDownloadSource(download_id="dl-1", output_path=str(dl)), ctx
+    )
+
+    assert [o.status for o in outcomes] == [ImportStatus.IMPORTED]
+    # Resolved by cv id to #404, NOT the filename's #405, regardless of row ids.
+    assert outcomes[0].issue_id == s.issue_id
+    assert outcomes[0].issue_id != id_405
+    async with db.read_session() as session:
+        events = await history.events_for_issue(session, s.issue_id)
+    data = history.decode_data(events[0].data)
+    # It went through the cv-issue-id namespace, not the filename heuristic.
+    assert data["provenance"]["issue"] == "comicinfo"
 
 
 # --- FRG-IMP-024: our own signals (tag / grab) outrank the embedded id -------

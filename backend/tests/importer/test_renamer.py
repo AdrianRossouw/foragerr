@@ -14,9 +14,16 @@ from foragerr.importer.renamer import (
 
 @pytest.mark.req("FRG-PP-009")
 def test_tokens_padding_and_year_render():
+    # Subject: the {IssueId} token renders into the durable identity tag. The
+    # shipped default is tag-free (FRG-PP-020), so pin the tagged template
+    # explicitly rather than exercising it through DEFAULT_FILE_TEMPLATE.
     fields = RenameFields(series_title="Batman", issue="5", year="1987", issue_id="99")
     assert (
-        render_filename(fields, template=DEFAULT_FILE_TEMPLATE, ext=".cbz")
+        render_filename(
+            fields,
+            template="{Series Title} {Issue Number:000} ({Year}) [__{IssueId}__]",
+            ext=".cbz",
+        )
         == "Batman 005 (1987) [__99__].cbz"
     )
 

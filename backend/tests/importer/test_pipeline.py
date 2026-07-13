@@ -71,7 +71,9 @@ async def test_completed_download_source_imports_and_records_history(
         files = (await session.execute(select(IssueFileRow))).scalars().all()
         events = await history.events_for_issue(session, s.issue_id)
     assert len(files) == 1
-    assert Path(files[0].path).name == "Batman 404 (1987) [__%d__].cbz" % s.issue_id
+    # Renaming is off by default now (FRG-PP-020): the completed download
+    # imports under its own name, no identity tag stamped.
+    assert Path(files[0].path).name == "Batman 404 (1987).cbz"
     assert Path(files[0].path).parent == s.series_path  # imported under the series
     assert [e.event_type for e in events] == ["imported"]
 
@@ -144,6 +146,147 @@ async def test_issue_id_tag_short_circuits_to_direct_lookup(db, seed, import_ctx
     outcomes = await _run(db, source, ctx)
     assert outcomes[0].status is ImportStatus.IMPORTED
     assert outcomes[0].issue_id == s.issue_id
+
+
+# --- FRG-PP-003: universal stale-tag guard (naming-defaults) -----------------
+
+
+@pytest.mark.req("FRG-PP-003")
+async def test_stale_tag_for_other_series_yields_to_filename_parse(
+    db, seed, import_ctx
+):
+    """After a reinstall a `[__id__]` tag points at an arbitrary row. On an
+    UNSCOPED import a parseable filename naming a different series must win over
+    the stale tag — the file resolves to the series/issue the NAME identifies,
+    never to whatever row the internal id now happens to hit."""
+    batman = await seed(title="Batman", issue_number="404")
+    daredevil = await seed(
+        title="Daredevil", issue_number="404", cv_volume_id=99, cv_issue_id=8800
+    )
+    ctx = import_ctx()
+    dl_dir = Path(ctx.config_dir).parent / "dl-stale"
+    # Filename clearly parses to Daredevil #404; the tag names Batman's row (a
+    # stale id from a previous database). Same issue number on both series, so
+    # only the series-matching-key disagreement can catch it.
+    make_cbz(dl_dir / f"Daredevil 404 (1987) [__{batman.issue_id}__].cbz")
+    source = CompletedDownloadSource(download_id="dl-stale", output_path=str(dl_dir))
+    outcomes = await _run(db, source, ctx)
+    assert outcomes[0].status is ImportStatus.IMPORTED
+    assert outcomes[0].issue_id == daredevil.issue_id  # resolved by the filename
+    assert outcomes[0].issue_id != batman.issue_id  # NOT dragged into the tag's row
+
+
+@pytest.mark.req("FRG-PP-003")
+async def test_tag_only_unparseable_name_still_resolves_by_tag(db, seed, import_ctx):
+    """A tag-only name (no parseable issue number — the legitimate DDL
+    convention) carries nothing resolvable to disagree with, so the tag remains
+    authoritative even though the leftover title text is not the series name.
+    The universal guard must not regress this fall-through."""
+    s = await seed(title="Batman", issue_number="404")
+    ctx = import_ctx()
+    dl_dir = Path(ctx.config_dir).parent / "dl-tagonly"
+    # "Loose Pages Bundle" parses to a matching key but NO issue number; the tag
+    # is the only resolvable signal.
+    make_cbz(dl_dir / f"Loose Pages Bundle [__{s.issue_id}__].cbz")
+    source = CompletedDownloadSource(download_id="dl-tagonly", output_path=str(dl_dir))
+    outcomes = await _run(db, source, ctx)
+    assert outcomes[0].status is ImportStatus.IMPORTED
+    assert outcomes[0].issue_id == s.issue_id  # resolved by the tag
+
+
+@pytest.mark.req("FRG-PP-003")
+async def test_tag_agreeing_with_filename_short_circuits_to_base_tag(
+    db, seed, import_ctx
+):
+    """When the tag and the filename parse AGREE (same series, same issue), the
+    fast-path short-circuit to `_BASE_TAG` is preserved — the guard only fires on
+    disagreement. Asserted at the base-resolution layer so the tag source, not a
+    coincidental filename match, is what resolved the candidate."""
+    from foragerr.importer.evidence import aggregate
+    from foragerr.importer.pipeline import _BASE_TAG, _reconcile_base
+    from foragerr.importer.sources import SOURCE_DOWNLOAD, ImportCandidate
+
+    s = await seed(title="Batman", issue_number="404")
+    ctx = import_ctx()
+    file_name = f"Batman 404 (1987) [__{s.issue_id}__].cbz"
+    evidence = aggregate(file_name=file_name, reference_year=2026)
+    candidate = ImportCandidate(
+        source_kind=SOURCE_DOWNLOAD,
+        local_path=f"/downloads/{file_name}",
+        size=1,
+        file_name=file_name,
+    )
+    async with db.read_session() as session:
+        series_id, issue_id, base_source = await _reconcile_base(
+            session, candidate, evidence, ctx
+        )
+    assert base_source == _BASE_TAG  # fast-path, not the filename heuristic
+    assert (series_id, issue_id) == (s.series_id, s.issue_id)
+
+
+@pytest.mark.req("FRG-PP-003")
+async def test_stale_tag_for_prefix_series_yields_to_filename_parse(
+    db, seed, import_ctx
+):
+    """The guard uses EXACT series-key equality, not the loose-subset match:
+    a filename naming a shorter series ("Batman") must not be treated as
+    agreeing with a tag that points at a longer series sharing the prefix
+    ("Batman Beyond"). Same issue number on both, so only the series check
+    catches it — and the subset matcher would have wrongly agreed."""
+    batman = await seed(title="Batman", issue_number="404")
+    beyond = await seed(
+        title="Batman Beyond", issue_number="404", cv_volume_id=97, cv_issue_id=8801
+    )
+    ctx = import_ctx()
+    dl_dir = Path(ctx.config_dir).parent / "dl-prefix"
+    make_cbz(dl_dir / f"Batman 404 (1987) [__{beyond.issue_id}__].cbz")
+    source = CompletedDownloadSource(download_id="dl-prefix", output_path=str(dl_dir))
+    outcomes = await _run(db, source, ctx)
+    assert outcomes[0].status is ImportStatus.IMPORTED
+    assert outcomes[0].issue_id == batman.issue_id  # the FILENAME's series wins
+    assert outcomes[0].issue_id != beyond.issue_id  # not the stale tag's row
+
+
+@pytest.mark.req("FRG-PP-003")
+async def test_grab_title_cannot_mask_a_filename_disagreement(db, seed, import_ctx):
+    """The guard is judged against the FILENAME layer, never the aggregated
+    evidence (where a grab title outranks the filename). A grab title matching
+    the stale tag must not let the tag survive a filename that names a different
+    series. Asserted at the base-resolution layer: the tag is DISCARDED, so the
+    result comes from grab-history (`_BASE_GRAB`), not the tag (`_BASE_TAG`) —
+    proving the guard fired on the filename despite the grab-masked aggregate."""
+    from foragerr.importer.evidence import LAYER_GRAB, aggregate
+    from foragerr.importer.pipeline import _BASE_GRAB, _reconcile_base
+    from foragerr.importer.sources import SOURCE_DOWNLOAD, ImportCandidate
+
+    batman = await seed(title="Batman", issue_number="404")
+    daredevil = await seed(
+        title="Daredevil", issue_number="404", cv_volume_id=96, cv_issue_id=8802
+    )
+    ctx = import_ctx()
+    # File names Daredevil but carries a stale Batman row-id tag; the grab title
+    # agrees with the tag, so the AGGREGATE series is "batman" (grab outranks
+    # filename) — the masking Codex flagged.
+    file_name = f"Daredevil 404 (1987) [__{batman.issue_id}__].cbz"
+    evidence = aggregate(
+        grab_title="Batman 404 (1987)", file_name=file_name, reference_year=2026
+    )
+    assert evidence.provenance["series"] == LAYER_GRAB  # aggregate reads "batman"
+    candidate = ImportCandidate(
+        source_kind=SOURCE_DOWNLOAD,
+        local_path=f"/downloads/{file_name}",
+        size=1,
+        file_name=file_name,
+        grab_series_id=batman.series_id,
+        grab_issue_id=batman.issue_id,
+    )
+    async with db.read_session() as session:
+        series_id, issue_id, base_source = await _reconcile_base(
+            session, candidate, evidence, ctx
+        )
+    assert base_source == _BASE_GRAB  # tag discarded; NOT _BASE_TAG
+    assert issue_id == batman.issue_id  # from the download-id grab join
+    assert daredevil.issue_id != batman.issue_id
 
 
 @pytest.mark.req("FRG-PP-003")
