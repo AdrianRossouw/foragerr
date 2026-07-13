@@ -306,7 +306,7 @@ source. Compatibility: pre-1.0 releases may break with migration notes; from
 | FRG-OPDS-013 | Recent Additions shelf | opds | implemented | M2 |
 | FRG-OPDS-014 | Publisher browse shelf | opds | approved | B |
 | FRG-OPDS-015 | Single OPDS version; no OPDS 2.0 | opds | approved | B |
-| FRG-OPDS-016 | RAR-backed archive access for page streaming | opds | proposed | 0.9.x |
+| FRG-OPDS-016 | RAR-backed archive access for page streaming | opds | approved | 0.9.x |
 | FRG-NOTIF-001 | Generic notifier provider abstraction | notif | approved | B |
 | FRG-NOTIF-002 | Event catalog with per-connection opt-in | notif | approved | B |
 | FRG-NOTIF-003 | Event payload content | notif | approved | B |

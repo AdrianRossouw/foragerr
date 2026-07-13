@@ -34,4 +34,4 @@ Phased, per owner decision (2026-07-13):
 
 ## Approval
 
-Pending — Adrian.
+Approved — Adrian, 2026-07-13 (in-session, alongside naming-defaults; both queued as the next development).
