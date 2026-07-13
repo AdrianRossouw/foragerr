@@ -19,7 +19,7 @@ The owner selected a new brand mark from the Claude Design logo exploration (pro
 
 ### Modified Capabilities
 
-(none — brand asset/token *values* change; FRG-UI-002's token-driven-branding and FRG-UI-023's lockup requirements are unchanged and their tagged tests continue to pass against the new values.)
+(none — brand asset/token *values* change; FRG-UI-002's token-driven-branding and FRG-UI-023's lockup requirements are unchanged and their tagged tests continue to pass against the new values. `openspec validate` flags open delta-less changes; the archived m4-shell-hotfix precedent establishes the shape, and the flag clears at archive.)
 
 ## Impact
 
