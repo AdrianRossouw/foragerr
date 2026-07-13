@@ -9,6 +9,40 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.9.3] — 2026-07-13
+
+cbr-support: the second 0.9.x dogfood-series change — CBR comics become
+readable on the iPad, closing the biggest daily-usability gap (69% of the
+owner's real library was CBR, unreadable in Panels).
+
+### Added
+- **CBR (RAR) page streaming over OPDS** (FRG-OPDS-016): the archive layer
+  gains a RAR backend (`rarfile` + `unrar-free`, both OSI-licensed, shipped in
+  the Docker image) behind a single magic-byte-dispatched opener seam, with the
+  same resource-limit and path-confinement posture as ZIP. Every `.cbr` now
+  page-streams like a `.cbz`; a CBR imported before this support heals lazily
+  (its page count is computed on first open — no re-import). A zip renamed
+  `.cbr` (and the reverse) opens by content. Encrypted/damaged archives degrade
+  to download-only, never an error.
+- **Opt-in CBR→CBZ conversion** (FRG-PP-018, off by default): `convert_cbr_to_cbz`
+  converts at import under verify-before-discard (the produced CBZ is verified
+  before the original is removed, and the swap is crash-safe — the original is
+  deleted only after the DB commit is durable). On-demand per-series/per-issue
+  conversion via `POST /api/v1/convert/...`.
+
+### Security
+- The RAR parser is new attack surface over untrusted input (T-OPDS-7,
+  RISK-049): STRIDE analysis + risk register updated; the convert path re-gates
+  on the same `inspect_archive`/`safe_to_extract` vetting as streaming, on both
+  import-time and on-demand routes. Adversarially reviewed (metadata-lie
+  decompression bomb, path traversal, symlink, encrypted, forged magic — all
+  contained) and corpus-validated (473/473 of the owner's real CBRs stream via
+  `unrar-free`; libarchive refuted as a fallback).
+
+### Notes
+- PDFs remain download-only (readers open a downloaded PDF fine); PDF→CBZ is
+  deferred to a later format-preferences change.
+
 ## [v0.9.2] — 2026-07-13
 
 naming-defaults: the first 0.9.x dogfood-series change — library adoption
