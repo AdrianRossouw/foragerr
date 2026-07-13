@@ -26,7 +26,7 @@ Phased, per owner decision (2026-07-13):
 ## Impact
 
 - **Code**: archive-open layer serving OPDS page streaming and import-time page counts (zip-only today); import pipeline conversion step (phase 2); Dockerfile (`unrar` binary).
-- **Dependencies / SOUP** (FRG-PROC-012): add `rarfile` (ISC, Python) and `unrar` (RARLAB freeware, binary, **non-OSI** — license text recorded verbatim; linuxserver.io ecosystem precedent). soup-register updated in the same change; `tools/soup_check.py` green at the gate.
+- **Dependencies / SOUP** (FRG-PROC-012): add `rarfile` (ISC, Python) and `unrar-free` (GPL, Debian main — probe-verified against RAR4+RAR5 in the runtime base image; RARLAB `unrar` recorded as the non-OSI compatibility alternative only if the corpus run demands it). soup-register updated in the same change; `tools/soup_check.py` green at the gate.
 - **Security** (FRG-PROC-006): `docs/security/` STRIDE + risk register updated in the same change (untrusted RAR input; subprocess boundary; resource limits).
 - **Manual** (FRG-PROC-011): `docs/manual/user/` reading/OPDS section (CBR now streams; PDF remains download-only — Panels reads downloaded PDFs; opt-in PDF→CBZ deferred to the format-preferences change with `pypdfium2` (BSD) as the named candidate), admin configuration (conversion policy, backend selection).
 - **Registry** (FRG-PROC-002): allocate FRG-OPDS-016; FRG-PP-018 milestone B → 0.9.x.
