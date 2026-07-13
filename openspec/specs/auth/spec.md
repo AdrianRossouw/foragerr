@@ -7,7 +7,6 @@ Phase 1 reference research (`docs/research/`). Baseline depth per the Phase 2 sc
 decision: SHALL + coarse acceptance; scenario-level elaboration happens in the
 milestone change that implements each requirement (FRG-PROC-003, FRG-PROC-009).
 ## Requirements
-
 ### Requirement: FRG-AUTH-002 — single-user web login
 
 The system SHALL protect the web UI and API with a single-user username/password login (form-based session auth for the UI), with no anonymous access to any non-exempt endpoint. Login SHALL be mandatory — no auth-mode-none or other bypass configuration exists (owner decision 2026-07-11/12). The single principal SHALL be seeded from `FORAGERR_ADMIN_USER`/`FORAGERR_ADMIN_PASSWORD` at first authed boot; startup SHALL fail fast with an actionable error when they are absent and no principal exists. At each later boot the system SHALL compare the env pair against a stored fingerprint of the pair *as last seeded* (a KDF hash, never plaintext) and SHALL re-seed the principal only when the env pair is present and differs from that fingerprint (the lockout-recovery path) — an env pair that merely differs from the *live* credentials (because the operator changed the password in-app) SHALL NOT trigger a re-seed. No unauthenticated setup window SHALL exist at any point.
@@ -69,14 +68,13 @@ The system SHALL store the user password only as a salted hash using a memory-ha
 - **WHEN** logs are captured across bootstrap seeding, successful login, failed login, and password re-seed
 - **THEN** no password, hash, or salt value appears in any log line (bootstrap env values are redaction-registered), and auth log events carry no credential material
 
-
 ### Requirement: FRG-AUTH-004 — session management
 
-The system SHALL issue authenticated sessions as DB-backed opaque tokens delivered in HttpOnly, SameSite cookies, storing server-side only a hash of the token, with two sliding-expiry tiers — a standard session (configurable inactivity timeout, default 24 h) and an opt-in remember-me tier (configurable, default 90 d) selected on the login form. The system SHALL regenerate the session token at login, support explicit logout invalidating the session server-side, and prune expired sessions on the existing scheduler. When account credentials change, the system SHALL invalidate sessions as follows: an env re-seed at boot invalidates every session; a user-initiated password change from Settings invalidates every session *except* the acting one; and a logout-all control SHALL delete every session including the acting one.
+The system SHALL issue authenticated sessions as DB-backed opaque tokens delivered in HttpOnly, SameSite cookies, storing server-side only a hash of the token, with two sliding-expiry tiers — a standard session (configurable inactivity timeout, default 24 h) and an opt-in remember-me tier (configurable, default 90 d) selected on the login form. The system SHALL regenerate the session token at login, support explicit logout invalidating the session server-side, and prune expired sessions on the existing scheduler. When account credentials change, the system SHALL invalidate sessions as follows: an env re-seed at boot invalidates every session; a user-initiated password change from Settings invalidates every session *except* the acting one; and a logout-all control SHALL delete every session including the acting one. The web UI SHALL treat a logout as complete only when the server confirms session termination: on confirmation it clears client auth state and returns to the login screen; on a failed logout request it SHALL NOT clear auth state or navigate away (the session may still be live and the HttpOnly cookie cannot be cleared client-side), and SHALL surface a retryable failure instead.
 
-- **Milestone**: M8
-- **Source**: mylar-feature-surface.md §8 AUTH ("session login with timeout"); m8-auth pre-design owner decision (remember-me comfort tier + logout-all as the shared-device recovery), 2026-07-11/12.
-- **Notes**: Opaque DB tokens (not signed cookies) make server-side logout and password-change invalidation row deletes and leave no signing material to manage. `Secure` cookie flag is conditional on transport (Tailscale HTTPS story is DEP's); document the decision. CSRF posture lives in FRG-SEC-005. Logout-all requires no password re-auth (it grants nothing — pure session destruction — and is the shared-device recovery path); credential writes do require re-auth (see FRG-AUTH-005/007 and the change design).
+- **Milestone**: M8 (client logout-confirmation: logout-failure-handling)
+- **Source**: mylar-feature-surface.md §8 AUTH ("session login with timeout"); m8-auth pre-design owner decision (remember-me comfort tier + logout-all as the shared-device recovery), 2026-07-11/12; dogfooding 2026-07-13 (a failed logout must not present as a successful one).
+- **Notes**: Opaque DB tokens (not signed cookies) make server-side logout and password-change invalidation row deletes and leave no signing material to manage. `Secure` cookie flag is conditional on transport (Tailscale HTTPS story is DEP's); document the decision. CSRF posture lives in FRG-SEC-005. Logout-all requires no password re-auth (it grants nothing — pure session destruction — and is the shared-device recovery path); credential writes do require re-auth (see FRG-AUTH-005/007 and the change design). The client-confirmation rule closes a shared-device exposure: because the session cookie is HttpOnly, only a server-confirmed logout truly ends the session, so the UI must never report success without it.
 
 #### Scenario: Cookie attributes and server-side storage
 
@@ -92,6 +90,16 @@ The system SHALL issue authenticated sessions as DB-backed opaque tokens deliver
 
 - **WHEN** a user logs in (with any pre-existing session cookie present) and later logs out, then replays the old cookies
 - **THEN** login issues a fresh token (the prior token no longer authenticates — fixation defense), and after logout the deleted session's cookie yields 401 on replay (back-button included)
+
+#### Scenario: Confirmed logout clears the client and returns to login
+
+- **WHEN** the operator activates the logout control and the server confirms the session was terminated
+- **THEN** the UI clears its client auth state and navigates to the login screen
+
+#### Scenario: Failed logout keeps the session and offers retry
+
+- **WHEN** the operator activates the logout control and the logout request fails (a 4xx/5xx or a network error, so server-side termination is unconfirmed)
+- **THEN** the UI does NOT clear client auth state and does NOT navigate to the login screen, keeping the operator authenticated, and surfaces an accessible, retryable error — a subsequent successful logout then clears and returns to login as normal
 
 #### Scenario: Credential re-seed invalidates all sessions
 
