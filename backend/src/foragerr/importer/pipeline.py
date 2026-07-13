@@ -41,7 +41,7 @@ from pathlib import Path
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from foragerr.importer import fileops, history
+from foragerr.importer import convert, fileops, history
 from foragerr.importer.context import ImportContext
 from foragerr.importer.decisions import (
     ImportDecision,
@@ -978,6 +978,46 @@ async def _tag_comicinfo(
         )
 
 
+async def _convert_placed_cbr(
+    session: AsyncSession,
+    candidate: ImportCandidate,
+    ev: ImportEvaluation,
+    ctx: ImportContext,
+    result: ExecuteResult,
+) -> None:
+    """Convert a just-imported CBR to CBZ when the policy is on (FRG-PP-018).
+
+    Runs AFTER place_file + the issue_files row + the imported event + tagging,
+    so a conversion failure can never unwind a completed import. Gated on the
+    off-by-default ``convert_cbr_to_cbz`` policy AND the archive having been a
+    fully-listed, fully-vetted RAR (``kind == "rar"`` and ``safe_to_extract`` —
+    a magic-only/encrypted/oversized CBR is never rewritten). The whole
+    verify-before-discard swap lives in :func:`convert.apply_conversion`, which
+    records the ``converted``/``convert_failed`` event and never raises — the
+    import still succeeds either way (a failed verification keeps the .cbr).
+    """
+    archive = ev.archive
+    if not (
+        ctx.convert_cbr_to_cbz
+        and archive is not None
+        and archive.kind == "rar"
+        and archive.safe_to_extract
+    ):
+        return
+    await convert.apply_conversion(
+        session,
+        issue_file_id=result.issue_file_id,
+        source_path=result.imported_path,
+        series_id=ev.series_id,
+        issue_id=ev.issue_id,
+        now=ctx.now,
+        source=_source_provenance(candidate),
+        download_id=candidate.download_id,
+        source_title=_source_title(candidate),
+        offload=ctx.offload,
+    )
+
+
 def _source_title(candidate: ImportCandidate) -> str:
     return candidate.grab_title or candidate.client_title or candidate.file_name
 
@@ -1069,6 +1109,10 @@ async def import_candidate(
             # issue_files row + the imported event: a tagging failure is caught
             # inside and NEVER unwinds this completed import (records a warning).
             await _tag_comicinfo(session, candidate, ev, ctx, result)
+            # CBR→CBZ conversion (FRG-PP-018) runs last, behind the off-by-default
+            # policy flag: a verify-before-discard swap that also never unwinds
+            # the completed import (a failed verification keeps the .cbr).
+            await _convert_placed_cbr(session, candidate, ev, ctx, result)
             return ImportOutcome(
                 status=ImportStatus.IMPORTED,
                 candidate=candidate,

@@ -245,10 +245,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     #     rename preview/execute endpoints (FRG-PP-012) under /api/v1. Importing
     #     the library flows above registered the rename-series command. ---
     from foragerr.api.config_resources import router as config_resources_router
+    from foragerr.api.convert import router as convert_router
     from foragerr.api.rename import router as rename_router
 
     app.include_router(config_resources_router, prefix="/api/v1")
     app.include_router(rename_router, prefix="/api/v1")
+    # On-demand CBR→CBZ conversion (FRG-PP-018): importing the library flows
+    # above registered the convert-series/convert-issue pp-pool commands; mount
+    # their enqueue endpoints under /api/v1.
+    app.include_router(convert_router, prefix="/api/v1")
 
     # --- manual import (m2-manual-import): importing the module registers the
     #     manual-import pp-pool command + handler (FRG-PP-016); mount the

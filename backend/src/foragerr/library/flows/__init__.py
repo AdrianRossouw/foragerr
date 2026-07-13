@@ -37,6 +37,13 @@ from foragerr.library.flows._common import (
     encode_aliases,
 )
 from foragerr.library.flows.add import AddSeriesResult, add_series
+from foragerr.library.flows.convert import (
+    ConvertIssueCommand,
+    ConvertReport,
+    ConvertSeriesCommand,
+    convert_issue,
+    convert_series,
+)
 from foragerr.library.flows.edit_delete import (
     DeleteSeriesFilesCommand,
     IssueFileNotFoundError,
@@ -78,6 +85,9 @@ __all__ = [
     "AddSeriesResult",
     "BOOKTYPE_EDIT_ACTIONS",
     "BooktypeEdit",
+    "ConvertIssueCommand",
+    "ConvertReport",
+    "ConvertSeriesCommand",
     "GROUP_EDIT_ACTIONS",
     "GroupEdit",
     "DeleteSeriesFilesCommand",
@@ -99,6 +109,8 @@ __all__ = [
     "SeriesValidationError",
     "add_series",
     "comicvine_factory",
+    "convert_issue",
+    "convert_series",
     "decode_add_options",
     "decode_aliases",
     "decode_group_files",
