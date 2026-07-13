@@ -52,6 +52,8 @@ from foragerr.security.archives import (
     _detect_kind,
     _enumerate_members,
     _read_magic,
+    _unsafe_member_name,
+    inspect_archive,
     list_image_members,
     read_image_member,
 )
@@ -129,6 +131,17 @@ def build_verified_cbz(
     """
     source = Path(source_cbr)
     dest = Path(final_cbz)
+    # Re-gate on the SAME top-level vetting the streaming path uses before any
+    # member is read (RISK-049): the aggregate member-count / declared-size caps
+    # and the path-traversal / symlink rejection. The import-time convert is
+    # already gated upstream; this closes the on-demand path (per-series /
+    # per-issue) and any TOCTOU where the on-disk file changed since import.
+    report = inspect_archive(source, limits, require_image=False)
+    if not report.safe_to_extract:
+        raise ConvertError(
+            f"source archive {source} did not pass safe-to-extract vetting "
+            f"(unlistable, over a limit, or an unsafe member) — cannot convert"
+        )
     kind = _detect_kind(_read_magic(source))
     entries = _enumerate_members(source, kind)
     if not entries:
@@ -150,6 +163,14 @@ def build_verified_cbz(
                     # than copy a symlink member into the CBZ.
                     raise ConvertError(
                         f"refusing to convert: symlink member {name!r} in {source}"
+                    )
+                if _unsafe_member_name(name):
+                    # Belt-and-suspenders: inspect_archive already rejected the
+                    # archive if any member name was unsafe, but never copy a
+                    # traversal/absolute name into the produced CBZ regardless of
+                    # entry kind (dir entries are otherwise unchecked here).
+                    raise ConvertError(
+                        f"refusing to convert: unsafe member name {name!r} in {source}"
                     )
                 if is_dir:
                     dst.writestr(name, b"")

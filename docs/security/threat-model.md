@@ -141,7 +141,7 @@ allocated yet).
     extraction to disk; zip-slip/symlink member rejection), magic-byte dispatch (an
     archive is routed by content, never extension), and hard degradation — encrypted,
     zero-member, or unparseable RAR falls back to the non-listable path (no PSE link,
-    stream 404) rather than erroring. Backend absence degrades identically. RISK-049.
+    stream 404) rather than erroring. Backend absence degrades identically. The CBR-to-CBZ convert path (FRG-PP-018) applies the same inspect_archive/safe_to_extract gate and per-entry unsafe-name check before any read, on both the import-time and on-demand routes. RISK-049.
   - **T-OPDS-6 (Information disclosure — egress)**: hotlinked ComicVine cover URLs leak iPad
     client requests to a third-party CDN. Coverage: IF `OPDS — Cover and thumbnail links with
     local fallback` (served locally). RISK-023.

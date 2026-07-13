@@ -77,6 +77,30 @@ def _fake_image_rar(pages: int = 3):
     return _enum, _read, names
 
 
+#: A real RAR whose payload is a unix symlink member — inspect_archive rejects
+#: it (safe_to_extract=False), the same vetting the streaming path applies.
+_SYMLINK_RAR = _FIXTURES / "rar5-symlink-unix.rar"
+
+
+@pytest.mark.req("FRG-OPDS-016")
+def test_convert_refuses_an_unsafe_source_archive(tmp_path):
+    """build_verified_cbz re-gates on inspect_archive/safe_to_extract before
+    reading any member (RISK-049): a source that fails the structural vetting —
+    here a real RAR carrying a symlink member — is refused with a ConvertError
+    and leaves no temp CBZ behind, on the on-demand path that import-time
+    gating does not cover."""
+    from foragerr.importer import convert
+
+    src = tmp_path / "evil.cbr"
+    src.write_bytes(_SYMLINK_RAR.read_bytes())
+    dest = tmp_path / "evil.cbz"
+    with pytest.raises(convert.ConvertError):
+        convert.build_verified_cbz(src, dest)
+    # No temp CBZ, no destination CBZ left in the directory.
+    assert not dest.exists()
+    assert not list(tmp_path.glob(".foragerr-convert-*"))
+
+
 async def _run(db, source, ctx) -> list:
     outcomes = []
     async with db.write_session() as session:
