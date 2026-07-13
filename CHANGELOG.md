@@ -9,6 +9,41 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.9.2] — 2026-07-13
+
+naming-defaults: the first 0.9.x dogfood-series change — library adoption
+becomes non-destructive by default, and filename identity tags become durable.
+
+### Changed
+- **Renaming is off by default** (FRG-PP-020, **BREAKING for fresh installs
+  only**): a new install adopts an existing library byte-for-byte and
+  name-for-name; downloads keep their release names unless renaming is
+  enabled. Existing installs keep their persisted configuration unchanged.
+- **Default naming template drops the internal-id tag** (FRG-PP-009): now
+  `{Series Title} {Issue Number:000} ({Year})`. The round-trip validation
+  (rendered names must re-parse to the same issue) is unchanged.
+
+### Added
+- **`{CvIssueId}` naming token** (FRG-PP-009): renders the ComicVine issue id
+  as `[cvid-<ID>]` — the durable identity tag that survives database resets
+  and reinstalls; recognized by the parser into the existing ComicVine-id
+  evidence path. `{IssueId}` remains supported for already-stamped libraries.
+
+### Fixed
+- **Stale identity tags can no longer override a disagreeing filename**
+  (FRG-PP-003): a `[__id__]` tag whose issue contradicts the parsed filename
+  (different series, or a contradicted issue number) now falls through to the
+  filename heuristics on every import path — closing the reinstall hazard
+  where old tags point at arbitrary rows in a new database. Tag-only
+  unparseable names (the DDL convention) still resolve by tag.
+
+### Upgrade notes
+- Existing installs: no action; persisted config wins. To adopt the new
+  defaults, set `rename_enabled: false` / clear the template override.
+- Libraries stamped under the old default keep their `[__id__]` filenames;
+  they are harmless under the new guard, and a rename pass with the new
+  template (plus `{CvIssueId}` if you want durable tags) cleans them up.
+
 ## [v0.9.1] — 2026-07-12
 
 m8-rate-audit-followups: fixes and hardening from a full eight-angle + Codex
