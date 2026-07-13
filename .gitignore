@@ -48,3 +48,10 @@ docs/research/*.zip
 design_handoff_*/
 design_handoff_*.zip
 *.dc.html
+
+# design-sync working state (durable set in .design-sync/ IS committed)
+.ds-sync/
+ds-bundle/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules
