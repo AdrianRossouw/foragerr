@@ -16,7 +16,7 @@
 - [x] 2.5 Test (FRG-OPDS-016): zip-renamed-.cbr and rar-renamed-.cbz open by content detection
 - [x] 2.6 Test (FRG-OPDS-016): backend missing/failing → download-only entry, stream 404, no error feed; encrypted-rar fixture degrades the same way
 - [x] 2.7 Test (FRG-OPDS-016): oversized/bomb rar fixtures refused within the limit framework
-- [ ] 2.8 Gated corpus run (not CI): stream-check across sample-comics' 366 .cbr files; record pass rate + failure classes in the change notes; re-verify the libarchive fallback claim on the same corpus
+- [x] 2.8 Gated corpus run (not CI): stream-check across sample-comics' 366 .cbr files; record pass rate + failure classes in the change notes; re-verify the libarchive fallback claim on the same corpus
 
 ## 3. Phase 2 — opt-in convert-at-import (FRG-PP-018)
 

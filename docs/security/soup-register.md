@@ -98,7 +98,7 @@ deliberately does not cross-check this section against a manifest).
 
 | Name | Version constraint | Source | Intended purpose | License |
 |---|---|---|---|---|
-| unrar-free | Debian `main` (trixie), `>=0.3` | apt | External RAR4/RAR5 extraction backend invoked by `rarfile` as a subprocess (registers `/usr/bin/unrar` via update-alternatives); probe-verified 2026-07-13 against both formats in the `python:3.12-slim` base image. RARLAB's proprietary `unrar` remains a documented compatibility alternative (non-OSI, freeware; would be recorded here verbatim) only if the real-library corpus run surfaces archives unrar-free mishandles. | GPL-2+ |
+| unrar-free | Debian `main` (trixie), `>=0.3` | apt | External RAR4/RAR5 extraction backend invoked by `rarfile` as a subprocess (registers `/usr/bin/unrar` via update-alternatives); probe-verified 2026-07-13 against both formats in the `python:3.12-slim` base image. Corpus-verified 2026-07-13: 473/473 real .cbr pass via unrar-free; bsdtar/libarchive refuted as a fallback (469/473 member-read failures). RARLAB's proprietary `unrar` remains the sole documented compatibility alternative (non-OSI, freeware; would be recorded here verbatim) if real archives ever surface that unrar-free mishandles. | GPL-2+ |
 
 ## Development/test tooling (e2e)
 
