@@ -2,7 +2,7 @@
 
 ## MODIFIED Requirements
 
-### Requirement: FRG-PP-018 — CBR-to-CBZ conversion (opt-in format-shift at import)
+### Requirement: FRG-PP-018 — CBR-to-CBZ conversion and library-wide retagging
 
 The system SHALL optionally convert CBR archives to CBZ at import time as an explicit, off-by-default library policy surfaced with the format-preference configuration — verifying the converted archive (member count matches; final member decodes) before the original is discarded, recording the conversion as a history event, and updating the `issue_files` row (path, size, page count) atomically with the swap. On-demand conversion SHALL be available per issue and per series. Library-wide retagging (ComicInfo re-write across existing archives) remains out of scope until the META tagging dependency lands and is explicitly deferred.
 
