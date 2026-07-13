@@ -25,6 +25,8 @@
   align-items: center;
   gap: var(--spacing-sm);
   margin-bottom: var(--spacing-lg);
+  /* The speech-bubble ant mark draws in currentColor — brand accent here. */
+  color: var(--color-accent);
 }
 
 .brandWord {

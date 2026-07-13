@@ -9,6 +9,19 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.9.5] — 2026-07-13
+
+ant-mark: brand refresh — the forager ant in a speech bubble.
+
+### Changed
+- **New brand mark** (FRG-UI-002, FRG-UI-023): the logo becomes the owner's
+  finished vector — a forager ant carrying a comic in a speech bubble — as the
+  in-app `LogoMarkIcon` (sidebar + login lockups), with a simplified variant as
+  the 16px browser-tab favicon where the detailed mark would be illegible. The
+  lockup drops its gradient tile (the mark renders in the brand accent on the
+  chrome); the retired tile tokens are removed. The README gains a centered
+  logo masthead and a tightened intro.
+
 ## [v0.9.4] — 2026-07-13
 
 logout-failure-handling: a security bugfix from dogfooding — the logout

@@ -32,13 +32,10 @@
    * be near-invisible on the green on-track. */
   --color-switch-knob: #ffffff;
 
-  /* --- Logo lockup (2026-07-10 updated handoff, assets/: 32px gradient tile,
-   *     mark knocked out in dark green, wordmark near-white + accent "rr") --- */
-  --color-logo-tile-from: #63c483;
-  --color-logo-tile-to: #3a8455;
-  --color-logo-mark: #123018;
+  /* --- Logo lockup (2026-07-13 rebrand: the speech-bubble ant, drawn in
+   *     --color-accent directly on the chrome — the 2026-07-10 gradient-tile
+   *     tokens retired with it; wordmark near-white + accent "rr") --- */
   --color-logo-word: #f0f0f0;
-  --shadow-logo-tile: 0 2px 6px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.25);
 
   /* --- Creator initials avatar (FRG-UI-027/028): a green gradient disc behind
    *     deterministic initials (no person images). Two endpoints of the
