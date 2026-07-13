@@ -16,10 +16,18 @@ machine ``reason_code`` plus a user-visible ``reason`` — so the import pipelin
 can attach the reason to the candidate file and route corrupt/password archives
 to failed-download handling (FRG-PP-006) without a crash or resource blow-up.
 
-CBR (RAR) is validated by magic in M1; full member listing requires the
-optional :mod:`rarfile` dependency (+ an ``unrar`` binary) and is applied only
-when it imports cleanly — the documented unrar-absent CBR residual (design
-decision 4 / Risks). CB7 (7z) is magic-only in M1.
+CBR (RAR) is a first-class archive kind: when the optional :mod:`rarfile`
+dependency (+ an ``unrar``/``bsdtar`` backend binary) is importable the members
+are listed and page-streamed through the very same opener seam as ZIP
+(FRG-OPDS-016), under the identical resource-limit framework. When the backend
+is absent or fails on a specific archive (missing binary, encrypted, broken),
+the CBR degrades to the documented magic-only / non-listable residual — no PSE
+link, stream 404 — never an error (design decision 4/5 / Risks). CB7 (7z) stays
+magic-only.
+
+Archive kind is decided by content (magic bytes), never by file extension, so a
+ZIP renamed ``.cbr`` (and a RAR renamed ``.cbz``) routes to the correct opener —
+the misnamed-archive class Mylar handles in the wild (FRG-OPDS-016).
 """
 
 from __future__ import annotations
@@ -309,13 +317,32 @@ def _inspect_zip(
     )
 
 
+def _rar_is_symlink(info: object) -> bool:
+    """True if a RAR member is a symlink entry.
+
+    :class:`rarfile.RarInfo` exposes :meth:`is_symlink` (RAR4 unix-mode +
+    RAR5 file-redirect records). Guarded with ``getattr`` so an unexpected info
+    shape degrades to "not a symlink" rather than raising inside the never-raise
+    ``inspect_archive`` contract — the callers still gate on ``safe_to_extract``.
+    """
+    checker = getattr(info, "is_symlink", None)
+    try:
+        return bool(checker()) if callable(checker) else False
+    except Exception:  # pragma: no cover — defensive; never let a probe raise
+        return False
+
+
 def _inspect_rar(path: Path, limits: ArchiveLimits) -> ArchiveReport:
     """Validate a CBR. RAR magic is already confirmed by the caller.
 
     When :mod:`rarfile` (and an ``unrar``/``bsdtar`` backend) is importable the
-    member list is checked with the same name/size/nesting/count rules; when it
-    is not, the archive passes on magic alone — the documented unrar-absent CBR
-    residual (design decision 4). No extraction is performed either way.
+    member list is checked with the SAME name/symlink/nesting/size/count rules as
+    ZIP (FRG-OPDS-016), so a fully-listed CBR is ``safe_to_extract`` and streams
+    through the shared page path. When the backend is absent, the archive is
+    encrypted (header- or per-file), or the listing otherwise fails, the archive
+    passes on magic alone (``listed=False`` → non-listable, no PSE) — the
+    documented unrar-absent / degrade path (design decisions 4/5). No extraction
+    is performed either way (listing reads headers only).
     """
     try:
         import rarfile  # noqa: PLC0415 — optional dependency, imported lazily
@@ -324,17 +351,39 @@ def _inspect_rar(path: Path, limits: ArchiveLimits) -> ArchiveReport:
             ok=True,
             kind="rar",
             note="cbr validated by RAR magic only (rarfile/unrar unavailable) — "
-            "members not listed in M1",
+            "members not listed",
         )
 
     try:
         with rarfile.RarFile(path) as archive:
+            # Encrypted CBRs (header- or per-file-encrypted) degrade to the
+            # non-listable residual, exactly like a missing backend: no PSE, and
+            # the stream endpoint 404s. We never prompt for or hold a password.
+            if archive.needs_password():
+                return ArchiveReport(
+                    ok=True,
+                    kind="rar",
+                    note="cbr is encrypted — passed on magic, members not listed",
+                )
             infos = archive.infolist()
     except Exception as exc:  # rarfile raises a family of its own error types
         return ArchiveReport(
             ok=True,
             kind="rar",
             note=f"cbr passed on magic; member listing unavailable ({exc})",
+        )
+
+    if not infos:
+        # rarfile accepts a bare RAR *signature* with no parsable block body as a
+        # valid empty archive. A comic RAR always has members, so a zero-member
+        # listing is indistinguishable from a signature-only stub / truncated
+        # container — degrade to the magic-only, non-listable residual (no PSE),
+        # exactly like the unrar-absent path, rather than advertising an empty
+        # streamable archive.
+        return ArchiveReport(
+            ok=True,
+            kind="rar",
+            note="cbr has no listable members — passed on magic only",
         )
 
     member_count = len(infos)
@@ -356,6 +405,11 @@ def _inspect_rar(path: Path, limits: ArchiveLimits) -> ArchiveReport:
                 "unsafe_member_path",
                 "member name is absolute or contains a path-separator/'..' escape",
                 path=path,
+                offending_member=name,
+            )
+        if _rar_is_symlink(info):
+            return _reject(
+                "rar", "symlink_member", "member is a symlink entry", path=path,
                 offending_member=name,
             )
         if limits.max_nesting <= 0 and _is_nested_archive(name):
@@ -436,45 +490,99 @@ def natural_sort_key(name: str) -> tuple[tuple[int, object], ...]:
     return tuple(key)
 
 
+#: A normalized archive-member record produced by the per-format enumerators
+#: (:func:`_zip_entries` / :func:`_rar_entries`) so the image-member filter is
+#: identical across backends. ``(name, is_dir, is_symlink)``.
+_MemberEntry = tuple[str, bool, bool]
+
+
+def _zip_entries(path: str | os.PathLike[str]) -> list[_MemberEntry] | None:
+    """Enumerate a ZIP's members as normalized ``(name, is_dir, is_symlink)``
+    records, or ``None`` if the container cannot be opened. Reads only the
+    central directory — no member is decompressed."""
+    try:
+        with zipfile.ZipFile(path) as archive:
+            return [
+                (info.filename, info.filename.endswith("/"), _is_symlink_member(info))
+                for info in archive.infolist()
+            ]
+    except (zipfile.BadZipFile, OSError):
+        return None
+
+
+def _rar_entries(path: str | os.PathLike[str]) -> list[_MemberEntry] | None:
+    """Enumerate a RAR's members as normalized ``(name, is_dir, is_symlink)``
+    records, or ``None`` when the ``rarfile`` backend is unavailable or the
+    listing fails. Reads only headers via ``rarfile`` — no member is extracted."""
+    try:
+        import rarfile  # noqa: PLC0415 — optional dependency, imported lazily
+    except ImportError:
+        return None
+    try:
+        with rarfile.RarFile(path) as archive:
+            return [
+                (info.filename, info.isdir(), _rar_is_symlink(info))
+                for info in archive.infolist()
+            ]
+    except Exception:  # rarfile's own error family (broken/encrypted/backend)
+        return None
+
+
+def _enumerate_members(
+    path: str | os.PathLike[str], kind: str
+) -> list[_MemberEntry] | None:
+    """Dispatch member enumeration to the backend for ``kind`` (the magic-detected
+    container kind from :class:`ArchiveReport`). The single archive-opener seam
+    (FRG-OPDS-016): ZIP and RAR share one downstream filter; extension never
+    decides the opener, so a misnamed archive routes by content."""
+    if kind == "zip":
+        return _zip_entries(path)
+    if kind == "rar":
+        return _rar_entries(path)
+    return None  # 7z / unknown: not page-streamable
+
+
 def list_image_members(
     path: str | os.PathLike[str],
     limits: ArchiveLimits = DEFAULT_ARCHIVE_LIMITS,
 ) -> list[str] | None:
-    """Ordered image members of a listable archive, or ``None`` (FRG-OPDS-010).
+    """Ordered image members of a listable archive, or ``None`` (FRG-OPDS-010,
+    FRG-OPDS-016).
 
     Returns the archive's image members (extensions in :data:`_IMAGE_EXTS`) in
     :func:`natural_sort_key` order, EXCLUDING directory entries, symlink members,
     ``..``/absolute member names, non-image members and ``ComicInfo.xml``. This
     is exactly the OPDS "page" set — its length is the PSE ``pse:count`` and its
-    indexes address stream pages.
+    indexes address stream pages. ZIP (CBZ) and RAR (CBR) are served identically
+    through the shared opener seam; the container kind is chosen by content, so a
+    ZIP renamed ``.cbr`` (or the reverse) lists correctly.
 
     Returns ``None`` when the archive is not safely listable: gated on the
     :class:`ArchiveReport` ``safe_to_extract`` flag (never ``ok``), so a CBR with
-    :mod:`rarfile` absent, an oversized/hostile archive, or a corrupt container
-    all degrade to "no pages". A listable archive with zero image members returns
-    an empty list (listable, no pages) — distinct from ``None`` (not listable).
+    :mod:`rarfile`/``unrar`` absent, an encrypted/broken RAR, an oversized/hostile
+    archive, a 7z/unknown container, or a corrupt file all degrade to "no pages".
+    A listable archive with zero image members returns an empty list (listable, no
+    pages) — distinct from ``None`` (not listable).
 
-    ``limits.max_members`` is enforced by :func:`inspect_archive`, which sets
-    ``safe_to_extract=False`` when the member count is over cap.
+    ``limits.max_members`` (and the size ceilings) are enforced by
+    :func:`inspect_archive`, which sets ``safe_to_extract=False`` when a cap is
+    exceeded — for both ZIP and RAR.
     """
     report = inspect_archive(path, limits, require_image=False)
     if not report.safe_to_extract:
         return None
-    try:
-        with zipfile.ZipFile(path) as archive:
-            infos = archive.infolist()
-    except (zipfile.BadZipFile, OSError):
-        # A ``safe_to_extract`` non-zip container (e.g. a rar listed via
-        # ``rarfile``) is not page-streamable in the default deployment — the
-        # reader is zip-only — so it degrades to "no pages" (design §5).
+    entries = _enumerate_members(path, report.kind)
+    if entries is None:
+        # ``safe_to_extract`` but the opener could not re-enumerate (e.g. the RAR
+        # backend vanished between inspect and list, or a container the reader
+        # cannot serve) — degrade to "no pages" (design §5).
         return None
 
     members: list[str] = []
-    for info in infos:
-        name = info.filename
-        if name.endswith("/"):
+    for name, is_dir, is_symlink in entries:
+        if is_dir:
             continue  # directory entry
-        if _is_symlink_member(info):
+        if is_symlink:
             continue
         if _unsafe_member_name(name):
             continue
@@ -491,24 +599,43 @@ def list_image_members(
 def read_image_member(
     path: str | os.PathLike[str], member: str, *, max_bytes: int
 ) -> bytes:
-    """Read one image member into memory under a byte cap (FRG-OPDS-012).
+    """Read one image member into memory under a byte cap (FRG-OPDS-012,
+    FRG-OPDS-016).
 
     Defense-in-depth for the OPDS page path: re-checks the member name for the
     zip-slip family (absolute / ``..`` / drive-qualified) even though
-    :func:`list_image_members` already filtered it, rejects a symlink member, and
-    checks the member's DECLARED decompressed size (``ZipInfo.file_size``) against
-    ``max_bytes`` BEFORE calling :meth:`ZipFile.read` — so a declared-oversize
-    member is refused pre-decompression. Mirrors the byte-cap-before-read idiom in
-    :func:`foragerr.metadata.comicinfo.read_embedded_metadata`.
+    :func:`list_image_members` already filtered it, then dispatches to the backend
+    for the archive's *content* kind (magic bytes, never the extension) — so a
+    misnamed archive reads via the correct opener. Both backends reject a symlink
+    member and check the member's DECLARED decompressed size against ``max_bytes``
+    BEFORE reading — so a declared-oversize member is refused pre-decompression.
+    The RAR backend reads a single member through ``rarfile`` (an ``unrar``
+    subprocess), never a full-archive extraction. Mirrors the byte-cap-before-read
+    idiom in :func:`foragerr.metadata.comicinfo.read_embedded_metadata`.
 
-    Raises :class:`ArchiveMemberError` on any violation, an absent member, or
-    archive corruption caught during the read; never returns partial/oversized
-    bytes.
+    Raises :class:`ArchiveMemberError` on any violation, an absent member, an
+    unavailable/failed backend, or archive corruption caught during the read;
+    never returns partial/oversized bytes.
     """
     if not is_safe_member_name(member):
         raise ArchiveMemberError(
             f"unsafe member name refused (zip-slip guard): {member!r}"
         )
+    kind = _detect_kind(_read_magic(Path(path)))
+    if kind == "zip":
+        return _zip_read_member(path, member, max_bytes=max_bytes)
+    if kind == "rar":
+        return _rar_read_member(path, member, max_bytes=max_bytes)
+    raise ArchiveMemberError(
+        f"cannot read member {member!r}: {path} is not a supported archive "
+        f"(magic did not match zip or rar)"
+    )
+
+
+def _zip_read_member(
+    path: str | os.PathLike[str], member: str, *, max_bytes: int
+) -> bytes:
+    """Single-member ZIP read under the declared-size-before-read byte cap."""
     try:
         with zipfile.ZipFile(path) as archive:
             try:
@@ -527,6 +654,52 @@ def read_image_member(
         # Archive passed listing but this member could not be read: an IO error /
         # concurrent change (OSError, BadZipFile), an unsupported compression
         # method (NotImplementedError), or a corrupt deflate stream (zlib.error).
+        raise ArchiveMemberError(
+            f"could not read member {member!r} from {path}: {exc}"
+        ) from exc
+
+
+def _rar_read_member(
+    path: str | os.PathLike[str], member: str, *, max_bytes: int
+) -> bytes:
+    """Single-member RAR read under the declared-size-before-read byte cap.
+
+    ``rarfile.RarFile.read`` extracts exactly one member (spawning ``unrar`` for
+    that member) — never the whole archive to disk. The declared
+    ``RarInfo.file_size`` is checked BEFORE the read so a declared-oversize page is
+    refused pre-decompression, mirroring the ZIP path. A missing backend, an
+    absent member, a symlink member, an encrypted member, or any ``rarfile`` error
+    becomes an :class:`ArchiveMemberError` so the caller degrades to a bounded 4xx/
+    5xx (design §5) — never a crash."""
+    try:
+        import rarfile  # noqa: PLC0415 — optional dependency, imported lazily
+    except ImportError as exc:
+        raise ArchiveMemberError(
+            f"cannot read member {member!r}: RAR backend (rarfile/unrar) unavailable"
+        ) from exc
+    try:
+        with rarfile.RarFile(path) as archive:
+            try:
+                info = archive.getinfo(member)
+            except rarfile.NoRarEntry as exc:
+                raise ArchiveMemberError(f"member not found: {member!r}") from exc
+            if _rar_is_symlink(info):
+                raise ArchiveMemberError(f"member is a symlink entry: {member!r}")
+            size = getattr(info, "file_size", 0) or 0
+            if size > max_bytes:
+                raise ArchiveMemberError(
+                    f"member {member!r} declares {size} bytes, over the "
+                    f"per-page cap of {max_bytes}"
+                )
+            return archive.read(member)
+    except rarfile.Error as exc:
+        # rarfile's whole error family (corrupt/encrypted/backend failure). A
+        # separate clause from ArchiveMemberError so our own typed rejections
+        # (size/symlink/missing above) propagate unchanged.
+        raise ArchiveMemberError(
+            f"could not read member {member!r} from {path}: {exc}"
+        ) from exc
+    except OSError as exc:
         raise ArchiveMemberError(
             f"could not read member {member!r} from {path}: {exc}"
         ) from exc

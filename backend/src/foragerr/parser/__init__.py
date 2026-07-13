@@ -73,6 +73,13 @@ __all__ = [
 
 _ISSUE_ID_RE = re.compile(r"\[__(.{1,64}?)__\]")
 
+#: `[cvid-<digits>]` durable ComicVine identity tag (naming-defaults, FRG-PP-009).
+#: The reinstall-surviving counterpart to the internal-row-id `[__id__]` tag,
+#: rendered by the ``{CvIssueId}`` naming token. Recognized case-insensitively
+#: (an operator template may spell the literal ``CVID-``); the digits are the
+#: ComicVine issue id, fed to the importer's existing cv-issue-id namespace.
+_CV_ISSUE_ID_RE = re.compile(r"\[cvid-(\d{1,18})\]", re.IGNORECASE)
+
 #: `(fN)` fixed-release marker group inner text (FRG-PP-014), matched whole
 #: against the folded group content — `(f1)`, `(F2)`, `[f1]`.
 _FIX_MARKER_RE = re.compile(r"f(\d{1,2})")
@@ -136,10 +143,22 @@ def _parse_impl(
         issue_id = m.group(1)
         work = (work[: m.start()] + " " + work[m.end() :]).strip()
 
+    # durable [cvid-<digits>] ComicVine identity tag (naming-defaults, FRG-PP-009),
+    # stripped like the [__id__] tag so it never pollutes the title tokens.
+    cv_issue_id: int | None = None
+    mcv = _CV_ISSUE_ID_RE.search(work)
+    if mcv:
+        cv_issue_id = int(mcv.group(1))
+        work = (work[: mcv.start()] + " " + work[mcv.end() :]).strip()
+
     tokens = tokenize(work)
     if not tokens:
         return _failure(
-            FailureReason.NO_SERIES_TITLE, mode, type=ext, issue_id=issue_id
+            FailureReason.NO_SERIES_TITLE,
+            mode,
+            type=ext,
+            issue_id=issue_id,
+            cv_issue_id=cv_issue_id,
         )
 
     state = _State(tokens, reference_year, options)
@@ -161,7 +180,7 @@ def _parse_impl(
     state.attach_space_suffix()
     state.assemble_regions()
 
-    return state.build_result(mode, ext, issue_id)
+    return state.build_result(mode, ext, issue_id, cv_issue_id)
 
 
 class _State:
@@ -826,7 +845,11 @@ class _State:
             self.consume(j, "issue-suffix")
 
     def build_result(
-        self, mode: ParseMode, ext: str | None, issue_id: str | None
+        self,
+        mode: ParseMode,
+        ext: str | None,
+        issue_id: str | None,
+        cv_issue_id: int | None = None,
     ) -> ParseResult:
         issue: Issue | None = None
         issue_range: IssueRange | None = None
@@ -873,6 +896,7 @@ class _State:
             scan_group=self.scan_group,
             fix_revision=self.fix_revision,
             issue_id=issue_id,
+            cv_issue_id=cv_issue_id,
             type=ext,
             mode=mode,
             token_trace=trace,

@@ -175,7 +175,7 @@ wheels = [
 
 [[package]]
 name = "foragerr"
-version = "0.9.1"
+version = "0.9.2"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
@@ -188,6 +188,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pyyaml" },
+    { name = "rarfile" },
     { name = "sqlalchemy" },
     { name = "uvicorn" },
     { name = "websockets" },
@@ -211,6 +212,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.7" },
     { name = "pydantic-settings", specifier = ">=2.3" },
     { name = "pyyaml", specifier = ">=6.0" },
+    { name = "rarfile", specifier = ">=4.3,<5" },
     { name = "sqlalchemy", specifier = ">=2.0" },
     { name = "uvicorn", specifier = ">=0.30" },
     { name = "websockets", specifier = ">=13" },
@@ -492,6 +494,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/74/93/7baea19427dcfbe1e5a372d81473250b379f04b1bd3c4c5ff825e2327202/pyyaml-6.0.3-cp312-cp312-win32.whl", hash = "sha256:96b533f0e99f6579b3d4d4995707cf36df9100d67e0c8303a0c55b27b5f99bc5", size = 137658, upload-time = "2025-09-25T21:32:20.209Z" },
     { url = "https://files.pythonhosted.org/packages/86/bf/899e81e4cce32febab4fb42bb97dcdf66bc135272882d1987881a4b519e9/pyyaml-6.0.3-cp312-cp312-win_amd64.whl", hash = "sha256:5fcd34e47f6e0b794d17de1b4ff496c00986e1c83f7ab2fb8fcfe9616ff7477b", size = 154003, upload-time = "2025-09-25T21:32:21.167Z" },
     { url = "https://files.pythonhosted.org/packages/1a/08/67bd04656199bbb51dbed1439b7f27601dfb576fb864099c7ef0c3e55531/pyyaml-6.0.3-cp312-cp312-win_arm64.whl", hash = "sha256:64386e5e707d03a7e172c0701abfb7e10f0fb753ee1d773128192742712a98fd", size = 140344, upload-time = "2025-09-25T21:32:22.617Z" },
+]
+
+[[package]]
+name = "rarfile"
+version = "4.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c6/80/442df102d81a10d31ec2cf73d6f411f5575e3bb7adc0aaa45cbe693a37b6/rarfile-4.3.tar.gz", hash = "sha256:0d8b5a7ffb9f8e9a7b002f2398905e4420c0cb373e799b48e48f418db9c8816a", size = 154855, upload-time = "2026-07-08T19:21:54.072Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/78/2d/4a161de993dab0baac89b8c5b9765f420e8cc5239c5c82e0f51cb41e5a74/rarfile-4.3-py3-none-any.whl", hash = "sha256:f9dd2f8bd811b2e30fb074aa176f972f51633aa41cf909db3f2921ed040e1128", size = 29583, upload-time = "2026-07-08T19:21:52.904Z" },
 ]
 
 [[package]]

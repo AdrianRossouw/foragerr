@@ -55,11 +55,11 @@ The system SHALL poll download clients (SABnzbd, built-in DDL) on a ~1-minute tr
 
 ### Requirement: FRG-PP-003 — Grab reconciliation by download ID
 
-Every grab SHALL record a history row keyed by the download-client ID, and completed downloads SHALL be reconciled to their grabbed issues primarily by that ID, falling back to parsing the download title/folder name (via the single IMP parser, including the `[__issueid__]` tag for DDL) only when no history match exists.
+Every grab SHALL record a history row keyed by the download-client ID, and completed downloads SHALL be reconciled to their grabbed issues primarily by that ID, falling back to parsing the download title/folder name (via the single IMP parser, including the `[__issueid__]` tag for DDL) only when no history match exists. A parsed issue-id tag SHALL be honored only when it does not disagree with the filename parse: when the tag's resolved issue belongs to a different series matching key than the parsed filename, or carries an issue identity the parsed filename contradicts, resolution SHALL fall through to the grab-history/filename heuristics on every import path — scoped and unscoped alike.
 
-- **Milestone**: M1
+- **Milestone**: M1 (guard universalized: naming-defaults)
 - **Source**: SA §4.3 ("DownloadId is the join key for the entire rest of the pipeline"); MFS §4 snatch↔download handshake (nzblog analogue); SA §8 Downloading bullet 2.
-- **Notes**: Replaces Mylar's name-normalized `nzblog` matching (AltNZBName fragility) with Sonarr's ID join; the parse fallback covers Mylar's `mode='outside'` case.
+- **Notes**: Replaces Mylar's name-normalized `nzblog` matching (AltNZBName fragility) with Sonarr's ID join; the parse fallback covers Mylar's `mode='outside'` case. The universal disagree-guard closes the stale-tag hazard: internal ids embedded in filenames by an earlier database are meaningless after a reinstall and must never override a parseable name.
 
 #### Scenario: Download-ID match survives an unparseable name
 
@@ -73,8 +73,13 @@ Every grab SHALL record a history row keyed by the download-client ID, and compl
 
 #### Scenario: Issue-id tag short-circuits to direct lookup
 
-- **WHEN** a download name carries a `[__issueid__]` tag (DDL convention)
+- **WHEN** a download name carries a `[__issueid__]` tag (DDL convention) and the rest of the name is unparseable or agrees with the tagged issue
 - **THEN** reconciliation short-circuits to a direct issue lookup by that id.
+
+#### Scenario: Stale tag never overrides a disagreeing filename parse
+
+- **WHEN** a file name carries a `[__issueid__]` tag whose resolved issue disagrees with the filename parse (different series matching key, or a contradicted issue identity) on any import — scoped or unscoped
+- **THEN** the tag is discarded for resolution and the pipeline proceeds via grab-history/filename heuristics exactly as if no tag were present.
 
 ### Requirement: FRG-PP-004 — Import evidence aggregation
 
@@ -183,11 +188,11 @@ The system SHALL support per-download-client remote-path mappings that translate
 
 ### Requirement: FRG-PP-009 — Token-based renaming engine
 
-File naming SHALL be driven by a configurable token template supporting at minimum {Series Title}, {Series CleanTitle}, {Volume}, {Year}, zero-padded decimal-safe {Issue:000}, {Issue Title}, {Classification} (Annual/Special rendering), {Booktype}, {Release Group}, and {IssueId} tokens — with token-case controlling output case, illegal-character replacement policy, byte-aware truncation to path-length limits, and a switch to disable renaming (keep original filename) entirely.
+File naming SHALL be driven by a configurable token template supporting at minimum {Series Title}, {Series CleanTitle}, {Volume}, {Year}, zero-padded decimal-safe {Issue:000}, {Issue Title}, {Classification} (Annual/Special rendering), {Booktype}, {Release Group}, {IssueId}, and {CvIssueId} tokens — with token-case controlling output case, illegal-character replacement policy, byte-aware truncation to path-length limits, and a switch to disable renaming (keep original filename) entirely. {CvIssueId} SHALL render the ComicVine issue id in a form the IMP parser recognizes into the existing cv-issue-id evidence namespace, making it the durable (reinstall-surviving) identity tag.
 
-- **Milestone**: M1
+- **Milestone**: M1 ({CvIssueId}: naming-defaults)
 - **Source**: SA §5.4 (FileNameBuilder token system, comic token list); MFS §4 Moving/renaming (FILE_FORMAT tokens, zero-level padding, lowercase/space options); MFP §2.16 (round-trip contract: renamed output must re-parse).
-- **Notes**: Round-trip requirement: every rename template output in the test matrix must re-parse via the IMP parser to the same issue identity (this closes Mylar's four-way normalization divergence). Issue rendering uses the single ordering/normalization implementation from IMP.
+- **Notes**: Round-trip requirement: every rename template output in the test matrix must re-parse via the IMP parser to the same issue identity (this closes Mylar's four-way normalization divergence). Issue rendering uses the single ordering/normalization implementation from IMP. {IssueId} (internal row id) is retained for compatibility with already-stamped libraries but appears in no shipped default.
 
 #### Scenario: Tokens, padding, and case render as specified
 
@@ -208,6 +213,11 @@ File naming SHALL be driven by a configurable token template supporting at minim
 
 - **WHEN** renaming is disabled
 - **THEN** the file imports under its original filename.
+
+#### Scenario: CvIssueId renders durable identity and round-trips
+
+- **WHEN** a name is rendered from a template containing {CvIssueId} for an issue with a known ComicVine id
+- **THEN** the rendered tag re-parses into the cv-issue-id evidence namespace and resolves to the same issue on a database whose internal row ids differ (reinstall simulation).
 
 ### Requirement: FRG-PP-010 — Folder templates and folder lifecycle
 
@@ -428,16 +438,31 @@ When tagging is enabled, the import pipeline SHALL write ComicInfo.xml metadata 
 
 ### Requirement: FRG-PP-018 — CBR-to-CBZ conversion and library-wide retagging
 
-The system SHALL optionally convert CBR archives to CBZ at import time (verifying the converted archive before discarding the original), and SHALL support on-demand retag/convert operations per issue, per series, and library-wide, throttled to respect ComicVine API rate limits.
+The system SHALL optionally convert CBR archives to CBZ at import time as an explicit, off-by-default library policy surfaced with the format-preference configuration — verifying the converted archive (member count matches; final member decodes) before the original is discarded, recording the conversion as a history event, and updating the `issue_files` row (path, size, page count) atomically with the swap. On-demand conversion SHALL be available per issue and per series. Library-wide retagging (ComicInfo re-write across existing archives) remains out of scope until the META tagging dependency lands and is explicitly deferred.
 
-- **Milestone**: B
+- **Milestone**: 0.9.x (pulled from B; adopted by cbr-support)
 - **Source**: MFS §4 Metadata tagging (CBR→CBZ, CBR2CBZ_ONLY, group_metatag with CV batch-limit protection); MFS capability map META/PP.
-- **Notes**: Depends on the tagging requirement above. Conversion is where the cbz-preferred format profile (quality AREA) becomes actionable for existing files. Rar extraction needs an unrar capability in the Docker image — deployment note.
+- **Notes**: Conversion is where the cbz-preferred format profile (quality AREA) becomes actionable for existing files. Rar extraction ships via the FRG-OPDS-016 backend (`unrar` in the Docker image — deployment note). Off by default per the FRG-PP-020 non-destructive stance. The retag half of the original requirement follows META, not this change.
 
-#### Scenario: Baseline acceptance
+#### Scenario: Opt-in conversion verifies before discarding
 
-- **WHEN** this requirement is verified against the implementation
-- **THEN** A cbr fixture imports as a verified cbz with the original removed only after verification; a mock library-wide retag of 3 series observes the configured rate throttle and updates every archive.
+- **WHEN** the conversion policy is enabled and a CBR imports
+- **THEN** the produced CBZ is verified (member count matches the source listing; final member decodes as an image) before the original file is removed, the `issue_files` row swaps to the CBZ path/size/page-count atomically, and a conversion history event is recorded.
+
+#### Scenario: Off by default — no conversion without opt-in
+
+- **WHEN** a CBR imports with default configuration
+- **THEN** the file imports as-is (`.cbr`, byte-identical) and no conversion occurs.
+
+#### Scenario: Failed verification keeps the original
+
+- **WHEN** conversion output fails verification (truncated write, undecodable member)
+- **THEN** the original CBR is kept untouched as the imported file, the failure is logged as a history event, and the import itself still succeeds.
+
+#### Scenario: On-demand conversion per issue and per series
+
+- **WHEN** an operator triggers conversion for one issue or one series with the backend available
+- **THEN** each targeted CBR converts under the same verify-before-discard semantics, and already-CBZ files are skipped as no-ops.
 
 ### Requirement: FRG-PP-019 — Permissions and ownership enforcement
 
@@ -451,4 +476,23 @@ The system SHALL optionally apply configured file/directory modes and owner/grou
 
 - **WHEN** this requirement is verified against the implementation
 - **THEN** With enforcement configured, imported files/folders carry the configured mode/owner in a privileged test environment; in an unprivileged environment the import still succeeds with a warning event.
+
+### Requirement: FRG-PP-020 — Non-destructive defaults
+
+A fresh install SHALL NOT modify adopted files: `rename_enabled` defaults to off, and the shipped default file-naming template SHALL contain no internal-identifier tokens ({IssueId}). Persisted configuration SHALL always take precedence over shipped defaults, so a default change never alters the effective behavior of an existing install.
+
+#### Scenario: Fresh install adopts a library untouched
+
+- **WHEN** a fresh install (no persisted config) runs a library import in `in_place` mode
+- **THEN** every adopted file keeps its exact original path and filename, byte-for-byte.
+
+#### Scenario: Fresh-install default template carries no internal ids
+
+- **WHEN** a fresh install renders a name with renaming explicitly enabled and the shipped default template
+- **THEN** the rendered name is `{Series Title} {Issue Number:000} ({Year})` — no `[__{IssueId}__]` or other internal-row-id token appears.
+
+#### Scenario: Existing installs keep their configured behavior
+
+- **WHEN** a config file persisted under an earlier release (e.g. `rename_enabled: true` with the old tagged template) is loaded by a build shipping the new defaults
+- **THEN** the persisted values win unchanged — renaming stays enabled with the old template until the operator edits it.
 
