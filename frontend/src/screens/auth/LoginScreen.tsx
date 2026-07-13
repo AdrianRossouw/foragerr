@@ -73,7 +73,7 @@ export function LoginScreen() {
     <div className={styles.page}>
       <div className={styles.card}>
         <div className={styles.brand} aria-hidden>
-          <LogoMarkIcon size={30} />
+          <LogoMarkIcon size={40} />
           <span className={styles.brandWord}>
             Forage<span className={styles.brandWordAccent}>rr</span>
           </span>
