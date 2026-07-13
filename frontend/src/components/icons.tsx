@@ -28,48 +28,51 @@ function Svg({ size = 18, children, ...rest }: IconProps) {
   );
 }
 
-/**
- * The brand mark — an ant inside a hexagonal nest cell — traced from the
- * design handoff's `assets/foragerr-mark.svg` (geometry preserved exactly).
- * Draws in `currentColor` like every other icon so the lockup's knockout
- * color comes from the token layer, not from here.
- */
 export function LogoMarkIcon({ size = 20, ...rest }: IconProps) {
+  /* The forager ant in a comic speech bubble (owner-selected 2026-07-13 from
+   * the Claude Design logo iterations, variant "appmarkant"). Drawn entirely
+   * in currentColor so the lockup colors it via CSS; renders on the chrome
+   * with no tile behind it. */
   return (
     <svg
       width={size}
-      height={(size * 96) / 100}
-      viewBox="0 0 100 96"
+      height={size}
+      viewBox="0 0 100 100"
       fill="none"
       overflow="visible"
       aria-hidden
       focusable="false"
       {...rest}
     >
-      <path
-        d="M50 6 L86 27 L86 69 L50 90 L14 69 L14 27 Z"
+      <path d="M30 68 L20 86 L44 72 Z" fill="currentColor" />
+      <rect
+        x={12}
+        y={12}
+        width={76}
+        height={60}
+        rx={26}
         stroke="currentColor"
-        strokeWidth={5}
-        strokeLinejoin="round"
-        opacity={0.6}
+        strokeWidth={6.5}
       />
-      <svg x={9} y={19.5} width={82} height={60.9} viewBox="0 0 140 104" overflow="visible">
-        <g stroke="currentColor" strokeWidth={5.5} strokeLinecap="round" strokeLinejoin="round">
-          <path d="M62 56 L54 76 L44 90" />
-          <path d="M78 57 L76 78 L70 92" />
-          <path d="M92 56 L100 78 L102 92" />
-        </g>
-        <g stroke="currentColor" strokeWidth={5} strokeLinecap="round">
-          <path d="M112 34 Q126 22 121 11" />
-          <path d="M116 39 Q131 31 130 19" />
-        </g>
-        <g fill="currentColor" stroke="none">
-          <ellipse cx={40} cy={46} rx={24} ry={17} />
-          <circle cx={68} cy={47} r={5} />
-          <ellipse cx={82} cy={46} rx={13} ry={10.5} />
-          <circle cx={106} cy={43} r={13} />
-        </g>
-      </svg>
+      <ellipse cx={35} cy={48} rx={15} ry={11.5} fill="currentColor" />
+      <circle cx={49} cy={48} r={3.2} fill="currentColor" />
+      <ellipse cx={57} cy={46} rx={8} ry={7} fill="currentColor" />
+      <circle cx={70} cy={43} r={10} fill="currentColor" />
+      <path d="M79 44 l6 2 l-6 2.5 Z" fill="currentColor" />
+      <g stroke="currentColor" strokeWidth={4} strokeLinecap="round">
+        <path d="M76 35 Q86 26 82 18" />
+        <path d="M79 37 Q90 30 89 22" />
+      </g>
+      <g
+        stroke="currentColor"
+        strokeWidth={4.5}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M47 53 L42 68 L35 76" />
+        <path d="M55 53 L53 70 L47 78" />
+        <path d="M61 52 L67 68 L71 78" />
+      </g>
     </svg>
   );
 }

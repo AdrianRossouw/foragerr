@@ -52,19 +52,17 @@
   text-decoration: none;
 }
 
-/* The lockup reproduces the design handoff's logo spec exactly (README §Logo
- * & in-app branding): 32px radius-8 gradient tile with an inset highlight,
- * the mark knocked out in dark green, 19px/900/-0.3px wordmark. */
+/* The lockup: the speech-bubble ant mark (2026-07-13 rebrand, owner-selected
+ * from the Claude Design logo iterations) drawn as an accent-green line mark
+ * directly on the chrome — no tile behind it — beside the 19px/900/-0.3px
+ * wordmark. */
 .brandTile {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 32px;
   height: 32px;
-  border-radius: var(--radius-lg);
-  background: linear-gradient(155deg, var(--color-logo-tile-from), var(--color-logo-tile-to));
-  box-shadow: var(--shadow-logo-tile);
-  color: var(--color-logo-mark);
+  color: var(--color-accent);
 }
 
 .brandWord {
