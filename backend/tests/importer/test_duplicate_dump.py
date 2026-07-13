@@ -170,7 +170,8 @@ async def test_duplicate_loser_moves_to_the_dump_folder(db, seed, import_ctx, tm
     async with db.read_session() as session:
         files = (await session.execute(select(IssueFileRow))).scalars().all()
         events = await history.events_for_issue(session, s.issue_id)
-    assert len(files) == 1 and files[0].path.endswith("Batman 404 (1987) [__%d__].cbz" % s.issue_id)
+    # FRG-PP-020: the shipped default is tag-free, so no internal-id segment.
+    assert len(files) == 1 and files[0].path.endswith("Batman 404 (1987).cbz")
     replaced = events[-1]
     assert replaced.event_type == "upgrade_replaced"
     data = history.decode_data(replaced.data)
@@ -300,8 +301,9 @@ async def test_same_path_duplicate_preserves_the_loser_in_the_dump(
     dump = tmp_path / "dupes"
     dump.mkdir()
     ctx = import_ctx(duplicate_dump_path=str(dump))
-    # The existing file at EXACTLY the name the default template renders.
-    old = s.series_path / f"Batman 404 (1987) [__{s.issue_id}__].cbz"
+    # The existing file at EXACTLY the name the default template renders
+    # (FRG-PP-020: tag-free).
+    old = s.series_path / "Batman 404 (1987).cbz"
     make_cbz(old, images=1)
     old_size = old.stat().st_size
     await _register_existing(db, s.issue_id, old)
@@ -332,7 +334,9 @@ async def test_same_path_duplicate_without_dump_recycles_the_loser(
     recycle = tmp_path / "recycle"
     recycle.mkdir()
     ctx = import_ctx(recycle_bin_path=str(recycle))
-    old = s.series_path / f"Batman 404 (1987) [__{s.issue_id}__].cbz"
+    # The existing file at EXACTLY the name the default template renders
+    # (FRG-PP-020: tag-free).
+    old = s.series_path / "Batman 404 (1987).cbz"
     make_cbz(old, images=1)
     old_size = old.stat().st_size
     await _register_existing(db, s.issue_id, old)
@@ -364,7 +368,9 @@ async def test_persisted_fix_marker_survives_rename_and_still_wins(
     s = await seed()
     dump = tmp_path / "dupes"
     dump.mkdir()
-    ctx = import_ctx(duplicate_dump_path=str(dump))
+    # Renaming must actually run for the marker-stripping this test exercises
+    # (ImportContext.rename_enabled now defaults False).
+    ctx = import_ctx(duplicate_dump_path=str(dump), rename_enabled=True)
 
     outcomes = await _import_one(
         db, ctx, s, name="Batman 404 (1987) (f2).cbz", images=1, download_id="fx-p1"

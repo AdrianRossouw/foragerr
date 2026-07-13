@@ -51,6 +51,7 @@ from foragerr.importer.decisions import (
     same_rung,
 )
 from foragerr.importer.evidence import (
+    LAYER_FILENAME,
     PROV_COMICINFO,
     PROV_COMICINFO_CONFLICT,
     PROV_MANUAL_OVERRIDE,
@@ -413,30 +414,36 @@ async def _tag_disagrees_with_filename(
 
     The universal stale-tag guard (FRG-PP-003): a parsed ``[__issueid__]`` tag is
     honored only when it does not disagree with the filename parse, on scoped AND
-    unscoped imports. Disagreement is judged **only on a concrete parsed comic
-    identity** — a filename that yields no issue number (a tag-only DDL name, or a
-    bare series fragment) carries nothing resolvable to contradict the tag, so the
-    tag stays the file's only signal and resolves it (the legitimate DDL
-    convention; falling through would merely block it since the heuristic itself
-    needs an issue number). When the filename DOES parse to an issue, the tag is
-    discarded if that issue is not the one the tag names (:func:`match_issue_id`,
-    the shared identity equality), or if the filename's series matching key is not
-    the tagged issue's series (:func:`series_title_matches`, the pipeline's shared
-    loose-subset rule). This generalizes the scoped-rescan series check
-    (FRG-SER-010) to every import path: after a database reinstall a stale tag
-    points at an arbitrary row, and the default template stamps the issue number
-    into the name, so any such parseable name wins over the meaningless tag.
+    unscoped imports. Judged against the **filename layer specifically**, never the
+    aggregated evidence — a grab title (which outranks the filename in aggregation)
+    must not be able to mask, or manufacture, a filename disagreement. A filename
+    that yields no issue number (a tag-only DDL name, or a bare series fragment)
+    carries nothing resolvable to contradict the tag, so the tag stays the file's
+    only signal and resolves it (the legitimate DDL convention; falling through
+    would merely block it since the heuristic itself needs an issue number). When
+    the filename DOES parse to an issue, the tag is discarded if that issue is not
+    the one the tag names (:func:`match_issue_id`, the shared identity equality),
+    or if the filename's series matching key is not **exactly** the tagged issue's
+    series key. Exact equality — not the loose-subset :func:`series_title_matches`
+    — is required here precisely because that subset rule treats a shorter name as
+    matching a longer one ("Batman" ⊆ "Batman Beyond"): the wrong direction for a
+    guard, where it would let a stale tag pointing at the longer series survive a
+    filename naming the shorter one. Keys are already folded, so exact equality is
+    the right same-series test; a legitimately under-extracted filename that fails
+    it falls through to the (reviewable) filename heuristic rather than silently
+    honoring a possibly-stale tag.
     """
-    if evidence.issue is None:
+    fname = evidence.layers.get(LAYER_FILENAME)
+    if fname is None or fname.issue is None:
         return False
     if tagged.issue_number:
         index = matching.build_issue_index([tagged])
-        if matching.match_issue_id(evidence.issue, index) is None:
+        if matching.match_issue_id(fname.issue, index) is None:
             return True
-    if evidence.matching_key is not None:
+    if fname.matching_key is not None:
         series = await session.get(SeriesRow, tagged.series_id)
         series_key = series.matching_key if series is not None else None
-        if not matching.series_title_matches(evidence.matching_key, series_key):
+        if fname.matching_key != series_key:
             return True
     return False
 

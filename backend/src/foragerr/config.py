@@ -36,7 +36,7 @@ from foragerr.config_migrations import (
     migrate_config,
 )
 from foragerr.logging import register_secret
-from foragerr.naming import DEFAULT_FOLDER_TEMPLATE
+from foragerr.naming import DEFAULT_FILE_TEMPLATE, DEFAULT_FOLDER_TEMPLATE
 from foragerr.security.archives import DEFAULT_ARCHIVE_LIMITS, ArchiveLimits
 
 logger = _stdlog.getLogger("foragerr.config")
@@ -44,13 +44,11 @@ logger = _stdlog.getLogger("foragerr.config")
 #: Fresh-install default file-naming template (FRG-PP-020, naming-defaults):
 #: no internal-identifier token. Adopting an existing library must never stamp
 #: a database row id — meaningless (and silently mis-mappable) after a
-#: reinstall or the planned 1.0 clean slate — into a filename. Deliberately
-#: NOT the same object as :data:`foragerr.naming.DEFAULT_FILE_TEMPLATE` (the
-#: token engine's own illustrative default, still tag-suffixed, consumed
-#: directly by ``importer.context``/``config_resources`` outside this
-#: Settings model); unifying the two is tracked as naming-defaults follow-up
-#: work, not this task's scope.
-DEFAULT_FILE_NAMING_TEMPLATE = "{Series Title} {Issue Number:000} ({Year})"
+#: reinstall or the planned 1.0 clean slate — into a filename. Aliased to the
+#: single source in ``foragerr.naming`` so the Settings default, the token
+#: engine, ImportContext, and the ``/config/naming/tokens`` endpoint can never
+#: drift (a "reset to default" that re-introduced the tag was the drift).
+DEFAULT_FILE_NAMING_TEMPLATE = DEFAULT_FILE_TEMPLATE
 
 CONFIG_DIR_ENV = "FORAGERR_CONFIG_DIR"
 DEFAULT_CONFIG_DIR = Path("/config")

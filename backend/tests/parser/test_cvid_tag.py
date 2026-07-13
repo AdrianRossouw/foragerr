@@ -11,7 +11,7 @@ import pytest
 from foragerr.naming import RenameFields, render, render_filename
 from foragerr.parser import parse
 
-_TEMPLATE = "{Series Title} {Issue Number:000} ({Year}) [cvid-{CvIssueId}]"
+_TEMPLATE = "{Series Title} {Issue Number:000} ({Year}) {CvIssueId}"
 
 
 @pytest.mark.req("FRG-PP-009")

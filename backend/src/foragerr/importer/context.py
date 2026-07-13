@@ -65,7 +65,7 @@ class ImportContext:
     junk_size_floor_bytes: int = DEFAULT_JUNK_SIZE_FLOOR_BYTES
     max_walk_depth: int = DEFAULT_MAX_WALK_DEPTH
     archive_extensions: tuple[str, ...] = ARCHIVE_EXTENSIONS
-    rename_enabled: bool = True
+    rename_enabled: bool = False
     file_template: str = DEFAULT_FILE_TEMPLATE
     folder_template: str = DEFAULT_FOLDER_TEMPLATE
     transfer_mode: fileops.TransferMode = fileops.TransferMode.MOVE

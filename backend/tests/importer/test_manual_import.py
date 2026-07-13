@@ -34,7 +34,7 @@ from foragerr.library import repo
 from foragerr.library.models import IssueFileRow
 from foragerr.naming import RenameFields, render_filename
 
-_CVID_TEMPLATE = "{Series Title} {Issue Number:000} ({Year}) [cvid-{CvIssueId}]"
+_CVID_TEMPLATE = "{Series Title} {Issue Number:000} ({Year}) {CvIssueId}"
 
 from importer._archives import (
     comicinfo_xml,

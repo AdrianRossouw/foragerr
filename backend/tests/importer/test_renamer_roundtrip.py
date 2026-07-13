@@ -42,7 +42,7 @@ CORPUS = _corpus_mod.CORPUS
 # identity untouched.
 _VARIANTS = (
     "{Series Title} {Issue Number:000} ({Year}) [__{IssueId}__]",
-    "{Series Title} {Issue Number:000} ({Year}) [cvid-{CvIssueId}]",
+    "{Series Title} {Issue Number:000} ({Year}) {CvIssueId}",
     "{Series Title} {Issue Number:000} ({Year})",
     "{series title} {issue number:000} ({year})",
     "{SERIES TITLE} {ISSUE NUMBER:000} ({YEAR})",
@@ -129,7 +129,14 @@ def test_oversized_series_title_preserves_identity_tag_and_issue_number():
         year="1987",
         issue_id=str(issue_id),
     )
-    rendered = render_filename(fields, ext=".cbz")
+    # The tag isn't in the shipped default any more (FRG-PP-020); this test's
+    # subject is that truncation preserves a TRAILING identity tag, so pin the
+    # tagged template explicitly.
+    rendered = render_filename(
+        fields,
+        ext=".cbz",
+        template="{Series Title} {Issue Number:000} ({Year}) [__{IssueId}__]",
+    )
 
     assert len(rendered.encode("utf-8")) <= 255  # respects the byte ceiling
     assert f"[__{issue_id}__]" in rendered  # identity tag survived truncation
@@ -180,7 +187,7 @@ def test_seeded_template_variants_round_trip():
 def test_cvid_variant_round_trips_identity_and_cv_id_over_the_corpus():
     """The ``[cvid-{CvIssueId}]`` template preserves the round-trip identity AND
     recovers the durable ComicVine id for every eligible corpus identity."""
-    template = "{Series Title} {Issue Number:000} ({Year}) [cvid-{CvIssueId}]"
+    template = "{Series Title} {Issue Number:000} ({Year}) {CvIssueId}"
     checked = 0
     for row in CORPUS:
         if not _eligible(row):

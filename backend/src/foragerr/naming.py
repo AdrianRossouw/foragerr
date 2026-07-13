@@ -53,10 +53,13 @@ from foragerr.security.paths import safe_path_component
 
 # --- default templates -------------------------------------------------------
 
-#: M1 default file template (design decision 7). ``({Year})`` is intentionally
-#: not optional (a library issue always has a series start year); the issue-id
-#: tag is optional (rescan-sourced files carry none).
-DEFAULT_FILE_TEMPLATE = "{Series Title} {Issue Number:000} ({Year}) [__{IssueId}__]"
+#: Default file template (FRG-PP-020: no internal-id tag). ``({Year})`` is
+#: intentionally not optional (a library issue always has a series start year).
+#: This is the single source of the shipped default — the token-defaults
+#: endpoint, ImportContext, and Settings all resolve to it, so "reset to
+#: default" never re-introduces an identity tag. Operators who want a durable
+#: identity tag add ``{CvIssueId}`` (renders ``[cvid-<ID>]``).
+DEFAULT_FILE_TEMPLATE = "{Series Title} {Issue Number:000} ({Year})"
 
 #: M1 default folder template — change-3's fixed ``{title} ({year})`` shape,
 #: now owned here (SER-008 transfer, FRG-PP-010).
@@ -181,6 +184,15 @@ def _render_segment(text: str, fmap: dict[str, str | None], empties: list[bool])
         key = _TOKEN_ALIASES.get(_canonical(m.group(1)))
         raw = fmap.get(key) if key is not None else None
         val = "" if raw is None else str(raw)
+        # {CvIssueId} renders the parser-recognizable [cvid-<ID>] form itself
+        # (FRG-PP-009), so a bare {CvIssueId} in a template is a working durable
+        # tag — never a raw number the parser would misread as the issue. Empty
+        # when the issue has no CV id (drops like any optional token). Padding
+        # and case are meaningless for the wrapped id, so they are skipped.
+        if key == "cv_issue_id":
+            wrapped = f"[cvid-{val}]" if val else ""
+            empties.append(wrapped == "")
+            return wrapped
         if m.group(2) is not None and val:
             val = _apply_pad(val, m.group(2))
         val = _apply_case(m.group(1), val)
