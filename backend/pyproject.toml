@@ -18,6 +18,7 @@ dependencies = [
     "websockets>=13",
     "pillow>=11,<12",
     "cryptography>=43,<47",
+    "rarfile>=4.3,<5",
 ]
 
 [project.scripts]
