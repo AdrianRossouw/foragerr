@@ -191,16 +191,8 @@ def build_verified_cbz(
                 f"produced CBZ has {produced} members, expected {expected} from "
                 f"the source listing (truncated write)"
             )
-        images = list_image_members(tmp, limits)
-        if not images:
-            raise ConvertError(
-                "produced CBZ has no listable image pages — refusing to convert"
-            )
-        # The final page must decode as an image (the readable-last-page check).
-        final_bytes = read_image_member(tmp, images[-1], max_bytes=limits.max_member_bytes)
-        render_page(final_bytes, max_width=None, max_pixels=_VERIFY_MAX_PIXELS)
-
-        return BuiltCbz(temp_path=tmp, size=tmp.stat().st_size, page_count=len(images))
+        page_count = _verify_cbz_pages(tmp, limits)
+        return BuiltCbz(temp_path=tmp, size=tmp.stat().st_size, page_count=page_count)
     except (ConvertError, ArchiveMemberError, ImageRenderError, OSError, zipfile.BadZipFile) as exc:
         _unlink_quiet(tmp)
         if isinstance(exc, ConvertError):
@@ -210,6 +202,44 @@ def build_verified_cbz(
         # Cancellation/shutdown mid-build: clean the temp, then let it propagate.
         _unlink_quiet(tmp)
         raise
+
+
+def _verify_cbz_pages(zip_path: str | os.PathLike[str], limits: ArchiveLimits) -> int:
+    """Return the image page count of a valid CBZ, or raise ConvertError.
+
+    The shared readable-comic check: the archive lists ≥1 image page and its
+    final page decodes as an image. Used both to verify a freshly-built temp and
+    to validate an already-promoted CBZ during idempotent recovery."""
+    images = list_image_members(zip_path, limits)
+    if not images:
+        raise ConvertError(
+            f"{zip_path} has no listable image pages — not a valid comic CBZ"
+        )
+    final_bytes = read_image_member(zip_path, images[-1], max_bytes=limits.max_member_bytes)
+    render_page(final_bytes, max_width=None, max_pixels=_VERIFY_MAX_PIXELS)
+    return len(images)
+
+
+def verify_existing_cbz(
+    path: str | os.PathLike[str], limits: ArchiveLimits = DEFAULT_ARCHIVE_LIMITS
+) -> BuiltCbz | None:
+    """A ``BuiltCbz`` for an already-promoted ``.cbz`` if it is a valid image
+    comic, else ``None`` (FRG-PP-018 idempotent recovery).
+
+    Used to complete a conversion whose ``.cbz`` was promoted by a prior run that
+    crashed before the DB commit — the original ``.cbr`` is still present (the
+    source is deleted only post-commit), so the row swap can finish against the
+    existing ``.cbz`` instead of failing forever on the destination-exists guard.
+    Returns ``None`` (never raises) when the file is not a valid comic CBZ, so
+    the caller falls through to the never-clobber failure path."""
+    p = Path(path)
+    try:
+        with zipfile.ZipFile(p):
+            pass
+        page_count = _verify_cbz_pages(p, limits)
+    except (ConvertError, ArchiveMemberError, ImageRenderError, OSError, zipfile.BadZipFile):
+        return None
+    return BuiltCbz(temp_path=p, size=p.stat().st_size, page_count=page_count)
 
 
 def promote_cbz(temp_path: str | os.PathLike[str], final_cbz: str | os.PathLike[str]) -> Path:
@@ -278,58 +308,66 @@ async def apply_conversion(
         return None  # non-CBR: no-op, no event (FRG-PP-018 on-demand skip)
 
     dest = cbz_path_for(source_path)
+    built: BuiltCbz | None = None
     if dest.exists() and not _same_physical_file(dest, source_path):
-        # A different file already occupies the .cbz target — never clobber it.
-        _record_failed(
-            session,
-            series_id=series_id,
-            issue_id=issue_id,
-            source=source,
-            download_id=download_id,
-            source_title=source_title,
-            now=now,
-            path=source_path,
-            error=f"destination {dest} already exists",
-        )
-        return None
+        # A .cbz already occupies the target. Distinguish two cases: (a) a prior
+        # run promoted it but crashed before the DB committed — the .cbr is still
+        # here (delete is post-commit), so recover idempotently by verifying the
+        # existing .cbz and completing the row swap against it; (b) an unrelated
+        # file — never clobber.
+        built = await _run_fs(verify_existing_cbz, str(dest), limits)
+        if built is None:
+            _record_failed(
+                session,
+                series_id=series_id,
+                issue_id=issue_id,
+                source=source,
+                download_id=download_id,
+                source_title=source_title,
+                now=now,
+                path=source_path,
+                error=f"destination {dest} already exists",
+            )
+            return None
 
-    # 1. Build + verify (no original touched, temp is hidden beside the dest).
-    try:
-        built: BuiltCbz = await _run_fs(
-            build_verified_cbz, source_path, str(dest), limits=limits
-        )
-    except ConvertError as exc:
-        logger.warning("convert: %s kept (verification failed): %s", source_path, exc)
-        _record_failed(
-            session,
-            series_id=series_id,
-            issue_id=issue_id,
-            source=source,
-            download_id=download_id,
-            source_title=source_title,
-            now=now,
-            path=source_path,
-            error=str(exc),
-        )
-        return None
+    if built is None:
+        # 1. Build + verify (no original touched, temp is hidden beside the dest).
+        try:
+            built = await _run_fs(
+                build_verified_cbz, source_path, str(dest), limits=limits
+            )
+        except ConvertError as exc:
+            logger.warning("convert: %s kept (verification failed): %s", source_path, exc)
+            _record_failed(
+                session,
+                series_id=series_id,
+                issue_id=issue_id,
+                source=source,
+                download_id=download_id,
+                source_title=source_title,
+                now=now,
+                path=source_path,
+                error=str(exc),
+            )
+            return None
 
-    # 2. Promote the verified temp onto the .cbz destination.
-    try:
-        await _run_fs(promote_cbz, str(built.temp_path), str(dest))
-    except Exception as exc:  # noqa: BLE001 — a promote failure keeps the original
-        logger.warning("convert: promotion of %s failed; original kept: %s", dest, exc)
-        _record_failed(
-            session,
-            series_id=series_id,
-            issue_id=issue_id,
-            source=source,
-            download_id=download_id,
-            source_title=source_title,
-            now=now,
-            path=source_path,
-            error=f"promotion failed: {exc}",
-        )
-        return None
+        # 2. Promote the verified temp onto the .cbz destination.
+        try:
+            await _run_fs(promote_cbz, str(built.temp_path), str(dest))
+        except Exception as exc:  # noqa: BLE001 — a promote failure keeps the original
+            logger.warning("convert: promotion of %s failed; original kept: %s", dest, exc)
+            _record_failed(
+                session,
+                series_id=series_id,
+                issue_id=issue_id,
+                source=source,
+                download_id=download_id,
+                source_title=source_title,
+                now=now,
+                path=source_path,
+                error=f"promotion failed: {exc}",
+            )
+            return None
 
     # 3. From here the verified .cbz is durable beside the original. Swap the row
     #    (path/size/page-count) and record the event in the caller's transaction,
@@ -355,12 +393,27 @@ async def apply_conversion(
         },
         now=now,
     )
-    # Remove the original CBR last (after the row+event are staged). A failure
-    # here is a leftover file, not data loss — logged, never fatal.
-    try:
-        await _run_fs(os.remove, source_path)
-    except OSError as exc:  # pragma: no cover - leftover original is non-fatal
-        logger.warning("convert: original %s not removed after swap: %s", source_path, exc)
+    # Remove the original CBR only AFTER the row swap + event commit durably
+    # (RISK-049 crash-safety): deleting it inside this transaction risks losing
+    # the file while the DB rolls back to the old .cbr path on a crash/commit
+    # failure, and races OPDS readers still resolving the old path. Schedule it
+    # as a post-commit cleanup; if no such slot exists (a caller not on
+    # write_session), leave the original for later cleanup rather than delete it
+    # pre-commit. A cleanup failure is a leftover file, never data loss.
+    cleanups = session.info.get("post_commit_cleanup")
+    if cleanups is not None:
+        async def _remove_original(path: str = source_path) -> None:
+            try:
+                await _run_fs(os.remove, path)
+            except OSError as exc:  # pragma: no cover - leftover original is non-fatal
+                logger.warning("convert: original %s not removed after commit: %s", path, exc)
+
+        cleanups.append(_remove_original)
+    else:  # pragma: no cover - production convert always runs under write_session
+        logger.warning(
+            "convert: no post-commit cleanup slot; original %s left for later cleanup",
+            source_path,
+        )
     return str(dest)
 
 

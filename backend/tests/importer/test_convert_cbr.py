@@ -24,6 +24,7 @@ which the verify honestly rejects.
 
 from __future__ import annotations
 
+import datetime as dt
 import io
 import zipfile
 from pathlib import Path
@@ -99,6 +100,51 @@ def test_convert_refuses_an_unsafe_source_archive(tmp_path):
     # No temp CBZ, no destination CBZ left in the directory.
     assert not dest.exists()
     assert not list(tmp_path.glob(".foragerr-convert-*"))
+
+
+@pytest.mark.req("FRG-PP-018")
+async def test_convert_recovers_idempotently_from_a_promoted_cbz(db, seed, monkeypatch):
+    """A prior run promoted the .cbz but crashed before the DB commit — the
+    original .cbr is still present (delete is post-commit). A retry must COMPLETE
+    the conversion against the existing .cbz (verify + row swap), not fail forever
+    on the destination-exists guard (RISK-049 crash recovery)."""
+    from foragerr.importer import convert
+    from foragerr.library import repo
+
+    s = await seed()
+    cbr = s.series_path / "Batman 404 (1987).cbr"
+    _make_cbr(cbr)
+    # Simulate the crash state: a valid, decodable image .cbz already sits at the
+    # target (a prior run promoted it but crashed before commit).
+    cbz = convert.cbz_path_for(cbr)
+    png = _png()
+    with zipfile.ZipFile(cbz, "w") as zf:
+        zf.writestr("page000.png", png)
+        zf.writestr("page001.png", png)
+    async with db.write_session() as session:
+        await repo.add_issue_file(
+            session, issue_id=s.issue_id, path=str(cbr), size=cbr.stat().st_size
+        )
+        row = (await session.execute(select(IssueFileRow))).scalars().one()
+        file_id = row.id
+
+    async with db.write_session() as session:
+        new_path = await convert.apply_conversion(
+            session,
+            issue_file_id=file_id,
+            source_path=str(cbr),
+            series_id=s.series_id,
+            issue_id=s.issue_id,
+            now=dt.datetime(2026, 7, 13, 12, 0, 0),
+            source="manual",
+        )
+
+    assert new_path == str(cbz)  # recovered, not failed
+    files = await _files(db)
+    assert len(files) == 1
+    assert files[0].path == str(cbz)  # row swapped to the existing .cbz
+    assert not cbr.exists()  # original removed post-commit
+    assert cbz.exists()
 
 
 async def _run(db, source, ctx) -> list:

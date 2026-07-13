@@ -23,6 +23,7 @@ reentrant and nesting would deadlock).
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -140,9 +141,11 @@ class Database:
         - Publishes events queued via :func:`queue_event` only after commit.
         """
         events: list[Any] = []
+        cleanups: list[Callable[[], Any]] = []
         async with self._write_lock:
             session = self._sessions()
             session.info["post_commit_events"] = events
+            session.info["post_commit_cleanup"] = cleanups
             try:
                 yield session
                 await self._commit_with_retry(session)
@@ -160,10 +163,20 @@ class Database:
                 raise
             finally:
                 await session.close()
-        # The lock is released and the commit succeeded: deliver events.
+        # The lock is released and the commit succeeded: deliver events, then run
+        # post-commit cleanups (durable-state-dependent filesystem work, e.g.
+        # deleting a source file only after the row that stopped referencing it
+        # is committed). A cleanup failure is a leftover file, never fatal.
         if events and self.event_publisher is not None:
             for evt in events:
                 self.event_publisher(evt)
+        for cleanup in cleanups:
+            try:
+                result = cleanup()
+                if inspect.isawaitable(result):
+                    await result
+            except Exception:  # noqa: BLE001 - a failed cleanup is non-fatal
+                logger.warning("post-commit cleanup failed", exc_info=True)
 
     async def _commit_with_retry(self, session: AsyncSession) -> None:
         """Commit with bounded backoff on residual SQLITE_BUSY (FRG-DB-006)."""
