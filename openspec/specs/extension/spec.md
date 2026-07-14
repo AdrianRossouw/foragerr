@@ -17,14 +17,14 @@ detail (FRG-PROC-003, FRG-PROC-009); the security analysis lives in
 
 ### Requirement: FRG-EXT-001 — Explicit-action cookie-to-clipboard copy
 
-The companion browser extension SHALL obtain the operator's Humble
-`_simpleauth_sess` session cookie for `www.humblebundle.com` and place it on the
-system clipboard ONLY in response to an explicit user action (a click in the
-extension popup), reading the cookie via the browser `cookies` API at the moment of
-that action. It SHALL NOT display the cookie value to the operator, SHALL NOT inject
-any script into humblebundle.com, SHALL NOT read the cookie in any background,
-scheduled, or page-load-triggered context, SHALL NOT persist the cookie value, and
-SHALL NOT transmit the cookie or any data to any network endpoint.
+The companion browser extension SHALL, ONLY in response to an explicit user action (a
+click in the extension popup), read the operator's Humble `_simpleauth_sess` session
+cookie for `www.humblebundle.com` via the browser `cookies` API and write that value
+to the system clipboard, so the operator can paste it into foragerr's existing Sources
+connect/reconnect card. The extension SHALL NOT display the cookie value to the
+operator, SHALL NOT inject any script into humblebundle.com, SHALL NOT read the cookie
+in any background, scheduled, or page-load-triggered context, SHALL NOT persist the
+cookie value, and SHALL NOT transmit the cookie or any data to any network endpoint.
 
 #### Scenario: Cookie read and copied only on click
 
@@ -114,3 +114,4 @@ load); no store listing is required.
 - **WHEN** the build tooling is inspected
 - **THEN** it uses only the language/runtime standard library and adds no entry to
   `docs/security/soup-register.md`
+
