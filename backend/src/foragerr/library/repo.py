@@ -531,6 +531,18 @@ async def series_statistics(
     file_count = file_count or 0
     size_on_disk = size_on_disk or 0
 
+    # "Missing" has ONE definition (FRG-SER-009): the wanted count. Derive it by
+    # counting `wanted_issues()` filtered to this series rather than
+    # `issue_count - file_count`, which over-counted unreleased (future-dated)
+    # and unmonitored file-less issues — figures that disagreed with the Wanted
+    # list. Reusing the selectable makes drift impossible by construction.
+    missing_count = await session.scalar(
+        select(func.count()).select_from(
+            wanted_issues(as_of).where(IssueRow.series_id == series_id).subquery()
+        )
+    )
+    missing_count = missing_count or 0
+
     release_date_expr = func.coalesce(IssueRow.store_date, IssueRow.cover_date)
     last_release_date = await session.scalar(
         select(func.max(release_date_expr)).where(
@@ -546,7 +558,7 @@ async def series_statistics(
     return SeriesStatistics(
         issue_count=issue_count,
         file_count=file_count,
-        missing_count=max(issue_count - file_count, 0),
+        missing_count=missing_count,
         size_on_disk=size_on_disk,
         next_release_date=next_release_date,
         last_release_date=last_release_date,

@@ -39,10 +39,13 @@ Every screen renders inside a fixed three-part frame — the sidebar never moves
 and only the content region scrolls:
 
 - **Sidebar** (left): the logo lockup, then the navigation list, then a status
-  footer. Nav entries carry live count badges where they help — **Comics** shows
-  your library's series count, **Queue** shows the number of tracked downloads,
-  and **Wanted** shows how many series have missing issues (in an amber warn
-  style). The active screen's entry is highlighted with a green accent bar. The
+  footer. Only active work is badged on the nav: **Queue** shows the number of
+  tracked downloads. Library size and missing counts are not badged — they live
+  on their own screens, in the right units (the **Wanted** page lists the
+  individual missing issues; the **Comics** page shows the library). **Sources**
+  shows an amber `!` only when a store session has expired and needs
+  reconnecting — a state signal, not a count. The active screen's entry is
+  highlighted with a green accent bar. The
   nav lists only screens that exist today; entries for planned screens appear in
   the release that ships them. The footer shows a health pulse and the running
   version (e.g. "Foragerr 0.4.0 — all healthy"); it turns amber when the Health

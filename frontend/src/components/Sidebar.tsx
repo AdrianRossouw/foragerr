@@ -1,28 +1,29 @@
 import { Link, NavLink } from 'react-router-dom';
 import { useConnectionStore, type ConnectionStatus } from '../ws/connectionStore';
 import {
-  useSeriesIndex,
   useQueueCount,
   useHealthWarnings,
   useSystemStatus,
 } from '../api/hooks';
-import { useSources, useSourcesNewCount } from '../api/sourceHooks';
+import { useSources } from '../api/sourceHooks';
 import { LogoMarkIcon } from './icons';
 import styles from './AppShell.module.css';
 
 /**
- * Sidebar (FRG-UI-023): logo lockup, a nav list of the SHIPPED screens with
- * live count badges (Comics = library series count, Queue = tracked-download
- * count, Wanted = series-with-missing-issues in warn style), grouped operator
- * sections, and a footer status row (health pulse + running version). Calendar
+ * Sidebar (FRG-UI-023): logo lockup, a nav list of the SHIPPED screens,
+ * grouped operator sections, and a footer status row (health pulse + running
+ * version). Nav count badges are reserved for active/in-progress work only:
+ * Queue = tracked-download count is the sole count badge; the Sources item
+ * shows an amber `!` on session expiry (FRG-UI-029). Library-size and
+ * missing/pending counts are NOT badged — they read differently against their
+ * screens (wanted-count-consistency) and live on the pages themselves. Calendar
  * ships in m4-pull-experience (FRG-UI-018); Creators enters the nav here in
  * m5-creators-screens (FRG-UI-027), the change that ships its screen (mirrors
- * the README shipped-claims rule). All counts read
- * existing React Query caches kept live by the WebSocketBridge (no new
- * endpoints, no polling timers of their own).
+ * the README shipped-claims rule). The queue count reads the existing React
+ * Query cache kept live by the WebSocketBridge (no new endpoints, no polling).
  */
 
-type BadgeKind = 'series' | 'queue' | 'wanted';
+type BadgeKind = 'queue';
 
 interface NavItem {
   to: string;
@@ -43,7 +44,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: null,
     items: [
-      { to: '/', label: 'Comics', icon: 'fa-book', end: true, badge: 'series' },
+      { to: '/', label: 'Comics', icon: 'fa-book', end: true },
       { to: '/creators', label: 'Creators', icon: 'fa-user-pen' },
       { to: '/calendar', label: 'Calendar', icon: 'fa-calendar-days' },
       { to: '/add', label: 'Add New', icon: 'fa-plus' },
@@ -52,7 +53,6 @@ const NAV_GROUPS: NavGroup[] = [
         to: '/wanted',
         label: 'Wanted',
         icon: 'fa-triangle-exclamation',
-        badge: 'wanted',
       },
       {
         to: '/sources',
@@ -112,28 +112,15 @@ const CONNECTION_CLASS: Record<ConnectionStatus, string> = {
 };
 
 function NavBadge({ kind }: { kind: BadgeKind }) {
-  const series = useSeriesIndex();
   const queueCount = useQueueCount();
 
-  let value: number | undefined;
-  let warn = false;
-  if (kind === 'series') {
-    value = series.data?.length;
-  } else if (kind === 'queue') {
-    value = queueCount.data;
-  } else {
-    value = series.data?.filter((s) => s.statistics.missing_count > 0).length;
-    warn = true;
-  }
-
-  // A badge only appears once its count is loaded and non-zero — an empty
-  // library / idle queue shows a clean label, matching the design.
+  // Only active/in-progress work is badged on the nav (wanted-count-consistency):
+  // the queue length. A badge appears once loaded and non-zero — an idle queue
+  // shows a clean label.
+  const value = kind === 'queue' ? queueCount.data : undefined;
   if (value === undefined || value <= 0) return null;
   return (
-    <span
-      className={warn ? `${styles.navBadge} ${styles.navBadgeWarn}` : styles.navBadge}
-      data-testid={`nav-badge-${kind}`}
-    >
+    <span className={styles.navBadge} data-testid={`nav-badge-${kind}`}>
       {value}
     </span>
   );
@@ -141,39 +128,23 @@ function NavBadge({ kind }: { kind: BadgeKind }) {
 
 /**
  * Sources nav badge (FRG-UI-029): an amber `!` when any connected store's
- * session has expired (the more serious signal, always wins), else the count of
- * unreviewed `new` items across connected sources. Both use the warn (amber)
- * style. No source configured / nothing pending / all clean → no badge.
+ * session has expired — a needs-attention state signal, not a count. Nothing
+ * else is badged (unreviewed-new counts live on the Sources page, where their
+ * comic/non-comic scope is visible). No source configured / all clean → no badge.
  */
 function SourcesNavBadge() {
   const sources = useSources();
-  const connectedIds = (sources.data ?? [])
-    .filter((s) => s.connection_state === 'connected')
-    .map((s) => s.id);
   const expired = (sources.data ?? []).some(
     (s) => s.connection_state === 'expired',
   );
-  const newCount = useSourcesNewCount(connectedIds);
-
-  if (expired) {
-    return (
-      <span
-        className={`${styles.navBadge} ${styles.navBadgeWarn}`}
-        data-testid="nav-badge-sources"
-        aria-label="A store session needs attention"
-      >
-        !
-      </span>
-    );
-  }
-  const value = newCount.data;
-  if (value === undefined || value <= 0) return null;
+  if (!expired) return null;
   return (
     <span
       className={`${styles.navBadge} ${styles.navBadgeWarn}`}
       data-testid="nav-badge-sources"
+      aria-label="A store session needs attention"
     >
-      {value}
+      !
     </span>
   );
 }

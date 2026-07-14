@@ -156,3 +156,80 @@ async def test_next_and_last_release_dates_are_derived(db, root_folder_id, forma
         stats = await repo.series_statistics(session, series_id, as_of=dt.date.today())
     assert stats.last_release_date == dt.date.today() - dt.timedelta(days=5)
     assert stats.next_release_date == dt.date.today() + dt.timedelta(days=10)
+
+
+@pytest.mark.req("FRG-SER-009")
+async def test_missing_count_is_the_wanted_count_one_definition(
+    db, root_folder_id, format_profile_id
+):
+    """missing_count uses the wanted predicate (FRG-SER-004), not
+    issue_count - file_count: unreleased and unmonitored file-less issues are
+    NOT missing, and the count equals the wanted list for the series.
+    """
+    as_of = dt.date(2026, 1, 1)
+    past = dt.date(2025, 6, 1)  # released
+    future = dt.date(2026, 6, 1)  # not yet released
+
+    async with db.write_session() as session:
+        series = await repo.create_series(
+            session,
+            cv_volume_id=42,
+            title="Wanted Def Series",
+            format_profile_id=format_profile_id,
+            root_folder_id=root_folder_id,
+            path="/tmp/comics/Wanted Def Series",
+            monitored=True,
+        )
+        series_id = series.id
+        n = 0
+
+        # 3 released, monitored, file-less  -> MISSING
+        for _ in range(3):
+            n += 1
+            await repo.create_issue(
+                session, series_id=series_id, cv_issue_id=1000 + n,
+                issue_number=str(n), store_date=past, monitored=True,
+            )
+        # 2 unreleased (future), monitored, file-less  -> NOT missing
+        for _ in range(2):
+            n += 1
+            await repo.create_issue(
+                session, series_id=series_id, cv_issue_id=1000 + n,
+                issue_number=str(n), store_date=future, monitored=True,
+            )
+        # 1 released, UNmonitored, file-less  -> NOT missing
+        n += 1
+        await repo.create_issue(
+            session, series_id=series_id, cv_issue_id=1000 + n,
+            issue_number=str(n), store_date=past, monitored=False,
+        )
+        # 4 released, monitored, WITH a file  -> NOT missing
+        for _ in range(4):
+            n += 1
+            issue = await repo.create_issue(
+                session, series_id=series_id, cv_issue_id=1000 + n,
+                issue_number=str(n), store_date=past, monitored=True,
+            )
+            await repo.add_issue_file(
+                session, issue_id=issue.id,
+                path=f"/tmp/comics/Wanted Def Series/{issue.id}.cbz", size=100,
+            )
+
+    async with db.read_session() as session:
+        stats = await repo.series_statistics(session, series_id, as_of=as_of)
+        # The wanted list restricted to this series (wanted is library-wide).
+        series_wanted = await session.execute(
+            repo.wanted_issues(as_of).where(
+                repo.IssueRow.series_id == series_id
+            )
+        )
+        series_wanted_count = len(series_wanted.scalars().all())
+
+    assert stats.issue_count == 10
+    assert stats.file_count == 4
+    # The old shortcut would have said 10 - 4 = 6.
+    assert stats.issue_count - stats.file_count == 6
+    # The correct wanted-aligned count excludes the 2 unreleased + 1 unmonitored.
+    assert stats.missing_count == 3
+    # Single definition: missing_count equals the wanted list for the series.
+    assert stats.missing_count == series_wanted_count

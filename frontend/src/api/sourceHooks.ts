@@ -19,8 +19,8 @@ import type {
  * Store-source data-access hooks (FRG-UI-029). Reads over the sources CRUD +
  * entitlement review surface (backend/src/foragerr/api/sources.py); every
  * mutation invalidates the bare ['sources'] family so the list, each source's
- * entitlements, an open detail, and the sidebar new-count re-derive together
- * (the whole inventory is one review surface). The session cookie is NEVER read
+ * entitlements, and an open detail re-derive together (the whole inventory is
+ * one review surface). The session cookie is NEVER read
  * back from the server (write-only, FRG-SRC-002) — connect/reconnect carry it
  * one-way in the request body only.
  */
@@ -75,33 +75,6 @@ export function useEntitlementDetail(
         `/api/v1/sources/entitlements/${entitlementId}`,
       ),
     enabled: enabled && entitlementId != null,
-  });
-}
-
-/**
- * The unreviewed-`new` count across connected sources for the Sources nav badge
- * (FRG-UI-029). Fetches the server-filtered `?review_status=new` slice per
- * connected source (the small set, not the whole inventory) and sums; dormant
- * with no connected source, so an unconfigured install pays nothing.
- */
-export function useSourcesNewCount(
-  sourceIds: number[],
-): UseQueryResult<number> {
-  const fetcher = useFetcher();
-  const idsHash = [...sourceIds].sort((a, b) => a - b).join(',');
-  return useQuery({
-    queryKey: queryKeys.sources.newCount(idsHash),
-    queryFn: async () => {
-      let total = 0;
-      for (const id of sourceIds) {
-        const rows = await fetcher<EntitlementResource[]>(
-          `/api/v1/sources/${id}/entitlements?review_status=new`,
-        );
-        total += rows.length;
-      }
-      return total;
-    },
-    enabled: sourceIds.length > 0,
   });
 }
 
