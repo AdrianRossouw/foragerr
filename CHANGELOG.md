@@ -9,6 +9,30 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.9.7] — 2026-07-14
+
+Refreshed README screenshots and repaired the screenshot-refresh tooling that
+broke when mandatory authentication landed.
+
+### Fixed
+- **README screenshot refresh** (FRG-PROC-017): `tools/refresh-readme-shots.sh`
+  had been broken since mandatory login (M8, v0.7.0) — the backend fail-fasts
+  without an operator account and every API call sits behind the default-deny
+  perimeter, but the tool seeded no credentials, so the shots had not been
+  regenerable. It now boots a throwaway admin, authenticates (cookie-jar login
+  with a same-origin `Origin` header for the CSRF check), routes the populate
+  calls through an authenticated helper, and the Playwright capture logs in
+  before shooting.
+
+### Changed
+- The screenshot demo library is now a dedicated public-domain-only path
+  (`COMICS_DIR` default `/comics/_pd-demo`), segregated from any working/testing
+  root so copyrighted or half-imported content cannot poison public README
+  screenshots or abort the run on the completeness guard.
+- Regenerated all seven README screenshots against the current UI: they now show
+  the v0.9.5 ant brand mark, the authenticated app chrome, and the shipped
+  Humble cookie extension helper text.
+
 ## [v0.9.6] — 2026-07-14
 
 humble-session-extension: a companion browser extension that copies the Humble
