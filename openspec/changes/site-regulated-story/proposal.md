@@ -1,5 +1,14 @@
 # site-regulated-story
 
+## Approval
+
+Approved by Adrian, 2026-07-14 (in session, FRG-PROC-009), with a staging
+condition: implement fully on the change branch and provide a testing preview of
+the built site for owner verification and feedback **before** merge and release.
+Open questions resolved by default at approval: hero trace-card exemplar =
+FRG-SER-019; risk table renders all rows; CI test gate deferred to a follow-up
+(site wording stays "enforced at merge gates").
+
 ## Why
 
 foragerr's most distinctive property is not the comic manager — it is the regulated,
