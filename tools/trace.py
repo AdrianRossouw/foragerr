@@ -93,6 +93,7 @@ def test_tags():
         'frontend/src/**/*.test.*',
         'frontend/src/**/*.spec.*',
         'e2e/tests/**/*.spec.*',  # FRG ids in Playwright test titles (FRG-PROC-010)
+        'extension/tests/**/*.test.mjs',  # FRG ids in node:test titles (companion extension)
     ):
         for f in ROOT.glob(pattern):
             for rid in set(ID_RE.findall(f.read_text(errors='ignore'))):
