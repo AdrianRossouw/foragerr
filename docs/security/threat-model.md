@@ -1673,6 +1673,61 @@ shipped model:
 RISK-020's residual note (rate-limit/audit landing in `m8-rate-audit`) is now
 closed; see the row for the final disposition.
 
+### 2026-07-14 — humble-session-extension (0.9.x dogfood)
+
+A companion browser extension (Chrome + Firefox, Manifest V3) whose entire job is
+to read the operator's own Humble `_simpleauth_sess` cookie on an explicit click and
+place it on the system clipboard, so the operator pastes it into the existing Sources
+connect/reconnect card. **Owner decision 2026-07-14: clipboard-only.** An earlier
+draft had the extension POST the cookie to a new authenticated foragerr endpoint using
+a stored API key; that shape was rejected — the extension does not connect back to
+foragerr, holds no API key, and makes no network request of any kind. There is no
+backend change: the existing manual-paste path is the only ingestion route.
+
+New elements: **E-EXT** (the extension in the browser profile), **E-DIST** (the
+self-distributed artifact). Because the extension has no network capability and stores
+no credential, the connected-extension threats (API-key-at-rest, transit interception,
+cookie-to-wrong-instance) do not exist here.
+
+- **T-EXT-1 (clipboard residual) — accepted, folds into RISK-046.** The cookie is
+  briefly on the system clipboard so the operator can paste it into the connect card;
+  a malicious co-installed extension with `clipboardRead` or a clipboard-manager app
+  could read it. This is the *same* exposure the manual DevTools copy already has and
+  RISK-046 already accepts — the extension mechanizes the copy (removing the DevTools
+  fumble), it does not add a new exposure class. The cookie is Humble-only (no
+  foragerr/OS credential), expires in weeks, and is invalidated by logging out of
+  Humble (surfacing `expired`, FRG-SRC-005); no payment/billing action is reachable
+  with it. The clipboard hop is intrinsic to any paste-based ingestion; removing it
+  would require a native-messaging path, out of scope. RISK-046 updated to record this.
+- **T-EXT-2 (self-distributed build integrity) — mitigated, RISK-050.** A tampered
+  build could try to exceed its stated permissions or copy the cookie elsewhere.
+  Controls: dependency-free deterministic build the operator rebuilds and byte-compares
+  (FRG-EXT-003); AMO-signed Firefox artifact; MV3 no-remote-code guarantee; and a
+  minimal, auditable manifest — `cookies` + `clipboardWrite` and a single
+  `www.humblebundle.com` host permission, no `storage`, no content scripts, no
+  `nativeMessaging`, no optional permissions, no CSP override, no other host
+  (FRG-EXT-002). Any egress a tampered build added would therefore require a **visible
+  source or manifest change** the operator sees on rebuild — that visibility, not the
+  sandbox, is the control.
+- **No-egress property — correctly attributed (gate correction, adversarial review).**
+  The no-transmission guarantee is NOT "closed by construction because there is no
+  network host permission": MV3 does **not** gate write-only egress on host
+  permissions (a `fetch(..., {mode:"no-cors"})`, `sendBeacon`, `Image().src`,
+  `WebSocket`, or `RTCPeerConnection` reaches any origin without one), and the default
+  MV3 content-security policy restricts script/object sources but sets no `connect-src`.
+  The property instead rests on three real controls: (1) the reviewed, reproducible
+  source contains no egress primitive (a build-gate source scan is a tripwire for
+  accidental regressions, explicitly not a proof against a determined obfuscated edit);
+  (2) MV3 forbids remotely hosted code, so only the shipped, auditable bundle runs;
+  (3) the minimal manifest keeps that auditable surface small and forbids the
+  `nativeMessaging`/optional-permission/CSP-override keys a host permission would not
+  have blocked. The shipped code today contains no egress path — nothing is broken;
+  this note records the accurate basis for the claim.
+
+Server-side surface unchanged: RISK-045 (cookie at rest), RISK-047 (store-JSON
+parsing), RISK-048 (signed-URL egress) are untouched — no backend code changes in this
+change. No new SOUP (dependency-free build).
+
 ## Coverage summary
 
 - **Well covered by the five drafts** (mitigation named, no new requirement needed): OPDS

@@ -1,0 +1,11 @@
+{
+  "name": "foragerr-humble-cookie-extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Companion browser extension: one-click copy of the Humble Bundle session cookie to the clipboard for foragerr's Sources card. No network access.",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test"
+  }
+}

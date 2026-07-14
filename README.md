@@ -104,10 +104,14 @@ golden-age comics (Fiction House and Fawcett titles) from the Internet Archive.
 ![The Sources screen connect card: connecting a Humble Bundle account by pasting a session cookie, with helper steps, an auto-sync toggle, and a privacy note](docs/readme-assets/sources.png)
 
 *Store sources — connect a Humble Bundle account with a pasted session cookie
-and review purchases before they enter the library —
+and review purchases before they enter the library; a companion browser
+extension ([extension/](extension/README.md)) copies the cookie in one click,
+no DevTools —
 [FRG-UI-029](docs/traceability/requirements-registry.md),
-[FRG-SRC-001](docs/traceability/requirements-registry.md) · spec:
-[ui](openspec/specs/ui/spec.md), [sources](openspec/specs/sources/spec.md) ·
+[FRG-SRC-001](docs/traceability/requirements-registry.md),
+[FRG-EXT-001](docs/traceability/requirements-registry.md) · spec:
+[ui](openspec/specs/ui/spec.md), [sources](openspec/specs/sources/spec.md),
+[extension](openspec/specs/extension/spec.md) ·
 manual: [sources](docs/manual/user/sources.md)*
 
 ### Media management

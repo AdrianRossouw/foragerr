@@ -120,6 +120,7 @@ written into an OpenSpec change proposal.
 | DB   | Persistence |
 | DEP  | Packaging and deployment |
 | AUTH | Authentication (deferred milestone) |
+| EXT  | Companion browser extension |
 
 ## Examples
 
