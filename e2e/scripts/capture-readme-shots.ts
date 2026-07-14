@@ -40,6 +40,11 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const BASE_URL = process.env.BASE_URL ?? 'http://127.0.0.1:8790';
 const OUT_DIR = process.env.OUT_DIR ?? resolve(HERE, '../../docs/readme-assets');
 const SERIES_HINT = process.env.SERIES ?? 'Planet';
+// Mandatory login (M8 auth): the app is behind a default-deny perimeter, so the
+// capture browser must authenticate before any screen renders. Creds come from
+// the same env the refresh tool seeds the backend with.
+const ADMIN_USER = process.env.FORAGERR_ADMIN_USER ?? 'admin';
+const ADMIN_PASSWORD = process.env.FORAGERR_ADMIN_PASSWORD ?? '';
 const ONLY = (process.env.SHOTS ?? '')
   .split(',')
   .map((s) => s.trim())
@@ -73,6 +78,23 @@ async function settle(page: Page): Promise<void> {
   await page.evaluate(() => (document as any).fonts?.ready).catch(() => {});
   await waitForImages(page);
   await page.waitForTimeout(600); // cover fade-in transitions after load
+}
+
+/**
+ * Authenticate once (M8 mandatory login). The session cookie lives in the
+ * browser context, so every later navigation is authenticated. Idempotent: a
+ * reused, already-authenticated instance redirects away from /login.
+ */
+async function login(page: Page): Promise<void> {
+  await page.goto(`${BASE_URL}/login`, { waitUntil: 'domcontentloaded' });
+  if (!new URL(page.url()).pathname.startsWith('/login')) return;
+  await page.fill('input[name="username"]', ADMIN_USER);
+  await page.fill('input[type="password"]', ADMIN_PASSWORD);
+  await Promise.all([
+    page.waitForURL((u) => !u.pathname.startsWith('/login'), { timeout: 15_000 }),
+    page.click('button[type="submit"]'),
+  ]);
+  await settle(page);
 }
 
 async function discoverSeriesId(page: Page): Promise<number | null> {
@@ -248,6 +270,7 @@ async function main(): Promise<void> {
   });
   const page = await context.newPage();
   try {
+    await login(page);
     for (const shot of selected) {
       console.log(`--- ${shot.id} ---`);
       await shot.run(page);
