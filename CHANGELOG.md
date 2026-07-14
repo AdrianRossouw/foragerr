@@ -9,6 +9,18 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.9.8] — 2026-07-14
+
+### Changed
+- The README **Sources** screenshot now shows a live connected Humble Bundle
+  account with its entitlement-review list, instead of the empty connect card
+  (FRG-PROC-017). `tools/refresh-readme-shots.sh` optionally connects the Humble
+  source before capture when `FORAGERR_TEST_HUMBLE_COOKIE` is present — best-effort
+  and non-destructive: an absent or expired cookie leaves the connect-card shot
+  and never fails the run. The connected view renders title text + format badges
+  only (no cover art) from a dedicated foragerr test account, so the shot is a
+  factual purchase list rather than reproduced content.
+
 ## [v0.9.7] — 2026-07-14
 
 Refreshed README screenshots and repaired the screenshot-refresh tooling that

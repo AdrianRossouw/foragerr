@@ -246,6 +246,46 @@ except Exception: print(0)')"
   sleep 2
 done
 
+# --- Optional: connect the Humble source so the Sources shot shows the real
+# connected/entitlement view instead of the empty connect card ----------------
+# Best-effort and non-destructive: an absent or expired cookie simply leaves the
+# connect-card shot in place and never fails the run. The cookie is a dedicated
+# foragerr test account's; it is read from .env and handed to the API over stdin
+# so it never appears in any argv or in the log. The connected view renders only
+# title text + format badges (no cover art), so a real purchase list is factual
+# metadata, not reproduced copyrighted content.
+HUMBLE_COOKIE=""
+if [ -f "${REPO}/.env" ]; then
+  HUMBLE_COOKIE="$(grep -E '^FORAGERR_TEST_HUMBLE_COOKIE=' "${REPO}/.env" | head -1 | cut -d= -f2- || true)"
+fi
+if [ -n "${HUMBLE_COOKIE}" ]; then
+  log "connecting Humble source (test account)…"
+  # Feed the cookie to the JSON builder over stdin (here-string), not argv or
+  # env, so it appears in no process's argv and no process environment; the
+  # builder's stdout (the request body) pipes on to curl over stdin too.
+  SRC_ID="$(python3 -c 'import json, sys; c = sys.stdin.read().rstrip("\n"); print(json.dumps({"type": "humble", "name": "Humble Bundle", "settings": {"session_cookie": c}, "auto_sync": False}))' <<< "${HUMBLE_COOKIE}" \
+    | apic -X POST "${BASE_URL}/api/v1/sources" -H 'content-type: application/json' --data-binary @- 2>/dev/null \
+    | python3 -c 'import json,sys
+try: print(json.load(sys.stdin)["source"]["id"])
+except Exception: pass' || true)"
+  if [ -n "${SRC_ID}" ]; then
+    log "Humble connected (source ${SRC_ID}); syncing entitlements…"
+    apic -X POST "${BASE_URL}/api/v1/sources/${SRC_ID}/sync" >/dev/null 2>&1 || true
+    ECOUNT=0
+    for _ in $(seq 1 45); do
+      ECOUNT="$(apic "${BASE_URL}/api/v1/sources/${SRC_ID}/entitlements" 2>/dev/null \
+        | python3 -c 'import json,sys
+try: print(len(json.load(sys.stdin)))
+except Exception: print(0)' || echo 0)"
+      [ "${ECOUNT:-0}" -gt 0 ] && break
+      sleep 2
+    done
+    log "Humble entitlements synced: ${ECOUNT:-0}"
+  else
+    log "Humble cookie absent/invalid — keeping the connect-card Sources shot"
+  fi
+fi
+
 # --- Capture -----------------------------------------------------------------
 # This sandbox's node lacks TypeScript type-stripping, so transpile then run
 # (the fallback documented in capture-readme-shots.ts's header).
