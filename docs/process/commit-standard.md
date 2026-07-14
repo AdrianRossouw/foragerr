@@ -62,10 +62,16 @@ Governed by **FRG-PROC-001** and **FRG-PROC-002** (message format) and
 8. Registry rows flipped, matrix regenerated, change archived, branch deleted
    after merge.
 9. Release record per FRG-PROC-013 (`openspec/specs/dev-process/spec.md` owns the
-   scheme), from change 7 / v0.1.0 onward:
+   scheme), from change 7 / v0.1.0 onward. Execute via the **`/release` skill**
+   (`.claude/skills/release/SKILL.md`), which is subordinate to FRG-PROC-013 and
+   just runs this mechanically:
    - **Pre-merge** (in the change itself): the release version's `CHANGELOG.md`
      entry (Added/Changed/Fixed/Security + FRG refs + upgrade notes) is written, and
-     `backend/pyproject.toml` `version` is set to the release version.
+     `backend/pyproject.toml` `version` is set to the release version. The version
+     number is allocated **at merge time**, not at branch-creation time (it is a
+     global sequential resource; stamping it early is what collides when branches
+     merge out of order — the collision surfaces as a merge conflict on the
+     `version =` line and the CHANGELOG anchor, never a silent bad release).
    - **Post-merge** (immediately after the merge commit exists — the one post-merge
      step): create and push the annotated SemVer tag, then publish a GitHub Release
      (`gh release create`) for it carrying that CHANGELOG entry as its body.
