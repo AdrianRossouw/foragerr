@@ -16,8 +16,13 @@ never automates a login (`FRG-SRC-002`):
 
 1. Log into [humblebundle.com](https://www.humblebundle.com) in your own
    browser, as you normally would.
-2. Open your browser's developer tools, find the `_simpleauth_sess` cookie for
-   `humblebundle.com`, and copy its value.
+2. Get the session cookie onto your clipboard. The easy way is the **foragerr
+   browser extension** (Chrome + Firefox): click it and press **Copy Humble
+   session cookie** — one click, no developer tools. See `../../../extension/
+   README.md` for install and build/verify instructions. The extension only
+   copies the cookie to your clipboard; it never talks to foragerr.
+   *Fallback without the extension:* open your browser's developer tools, find
+   the `_simpleauth_sess` cookie for `humblebundle.com`, and copy its value.
 3. In foragerr, open **Sources → Humble Bundle** and paste the cookie into the
    connect card, then press **Connect**.
 

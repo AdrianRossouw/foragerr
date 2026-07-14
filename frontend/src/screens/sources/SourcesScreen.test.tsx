@@ -202,13 +202,13 @@ describe('FRG-UI-029: connect flow', () => {
     expect(connect).toBeEnabled();
   });
 
-  it('FRG-UI-029 — the helper reveals the extension "coming soon" chip and the DevTools cookie name', async () => {
+  it('FRG-UI-029 — the helper points to the browser extension and names the DevTools cookie', async () => {
     const user = userEvent.setup();
     renderScreen({ sources: [], entitlements: [], calls: [] });
 
     await user.click(await screen.findByTestId('helper-toggle'));
     const helper = screen.getByTestId('cookie-helper');
-    expect(within(helper).getByText('Coming soon')).toBeInTheDocument();
+    expect(within(helper).getByText(/browser extension/)).toBeInTheDocument();
     expect(within(helper).getByText('_simpleauth_sess')).toBeInTheDocument();
   });
 

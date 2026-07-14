@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>foragerr — Humble cookie</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #16181d;
+        --fg: #e6e8ec;
+        --muted: #9aa0aa;
+        --accent: #d8642f;
+        --ok: #4a9d5b;
+        --warn: #c9a227;
+        --error: #cf4b4b;
+      }
+      body {
+        margin: 0;
+        width: 300px;
+        padding: 16px;
+        font: 13px/1.45 system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--fg);
+      }
+      h1 {
+        margin: 0 0 4px;
+        font-size: 14px;
+      }
+      p.lede {
+        margin: 0 0 12px;
+        color: var(--muted);
+      }
+      button {
+        width: 100%;
+        padding: 9px 12px;
+        font: inherit;
+        font-weight: 600;
+        color: #fff;
+        background: var(--accent);
+        border: 0;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
+      #status {
+        margin: 12px 0 0;
+        min-height: 1.45em;
+        color: var(--muted);
+      }
+      #status[data-kind="ok"] {
+        color: var(--ok);
+      }
+      #status[data-kind="warn"] {
+        color: var(--warn);
+      }
+      #status[data-kind="error"] {
+        color: var(--error);
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Humble session cookie</h1>
+    <p class="lede">
+      Copies your logged-in Humble cookie to the clipboard so you can paste it
+      into foragerr's Sources card. Nothing is sent anywhere.
+    </p>
+    <button id="copy" type="button">Copy Humble session cookie</button>
+    <p id="status" role="status" aria-live="polite"></p>
+    <script src="popup.js" type="module"></script>
+  </body>
+</html>

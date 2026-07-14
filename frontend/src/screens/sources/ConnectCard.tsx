@@ -114,9 +114,9 @@ export function ConnectCard({ source }: { source: StoreSourceResource | null }) 
           <div className={styles.helperStep}>
             <span className={styles.stepNum}>1</span>
             <span>
-              Use the Foragerr browser extension
-              <span className={styles.comingSoon}>Coming soon</span> — one click
-              on humblebundle.com grabs the cookie, no DevTools needed.
+              Use the Foragerr browser extension — one click on
+              humblebundle.com copies the cookie to your clipboard, no DevTools
+              needed. Then paste it below.
             </span>
           </div>
           <div className={styles.helperStep}>

@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "foragerr — Humble cookie",
+  "version": "0.1.0",
+  "description": "One-click copy of your Humble Bundle session cookie to the clipboard, to paste into foragerr's Sources card. No network access.",
+  "permissions": ["cookies", "clipboardWrite"],
+  "host_permissions": ["https://www.humblebundle.com/*"],
+  "action": {
+    "default_title": "Copy Humble session cookie",
+    "default_popup": "popup.html"
+  }
+}

@@ -179,19 +179,6 @@
   flex: none;
 }
 
-.comingSoon {
-  display: inline-block;
-  margin-left: var(--spacing-xs);
-  padding: 1px 6px;
-  border-radius: var(--radius-pill);
-  background: var(--color-warning-tint);
-  color: var(--color-warning-text);
-  font-size: 9px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  vertical-align: middle;
-}
-
 .code {
   font-family: ui-monospace, monospace;
   background: var(--surface-input);
