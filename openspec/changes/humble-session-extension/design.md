@@ -55,10 +55,23 @@ permissions:      ["cookies", "clipboardWrite"]
 host_permissions: ["https://www.humblebundle.com/*"]
 ```
 No `tabs`, `<all_urls>`, `storage`, `externally_connectable`, `webRequest`, content
-scripts, or `web_accessible_resources`. `host_permissions` is a single hard-coded
-Humble host (needed for the `cookies.get` read); there is no dynamic/optional host
-permission because there is no other origin to reach. MV3 forbids remotely hosted code,
-so the extension can execute only its shipped, reviewable bundle.
+scripts, `web_accessible_resources`, `nativeMessaging`, `optional_permissions`,
+`optional_host_permissions`, or `content_security_policy` override. `host_permissions`
+is a single hard-coded Humble host (needed for the `cookies.get` read); there is no
+dynamic/optional host permission because there is no other origin to reach. MV3 forbids
+remotely hosted code, so the extension can execute only its shipped, reviewable bundle.
+
+**On the no-egress claim (gate correction).** A narrow `host_permissions` does NOT by
+itself prevent write-only exfiltration in MV3 — `fetch(..., {mode:"no-cors"})`,
+`sendBeacon`, `Image().src`, `WebSocket`, and `RTCPeerConnection` all reach any origin
+with no host permission, and the default MV3 CSP sets no `connect-src`. So the
+no-transmission property is not a platform guarantee derived from host scope. It rests
+on: the reviewed source containing no egress primitive (the `no-network` test is a
+regression tripwire, not a proof — a determined author can obfuscate past any
+denylist), MV3's no-remote-code guarantee, and the minimal manifest above (which also
+omits `nativeMessaging` and the optional-permission/CSP keys a host permission would
+not have blocked) — all verifiable against the reproducible build. The shipped code
+contains no egress path; this is the accurate basis for that fact.
 
 ### 4. Copy affordance and expiry hint
 The popup shows a single "Copy Humble session cookie" button. On success it confirms
@@ -90,9 +103,12 @@ connected extension do not exist here.
 | T-EXT-1 | Info disclosure | E-EXT / clipboard | The Humble cookie is briefly on the system clipboard, where a malicious co-installed extension with `clipboardRead` or a clipboard-manager app could read it → access to the operator's Humble account (order history/entitlements). | **Accepted residual (extends RISK-046).** This is the *same* clipboard exposure the manual DevTools copy already has and RISK-046 already accepts — the extension mechanizes the copy, it does not add a new class. It removes the DevTools/OS-copy fumble but not the clipboard hop (the connect card needs a pasteable value). The cookie is Humble-only (no foragerr/OS credential), expires in weeks, and is invalidated by logging out of Humble (surfacing `expired`, FRG-SRC-005). No payment/billing action is reachable with it. Ceiling: any paste-based flow crosses the clipboard. Review trigger: a clipboard-free ingestion path (e.g. native messaging) is ever built, or Humble ships a scoped token. |
 | T-EXT-2 | Tampering | E-DIST | Operator installs a tampered build (supply chain of the self-distributed zip) that quietly gains reach or copies elsewhere. | **Mitigated (RISK-050).** Dependency-free, deterministic build the operator runs/verifies themselves; Firefox artifact is AMO-signed; no remote code (MV3); the manifest's `cookies`+`clipboardWrite`+single-host surface is auditable and has no network permission to exfiltrate through. No third-party build pipeline to compromise. |
 
-Permission over-reach is closed **by construction** (Decision 3), not carried as a live
-risk: with no network host permission, no `storage`, and no content scripts, there is
-no egress path or standing site reach for the extension to abuse.
+Permission over-reach is bounded by the minimal, auditable manifest and the reviewed
+egress-free source (Decision 3), not by host scope: MV3 does not gate write-only egress
+on host permissions, so the real controls are the absence of egress code in a
+reproducible bundle, MV3's no-remote-code guarantee, and a manifest that also omits
+`nativeMessaging` and the optional-permission/CSP keys. No standing site reach exists
+(no content scripts, no `storage`).
 
 Existing rows: **RISK-046 updated** — its mitigation/review text records that the
 extension provides a one-click copy replacing the DevTools step, with no foragerr-side

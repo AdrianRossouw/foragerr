@@ -1,0 +1,8 @@
+# Pin extension sources to LF so the deterministic build (FRG-EXT-003) is
+# byte-identical across platforms regardless of core.autocrlf.
+*.js   text eol=lf
+*.mjs  text eol=lf
+*.html text eol=lf
+*.css  text eol=lf
+*.json text eol=lf
+*.md   text eol=lf

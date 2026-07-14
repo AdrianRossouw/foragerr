@@ -16,11 +16,18 @@ function sha256(path) {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
 
+// Build into an isolated dir so this test never races the manifest test's
+// output under parallel `node --test` (both invoke build.mjs, which rm's DIST).
+const OUT = "dist-test-build";
+
 function buildAndHash() {
-  execFileSync("node", [join(ROOT, "build.mjs")], { stdio: "ignore" });
+  execFileSync("node", [join(ROOT, "build.mjs")], {
+    stdio: "ignore",
+    env: { ...process.env, EXT_DIST_DIR: OUT },
+  });
   return {
-    chrome: sha256(join(ROOT, "dist", "chrome.zip")),
-    firefox: sha256(join(ROOT, "dist", "firefox.zip")),
+    chrome: sha256(join(ROOT, OUT, "chrome.zip")),
+    firefox: sha256(join(ROOT, OUT, "firefox.zip")),
   };
 }
 

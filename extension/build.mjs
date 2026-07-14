@@ -14,7 +14,11 @@ import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = join(HERE, "src");
-const DIST = join(HERE, "dist");
+// Output dir is overridable so parallel test runs build into isolated dirs
+// instead of racing on a shared ./dist (they otherwise rm each other's output).
+const DIST = process.env.EXT_DIST_DIR
+  ? join(HERE, process.env.EXT_DIST_DIR)
+  : join(HERE, "dist");
 
 const base = JSON.parse(readFileSync(join(HERE, "manifest.base.json"), "utf8"));
 

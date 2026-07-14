@@ -111,7 +111,7 @@ no DevTools —
 [FRG-SRC-001](docs/traceability/requirements-registry.md),
 [FRG-EXT-001](docs/traceability/requirements-registry.md) · spec:
 [ui](openspec/specs/ui/spec.md), [sources](openspec/specs/sources/spec.md),
-[extension](openspec/changes/humble-session-extension/specs/extension/spec.md) ·
+[extension](openspec/specs/extension/spec.md) ·
 manual: [sources](docs/manual/user/sources.md)*
 
 ### Media management

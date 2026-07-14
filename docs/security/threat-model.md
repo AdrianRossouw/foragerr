@@ -1704,13 +1704,25 @@ cookie-to-wrong-instance) do not exist here.
   Controls: dependency-free deterministic build the operator rebuilds and byte-compares
   (FRG-EXT-003); AMO-signed Firefox artifact; MV3 no-remote-code guarantee; and a
   minimal, auditable manifest — `cookies` + `clipboardWrite` and a single
-  `www.humblebundle.com` host permission, no `storage`, no content scripts, no other
-  host, and no `fetch`/XHR/WebSocket in the source (FRG-EXT-002) — so there is no
-  network egress path a tampered build could exfiltrate through without a visible
-  source/manifest change. A source-scan test enforces the no-network invariant.
-- **Permission over-reach — closed by construction, not a live risk.** With no network
-  host permission, no `storage`, and no content scripts, the extension has no egress
-  path and no standing site reach to abuse (FRG-EXT-002).
+  `www.humblebundle.com` host permission, no `storage`, no content scripts, no
+  `nativeMessaging`, no optional permissions, no CSP override, no other host
+  (FRG-EXT-002). Any egress a tampered build added would therefore require a **visible
+  source or manifest change** the operator sees on rebuild — that visibility, not the
+  sandbox, is the control.
+- **No-egress property — correctly attributed (gate correction, adversarial review).**
+  The no-transmission guarantee is NOT "closed by construction because there is no
+  network host permission": MV3 does **not** gate write-only egress on host
+  permissions (a `fetch(..., {mode:"no-cors"})`, `sendBeacon`, `Image().src`,
+  `WebSocket`, or `RTCPeerConnection` reaches any origin without one), and the default
+  MV3 content-security policy restricts script/object sources but sets no `connect-src`.
+  The property instead rests on three real controls: (1) the reviewed, reproducible
+  source contains no egress primitive (a build-gate source scan is a tripwire for
+  accidental regressions, explicitly not a proof against a determined obfuscated edit);
+  (2) MV3 forbids remotely hosted code, so only the shipped, auditable bundle runs;
+  (3) the minimal manifest keeps that auditable surface small and forbids the
+  `nativeMessaging`/optional-permission/CSP-override keys a host permission would not
+  have blocked. The shipped code today contains no egress path — nothing is broken;
+  this note records the accurate basis for the claim.
 
 Server-side surface unchanged: RISK-045 (cookie at rest), RISK-047 (store-JSON
 parsing), RISK-048 (signed-URL egress) are untouched — no backend code changes in this

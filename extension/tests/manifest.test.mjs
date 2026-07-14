@@ -11,12 +11,17 @@ import { execFileSync } from "node:child_process";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
 
-// Build fresh so the test reflects current source, not a stale dist.
-execFileSync("node", [join(ROOT, "build.mjs")], { stdio: "ignore" });
+// Build fresh into an isolated dir so this test never races the build test's
+// output under parallel `node --test` (both invoke build.mjs, which rm's DIST).
+const OUT = "dist-test-manifest";
+execFileSync("node", [join(ROOT, "build.mjs")], {
+  stdio: "ignore",
+  env: { ...process.env, EXT_DIST_DIR: OUT },
+});
 
 function manifest(target) {
   return JSON.parse(
-    readFileSync(join(ROOT, "dist", target, "manifest.json"), "utf8"),
+    readFileSync(join(ROOT, OUT, target, "manifest.json"), "utf8"),
   );
 }
 
@@ -36,6 +41,13 @@ for (const target of ["chrome", "firefox"]) {
       "web_accessible_resources",
       "devtools_page",
       "chrome_url_overrides",
+      // Egress / broad-reach keys a host permission would NOT prevent — the
+      // no-network property rests on these being absent, not on host scope.
+      "nativeMessaging",
+      "content_security_policy",
+      "optional_permissions",
+      "optional_host_permissions",
+      "declarative_net_request",
     ]) {
       assert.equal(m[forbidden], undefined, `must not declare ${forbidden}`);
     }

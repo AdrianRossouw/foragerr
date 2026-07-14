@@ -41,26 +41,37 @@ cookie value, and SHALL NOT transmit the cookie or any data to any network endpo
 ### Requirement: FRG-EXT-002 — Least-privilege, no-network permission surface
 
 The extension manifest SHALL request only the `cookies` and `clipboardWrite`
-permissions and the single host permission `https://www.humblebundle.com/*`. It SHALL
+permissions and the single host permission `https://www.humblebundle.com/*`, and SHALL
 NOT declare content scripts, `tabs`, `<all_urls>`, `storage`, `webRequest`,
-`externally_connectable`, or any host permission other than the Humble host, and SHALL
-be Manifest V3 (which forbids remotely hosted code). The extension code SHALL contain
-no `fetch`, `XMLHttpRequest`, WebSocket, or other network call — it has no capability
-to transmit the cookie anywhere.
+`externally_connectable`, `nativeMessaging`, `optional_permissions`,
+`optional_host_permissions`, a relaxed `content_security_policy`, or any host
+permission other than the Humble host. It SHALL be Manifest V3 (which forbids remotely
+hosted code). The shipped extension source SHALL contain no network-egress call —
+`fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `sendBeacon`,
+`RTCPeerConnection`, dynamic `import()`, `eval`/`new Function`, or an `src`/CSS-`url()`
+beacon. A narrow host permission does NOT by itself prevent write-only egress in MV3,
+so the no-transmission property rests on the reviewed source carrying no egress code,
+MV3's no-remote-code guarantee, and the minimal manifest — verifiable against the
+reproducible build (FRG-EXT-003) — not on host scope. The cookie leaves only via the
+operator-controlled clipboard.
 
 #### Scenario: Manifest declares no broad reach and no extra host
 
 - **WHEN** either browser build's `manifest.json` is inspected
 - **THEN** `permissions` is exactly `["cookies","clipboardWrite"]`, `host_permissions`
   is exactly the single Humble host, and there is no `content_scripts`, `tabs`,
-  `<all_urls>`, `storage`, `externally_connectable`, or `web_accessible_resources`
+  `<all_urls>`, `storage`, `externally_connectable`, `web_accessible_resources`,
+  `nativeMessaging`, `optional_permissions`, `optional_host_permissions`, or
+  `content_security_policy` override
 
-#### Scenario: No network egress in code
+#### Scenario: No network egress in the shipped source
 
-- **WHEN** the extension source is inspected
-- **THEN** it contains no `fetch`/`XMLHttpRequest`/WebSocket usage and requests no
-  origin beyond the Humble host — the cookie can leave only via the clipboard the
-  operator controls
+- **WHEN** the extension source is inspected (a build-gate tripwire, not a proof of
+  impossibility — MV3 does not sandbox egress)
+- **THEN** it contains none of the egress primitives above, and the manifest declares
+  no `nativeMessaging`/optional-permission/CSP-override surface — so the reviewed,
+  reproducible bundle transmits nothing and the cookie leaves only via the clipboard
+  the operator controls
 
 ### Requirement: FRG-EXT-003 — Cross-browser parity and reproducible self-distributed build
 
