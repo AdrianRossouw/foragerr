@@ -9,6 +9,26 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.9.9] — 2026-07-14
+
+### Fixed
+- **One definition of "missing"** (FRG-SER-009): `series_statistics.missing_count`
+  now uses the same wanted predicate as the Wanted list (FRG-SER-004) — series
+  monitored, issue monitored, released, no file — instead of `issue_count -
+  file_count`. It no longer over-counts unreleased (future-dated) or unmonitored
+  file-less issues, so series-card counts and the Wanted screen can never disagree.
+
+### Changed
+- **Nav count badges reduced to active work only** (FRG-UI-023, FRG-UI-029): the
+  sidebar keeps only the **Queue** download count and the **Sources** expiry `!`
+  attention signal. The Comics library-size, Wanted series-with-missing, and
+  Sources unreviewed-new count badges are removed — each counted a different
+  thing or unit than the screen it pointed at (the Wanted badge counted series
+  while the page lists missing issues; the Sources badge counted all entitlements
+  while the page defaults to comics), so the numbers never reconciled at a glance.
+  Those counts live on their pages now, in the right units (Sonarr/Radarr
+  convention: badge active work, not pending/missing).
+
 ## [v0.9.8] — 2026-07-14
 
 ### Changed
