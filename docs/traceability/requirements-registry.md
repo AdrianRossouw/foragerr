@@ -292,6 +292,9 @@ source. Compatibility: pre-1.0 releases may break with migration notes; from
 | FRG-SRC-005 | session expiry as a modeled state | sources | implemented | M6 |
 | FRG-SRC-006 | entitlement download and import handoff | sources | implemented | M6 |
 | FRG-SRC-007 | collected-edition reconciliation never suppresses singles | sources | implemented | M6 |
+| FRG-EXT-001 | Explicit-action cookie-to-clipboard copy | extension | proposed | 0.9.x |
+| FRG-EXT-002 | Least-privilege, no-network permission surface | extension | proposed | 0.9.x |
+| FRG-EXT-003 | Cross-browser parity and reproducible self-distributed build | extension | proposed | 0.9.x |
 | FRG-OPDS-001 | OPDS 1.2 Atom catalog with navigation root | opds | implemented | M1 |
 | FRG-OPDS-002 | Acquisition feeds with per-entry metadata | opds | implemented | M1 |
 | FRG-OPDS-003 | Library-id-based file resolution only (no client-supplied paths) | opds | implemented | M1 |

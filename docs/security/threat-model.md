@@ -1673,6 +1673,49 @@ shipped model:
 RISK-020's residual note (rate-limit/audit landing in `m8-rate-audit`) is now
 closed; see the row for the final disposition.
 
+### 2026-07-14 — humble-session-extension (0.9.x dogfood)
+
+A companion browser extension (Chrome + Firefox, Manifest V3) whose entire job is
+to read the operator's own Humble `_simpleauth_sess` cookie on an explicit click and
+place it on the system clipboard, so the operator pastes it into the existing Sources
+connect/reconnect card. **Owner decision 2026-07-14: clipboard-only.** An earlier
+draft had the extension POST the cookie to a new authenticated foragerr endpoint using
+a stored API key; that shape was rejected — the extension does not connect back to
+foragerr, holds no API key, and makes no network request of any kind. There is no
+backend change: the existing manual-paste path is the only ingestion route.
+
+New elements: **E-EXT** (the extension in the browser profile), **E-DIST** (the
+self-distributed artifact). Because the extension has no network capability and stores
+no credential, the connected-extension threats (API-key-at-rest, transit interception,
+cookie-to-wrong-instance) do not exist here.
+
+- **T-EXT-1 (clipboard residual) — accepted, folds into RISK-046.** The cookie is
+  briefly on the system clipboard so the operator can paste it into the connect card;
+  a malicious co-installed extension with `clipboardRead` or a clipboard-manager app
+  could read it. This is the *same* exposure the manual DevTools copy already has and
+  RISK-046 already accepts — the extension mechanizes the copy (removing the DevTools
+  fumble), it does not add a new exposure class. The cookie is Humble-only (no
+  foragerr/OS credential), expires in weeks, and is invalidated by logging out of
+  Humble (surfacing `expired`, FRG-SRC-005); no payment/billing action is reachable
+  with it. The clipboard hop is intrinsic to any paste-based ingestion; removing it
+  would require a native-messaging path, out of scope. RISK-046 updated to record this.
+- **T-EXT-2 (self-distributed build integrity) — mitigated, RISK-050.** A tampered
+  build could try to exceed its stated permissions or copy the cookie elsewhere.
+  Controls: dependency-free deterministic build the operator rebuilds and byte-compares
+  (FRG-EXT-003); AMO-signed Firefox artifact; MV3 no-remote-code guarantee; and a
+  minimal, auditable manifest — `cookies` + `clipboardWrite` and a single
+  `www.humblebundle.com` host permission, no `storage`, no content scripts, no other
+  host, and no `fetch`/XHR/WebSocket in the source (FRG-EXT-002) — so there is no
+  network egress path a tampered build could exfiltrate through without a visible
+  source/manifest change. A source-scan test enforces the no-network invariant.
+- **Permission over-reach — closed by construction, not a live risk.** With no network
+  host permission, no `storage`, and no content scripts, the extension has no egress
+  path and no standing site reach to abuse (FRG-EXT-002).
+
+Server-side surface unchanged: RISK-045 (cookie at rest), RISK-047 (store-JSON
+parsing), RISK-048 (signed-URL egress) are untouched — no backend code changes in this
+change. No new SOUP (dependency-free build).
+
 ## Coverage summary
 
 - **Well covered by the five drafts** (mitigation named, no new requirement needed): OPDS
