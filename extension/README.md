@@ -57,19 +57,41 @@ the no-network source invariant, and build reproducibility.
 
 ## Install
 
-**Chrome** (developer mode, single-operator):
+### Which path is right for me?
+
+- **You use Chrome/Chromium** → load the unpacked build (below). No signing, no
+  Mozilla account, done.
+- **You want it permanently in normal Firefox** → sign `dist/firefox.zip` as an
+  *unlisted* add-on (below). This is a ~5-minute one-time chore; "unlisted"
+  means Mozilla signs it but it is NOT published to the public store. Regular
+  release/beta Firefox refuses to permanently install an unsigned extension and
+  that policy is locked, so signing is the only permanent path there.
+- **You run Firefox ESR or Developer Edition** → you can skip signing: set
+  `xpinstall.signatures.required = false` in `about:config` and load
+  `dist/firefox.zip` directly. (Release Firefox ignores that pref.)
+- **You just need it occasionally in Firefox** → `about:debugging` → **This
+  Firefox** → **Load Temporary Add-on** → pick any file in `dist/firefox/`. Works
+  on any Firefox with no signing, but is removed on restart.
+
+### Chrome (developer mode, single-operator)
 
 1. `chrome://extensions` → enable **Developer mode**.
 2. **Load unpacked** → select `dist/chrome/`.
 
-**Firefox** (self-distributed, unlisted):
+### Firefox (self-distributed, unlisted signing)
 
-1. Sign the `dist/firefox.zip` as an **unlisted** add-on via
-   [AMO](https://addons.mozilla.org/developers/) (`web-ext sign` or the
-   Developer Hub). Unlisted signing is required for permanent install; there is
-   no public store listing.
-2. Install the signed `.xpi` from `about:addons` → gear → **Install Add-on From
-   File**.
+Unlisted signing has no public store listing. Two ways to get a signed `.xpi`:
+
+- **Web UI (no local tooling):** [AMO Developer Hub](https://addons.mozilla.org/developers/)
+  → Submit a New Add-on → **On your own** (self-distribution) → upload
+  `dist/firefox.zip` → download the signed `.xpi`. Requires a free Mozilla
+  account.
+- **CLI:** `web-ext sign --channel=unlisted` with an AMO API key. `web-ext` is a
+  signing tool run ad hoc — it is not part of this extension's build and adds no
+  dependency to the shipped artifact.
+
+Then install the signed `.xpi` from `about:addons` → gear → **Install Add-on
+From File**.
 
 ## Use
 

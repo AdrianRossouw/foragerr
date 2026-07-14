@@ -9,6 +9,38 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.9.6] — 2026-07-14
+
+humble-session-extension: a companion browser extension that copies the Humble
+session cookie to the clipboard, replacing the DevTools copy step.
+
+### Added
+- **Companion browser extension** (FRG-EXT-001, FRG-EXT-002, FRG-EXT-003): a
+  Chrome + Firefox Manifest V3 extension (in `extension/`) whose sole job is to
+  copy the operator's Humble `_simpleauth_sess` cookie to the clipboard on one
+  popup click, to paste into the existing **Sources** connect/reconnect card. It
+  is **clipboard-only**: it never connects to foragerr, holds no API key, and
+  makes no network request — the backend and the connect API are unchanged. New
+  `EXT` requirement area. Least-privilege manifest (`cookies` + `clipboardWrite`
+  + the single Humble host, no content scripts, no network); dependency-free
+  deterministic build the operator can byte-verify; self-distributed (Firefox
+  unlisted AMO signing, Chrome developer-mode load).
+
+### Changed
+- The Sources connect-card helper now points to the shipped extension (the
+  "coming soon" chip is gone); the manual leads with the one-click copy and
+  keeps the DevTools cookie-copy as a documented fallback.
+
+### Security
+- Full STRIDE/risk analysis landed before the code (FRG-PROC-006): T-EXT-1
+  (clipboard residual, folded into RISK-046 — the extension mechanizes the
+  existing copy, adding no new exposure class) and T-EXT-2 / RISK-050
+  (self-distributed build integrity). An adversarial review plus an independent
+  Codex pass confirmed the no-egress / no-retention guarantees hold in the
+  shipped code; their findings (a build-race test flake, an overstated
+  "host-permission ⇒ no egress" claim, and test-rigor gaps) were applied before
+  merge.
+
 ## [v0.9.5] — 2026-07-13
 
 ant-mark: brand refresh — the forager ant in a speech bubble.
