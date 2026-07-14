@@ -127,6 +127,7 @@ written into an OpenSpec change proposal.
 | DEP  | Packaging and deployment |
 | AUTH | Authentication (deferred milestone) |
 | EXT  | Companion browser extension |
+| SITE | Public project site (GitHub Pages) |
 
 ## Examples
 
