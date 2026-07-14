@@ -122,8 +122,8 @@ describe('FRG-UI-020: Settings nav group', () => {
 
 /**
  * FRG-UI-023 — the application shell's sidebar: shipped-screens-only nav and
- * live count badges (Comics = library series count, Queue = tracked-download
- * count, Wanted = series-with-missing-issues in warn style).
+ * the single active-work count badge (Queue = tracked-download count). Comics,
+ * Wanted, and Sources-new counts are NOT badged (wanted-count-consistency).
  */
 describe('FRG-UI-023: sidebar nav lists only shipped screens', () => {
   it('FRG-UI-023 — every nav entry routes to an implemented route; Calendar + Creators shipped', () => {
@@ -196,7 +196,7 @@ describe('FRG-UI-023: logo lockup', () => {
 });
 
 describe('FRG-UI-023: sidebar count badges are live', () => {
-  it('FRG-UI-023 — Comics/Queue/Wanted badges reflect the caches, Wanted uses warn style', async () => {
+  it('FRG-UI-023 — only the Queue active-work badge renders; Comics and Wanted carry no count badge', async () => {
     renderWithProviders(<Sidebar />, {
       withRouter: true,
       client: createQueryClient(),
@@ -208,13 +208,13 @@ describe('FRG-UI-023: sidebar count badges are live', () => {
     });
 
     await waitFor(() =>
-      expect(screen.getByTestId('nav-badge-series')).toHaveTextContent('3'),
+      expect(screen.getByTestId('nav-badge-queue')).toHaveTextContent('4'),
     );
-    expect(screen.getByTestId('nav-badge-queue')).toHaveTextContent('4');
-    // Two of three series carry missing issues.
-    const wanted = screen.getByTestId('nav-badge-wanted');
-    expect(wanted).toHaveTextContent('2');
-    expect(wanted.className).toMatch(/navBadgeWarn/);
+    // Library size and missing counts are NOT badged on the nav — they read
+    // differently against their screens (wanted-count-consistency). Only
+    // active work (the queue) is badged.
+    expect(screen.queryByTestId('nav-badge-series')).toBeNull();
+    expect(screen.queryByTestId('nav-badge-wanted')).toBeNull();
 
     // Footer surfaces the running version + health state.
     await waitFor(() =>
@@ -224,32 +224,29 @@ describe('FRG-UI-023: sidebar count badges are live', () => {
     );
   });
 
-  it('FRG-UI-023 — a badge updates without reload when its cache changes', async () => {
+  it('FRG-UI-023 — the queue badge updates without reload when its cache changes', async () => {
     const client = createQueryClient();
     renderWithProviders(<Sidebar />, {
       withRouter: true,
       client,
-      fetcher: sidebarFetcher({ series: [withMissing(1, 1)], queueTotal: 0 }),
+      fetcher: sidebarFetcher({ series: [], queueTotal: 2 }),
     });
 
     await waitFor(() =>
-      expect(screen.getByTestId('nav-badge-series')).toHaveTextContent('1'),
+      expect(screen.getByTestId('nav-badge-queue')).toHaveTextContent('2'),
     );
 
     // A WS-driven cache write (the same mechanism the WebSocketBridge uses)
-    // grows the library; the badge re-renders with no page reload.
+    // changes the queue count; the badge re-renders with no page reload.
     act(() => {
-      client.setQueryData(queryKeys.series.all(), [
-        withMissing(1, 1),
-        withMissing(2, 0),
-      ]);
+      client.setQueryData(queryKeys.queue.count(), 5);
     });
     await waitFor(() =>
-      expect(screen.getByTestId('nav-badge-series')).toHaveTextContent('2'),
+      expect(screen.getByTestId('nav-badge-queue')).toHaveTextContent('5'),
     );
   });
 
-  it('FRG-UI-029 — the Sources nav item shows the unreviewed-new count, amber', async () => {
+  it('FRG-UI-029 — a connected source with unreviewed-new items shows no nav count badge', async () => {
     renderWithProviders(<Sidebar />, {
       withRouter: true,
       client: createQueryClient(),
@@ -265,9 +262,11 @@ describe('FRG-UI-023: sidebar count badges are live', () => {
       'href',
       '/sources',
     );
-    const badge = await screen.findByTestId('nav-badge-sources');
-    expect(badge).toHaveTextContent('7');
-    expect(badge.className).toMatch(/navBadgeWarn/);
+    // Unreviewed-new is not badged on the nav (its comic/non-comic scope is
+    // only clear on the page); with no expiry, the Sources item has no badge.
+    await waitFor(() =>
+      expect(screen.queryByTestId('nav-badge-sources')).toBeNull(),
+    );
   });
 
   it('FRG-UI-029 — an expired source flips the Sources badge to an amber "!" and the footer to attention', async () => {

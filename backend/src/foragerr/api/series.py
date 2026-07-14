@@ -565,10 +565,12 @@ async def list_series(
     """Paged series index with nested statistics (FRG-API-003, FRG-API-006).
 
     ``repo.series_statistics()`` runs several small aggregate queries per
-    row (issue count, file count/size, next/last release date) — a known
-    N+1 across the page (up to ~4 * pageSize queries), acceptable at M1
-    scale (int aggregates over indexed FKs, no heavy joins) but NOT free;
-    not fixed here (see the API-area report for rationale).
+    row (issue count, file count/size, missing/wanted count, next/last
+    release date) — a known N+1 across the page (up to ~5 * pageSize
+    queries; the missing count is the wanted-predicate count, one round-trip,
+    aligned to FRG-SER-004 per wanted-count-consistency), acceptable at
+    single-operator scale (int aggregates over indexed FKs, no heavy joins)
+    but NOT free; not fixed here (see the API-area report for rationale).
 
     ``collected`` (FRG-SER-018) optionally partitions by collected-edition
     typing: ``true`` -> only typed (``booktype IS NOT NULL``) series, ``false``

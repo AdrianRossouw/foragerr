@@ -801,16 +801,20 @@ with a null book-type SHALL show no badge.
 
 The SPA SHALL render every screen inside a fixed three-part shell: a 212px
 sidebar (logo lockup in a 60px header row; a nav list where each item has
-icon, label, and — where meaningful — a live count badge: Comics = library
-series count, Activity = queue length, Wanted = count of series with missing
-issues (warn style); a SYSTEM section with Settings and System; a footer
-status row showing a health indicator and the running version), a 60px
-global header (the existing library quick-search input, health and system
-icon buttons), and a per-screen toolbar slot above a content region that is
-the only scrolling area (no page-level scroll). The active nav item SHALL
-carry the accent treatment (inset accent bar, accent icon). The nav SHALL
-list only screens that exist — entries for future screens (Calendar,
-Creators) appear in the change that ships the screen.
+icon and label, and where a count badge is shown it is reserved for
+active/in-progress work only — Activity = queue length is the sole count
+badge; the Comics and Wanted nav items carry NO count badge (the library size
+is shown on the Comics page; missing counts live on the Wanted page, in issue
+units — a nav badge counting series-with-missing misreads against a page
+listing missing issues); a SYSTEM section with Settings and System; a footer
+status row showing a health indicator and the running version), a 60px global
+header (the existing library quick-search input, health and system icon
+buttons), and a per-screen toolbar slot above a content region that is the
+only scrolling area (no page-level scroll). The active nav item SHALL carry
+the accent treatment (inset accent bar, accent icon). The nav SHALL list only
+screens that exist — entries for future screens (Calendar, Creators) appear in
+the change that ships the screen. Pending/missing/library-size counts SHALL NOT
+be badged on the nav; only active-work counts (the queue) SHALL be.
 
 #### Scenario: Shell frames every route
 
@@ -820,12 +824,19 @@ Creators) appear in the change that ships the screen.
   content region scrolling independently, and the active nav item carries
   the accent treatment
 
-#### Scenario: Nav counts are live
+#### Scenario: The queue badge is live
 
-- **WHEN** the library gains a series, the queue gains an item, or a series
-  gains missing issues while the app is open
-- **THEN** the corresponding nav badges update without a page reload (React
-  Query + WS invalidation), and the Wanted badge uses the warn style
+- **WHEN** the queue gains or loses an item while the app is open
+- **THEN** the Activity/Queue nav badge updates without a page reload (React
+  Query + WS invalidation)
+
+#### Scenario: Comics and Wanted nav items carry no count badge
+
+- **WHEN** the sidebar is inspected while the library has series and some of
+  them have missing issues
+- **THEN** the Comics and Wanted nav items show icon and label with no count
+  badge; the library size appears on the Comics page and the missing count on
+  the Wanted page, in issue units
 
 #### Scenario: Only shipped screens appear in the nav
 
@@ -1057,7 +1068,8 @@ creator id SHALL render the standard not-found state.
 ### Requirement: FRG-UI-029 — Sources screen
 
 The web UI SHALL provide a top-level Sources screen per the v2 design handoff: a
-Sources nav item (badge = unreviewed-new count, amber `!` on expiry); a store rail
+Sources nav item that shows an amber `!` when any connected store's session has
+expired (a needs-attention state signal) and NO unreviewed-count badge; a store rail
 showing the connected/expired/not-connected status of each built store (Humble
 Bundle is the only one today — the rail carries no placeholder tab for an unbuilt
 integration; a second store tab appears when a second integration ships); a connect
@@ -1084,9 +1096,15 @@ select.
 #### Scenario: Expiry surfaces globally
 
 - **WHEN** a connected source's session expires while the operator is anywhere in the app
-- **THEN** the global banner appears with a Reconnect action, the sidebar footer and header health icon turn amber, the Sources badge flips to `!`, and reconnecting (from banner or card) clears all three
+- **THEN** the global banner appears with a Reconnect action, the sidebar footer and header health icon turn amber, the Sources badge shows `!`, and reconnecting (from banner or card) clears all three
+
+#### Scenario: No unreviewed-count badge on the nav
+
+- **WHEN** a connected source has unreviewed `new` entitlements but no expiry
+- **THEN** the Sources nav item shows no count badge; the pending-review counts appear only on the Sources page (the manage view's count line and All/New/Matched/Ignored filter), where their comic/non-comic scope is visible
 
 #### Scenario: First sync at scale
 
 - **WHEN** the first sync of a long-standing account lands hundreds of new entitlements
 - **THEN** the review list remains responsive, supports bulk select (including shift-range) for accept/ignore, and pending counts are accurate
+

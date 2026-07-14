@@ -192,19 +192,17 @@ export const queryKeys = {
   //   ['sources']                                   <-> GET /api/v1/sources
   //   ['sources', id, 'entitlements', hash]         <-> GET /sources/{id}/entitlements
   //   ['sources', 'entitlement', id]                <-> GET /sources/entitlements/{id}
-  //   ['sources', 'new-count', idsHash]             <-> aggregated new-review count
   // The list key is the bare ['sources'] prefix, so a review action / sync /
   // connect that invalidates `sources.all()` sweeps the list, every source's
-  // entitlement queries, an open entitlement detail, AND the sidebar new-count
-  // in one call (the whole inventory re-derives together). 'entitlement' and
-  // 'new-count' (strings) never collide with a numeric source id under the prefix.
+  // entitlement queries, and an open entitlement detail in one call (the whole
+  // inventory re-derives together). 'entitlement' (a string) never collides
+  // with a numeric source id under the prefix.
   sources: {
     all: () => ['sources'] as const,
     list: () => ['sources'] as const,
     entitlements: (sourceId: number, filtersHash = '') =>
       ['sources', sourceId, 'entitlements', filtersHash] as const,
     entitlementDetail: (id: number) => ['sources', 'entitlement', id] as const,
-    newCount: (idsHash: string) => ['sources', 'new-count', idsHash] as const,
   },
   // Auth (m8-auth-core FRG-AUTH-002; lifecycle status added in m8-keys-opds
   // FRG-AUTH-004/005/007), mirroring GET /api/v1/auth/{me,credentials}. Both
