@@ -16,8 +16,8 @@
 > AI-driven development of a real application — but weigh the software
 > accordingly: it is young, it is AI-authored, and no human has read every
 > line. The requirement registry, traceability matrix, per-change review
-> gates, and release records in this repository are the honest account of
-> how it was made.
+> gates, and release records in this repository show exactly how it was
+> made.
 
 foragerr is a self-hosted, Sonarr-style manager for a comic library you own. It
 imports and renames an existing collection — DRM-free purchases like Humble
