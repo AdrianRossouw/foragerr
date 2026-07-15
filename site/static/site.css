@@ -305,6 +305,12 @@ p { margin: 0 0 1em; }
 .absence-item p { font-size: 13.5px; color: var(--text-muted); margin-bottom: 10px; }
 
 /* --- product --- */
+.product-head {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  gap: 48px; align-items: center;
+}
+.product-mark { color: var(--color-accent); justify-self: end; padding-right: 24px; }
+.product-mark svg { width: 210px; height: 210px; display: block; opacity: 0.9; }
 .feature { padding: 24px; }
 .feature-title { font-size: 16px; font-weight: 600; color: var(--text-bright); margin-bottom: 8px; }
 .feature p { font-size: 14px; color: var(--text-secondary); margin: 0; }
@@ -322,6 +328,8 @@ p { margin: 0 0 1em; }
   .hero h1 { font-size: 36px; }
   .page-head h1 { font-size: 32px; }
   .grid-2, .grid-3, .teasers, .cov-grid { grid-template-columns: 1fr; }
+  .product-head { grid-template-columns: 1fr; }
+  .product-mark { display: none; }
   .stat-grid { grid-template-columns: 1fr 1fr; }
   .stat { border-left: none; border-top: 1px solid var(--surface-border-soft); }
   .header-row { height: auto; flex-wrap: wrap; padding-top: 10px; padding-bottom: 10px; gap: 10px 20px; }

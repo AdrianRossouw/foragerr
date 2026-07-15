@@ -606,7 +606,7 @@ def render_pages(root, cfg, registry, matrix, releases, risks, license_name):
                      f'<figcaption>{esc(caption)}</figcaption></figure>')
 
     product = template('product.html').substitute(
-        feature_cards=feature_cards, shots=''.join(shots))
+        feature_cards=feature_cards, shots=''.join(shots), mark=mark_svg)
 
     titles = {
         'index.html': site['title'],
