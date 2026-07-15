@@ -295,12 +295,12 @@ source. Compatibility: pre-1.0 releases may break with migration notes; from
 | FRG-EXT-001 | Explicit-action cookie-to-clipboard copy | extension | implemented | 0.9.x |
 | FRG-EXT-002 | Least-privilege, no-network permission surface | extension | implemented | 0.9.x |
 | FRG-EXT-003 | Cross-browser parity and reproducible self-distributed build | extension | implemented | 0.9.x |
-| FRG-SITE-001 | Generated facts only | site | approved | 0.9.x |
-| FRG-SITE-002 | Information architecture and honest framing | site | approved | 0.9.x |
-| FRG-SITE-003 | Timeline generated from release history | site | approved | 0.9.x |
-| FRG-SITE-004 | Trust center renders existing evidence only | site | approved | 0.9.x |
-| FRG-SITE-005 | Automated Pages deployment from main | site | approved | 0.9.x |
-| FRG-SITE-006 | Positioning and licensing accuracy | site | approved | 0.9.x |
+| FRG-SITE-001 | Generated facts only | site | implemented | 0.9.x |
+| FRG-SITE-002 | Information architecture and honest framing | site | implemented | 0.9.x |
+| FRG-SITE-003 | Timeline generated from release history | site | implemented | 0.9.x |
+| FRG-SITE-004 | Trust center renders existing evidence only | site | implemented | 0.9.x |
+| FRG-SITE-005 | Automated Pages deployment from main | site | implemented | 0.9.x |
+| FRG-SITE-006 | Positioning and licensing accuracy | site | implemented | 0.9.x |
 | FRG-OPDS-001 | OPDS 1.2 Atom catalog with navigation root | opds | implemented | M1 |
 | FRG-OPDS-002 | Acquisition feeds with per-entry metadata | opds | implemented | M1 |
 | FRG-OPDS-003 | Library-id-based file resolution only (no client-supplied paths) | opds | implemented | M1 |

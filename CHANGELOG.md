@@ -9,6 +9,34 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.9.10] — 2026-07-15
+
+### Added
+- **A public project site** (FRG-SITE-001..006), served at
+  `adrianrossouw.github.io/foragerr` by the repository's first GitHub Actions
+  workflow on every push to `main`. It tells foragerr's regulated-software
+  story across five pages — Overview, The Method, Timeline, Trust Center, and
+  Product — and every displayed fact (requirement counts, test coverage, the
+  release timeline, the risk register, the archived-change approval count) is
+  generated at build time from committed artifacts (the requirements registry,
+  traceability matrix, `CHANGELOG.md`, risk register, `LICENSE`, and git tags)
+  by a stdlib-only generator (`site/build.py`). The build fails on any missing
+  or inconsistent source, so the site cannot drift from the repository or claim
+  evidence that does not exist. The Trust Center states plainly what is **not**
+  in place (no external penetration test, no CI-enforced gates, no live
+  dependency-advisory scanning, no formal CAPA process), each citing the
+  committed document that records the deferral.
+
+### Security
+- The deploy workflow pins every third-party action to a full commit SHA and
+  runs with least-privilege token permissions (`contents: read`, `pages: write`,
+  `id-token: write`); the new supply-chain surface is recorded as RISK-051 with
+  a threat-model note and a SOUP-register entry for the pinned actions. The site
+  references the brand mark as an `<img>` rather than inlining the SVG, closing a
+  stored-XSS path, and a two-tier banned-phrase scan enforces positioning and
+  licensing accuracy across all output while barring fabricated-evidence claims
+  from the site's own authored copy.
+
 ## [v0.9.9] — 2026-07-14
 
 ### Fixed

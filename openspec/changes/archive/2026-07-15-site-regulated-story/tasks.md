@@ -2,7 +2,7 @@
 
 ## 1. Registration & governance
 
-- [ ] 1.1 Registry hygiene: FRG-SITE-001..006 and the SITE AREA row were allocated
+- [x] 1.1 Registry hygiene: FRG-SITE-001..006 and the SITE AREA row were allocated
       at proposal time; flip rows `proposed` → `approved` once the owner records
       approval, and `approved` → `implemented` at the merge gate [FRG-SITE-001..006]
 - [x] 1.2 docs/security updates: risk-register entry for the GitHub Actions
