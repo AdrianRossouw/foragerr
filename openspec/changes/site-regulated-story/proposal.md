@@ -17,6 +17,13 @@ by requirement status, and may state control absences (pentest, CI enforcement,
 advisory scanning, CAPA) in one dedicated absence section, each citing the
 committed doc recording the deferral; positive claims remain build-failing.
 
+**Refined during review (2026-07-15, pre-merge):** the banned-phrase scan is
+two-tier — positioning/licensing phrases fail the build anywhere in the output,
+while evidence-claim phrases are barred only from the site's own authored copy
+(the absence section and faithful source-artifact passthrough — risk register,
+changelog — may contain them truthfully). The logo mark is referenced as an
+`<img>` (never inlined), closing an SVG stored-XSS path.
+
 ## Why
 
 foragerr's most distinctive property is not the comic manager — it is the regulated,

@@ -1,19 +1,33 @@
 # Phrases that must never appear in the built site (FRG-SITE-006, FRG-SITE-004).
 # One per line, matched case-insensitively against rendered HTML. Lines starting
-# with # are comments.
+# with # are comments. Two categories, separated by the [everywhere] /
+# [claims-only] headers:
 #
+#   [everywhere]  — scanned over the ENTIRE rendered output, including text
+#                   rendered from source artifacts (risk register, CHANGELOG).
+#                   Positioning and licensing must hold everywhere.
+#
+#   [claims-only] — the site must not itself CLAIM this evidence exists. Scanned
+#                   over the site's own authored copy only: exempt inside the one
+#                   dedicated absence section (which states these do NOT exist)
+#                   and inside generated source-artifact passthrough (a risk row
+#                   or changelog entry may truthfully use the word).
+
+[everywhere]
 # Positioning: never describe the project in piracy meta-language.
 piracy
 pirate
 warez
 non-infringing
-# Licensing: the project is GPL-3.0; any other license claim is false.
-# (Bare "MIT" is allowed — dependency license enumerations in the CHANGELOG
-# legitimately contain it; a *claim* phrase is what's banned.)
+# Licensing: the project is GPL-3.0; any other license *claim* is false.
+# (Bare "MIT" is allowed — dependency license enumerations legitimately contain
+# it; a claim phrase is what's banned.)
 MIT license
 MIT-licensed
 licensed under MIT
-# Evidence that does not exist yet (FRG-SITE-004): claiming it is fabrication.
+
+[claims-only]
+# Evidence that does not exist yet: the site must not claim it in its own copy.
 penetration test
 pentest
 SBOM

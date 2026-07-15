@@ -81,27 +81,37 @@ requirements it can apply to (implemented requirements with tagged tests over to
 implemented) and a coverage breakdown by requirement status — and the site MUST NOT
 display standalone volume metrics (such as a raw test count) or a coverage ratio
 whose denominator mixes statuses that cannot carry tests (unbuilt backlog) with
-those that must. The site MUST NOT make positive claims about artifacts that do not
-exist (penetration tests, SBOMs, acceptance reports, CI enforcement); it MAY state
-their absence explicitly within a single dedicated absence section, each absence
-citing the committed document that records the deferral or decision.
+those that must. In its own authored copy the site MUST NOT make positive claims
+about artifacts that do not exist (penetration tests, SBOMs, acceptance reports, CI
+enforcement); it MAY state their absence explicitly within a single dedicated absence
+section, each absence citing the committed document that records the deferral or
+decision. Content rendered faithfully from a source artifact (the risk register, the
+changelog) is not an authored claim and MAY contain such terms where the source does,
+but positioning and licensing constraints (FRG-SITE-006) MUST hold across the entire
+rendered output regardless of source.
 
 #### Scenario: Every indexed artifact exists
 - **WHEN** the Trust Center page is built
 - **THEN** every artifact card's repository path exists in the working tree, and its
   link resolves to that path in the repository hosting UI
 
-#### Scenario: Nonexistent evidence is not claimed
-- **WHEN** the built site's pages are scanned, excluding the dedicated absence
-  section
-- **THEN** they contain no references to penetration tests, SBOMs, acceptance
+#### Scenario: Nonexistent evidence is not claimed in authored copy
+- **WHEN** the built site's authored copy is scanned — the rendered output
+  excluding the dedicated absence section and the regions rendered verbatim from
+  source artifacts (risk register, changelog)
+- **THEN** it contains no references to penetration tests, SBOMs, acceptance
   reports, or CI-enforced controls while no such artifacts exist in the repository
 
 #### Scenario: Absences are stated only in the absence section
 - **WHEN** the Trust Center's absence section is rendered
 - **THEN** each entry states that the control is not in place and cites the
-  committed document recording its deferral, and the same phrases appearing
-  outside the absence section still fail the build
+  committed document recording its deferral, and an evidence-claim phrase in the
+  site's authored copy outside that section still fails the build
+
+#### Scenario: Positioning holds across all rendered content
+- **WHEN** any page — including content rendered from source artifacts — is scanned
+- **THEN** a positioning or licensing violation (piracy meta-language, a false
+  license claim) fails the build wherever it appears, source-rendered or authored
 
 #### Scenario: Coverage breakdown is derived by status
 - **WHEN** the Trust Center's coverage panel is built

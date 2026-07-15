@@ -10,11 +10,17 @@ This pins the committed artifact's property rather than re-running the tool
 
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 
 import pytest
 
-MATRIX = Path(__file__).resolve().parents[2] / "docs" / "traceability" / "matrix.md"
+ROOT = Path(__file__).resolve().parents[2]
+MATRIX = ROOT / "docs" / "traceability" / "matrix.md"
+
+_spec = importlib.util.spec_from_file_location("trace_tool", ROOT / "tools" / "trace.py")
+trace_tool = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(trace_tool)
 
 
 @pytest.mark.req("FRG-PROC-005")
@@ -38,3 +44,23 @@ def test_matrix_test_cells_are_sorted():
         "matrix Tests cells are not sorted (regenerated with a pre-fix "
         f"tools/trace.py?): {unsorted_cells}"
     )
+
+
+@pytest.mark.req("FRG-PROC-005")
+def test_pre_baseline_statuses_are_excused_only_in_open_deltas():
+    """An approved (or proposed) registry row with no baseline spec is a gap
+    UNLESS it lives in an open change delta (FRG-PROC-009 approval gate). Pins
+    the widened exemption so a regression that reverts it is caught here, not at
+    the next merge gate."""
+    assert trace_tool.PRE_BASELINE_STATUSES == ("proposed", "approved")
+    # Every currently-approved FRG-SITE row is backed by the open change delta,
+    # so trace.py must run clean over real repo state (the same check the merge
+    # gate runs). A regression narrowing the status set would surface those rows
+    # as gaps and make main() exit non-zero.
+    reg = trace_tool.registry_rows()
+    delta_ids = trace_tool.open_change_delta_ids()
+    approved_site = [rid for rid, row in reg.items()
+                     if rid.startswith("FRG-SITE-") and row["status"] == "approved"]
+    assert approved_site, "expected the site change's approved rows to be present"
+    for rid in approved_site:
+        assert rid in delta_ids, f"{rid} approved but not in any open change delta"

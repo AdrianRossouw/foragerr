@@ -71,3 +71,25 @@
       review, CAPA) each citing its committed deferral doc; banned-phrase scan
       carve-out for the single data-absence section; spec delta amended
       [FRG-SITE-004, FRG-SITE-006]
+
+## 7. Merge-gate review fixes (2026-07-15, 8-angle fleet + Codex)
+
+- [x] 7.1 SVG logo referenced as <img> (never inlined) + build-time script/handler
+      assertion — closes stored-XSS path [FRG-SITE-002]
+- [x] 7.2 Matrix pollution fixed: fixtures use synthetic IDs + fixture site.toml
+      via build(config_dir=...); real FRG-SER-019 no longer mis-attributed to the
+      site tests [FRG-SITE-002]
+- [x] 7.3 Two-tier banned-phrase scan (positioning everywhere; evidence-claim in
+      authored copy only, exempting the absence section and data-generated
+      source passthrough); non-nesting marked-region regex; spec + tests updated
+      [FRG-SITE-004, FRG-SITE-006]
+- [x] 7.4 CHANGELOG parser handles code fences (<pre>) and fails loudly on a
+      malformed release heading; blank matrix Tests cell no longer counted as
+      tested [FRG-SITE-001, FRG-SITE-003, FRG-SITE-004]
+- [x] 7.5 Process-rule coverage tile guarded (fails if a non-PROC row is `active`);
+      dead coverage() removed; shared table-row parser; archive fails on a
+      missing proposal.md; --out delete-guard; sources.png caption matches README
+      [FRG-SITE-004]
+- [x] 7.6 Workflow concurrency cancel-in-progress:false; trace.py named
+      PRE_BASELINE_STATUSES + regression test pinning the approved-in-open-delta
+      allowance [FRG-SITE-005, FRG-PROC-005]

@@ -23,7 +23,9 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  # Do not cancel an in-flight publish; let it finish and run the next build
+  # after (GitHub's own Pages template does the same).
+  cancel-in-progress: false
 
 jobs:
   deploy:
