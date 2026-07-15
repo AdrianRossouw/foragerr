@@ -108,3 +108,20 @@ deliberately does not cross-check this section against a manifest).
 | @playwright/test | `1.49.1` | Browser-driven end-to-end test runner for the FRG-PROC-010 slice-verification harness (`e2e/tests`) |
 | @types/node | `^26.1.0` | TypeScript type definitions for the harness's node-side helpers and report generator |
 | typescript | `^6.0.3` | Type-checks the e2e harness sources |
+
+## CI workflow actions (GitHub Pages deploy)
+
+GitHub Actions consumed by `.github/workflows/pages.yml` (the repository's only
+workflow, added by `site-regulated-story`). Not manifest dependencies — recorded
+here because they are third-party code executed with the repository checked out
+(RISK-051). Each is pinned to a full commit SHA in the workflow (the tag column
+records what the SHA pointed at when pinned); moving a pin is a reviewed diff,
+and pinning + least-privilege permissions are asserted by tagged tests
+(FRG-SITE-005). Anomaly review: Deferred — see methodology.
+
+| Name | Pinned commit (tag at pin time) | Purpose | License |
+|---|---|---|---|
+| actions/checkout | `34e114876b0b11c390a56381ad16ebd13914f8d5` (v4) | Check out the repository (full history — the site build cross-checks CHANGELOG entries against tags) | MIT |
+| actions/configure-pages | `983d7736d9b0ae728b81ab479565c72886d7745b` (v5) | Resolve the Pages site configuration for the deploy step | MIT |
+| actions/upload-pages-artifact | `56afc609e74202658d3ffba0e8f6dda462b719fa` (v3) | Package the built `_site/` output as the Pages deployment artifact | MIT |
+| actions/deploy-pages | `d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e` (v4) | Publish the artifact to GitHub Pages via OIDC | MIT |

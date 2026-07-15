@@ -55,3 +55,6 @@ ds-bundle/
 .design-sync/.cache/
 .design-sync/learnings/
 .design-sync/node_modules
+
+# Built public site (site/build.py output; deployed by .github/workflows/pages.yml)
+_site/

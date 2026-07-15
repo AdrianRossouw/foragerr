@@ -1,0 +1,15 @@
+# Site configuration (FRG-SITE-001/002/006).
+# Facts here are pointers, not content: the generator validates each one
+# against repository state at build time and fails on drift.
+
+[site]
+title = "foragerr — AI-built, human-directed, auditable"
+description = "A self-hosted comic library manager built to a regulated standard, almost entirely by AI. The record of how it was made."
+repo_url = "https://github.com/AdrianRossouw/foragerr"
+releases_url = "https://github.com/AdrianRossouw/foragerr/releases"
+
+[hero]
+# The requirement followed end-to-end on the Overview hero (owner pick,
+# approval 2026-07-14). Must exist in the registry and carry tests + commits
+# in the traceability matrix, or the build fails.
+exemplar_requirement = "FRG-SER-019"
