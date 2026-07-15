@@ -123,9 +123,10 @@ def built(tmp_path):
 def test_facts_track_the_source_artifacts(built):
     pages, _ = built
     index = pages['index.html']
-    # 3 live requirements (one withdrawn excluded), 2 with tagged tests.
+    # 3 live requirements (one withdrawn excluded); both implemented ones tested.
     assert '>3</div><div class="stat-l">requirements in the registry' in index
-    assert '>2 of 3</div><div class="stat-l">requirements with tagged tests' in index
+    assert ('>2 of 2</div><div class="stat-l">implemented requirements have '
+            'tagged tests') in index
     assert '>2</div><div class="stat-l">tagged releases' in index
     assert '>2</div><div class="stat-l">risks tracked in the register' in index
     # No other numerals leak into stats: the values above came from fixtures.
@@ -275,8 +276,11 @@ def test_absence_citation_must_exist(tmp_path):
 def test_coverage_metric_replaces_test_count(built):
     pages, _ = built
     index = pages['index.html']
-    assert 'requirements with tagged tests' in index
+    assert 'implemented requirements have tagged tests' in index
     assert 'automated tests' not in index.lower()
+    # No all-requirements ratio: fixture has 3 live requirements, and no
+    # "of 3" coverage figure may appear anywhere in the strip.
+    assert 'of 3</div>' not in index
 
 
 @pytest.mark.req("FRG-SITE-006")

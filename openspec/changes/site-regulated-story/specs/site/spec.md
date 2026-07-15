@@ -76,10 +76,12 @@ proposals with their recorded approvals, manual, history scan) — each linking 
 file in the repository, with any displayed counts (such as archived changes and
 recorded approvals) derived at build time. The risk table MUST be rendered from
 `docs/security/risk-register.md`. Aggregate metrics MUST be evidence metrics derived
-from the registry and matrix — including traced-test coverage (requirements with
-tagged tests over total non-withdrawn requirements) and a coverage breakdown by
-requirement status — and the site MUST NOT display standalone volume metrics (such as
-a raw test count). The site MUST NOT make positive claims about artifacts that do not
+from the registry and matrix — including traced-test coverage stated against the
+requirements it can apply to (implemented requirements with tagged tests over total
+implemented) and a coverage breakdown by requirement status — and the site MUST NOT
+display standalone volume metrics (such as a raw test count) or a coverage ratio
+whose denominator mixes statuses that cannot carry tests (unbuilt backlog) with
+those that must. The site MUST NOT make positive claims about artifacts that do not
 exist (penetration tests, SBOMs, acceptance reports, CI enforcement); it MAY state
 their absence explicitly within a single dedicated absence section, each absence
 citing the committed document that records the deferral or decision.
@@ -110,8 +112,9 @@ citing the committed document that records the deferral or decision.
 
 #### Scenario: Coverage metric replaces test count
 - **WHEN** the stat strip is built
-- **THEN** it shows traced-test coverage computed from the traceability matrix and
-  does not show a standalone total-test-count figure
+- **THEN** it shows implemented-requirement test coverage computed from the
+  traceability matrix, and shows neither a standalone total-test-count figure nor
+  a coverage ratio over all non-withdrawn requirements
 
 ### Requirement: FRG-SITE-005 — Automated Pages deployment from main
 The repository SHALL contain a GitHub Actions workflow that, on every push to

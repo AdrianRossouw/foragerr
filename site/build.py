@@ -406,7 +406,8 @@ def render_pages(root, cfg, registry, matrix, releases, risks, license_name):
 
     stats = [
         (str(live), 'requirements in the registry'),
-        (f'{traced} of {live}', 'requirements with tagged tests'),
+        (f'{cov["implemented_tested"]} of {cov["implemented_total"]}',
+         'implemented requirements have tagged tests'),
         (str(len(releases)), 'tagged releases'),
         (str(len(risks)), 'risks tracked in the register'),
     ]
