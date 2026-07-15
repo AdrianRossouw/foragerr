@@ -1,0 +1,22 @@
+# Phrases that must never appear in the built site (FRG-SITE-006, FRG-SITE-004).
+# One per line, matched case-insensitively against rendered HTML. Lines starting
+# with # are comments.
+#
+# Positioning: never describe the project in piracy meta-language.
+piracy
+pirate
+warez
+non-infringing
+# Licensing: the project is GPL-3.0; any other license claim is false.
+# (Bare "MIT" is allowed — dependency license enumerations in the CHANGELOG
+# legitimately contain it; a *claim* phrase is what's banned.)
+MIT license
+MIT-licensed
+licensed under MIT
+# Evidence that does not exist yet (FRG-SITE-004): claiming it is fabrication.
+penetration test
+pentest
+SBOM
+software bill of materials
+acceptance report
+enforced in CI

@@ -40,8 +40,9 @@ def spec_ids():
 def open_change_delta_ids():
     """Requirement headings declared in OPEN change deltas (not the archive).
 
-    A `proposed` registry row is expected to live here rather than in a
-    baseline spec — the delta is synced to baseline when the change merges.
+    A `proposed` or `approved` registry row is expected to live here rather
+    than in a baseline spec — approval flips the status before implementation
+    merges (FRG-PROC-009), and the delta is synced to baseline at merge.
     """
     found = set()
     for spec in (ROOT / 'openspec/changes').glob('*/specs/*/spec.md'):
@@ -119,7 +120,7 @@ def main():
             if rid in specs:
                 problems.append(f'{rid} is withdrawn but still present in spec {specs[rid]}')
         elif rid not in specs:
-            if row['status'] == 'proposed' and rid in delta_ids:
+            if row['status'] in ('proposed', 'approved') and rid in delta_ids:
                 continue  # lives in an open change delta; baseline sync happens at merge
             problems.append(f'{rid} ({row["status"]}) in registry but in no spec or open change delta')
 

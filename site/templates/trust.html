@@ -1,0 +1,25 @@
+<section class="shell page-head">
+  <div class="kicker">Trust center</div>
+  <h1>Everything that backs the claim lives in the repo.</h1>
+  <p class="lede">This is the index. Each entry links to the living document where the real work is kept — no PDFs behind a form, no marketing gloss. If it is not here, it does not exist yet, and this site will not pretend otherwise.</p>
+</section>
+
+<section class="shell block">
+  <div class="kicker-sub">Evidence &amp; artifacts</div>
+  <div class="grid-2">$artifact_cards</div>
+</section>
+
+<section class="shell block">
+  <div class="risk-head">
+    <div class="kicker-sub">Risk register</div>
+    <span class="soft-note">$n_risks risks · rendered from <a href="$register_url">docs/security/risk-register.md</a></span>
+  </div>
+  <div class="card table-card">
+    <div class="table-scroll">
+      <table class="risk-table">
+        <thead><tr><th>ID</th><th>Risk</th><th>L</th><th>I</th><th>Status</th></tr></thead>
+        <tbody>$risk_rows</tbody>
+      </table>
+    </div>
+  </div>
+</section>

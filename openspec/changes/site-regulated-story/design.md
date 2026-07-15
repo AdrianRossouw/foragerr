@@ -51,9 +51,10 @@ the first.
 
 3. **Design transcription, not design-system sync.** `site/static/site.css` ports
    the token values used by the dc.html (they are the frontend's tokens) as plain
-   CSS custom properties. Fonts: system stack plus the repo's already-vendored
-   Roboto Mono copied at build time — zero external requests, which also keeps the
-   site CSP-clean.
+   CSS custom properties. Fonts: the app's own font stacks (`Roboto` preferred,
+   system fallbacks) with no font files served — the repo's Roboto woff2 comes
+   from npm at frontend build time and is not committed, and shipping fonts is
+   not worth an npm step in the site build. Zero external requests either way.
 
 4. **Hero trace card: exemplar requirement configured in `site/site.toml`**
    (parsed with stdlib `tomllib`), validated at build time against the registry and

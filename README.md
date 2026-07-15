@@ -6,6 +6,8 @@
 
 <p align="center"><em>A self-hosted, Sonarr-style manager for a comic library you own.</em></p>
 
+<p align="center"><a href="https://adrianrossouw.github.io/foragerr/">adrianrossouw.github.io/foragerr</a> — the regulated-software story, generated from this repository's own records.</p>
+
 > **AI-built, human-directed.** foragerr's code, tests, and documentation are
 > written almost entirely by AI (Anthropic's Claude), working under the
 > spec-driven, requirement-traced process described below, with direction,
