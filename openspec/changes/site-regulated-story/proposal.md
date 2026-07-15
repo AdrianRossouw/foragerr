@@ -9,6 +9,14 @@ Open questions resolved by default at approval: hero trace-card exemplar =
 FRG-SER-019; risk table renders all rows; CI test gate deferred to a follow-up
 (site wording stays "enforced at merge gates").
 
+**Amendment approved 2026-07-15 (preview feedback round 1, in session):**
+FRG-SITE-004 extended pre-merge — Trust Center additionally indexes
+process/governance artifacts (dev-process spec, commit standard, archived
+changes with approval counts, manual, history scan), shows a coverage breakdown
+by requirement status, and may state control absences (pentest, CI enforcement,
+advisory scanning, CAPA) in one dedicated absence section, each citing the
+committed doc recording the deferral; positive claims remain build-failing.
+
 ## Why
 
 foragerr's most distinctive property is not the comic manager — it is the regulated,

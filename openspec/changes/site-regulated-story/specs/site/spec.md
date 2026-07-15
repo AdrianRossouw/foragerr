@@ -69,14 +69,20 @@ generator MUST NOT invent, omit, or reorder releases relative to the CHANGELOG.
 
 ### Requirement: FRG-SITE-004 — Trust center renders existing evidence only
 The Trust Center SHALL index only evidence artifacts that exist in the repository at
-build time (requirements registry, traceability matrix, risk register, threat model,
-SOUP register, release records), each linking to its file in the repository. The
-risk table MUST be rendered from `docs/security/risk-register.md`. Aggregate metrics
-MUST be evidence metrics derived from the registry and matrix — including traced-test
-coverage (requirements with tagged tests over total non-withdrawn requirements) — and
-the site MUST NOT display standalone volume metrics (such as a raw test count) or
-claims about artifacts that do not exist (penetration tests, SBOMs, acceptance
-reports, CI enforcement).
+build time — evidence documents (requirements registry, traceability matrix, risk
+register, threat model, SOUP register, known-anomalies register, release records) and
+process/governance artifacts (dev-process spec, commit standard, archived change
+proposals with their recorded approvals, manual, history scan) — each linking to its
+file in the repository, with any displayed counts (such as archived changes and
+recorded approvals) derived at build time. The risk table MUST be rendered from
+`docs/security/risk-register.md`. Aggregate metrics MUST be evidence metrics derived
+from the registry and matrix — including traced-test coverage (requirements with
+tagged tests over total non-withdrawn requirements) and a coverage breakdown by
+requirement status — and the site MUST NOT display standalone volume metrics (such as
+a raw test count). The site MUST NOT make positive claims about artifacts that do not
+exist (penetration tests, SBOMs, acceptance reports, CI enforcement); it MAY state
+their absence explicitly within a single dedicated absence section, each absence
+citing the committed document that records the deferral or decision.
 
 #### Scenario: Every indexed artifact exists
 - **WHEN** the Trust Center page is built
@@ -84,9 +90,23 @@ reports, CI enforcement).
   link resolves to that path in the repository hosting UI
 
 #### Scenario: Nonexistent evidence is not claimed
-- **WHEN** the built site's pages are scanned
+- **WHEN** the built site's pages are scanned, excluding the dedicated absence
+  section
 - **THEN** they contain no references to penetration tests, SBOMs, acceptance
   reports, or CI-enforced controls while no such artifacts exist in the repository
+
+#### Scenario: Absences are stated only in the absence section
+- **WHEN** the Trust Center's absence section is rendered
+- **THEN** each entry states that the control is not in place and cites the
+  committed document recording its deferral, and the same phrases appearing
+  outside the absence section still fail the build
+
+#### Scenario: Coverage breakdown is derived by status
+- **WHEN** the Trust Center's coverage panel is built
+- **THEN** it shows, computed from the traceability matrix: implemented
+  requirements with tagged tests over total implemented, the count of approved
+  not-yet-built requirements, and the count of process rules split by
+  machine-tested versus hook/gate-enforced
 
 #### Scenario: Coverage metric replaces test count
 - **WHEN** the stat strip is built

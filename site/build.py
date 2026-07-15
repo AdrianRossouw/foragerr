@@ -219,6 +219,41 @@ def coverage(registry, matrix):
     return len(traced), len(live)
 
 
+def coverage_breakdown(registry, matrix):
+    """Traced-test coverage split by requirement status (FRG-SITE-004)."""
+    def bucket(status):
+        ids = [r for r, row in registry.items() if row['status'] == status]
+        tested = [r for r in ids if matrix.get(r, {}).get('tests')]
+        return len(tested), len(ids)
+    impl_tested, impl_total = bucket('implemented')
+    v_tested, v_total = bucket('verified')
+    appr_tested, appr_total = bucket('approved')
+    act_tested, act_total = bucket('active')
+    return {
+        'implemented_tested': impl_tested + v_tested,
+        'implemented_total': impl_total + v_total,
+        'approved_total': appr_total,
+        'active_tested': act_tested,
+        'active_total': act_total,
+    }
+
+
+def archive_approvals(root: Path):
+    """(archived change count, count with a recorded ## Approval section)."""
+    archive = root / 'openspec/changes/archive'
+    if not archive.is_dir():
+        fail('missing source artifact: openspec change archive '
+             f'({archive})')
+    changes = sorted(d for d in archive.iterdir() if d.is_dir())
+    if not changes:
+        fail('openspec change archive is empty')
+    approved = sum(1 for d in changes
+                   if (d / 'proposal.md').is_file()
+                   and re.search(r'^## Approval', (d / 'proposal.md').read_text(),
+                                 re.M))
+    return len(changes), approved
+
+
 def risk_tone(status: str) -> str:
     word = status.split()[0].rstrip(':').lower()
     return {'mitigated': 'success', 'open': 'warning', 'accepted': 'info',
@@ -267,6 +302,68 @@ def trust_artifacts(root, cfg, registry, risks, releases):
     return cards
 
 
+def governance_artifacts(root, cfg):
+    """Process/governance card row (FRG-SITE-004) — existence-checked."""
+    n_changes, n_approved = archive_approvals(root)
+    items = [
+        ('Development-process spec', 'openspec/specs/dev-process/spec.md',
+         'Governing', 'success',
+         'The process rules themselves — spec before code, stable IDs, tagged '
+         'tests, review gates — written as requirements like everything else.'),
+        ('Commit standard & merge gates', 'docs/process/commit-standard.md',
+         'Enforced by hooks', 'success',
+         'Commit format with mandatory requirement trailers, and the checklist '
+         'every change passes before it merges.'),
+        ('Archived change proposals', 'openspec/changes/archive/',
+         f'{n_approved} of {n_changes} approved', 'success',
+         'Every completed change with its proposal, design, tasks, and the '
+         'recorded owner approval that let implementation begin.'),
+        ('User & admin manual', 'docs/manual/',
+         'Synced per change', 'info',
+         'Documentation is updated in the same change that alters behavior — '
+         'a change declares its manual impact or states why there is none.'),
+        ('Repository history scan', 'docs/security/history-scan.md',
+         'Recorded', 'neutral',
+         'History hygiene: what was checked for secrets and residue before the '
+         'repository went public.'),
+    ]
+    cards = []
+    for name, rel, status, tone, note in items:
+        target = root / rel.rstrip('/')
+        if not (target.is_file() or target.is_dir()):
+            fail(f'governance artifact missing from repository: {rel}')
+        blob = 'tree' if rel.endswith('/') else 'blob'
+        cards.append({'name': name, 'path': rel, 'status': status,
+                      'tone': tone, 'note': note,
+                      'href': f'{cfg["site"]["repo_url"]}/{blob}/main/{rel.rstrip("/")}'})
+    return cards
+
+
+# What is deliberately NOT claimed, each citing the committed doc that records
+# the deferral (FRG-SITE-004 absence section — rendered inside
+# <section data-absence>, the one region exempt from the banned-phrase scan).
+ABSENCES = [
+    ('External penetration test',
+     'None has been performed. The roadmap schedules the penetration-test '
+     'decision — whether, scope, and by whom — at the 1.0 go-live milestone.',
+     'docs/roadmap.md'),
+    ('CI-enforced quality gates',
+     'Test suites and consistency checks run at every merge gate on the '
+     'operator’s machine, not in CI; the Pages deploy workflow is the '
+     'only CI.',
+     'docs/process/commit-standard.md'),
+    ('Live dependency-advisory review',
+     'Dependency inventory is complete and mechanically verified, but '
+     'advisory scanning (pip-audit, npm audit) is deferred until '
+     'network-connected CI exists.',
+     'docs/security/soup-register.md'),
+    ('Formal CAPA process',
+     'There is no corrective-and-preventive-action log; the known-anomalies '
+     'register is the nearest current artifact.',
+     'docs/security/known-anomalies.md'),
+]
+
+
 # --- rendering ---------------------------------------------------------------
 
 PAGES = [('index.html', 'Overview'), ('method.html', 'The Method'),
@@ -295,6 +392,8 @@ def render_pages(root, cfg, registry, matrix, releases, risks, license_name):
     traced, live = coverage(registry, matrix)
     ex = exemplar_card(cfg, registry, matrix)
     artifacts = trust_artifacts(root, cfg, registry, risks, releases)
+    governance = governance_artifacts(root, cfg)
+    cov = coverage_breakdown(registry, matrix)
 
     base = template('base.html')
     mark_svg = read_text(root / 'docs/assets/foragerr-mark.svg', 'logo mark')
@@ -426,13 +525,46 @@ def render_pages(root, cfg, registry, matrix, releases, risks, license_name):
         n_releases=str(len(releases)), timeline_groups=timeline_groups,
         releases_url=esc(site['releases_url']))
 
-    artifact_cards = ''.join(
-        f'<a class="card artifact" href="{esc(a["href"])}">'
-        f'<div class="artifact-head"><span class="artifact-name">'
-        f'{esc(a["name"])}</span>{chip(a["status"], a["tone"])}</div>'
-        f'<div class="artifact-path">{esc(a["path"])}</div>'
-        f'<div class="artifact-note">{esc(a["note"])}</div></a>'
-        for a in artifacts)
+    def artifact_card_html(items):
+        return ''.join(
+            f'<a class="card artifact" href="{esc(a["href"])}">'
+            f'<div class="artifact-head"><span class="artifact-name">'
+            f'{esc(a["name"])}</span>{chip(a["status"], a["tone"])}</div>'
+            f'<div class="artifact-path">{esc(a["path"])}</div>'
+            f'<div class="artifact-note">{esc(a["note"])}</div></a>'
+            for a in items)
+
+    artifact_cards = artifact_card_html(artifacts)
+    governance_cards = artifact_card_html(governance)
+
+    coverage_tiles = ''.join(
+        f'<div class="cov-tile"><div class="cov-v">{esc(v)}</div>'
+        f'<div class="cov-l">{esc(l)}</div><div class="cov-note">{esc(n)}</div></div>'
+        for v, l, n in [
+            (f'{cov["implemented_tested"]} of {cov["implemented_total"]}',
+             'implemented requirements with tagged tests',
+             'The traceability check fails the merge gate on any implemented '
+             'requirement without one — this cannot silently regress.'),
+            (str(cov['approved_total']),
+             'approved, not yet built',
+             'Backlog requirements carry no tests by definition; they are '
+             'specified, awaiting implementation.'),
+            (f'{cov["active_tested"]} of {cov["active_total"]}',
+             'process rules machine-tested',
+             'The rest of the process rules are enforced by git hooks and the '
+             'merge-gate checklist rather than the test suite.'),
+        ])
+
+    absence_items = []
+    for name, body, cite in ABSENCES:
+        if not (root / cite).is_file():
+            fail(f'absence citation missing from repository: {cite}')
+        absence_items.append(
+            f'<div class="card absence-item"><div class="absence-name">'
+            f'{esc(name)}</div><p>{esc(body)}</p>'
+            f'<a class="artifact-path" '
+            f'href="{esc(site["repo_url"])}/blob/main/{esc(cite)}">'
+            f'{esc(cite)}</a></div>')
 
     risk_rows = ''.join(
         f'<tr><td class="mono">{esc(r["id"])}</td><td>{esc(r["desc"])}</td>'
@@ -441,8 +573,9 @@ def render_pages(root, cfg, registry, matrix, releases, risks, license_name):
         for r in risks)
 
     trust = template('trust.html').substitute(
-        artifact_cards=artifact_cards, risk_rows=risk_rows,
-        n_risks=str(len(risks)),
+        artifact_cards=artifact_cards, governance_cards=governance_cards,
+        coverage_tiles=coverage_tiles, absence_items=''.join(absence_items),
+        risk_rows=risk_rows, n_risks=str(len(risks)),
         register_url=esc(f'{site["repo_url"]}/blob/main/docs/security/risk-register.md'))
 
     features = [
@@ -489,9 +622,17 @@ def render_pages(root, cfg, registry, matrix, releases, risks, license_name):
 
 # --- truthfulness scans (FRG-SITE-004/006) -----------------------------------
 
+ABSENCE_SECTION_RE = re.compile(r'<section[^>]*\bdata-absence\b.*?</section>',
+                                re.S)
+
+
 def scan_output(pages: dict, banned: list, license_name: str, repo_url: str):
     for name, content in pages.items():
-        low = content.lower()
+        # The one dedicated absence section may name missing artifacts to state
+        # they do not exist (FRG-SITE-004); positive claims elsewhere still fail.
+        if len(ABSENCE_SECTION_RE.findall(content)) > 1:
+            fail(f'more than one absence section in {name}')
+        low = ABSENCE_SECTION_RE.sub('', content).lower()
         for phrase in banned:
             if phrase.lower() in low:
                 fail(f'banned phrase {phrase!r} found in {name}')

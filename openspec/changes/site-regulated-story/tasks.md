@@ -58,3 +58,16 @@
 - [ ] 5.1 Owner: flip repo Settings → Pages → Source to "GitHub Actions"
 - [ ] 5.2 Verify first deploy: workflow green, adrianrossouw.github.io/foragerr
       serves the built site, artifact links resolve [FRG-SITE-005]
+
+## 6. Preview feedback round 1 (2026-07-15, owner-approved amendment)
+
+- [x] 6.1 Trust Center "Process & governance" cards: dev-process spec, commit
+      standard, archived changes w/ derived approval count, manual, history
+      scan — existence-checked [FRG-SITE-004]
+- [x] 6.2 Coverage-by-status panel (implemented N/N tested, approved backlog,
+      process rules tested vs hook-enforced) derived from the matrix
+      [FRG-SITE-004]
+- [x] 6.3 "Not in place yet" absence section (pentest, CI gates, advisory
+      review, CAPA) each citing its committed deferral doc; banned-phrase scan
+      carve-out for the single data-absence section; spec delta amended
+      [FRG-SITE-004, FRG-SITE-006]

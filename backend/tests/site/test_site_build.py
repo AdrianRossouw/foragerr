@@ -80,6 +80,20 @@ def make_repo(root: Path, changelog: str = CHANGELOG, tags=('v0.1.0', 'v0.1.1'),
     (root / 'docs/security/soup-register.md').write_text('# SOUP\n')
     (root / 'docs/security/known-anomalies.md').write_text('# Anomalies\n')
     (root / 'LICENSE').write_text(license_text)
+    (root / 'docs/process').mkdir(parents=True)
+    (root / 'docs/manual').mkdir(parents=True)
+    (root / 'docs/process/commit-standard.md').write_text('# Commit standard\n')
+    (root / 'docs/manual/index.md').write_text('# Manual\n')
+    (root / 'docs/security/history-scan.md').write_text('# History scan\n')
+    (root / 'docs/roadmap.md').write_text('# Roadmap\n')
+    (root / 'openspec/specs/dev-process').mkdir(parents=True)
+    (root / 'openspec/specs/dev-process/spec.md').write_text('# dev-process\n')
+    for name, approved in (('2026-01-01-first', True), ('2026-01-02-second', True),
+                           ('2026-01-03-unapproved', False)):
+        d = root / 'openspec/changes/archive' / name
+        d.mkdir(parents=True)
+        body = '# p\n\n## Approval\n\nApproved.\n' if approved else '# p\n'
+        (d / 'proposal.md').write_text(body)
     (root / 'docs/assets/foragerr-mark.svg').write_text('<svg xmlns="http://www.w3.org/2000/svg"></svg>')
     for shot, _ in site_build.PRODUCT_SHOTS:
         (root / 'docs/readme-assets' / shot).write_bytes(b'\x89PNG-fixture')
@@ -192,10 +206,69 @@ def test_every_indexed_artifact_exists(tmp_path):
 def test_nonexistent_evidence_is_not_claimed(built):
     pages, _ = built
     for name, content in pages.items():
-        low = content.lower()
+        low = site_build.ABSENCE_SECTION_RE.sub('', content).lower()
         for phrase in ('penetration test', 'pentest', 'sbom', 'acceptance report',
                        'enforced in ci'):
             assert phrase not in low, f'{phrase!r} claimed in {name}'
+
+
+@pytest.mark.req("FRG-SITE-004")
+def test_governance_cards_render_with_derived_approval_count(built):
+    pages, _ = built
+    trust = pages['trust.html']
+    assert 'Process &amp; governance' in trust
+    for path in ('openspec/specs/dev-process/spec.md',
+                 'docs/process/commit-standard.md',
+                 'openspec/changes/archive/', 'docs/manual/',
+                 'docs/security/history-scan.md'):
+        assert path in trust, f'governance card missing: {path}'
+    assert '2 of 3 approved' in trust  # from the fixture archive
+
+
+@pytest.mark.req("FRG-SITE-004")
+def test_missing_governance_artifact_fails_the_build(tmp_path):
+    root = make_repo(tmp_path / 'repo')
+    (root / 'docs/security/history-scan.md').unlink()
+    with pytest.raises(SystemExit):
+        site_build.build(root, tmp_path / 'out')
+
+
+@pytest.mark.req("FRG-SITE-004")
+def test_coverage_breakdown_is_derived_by_status(built):
+    pages, _ = built
+    trust = pages['trust.html']
+    # Fixture matrix: 2 implemented (both tested), 1 approved (untested),
+    # 0 active process rules.
+    assert '2 of 2' in trust
+    assert 'implemented requirements with tagged tests' in trust
+    assert 'approved, not yet built' in trust
+    assert '0 of 0' in trust and 'process rules machine-tested' in trust
+
+
+@pytest.mark.req("FRG-SITE-004")
+def test_absences_stated_only_in_absence_section(built):
+    pages, _ = built
+    trust = pages['trust.html']
+    sections = site_build.ABSENCE_SECTION_RE.findall(trust)
+    assert len(sections) == 1, 'exactly one dedicated absence section'
+    absence = sections[0].lower()
+    assert 'penetration test' in absence
+    assert 'not in place yet' in absence
+    # Every absence entry cites an existing committed document.
+    for _, _, cite in site_build.ABSENCES:
+        assert cite in sections[0]
+    # The phrases live nowhere else on any page.
+    for name, content in pages.items():
+        assert 'penetration test' not in \
+            site_build.ABSENCE_SECTION_RE.sub('', content).lower(), name
+
+
+@pytest.mark.req("FRG-SITE-006")
+def test_absence_citation_must_exist(tmp_path):
+    root = make_repo(tmp_path / 'repo')
+    (root / 'docs/roadmap.md').unlink()  # cited by the pentest absence entry
+    with pytest.raises(SystemExit):
+        site_build.build(root, tmp_path / 'out')
 
 
 @pytest.mark.req("FRG-SITE-004")
