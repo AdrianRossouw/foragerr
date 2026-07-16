@@ -229,6 +229,22 @@ Approved by Adrian 2026-07-16 (in session, FRG-PROC-009); approvals recorded in 
 proposal. Registry IDs are allocated at each change's implementation kickoff (M3 lesson:
 allocate at the implementing change's proposal, never pre-allocate).
 
+## Addendum — states + tablet-viewport audit (2026-07-16)
+
+Per the owner's M9-tail direction (fidelity audit dropped; a11y deferred to
+post-cycle; states accepted): all 21 screens were swept at iPad portrait
+(834×1194) and landscape (1024×768) with automated probes (horizontal
+overflow, near-empty render, load failure) plus visual review, and every
+screen's empty/populated states inventoried. **Result: zero mechanical
+failures** — no page-level horizontal scroll, no blank screens, sidebar and
+grids reflow correctly, series tables stay usable. Empty states are present
+everywhere and mostly good (Sources' guided connect card is the exemplar).
+Two polish notes, recorded here and deliberately not scoped into a change:
+issue-row action icons are small for touch (~24px targets), and the Queue
+empty state ("The queue is empty.") could point somewhere useful (e.g.
+Wanted). The real-device OPDS reading session (Panels over Tailscale) remains
+with the owner.
+
 ## Test-run state (for reproducing/cleanup)
 
 Container `foragerr-m9sim` on `127.0.0.1:8791` (bound loopback-only), image `foragerr:m9sim`
