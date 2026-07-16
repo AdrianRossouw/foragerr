@@ -462,11 +462,47 @@ def test_auth_failure_flips_comicvine_health_and_success_clears_it(
 
     assert comicvine_health()["auth_failed"] is False
     lookup = client.get("/api/v1/series/lookup", params={"term": "batman"})
-    assert lookup.status_code in (200, 502, 503)  # surfaced upstream-auth error
+    # FRG-API-003 contract: an upstream auth failure is a structured 503,
+    # never an empty 200 (permissive assertion here would mask a regression).
+    assert lookup.status_code == 503
     assert comicvine_health()["auth_failed"] is True
 
     ok = _CVRecorder()
     _patch_cv(monkeypatch, ok)
     lookup = client.get("/api/v1/series/lookup", params={"term": "batman"})
     assert lookup.status_code == 200
+    assert comicvine_health()["auth_failed"] is False
+
+
+@pytest.mark.req("FRG-META-019")
+def test_json_envelope_auth_rejection_also_flips_health(client, monkeypatch):
+    """ComicVine can reject a key INSIDE an HTTP 200 (envelope status_code
+    100); that path must set auth_failed too, and a 200 alone must NOT clear
+    it — only a confirmed-success envelope does (Codex gate finding)."""
+    from foragerr.metadata.ratelimit import comicvine_health
+
+    class _EnvelopeAuthFail(_CVRecorder):
+        def handler(self):
+            def _handle(request: httpx.Request) -> httpx.Response:
+                return httpx.Response(
+                    200,
+                    json={"status_code": 100, "error": "Invalid API Key"},
+                )
+
+            return _handle
+
+    _patch_cv(monkeypatch, _EnvelopeAuthFail())
+    assert client.put(
+        "/api/v1/config/general", json={"comicvine_api_key": _KEY}
+    ).status_code == 200
+    lookup = client.get("/api/v1/series/lookup", params={"term": "batman"})
+    assert lookup.status_code == 503  # same FRG-API-003 auth-failure contract
+    assert comicvine_health()["auth_failed"] is True
+
+    ok = _CVRecorder()
+    _patch_cv(monkeypatch, ok)
+    assert (
+        client.get("/api/v1/series/lookup", params={"term": "batman"}).status_code
+        == 200
+    )
     assert comicvine_health()["auth_failed"] is False

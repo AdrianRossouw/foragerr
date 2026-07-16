@@ -512,12 +512,19 @@ class ComicVineClient:
     def _raise_for_status(self, result) -> None:
         code = result.status_code
         if code == 200:
-            # Success clears the auth-failure health dimension (FRG-META-019)
-            # so a corrected key recovers Health without a restart.
-            gate().note_auth_ok()
+            # NOT the auth-ok point: ComicVine also rejects keys INSIDE a 200
+            # response (JSON envelope status_code 100), so the auth-failure
+            # dimension (FRG-META-019) transitions in _raise_for_cv_error,
+            # after the envelope is confirmed.
             return
         if code in (401, 403):
-            gate().note_auth_failed()
+            # Only an unambiguous 401 flips the credential health verdict: a
+            # bare 403 can be a Cloudflare/WAF block with a perfectly valid
+            # key, and a red "fix your key" Health message would send the
+            # operator to rotate a good credential. The envelope status_code
+            # 100 path (_raise_for_cv_error) is the other sure signal.
+            if code == 401:
+                gate().note_auth_failed()
             raise ComicVineAuthError(
                 f"comicvine authentication failed (HTTP {code})"
             )
@@ -553,8 +560,15 @@ class ComicVineClient:
     def _raise_for_cv_error(self, data: dict[str, Any]) -> None:
         status = data.get("status_code")
         if status in (1, None):  # 1 = OK; absent when the shape has no envelope
+            # The true success point: HTTP 200 AND a non-error envelope clears
+            # the auth-failure health dimension (FRG-META-019). By design the
+            # flag clears ONLY here — budget refusals, network failures, or
+            # rate limits after a key fix keep it set until a request actually
+            # succeeds, because nothing less proves the credential works.
+            gate().note_auth_ok()
             return
         if status == 100:
+            gate().note_auth_failed()
             raise ComicVineAuthError(
                 "comicvine rejected the API key (status_code 100)"
             )

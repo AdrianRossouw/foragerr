@@ -16,6 +16,12 @@
   border: 1px solid var(--color-accent);
   color: var(--color-accent);
   font-size: var(--font-size-sm);
+  /* Failure reasons ride in the chip (FRG-UI-030); command errors can be
+     verbose, so clip — the full text stays available via title. */
+  max-width: 32rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* --- hero band ---------------------------------------------------------- */

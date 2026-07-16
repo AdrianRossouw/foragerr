@@ -21,5 +21,5 @@
 ## 4. Docs, gate, merge
 
 - [x] 4.1 Manual (FRG-PROC-011): `docs/manual/admin/configuration.md` "Setting the ComicVine key" — note the key applies to background workers immediately too; Health section gains the auth-failed state row
-- [ ] 4.2 Suites green (pytest + vitest + tsc); regenerate traceability matrix; soup_check + risk-register check exit 0 (no dep changes; no new attack surface)
-- [ ] 4.3 Tiered review gate (small: 2-3 angles + Codex); merge --no-ff; /release v0.9.11; delete branch
+- [x] 4.2 Suites green (pytest + vitest + tsc); regenerate traceability matrix; soup_check + risk-register check exit 0 (no dep changes; no new attack surface)
+- [x] 4.3 Tiered review gate (small: 2-3 angles + Codex); merge --no-ff; /release v0.9.11; delete branch
