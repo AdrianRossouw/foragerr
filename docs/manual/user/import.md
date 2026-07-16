@@ -195,6 +195,15 @@ restart; one scan proposes matches for a bounded number of groups
 live search). Proposals already attached carry forward across re-scans, so a
 re-scan spends its budget on groups that don't have one yet.
 
+The publisher ignore list (`comicvine_ignored_publishers`, Settings → General)
+applies to these automatic proposals too — a foreign-market reprint on the
+list is never auto-proposed, which is usually what you want (it also prevents
+the wrong-edition trap where a translated volume wins the match). If a group
+genuinely belongs to an ignore-listed publisher, the inline ComicVine search
+on its card shows "N result(s) hidden by your publisher ignore list — Show",
+exactly like Add New, so the edition stays reachable; a pasted ComicVine
+volume URL/ID always bypasses the list entirely.
+
 Review the groups: confirm proposals, correct one via the inline ComicVine
 search, or skip a group. Groups the scan could not parse or match are staged
 with the reason visible and are never imported on a guess — they need an

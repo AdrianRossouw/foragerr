@@ -141,7 +141,9 @@ class PublisherIgnoreList:
         for entry in split_csv(raw):
             folded = entry.casefold()
             if "*" in folded:
-                probe = folded.replace("*", "")
+                # Strip after removal: "Panini *" must probe "panini", not
+                # "panini " (which would never match).
+                probe = folded.replace("*", "").strip()
                 if probe:  # a bare "*" would match everything — ignore it
                     substrings.append(probe)
             else:

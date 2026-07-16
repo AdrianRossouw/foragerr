@@ -273,10 +273,11 @@ export function General() {
                 <p className={styles.sectionHelp}>
                   Comma-separated publisher names — foreign-market reprint
                   imprints that otherwise outrank the original volume. An entry
-                  ending in <code>*</code> matches as a wildcard (e.g.{' '}
-                  <code>Panini*</code> covers Panini Verlag/España/France); any
-                  other entry matches exactly. Hidden results are counted and stay
-                  recoverable per-search in Add New.
+                  containing <code>*</code> matches anywhere in the publisher
+                  name (e.g. <code>Panini*</code> covers Panini
+                  Verlag/España/France); any other entry matches exactly.
+                  Hidden results are counted and stay recoverable per-search in
+                  Add New. Saving an empty field hides nothing.
                 </p>
                 <button
                   type="button"

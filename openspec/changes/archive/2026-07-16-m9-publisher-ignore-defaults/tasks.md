@@ -25,5 +25,5 @@
 ## 5. Docs, gate, merge
 
 - [x] 5.1 Manual: configuration.md setting row (default list + upgrade note); user/search.md hidden-results UI
-- [ ] 5.2 Suites + tsc green; matrix regen; soup/risk checks exit 0
-- [ ] 5.3 Tiered gate (small/medium: 3 angles + Codex); registry flip; archive; merge --no-ff; /release v0.9.12
+- [x] 5.2 Suites + tsc green; matrix regen; soup/risk checks exit 0
+- [x] 5.3 Tiered gate (small/medium: 3 angles + Codex); registry flip; archive; merge --no-ff; /release v0.9.12

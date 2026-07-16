@@ -21,10 +21,12 @@ Series search (`GET /api/v1/series/lookup`) queries ComicVine by name and return
 candidates annotated with plausibility signals — publication-year range, issue-count
 sanity when you gave a target issue, and whether the series is already in your
 library — but foragerr never auto-picks a candidate for you. Results from publishers
-on a configurable ignore list (e.g. variant-cover/reprint-only imprints) are excluded
-outright; other plausibility signals only annotate, they don't filter. Results are
-capped (around 1000 candidates) with a visible truncation warning if a search would
-exceed that.
+on a configurable ignore list (foreign-market reprint imprints by default; editable
+in Settings → General) are excluded from the list but **counted, never silently
+dropped** — Add New shows "N result(s) hidden by your publisher ignore list" with a
+one-click reveal (see `search.md` → "Add New: hidden publishers"). Other plausibility
+signals only annotate, they don't filter. Results are capped (around 1000 candidates)
+with a visible truncation warning if a search would exceed that.
 
 ### Troubleshooting: search returns nothing
 

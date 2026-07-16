@@ -218,10 +218,12 @@ def _env_var_is_set(name: str) -> bool:
 def _ignored_publishers_source(settings: Settings) -> str:
     """Report where the effective ignored-publishers list comes from (FRG-UI-031):
     ``"env"`` (the env var wins), ``"file"`` (a value is stored in ``config.yaml``,
-    including the empty string older releases rendered), else ``"default"`` (the
-    curated fresh-install default). Presence in the file — not its emptiness —
-    is what distinguishes ``file`` from ``default``, so an upgrader who stored an
-    empty value keeps it."""
+    including the empty string older releases rendered), else ``"default"``.
+    Presence in the file — not its emptiness — distinguishes ``file`` from
+    ``default``, so an upgrader who stored an empty value keeps it. Note that
+    ``"default"`` is rare in practice: first-run rendering writes non-secret
+    defaults as real values, so even fresh installs report ``file`` — the
+    branch covers a hand-edited config whose line was removed."""
     if _env_var_is_set(COMICVINE_IGNORED_PUBLISHERS_ENV_VAR):
         return "env"
     stored = _read_config(Path(settings.config_dir) / CONFIG_FILENAME)

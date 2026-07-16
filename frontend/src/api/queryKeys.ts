@@ -147,6 +147,9 @@ export const queryKeys = {
   // refetch against live ComicVine (rate-limited) on each push while the add
   // screen is open.
   lookup: {
+    // Prefix for both variants below — the ignore-list save invalidates the
+    // whole family (FRG-UI-031: a changed list must reach re-searched terms).
+    all: () => ['lookup'] as const,
     // `includeIgnored` (FRG-UI-032) keys a SEPARATE cache entry so the
     // publisher-ignore-list reveal never overwrites the default result set —
     // the two coexist and the screen swaps between them. Default false keeps

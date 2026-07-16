@@ -69,7 +69,7 @@ CONFIG_FILENAME = "config.yaml"
 #: tests. It seeds fresh installs ONLY — a config.yaml that already carries a
 #: value (including the empty string older releases rendered) keeps it.
 DEFAULT_IGNORED_PUBLISHERS = (
-    "Panini*, Urban Comics, Planeta DeAgostini, Cross Cult, "
+    "Panini*, Urban Comics, Planeta DeAgostini, "
     "Editorial Televisa, Ediciones Zinco"
 )
 

@@ -725,3 +725,62 @@ describe('FRG-UI-015: review-session state survives refetches and remounts', () 
     expect(await screen.findByTestId('li-group-2')).toBeInTheDocument();
   });
 });
+
+describe('FRG-UI-032: library-import picker — publisher-ignore reveal parity', () => {
+  it('FRG-UI-032 — the inline picker shows the hidden count and Show reveals ignored candidates', async () => {
+    const { fetcher, spy } = fakeFetcher(
+      makeResolver({
+        groups: () => [noMatchGroup],
+        lookup: (path: string) =>
+          path.includes('includeIgnored=true')
+            ? {
+                records: mockLookupCandidates.map((c, i) => ({
+                  ...c,
+                  ignored: i === 0,
+                })),
+                complete: true,
+                truncated: false,
+                hidden_by_ignore_list: 1,
+              }
+            : {
+                records: mockLookupCandidates.slice(1),
+                complete: true,
+                truncated: false,
+                hidden_by_ignore_list: 1,
+              },
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<LibraryImport />, { fetcher });
+
+    await screen.findByTestId('li-group-3');
+    await user.click(screen.getByRole('button', { name: 'Search ComicVine' }));
+    await user.type(
+      screen.getByRole('searchbox', { name: 'Search ComicVine for Unknown Mini' }),
+      'metabaron',
+    );
+    await user.click(screen.getByRole('button', { name: 'Search' }));
+
+    const hiddenLine = await screen.findByTestId('li-ignored-hidden-Unknown Mini');
+    expect(hiddenLine).toHaveTextContent(
+      '1 result hidden by your publisher ignore list',
+    );
+
+    await user.click(within(hiddenLine).getByRole('button', { name: 'Show' }));
+    await waitFor(() =>
+      expect(
+        spy.mock.calls.some(
+          ([path]) =>
+            typeof path === 'string' && path.includes('includeIgnored=true'),
+        ),
+      ).toBe(true),
+    );
+    // The revealed set includes the previously hidden candidate; the count
+    // line collapses once ignored results are shown.
+    await waitFor(() =>
+      expect(
+        screen.queryByTestId('li-ignored-hidden-Unknown Mini'),
+      ).not.toBeInTheDocument(),
+    );
+  });
+});
