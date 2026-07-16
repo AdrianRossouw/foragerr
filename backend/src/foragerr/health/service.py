@@ -242,6 +242,25 @@ class HealthService:
 
     def _comicvine_component(self) -> ComponentHealth:
         health = comicvine_health()
+        # Auth failure outranks the politeness dimensions (FRG-META-019): a
+        # rejected key means NO request succeeds, worker context included —
+        # Health must not report OK while refreshes fail 401 (M9 finding F1).
+        if health.get("auth_failed"):
+            return ComponentHealth(
+                component="comicvine",
+                kind="comicvine",
+                label="ComicVine",
+                state=_STATE_ERROR,
+                message=(
+                    "ComicVine rejected the configured API key "
+                    "(authentication failed)"
+                ),
+                remediation=(
+                    "Set or correct the ComicVine API key in Settings → "
+                    "General; recovery is automatic on the next successful "
+                    "request."
+                ),
+            )
         if health.get("degraded"):
             remaining = float(health.get("cooldown_remaining_seconds", 0.0) or 0.0)
             return ComponentHealth(

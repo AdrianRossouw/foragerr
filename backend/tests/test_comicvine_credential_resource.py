@@ -416,3 +416,93 @@ def test_no_key_material_in_any_response_or_log(tmp_path, monkeypatch, caplog):
         assert _KEY not in resp.text
     logged = "\n".join(r.getMessage() for r in caplog.records)
     assert _KEY not in logged
+
+
+@pytest.mark.req("FRG-META-018")
+def test_put_refreshes_the_command_worker_context(client):
+    """A UI-saved key must reach COMMAND WORKERS, not just request handlers.
+
+    Workers read settings from the CommandService's HandlerContext at
+    execution time; before m9-cv-key-live-reload that context kept the
+    boot-time Settings snapshot, so every fresh install's first refresh ran
+    with the empty key and failed 401 until a restart (M9 finding F1)."""
+    commands = client.app.state.commands
+    assert (
+        commands.context.settings.comicvine_api_key.get_secret_value() == ""
+    )  # boot snapshot: no key yet
+
+    put = client.put("/api/v1/config/general", json={"comicvine_api_key": _KEY})
+    assert put.status_code == 200
+    ctx_key = commands.context.settings.comicvine_api_key.get_secret_value()
+    assert ctx_key == _KEY  # the worker context follows the save
+    # And the context tracks LATER saves too, not just the first.
+    second = _KEY[:-1] + "x"
+    assert client.put(
+        "/api/v1/config/general", json={"comicvine_api_key": second}
+    ).status_code == 200
+    assert (
+        commands.context.settings.comicvine_api_key.get_secret_value() == second
+    )
+
+
+@pytest.mark.req("FRG-META-019")
+def test_auth_failure_flips_comicvine_health_and_success_clears_it(
+    client, monkeypatch
+):
+    """A 401 from ComicVine (any context) marks the auth-failed health
+    dimension; the next 200 clears it — Health must never say OK while every
+    request is being rejected (M9 finding F1)."""
+    from foragerr.metadata.ratelimit import comicvine_health
+
+    failing = _CVRecorder(auth_fail=True)
+    _patch_cv(monkeypatch, failing)
+    assert client.put(
+        "/api/v1/config/general", json={"comicvine_api_key": _KEY}
+    ).status_code == 200
+
+    assert comicvine_health()["auth_failed"] is False
+    lookup = client.get("/api/v1/series/lookup", params={"term": "batman"})
+    # FRG-API-003 contract: an upstream auth failure is a structured 503,
+    # never an empty 200 (permissive assertion here would mask a regression).
+    assert lookup.status_code == 503
+    assert comicvine_health()["auth_failed"] is True
+
+    ok = _CVRecorder()
+    _patch_cv(monkeypatch, ok)
+    lookup = client.get("/api/v1/series/lookup", params={"term": "batman"})
+    assert lookup.status_code == 200
+    assert comicvine_health()["auth_failed"] is False
+
+
+@pytest.mark.req("FRG-META-019")
+def test_json_envelope_auth_rejection_also_flips_health(client, monkeypatch):
+    """ComicVine can reject a key INSIDE an HTTP 200 (envelope status_code
+    100); that path must set auth_failed too, and a 200 alone must NOT clear
+    it — only a confirmed-success envelope does (Codex gate finding)."""
+    from foragerr.metadata.ratelimit import comicvine_health
+
+    class _EnvelopeAuthFail(_CVRecorder):
+        def handler(self):
+            def _handle(request: httpx.Request) -> httpx.Response:
+                return httpx.Response(
+                    200,
+                    json={"status_code": 100, "error": "Invalid API Key"},
+                )
+
+            return _handle
+
+    _patch_cv(monkeypatch, _EnvelopeAuthFail())
+    assert client.put(
+        "/api/v1/config/general", json={"comicvine_api_key": _KEY}
+    ).status_code == 200
+    lookup = client.get("/api/v1/series/lookup", params={"term": "batman"})
+    assert lookup.status_code == 503  # same FRG-API-003 auth-failure contract
+    assert comicvine_health()["auth_failed"] is True
+
+    ok = _CVRecorder()
+    _patch_cv(monkeypatch, ok)
+    assert (
+        client.get("/api/v1/series/lookup", params={"term": "batman"}).status_code
+        == 200
+    )
+    assert comicvine_health()["auth_failed"] is False

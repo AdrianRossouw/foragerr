@@ -423,6 +423,9 @@ export function useWatchedCommand(onFinished: (status: string) => void): {
   status: string | null;
   running: boolean;
   error: string | null;
+  /** The command's recorded failure reason once it terminates `failed`
+   *  (the resource's verbatim `error`, FRG-UI-030); null otherwise. */
+  failureReason: string | null;
   start: (commandId: number) => void;
 } {
   const [commandId, setCommandId] = useState<number | null>(null);
@@ -433,6 +436,8 @@ export function useWatchedCommand(onFinished: (status: string) => void): {
     : commandQuery.data?.status ?? (commandId !== null ? 'queued' : null);
   const running = status !== null && LIVE_COMMAND_STATUSES.has(status);
   const finished = status !== null && !running ? status : null;
+  const failureReason =
+    status === 'failed' ? (commandQuery.data?.error ?? null) : null;
 
   // Ref'd callback: the effect must fire once per terminal transition, not on
   // every render where the caller's inline closure gets a new identity.
@@ -447,6 +452,7 @@ export function useWatchedCommand(onFinished: (status: string) => void): {
     status,
     running,
     error: watchFailed ? (commandQuery.error?.message ?? 'Could not check task status.') : null,
+    failureReason,
     start: setCommandId,
   };
 }

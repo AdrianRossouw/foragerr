@@ -39,6 +39,9 @@ beforeEach(() => {
 interface DetailOptions {
   mmConfig?: ReturnType<typeof makeMediaManagementConfig>;
   deleteCmdStatus?: string;
+  /** Override for the watched refresh command (id 88) poll — lets a test
+   *  drive the failed-with-reason chip (FRG-UI-030). */
+  refreshCmd?: Partial<ReturnType<typeof makeCommand>>;
   series?: SeriesResource;
   issues?: IssueResource[];
   collections?: CollectionRecord[];
@@ -48,6 +51,7 @@ interface DetailOptions {
 function detailFetcher({
   mmConfig = makeMediaManagementConfig(),
   deleteCmdStatus = 'completed',
+  refreshCmd,
   series = mockSeriesResource,
   issues = mockIssues,
   collections = [],
@@ -83,7 +87,7 @@ function detailFetcher({
       return makeCommand({ id: 88, name: body.name, status: 'queued' });
     }
     if (method === 'GET' && path === '/api/v1/command/88') {
-      return makeCommand({ id: 88, status: 'started' });
+      return makeCommand({ id: 88, status: 'started', ...refreshCmd });
     }
     if (method === 'GET' && path === '/api/v1/command/77') {
       return makeCommand({ id: 77, name: 'delete-series-files', status: deleteCmdStatus });
@@ -177,6 +181,42 @@ describe('FRG-UI-004: series detail hero + issues table', () => {
     await waitFor(() =>
       expect(screen.getByTestId('command-status')).toHaveTextContent('Refresh: started'),
     );
+  });
+
+  it('FRG-UI-030 — a failed watched command surfaces its recorded reason, not the bare status', async () => {
+    renderDetail({
+      refreshCmd: {
+        status: 'failed',
+        error: 'comicvine authentication failed (HTTP 401)',
+      },
+    });
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Invincible' })).toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('command-status')).toHaveTextContent(
+        'Refresh: failed — comicvine authentication failed (HTTP 401)',
+      ),
+    );
+  });
+
+  it('FRG-UI-030 — a reason-less failure renders the bare failed status as before', async () => {
+    renderDetail({ refreshCmd: { status: 'failed', error: null } });
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Invincible' })).toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('command-status')).toHaveTextContent('Refresh: failed'),
+    );
+    expect(screen.getByTestId('command-status').textContent).not.toContain('—');
   });
 
   it('FRG-UI-004 — the Search All hero action dispatches series-search with monitored_only: false', async () => {

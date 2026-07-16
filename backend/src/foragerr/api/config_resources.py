@@ -380,6 +380,13 @@ async def _apply(request: Request, updates: dict[str, Any], resource: type[BaseM
         for secret in new_settings.secret_fields().values():
             register_secret(secret.get_secret_value())
         request.app.state.settings = new_settings
+        # Command workers read settings from the service's HandlerContext at
+        # execution time; without this refresh they keep the boot-time snapshot
+        # and a UI-saved ComicVine key never reaches refresh/import/credit runs
+        # until restart (FRG-META-018). Worker POOL SIZES stay boot-time.
+        commands = getattr(request.app.state, "commands", None)
+        if commands is not None:
+            commands.context.settings = new_settings
         return resource.from_settings(new_settings)
 
 

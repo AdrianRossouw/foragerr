@@ -553,8 +553,15 @@ export function SeriesDetail() {
     .join(' / ');
 
   const commandChip = commandLabel && command.status && (
-    <span className={styles.commandChip} data-testid="command-status">
+    <span
+      className={styles.commandChip}
+      data-testid="command-status"
+      title={command.failureReason ?? undefined}
+    >
       {commandLabel}: {command.status}
+      {/* Failed commands carry their recorded cause (FRG-UI-030) — show it
+          instead of a bare "failed" the operator can only decode from Logs. */}
+      {command.failureReason && ` — ${command.failureReason}`}
     </span>
   );
 
