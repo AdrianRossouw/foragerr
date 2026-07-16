@@ -512,8 +512,12 @@ class ComicVineClient:
     def _raise_for_status(self, result) -> None:
         code = result.status_code
         if code == 200:
+            # Success clears the auth-failure health dimension (FRG-META-019)
+            # so a corrected key recovers Health without a restart.
+            gate().note_auth_ok()
             return
         if code in (401, 403):
+            gate().note_auth_failed()
             raise ComicVineAuthError(
                 f"comicvine authentication failed (HTTP {code})"
             )

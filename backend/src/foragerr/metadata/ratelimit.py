@@ -93,6 +93,10 @@ class _RateGate:
         self._cooldown_until = 0.0
         self._consecutive = 0
         self._degraded = False
+        #: Auth-failure dimension (FRG-META-019): flipped on a 401/403 response,
+        #: cleared on the next success. Independent of the rate-limit back-off
+        #: and budget dimensions — a bad key is not a cool-down.
+        self._auth_failed = False
         #: Per-bucket rolling-hour admission ledger (FRG-META-016): a deque of
         #: monotonic-clock timestamps, one appended per ADMITTED request, pruned
         #: at BUDGET_WINDOW_SECONDS. Bounded by the ceiling, so memory is
@@ -255,6 +259,22 @@ class _RateGate:
         )
         return delay
 
+    def note_auth_failed(self) -> None:
+        """Record an authentication rejection (FRG-META-019)."""
+        if not self._auth_failed:
+            logger.warning(
+                "comicvine authentication failed; health marked until the "
+                "next successful request"
+            )
+        self._auth_failed = True
+
+    def note_auth_ok(self) -> None:
+        """A successful response clears the auth-failure state."""
+        self._auth_failed = False
+
+    def is_auth_failed(self) -> bool:
+        return self._auth_failed
+
     def is_degraded(self) -> bool:
         if not self._degraded:
             return False
@@ -300,7 +320,7 @@ def comicvine_health() -> dict[str, object]:
 
     Shape: ``{"degraded": bool, "cooldown_remaining_seconds": float,
     "path_budgets": {bucket: {used, ceiling, resumes_in_seconds}},
-    "budget_exhausted": bool}``. ``path_budgets`` lists only buckets at or above
+    "budget_exhausted": bool, "auth_failed": bool}``. ``path_budgets`` lists only buckets at or above
     the 80% warning threshold (empty in the common quiet case), and
     ``budget_exhausted`` flags a bucket at/over its ceiling (FRG-META-016). The
     budget dimension is INDEPENDENT of ``degraded`` — a local budget refusal
@@ -312,4 +332,5 @@ def comicvine_health() -> dict[str, object]:
         "cooldown_remaining_seconds": round(_GATE.cooldown_remaining(), 3),
         "path_budgets": path_budgets,
         "budget_exhausted": budget_exhausted,
+        "auth_failed": _GATE.is_auth_failed(),
     }

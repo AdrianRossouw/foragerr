@@ -100,6 +100,8 @@ source. Compatibility: pre-1.0 releases may break with migration notes; from
 | FRG-META-015 | Relevance ordering of lookup candidates | meta | implemented | M4 |
 | FRG-META-016 | Per-path hourly request budget with defer-and-resume | meta | implemented | M6 |
 | FRG-META-017 | Unchanged-volume refresh short-circuit | meta | implemented | M6 |
+| FRG-META-018 | Runtime credential application across execution contexts | meta | approved | M9 |
+| FRG-META-019 | ComicVine authentication-failure health truthfulness | meta | approved | M9 |
 | FRG-PULL-001 | Metadata-derived weekly release view | pull | implemented | M3 |
 | FRG-PULL-002 | External pull-source fetch | pull | implemented | M3 |
 | FRG-PULL-003 | Idempotent per-week storage | pull | implemented | M3 |
@@ -285,6 +287,7 @@ source. Compatibility: pre-1.0 releases may break with migration notes; from
 | FRG-UI-027 | Creators grid screen | ui | implemented | M5 |
 | FRG-UI-028 | Creator profile screen | ui | implemented | M5 |
 | FRG-UI-029 | Sources screen | ui | implemented | M6 |
+| FRG-UI-030 | Command failure cause surfaced at the watch surface | ui | approved | M9 |
 | FRG-SRC-001 | store-source model and connection lifecycle | sources | implemented | M6 |
 | FRG-SRC-002 | Humble session-cookie authentication | sources | implemented | M6 |
 | FRG-SRC-003 | entitlement sync | sources | implemented | M6 |

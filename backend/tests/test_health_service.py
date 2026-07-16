@@ -283,3 +283,23 @@ async def test_one_failing_check_is_isolated_others_intact(db, monkeypatch):
     assert comps["database"].state == "error"
     assert "health check failed" in (comps["database"].message or "")
     assert comps["comicvine"].state == "ok"  # unaffected component intact
+
+
+@pytest.mark.req("FRG-META-019")
+async def test_comicvine_auth_failure_surfaces_as_error_and_recovers(db):
+    """An authentication rejection marks the ComicVine component ERROR with a
+    Settings-facing remediation — outranking the politeness dimensions — and
+    the next successful request clears it without a restart (M9 finding F1:
+    Health said OK while every worker request failed 401)."""
+    ratelimit.gate().note_auth_failed()
+
+    service = _service(db)
+    comp = _by_component(await service.component_view())["comicvine"]
+    assert comp.state == "error"
+    assert "key" in (comp.message or "").lower()
+    assert "settings" in (comp.remediation or "").lower()
+    assert "comicvine" in {w.source for w in await service.warnings()}
+
+    ratelimit.gate().note_auth_ok()
+    comp = _by_component(await service.component_view())["comicvine"]
+    assert comp.state == "ok"

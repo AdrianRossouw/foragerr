@@ -126,7 +126,10 @@ two ways, in the same precedence order as every other setting:
 2. Settings → General in the web UI — see `../user/web-ui.md` → "Settings" →
    "General". Saving there writes the key into `config.yaml` through the same
    documented-config writer as every other file-persisted setting; it applies
-   immediately, no restart needed. If the environment variable is set, the
+   immediately, no restart needed — to interactive lookups **and to background
+   work alike**: series refreshes, library-import scans, and credit fetches
+   running in command workers pick up the saved key on their next run
+   (`FRG-META-018`). If the environment variable is set, the
    General screen shows the field read-only with a note that it is
    environment-managed, rather than a save button that would have no effect.
 
@@ -154,9 +157,15 @@ the enable steps and RISK-015/RISK-016 in `docs/security/risk-register.md`.
 
 ## ComicVine health states
 
-The **ComicVine** component on System → Health reports two distinct non-OK states,
-both of which clear on their own without a restart:
+The **ComicVine** component on System → Health reports three distinct non-OK
+states, all of which clear on their own without a restart:
 
+- **Authentication failed** — ComicVine rejected the configured API key (HTTP
+  401/403) on a recent request, from any context including background workers.
+  The component reports an **error** naming the credential cause; set or
+  correct the key in Settings → General and the state clears automatically on
+  the next successful request (`FRG-META-019`). A failed series refresh also
+  shows this cause directly on the series page.
 - **Rate-limited / backed off** — ComicVine returned a rate-limit signal (HTTP
   420/429) or an abnormal-traffic page, so foragerr backed off for a cool-down
   window. The message shows roughly how long remains. If it persists, verify the
