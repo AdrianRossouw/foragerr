@@ -492,3 +492,79 @@ describe('FRG-PULL-009: Future-week presentation', () => {
     expect(card).toHaveAttribute('data-future', 'true');
   });
 });
+
+describe('FRG-UI-035: Calendar degraded pull-source notice', () => {
+  const week = currentIsoWeek();
+
+  /** A path-aware fetcher: pull weeks resolve to `records`, the system-health
+   *  endpoint to `healthComponents`, everything else to an empty page. */
+  function resolver(
+    records: PullEntryRecord[],
+    healthComponents: unknown,
+  ) {
+    return (path: string) => {
+      if (path === '/api/v1/system/health') return healthComponents;
+      if (path.startsWith('/api/v1/pull')) return pageOf(records, { pageSize: 200 });
+      return pageOf([], { pageSize: 200 });
+    };
+  }
+
+  it('FRG-UI-035 — a degraded pull source renders the inline degraded notice', async () => {
+    const { fetcher } = fakeFetcher(
+      resolver(
+        [],
+        [
+          {
+            component: 'pull-source',
+            label: 'Weekly pull source',
+            state: 'degraded',
+            message: 'Weekly pull source is degraded after 3 failed fetch(es)',
+            last_success: null,
+            last_failure: null,
+            disabled_until: null,
+          },
+        ],
+      ),
+    );
+    renderWithProviders(<CalendarScreen />, { fetcher, route: `/calendar?week=${week}` });
+
+    const notice = await screen.findByTestId('calendar-degraded-notice');
+    expect(notice).toHaveTextContent(/weekly pull source is currently unavailable/i);
+    expect(notice).toHaveTextContent(/library’s own data only/i);
+  });
+
+  it('FRG-UI-035 — a healthy source (no pull-source component) renders no notice', async () => {
+    // Health payload with only OTHER components: the pull-source component is
+    // absent when healthy, so no notice renders.
+    const { fetcher } = fakeFetcher(
+      resolver(
+        [],
+        [
+          {
+            component: 'comicvine',
+            label: 'ComicVine',
+            state: 'ok',
+            message: null,
+            last_success: null,
+            last_failure: null,
+            disabled_until: null,
+          },
+        ],
+      ),
+    );
+    renderWithProviders(<CalendarScreen />, { fetcher, route: `/calendar?week=${week}` });
+
+    await screen.findByText(/No releases this week/);
+    expect(screen.queryByTestId('calendar-degraded-notice')).not.toBeInTheDocument();
+  });
+
+  it('FRG-UI-035 — pull disabled (empty health payload) renders no notice', async () => {
+    // A disabled pull source contributes no health component at all, which is
+    // indistinguishable from healthy here — either way, no notice.
+    const { fetcher } = fakeFetcher(resolver([], []));
+    renderWithProviders(<CalendarScreen />, { fetcher, route: `/calendar?week=${week}` });
+
+    await screen.findByText(/No releases this week/);
+    expect(screen.queryByTestId('calendar-degraded-notice')).not.toBeInTheDocument();
+  });
+});

@@ -16,7 +16,11 @@ import {
 import { useUiStore } from '../../store/uiStore';
 import { ApiRequestError, isComicVineAuthError } from '../../api/fetcher';
 import { SUGGEST_DEBOUNCE_MS } from '../../api/hooks';
-import type { LookupCandidate, LookupResponse } from '../../api/types';
+import type {
+  LookupCandidate,
+  LookupResponse,
+  RootFolderResource,
+} from '../../api/types';
 import { AddSeries, normalizeLookupTerm } from './AddSeries';
 import { SeriesDetail } from '../series/SeriesDetail';
 
@@ -298,6 +302,117 @@ describe('FRG-UI-005: add series', () => {
     expect(screen.getByTestId('ft-add-confirm')).toBeDisabled();
   });
 
+  it('FRG-UI-034 — registering a root folder inline makes the dialog addable without losing the search results', async () => {
+    // GET /api/v1/rootfolder starts empty, then returns the created folder once
+    // the inline POST invalidates the list (mirroring the real refetch).
+    let roots: RootFolderResource[] = [];
+    const created: RootFolderResource = {
+      id: 9,
+      path: '/comics',
+      free_space: null,
+    };
+    const { spy, fetcher } = fakeFetcher((path, options) => {
+      const method = options?.method ?? 'GET';
+      if (method === 'GET' && path.startsWith('/api/v1/series/lookup/suggest?term=')) {
+        return { records: [], complete: true };
+      }
+      if (method === 'GET' && path.startsWith('/api/v1/series/lookup?term=')) {
+        return defaultLookup(path);
+      }
+      if (method === 'GET' && path === '/api/v1/rootfolder') return roots;
+      if (method === 'POST' && path === '/api/v1/rootfolder') {
+        roots = [created];
+        return created;
+      }
+      if (method === 'GET' && path === '/api/v1/formatprofile') return mockFormatProfiles;
+      throw new Error(`unexpected request: ${method} ${path}`);
+    });
+    const user = userEvent.setup();
+    renderWithProviders(
+      <Routes>
+        <Route path="/add" element={<AddSeries />} />
+      </Routes>,
+      { fetcher, route: '/add' },
+    );
+    await user.type(screen.getByRole('searchbox', { name: 'Search ComicVine' }), 'saga');
+    await user.click(screen.getByRole('button', { name: 'Search' }));
+    await waitFor(() =>
+      expect(screen.getByTestId('candidate-40501234')).toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole('button', { name: 'Select Saga' }));
+
+    // No roots yet: the inline registration form is offered (not a dead end).
+    await screen.findByTestId('add-no-roots');
+    await user.type(
+      screen.getByRole('textbox', { name: 'New root folder path' }),
+      '/comics',
+    );
+    await user.click(screen.getByTestId('add-register-root'));
+
+    // The POST fired, the dialog now has the new root SELECTED, and it is addable.
+    await waitFor(() =>
+      expect(
+        spy.mock.calls.some(
+          ([p, o]) => p === '/api/v1/rootfolder' && o?.method === 'POST',
+        ),
+      ).toBe(true),
+    );
+    const rootFolder = await screen.findByRole('combobox', { name: 'Root folder' });
+    await waitFor(() => expect(rootFolder).toHaveValue('9'));
+    expect(screen.getByTestId('ft-add-confirm')).toBeEnabled();
+    // The search results were never abandoned — the candidate is still present.
+    expect(screen.getByTestId('candidate-40501234')).toBeInTheDocument();
+  });
+
+  it('FRG-UI-034 — an inline registration refusal is shown verbatim and the operator can correct the path', async () => {
+    const { fetcher } = fakeFetcher((path, options) => {
+      const method = options?.method ?? 'GET';
+      if (method === 'GET' && path.startsWith('/api/v1/series/lookup/suggest?term=')) {
+        return { records: [], complete: true };
+      }
+      if (method === 'GET' && path.startsWith('/api/v1/series/lookup?term=')) {
+        return defaultLookup(path);
+      }
+      if (method === 'GET' && path === '/api/v1/rootfolder') return [];
+      if (method === 'POST' && path === '/api/v1/rootfolder') {
+        throw new ApiRequestError(
+          400,
+          { message: "path '/humble' is not writable", errors: [] },
+          '/api/v1/rootfolder',
+        );
+      }
+      if (method === 'GET' && path === '/api/v1/formatprofile') return mockFormatProfiles;
+      throw new Error(`unexpected request: ${method} ${path}`);
+    });
+    const user = userEvent.setup();
+    renderWithProviders(
+      <Routes>
+        <Route path="/add" element={<AddSeries />} />
+      </Routes>,
+      { fetcher, route: '/add' },
+    );
+    await user.type(screen.getByRole('searchbox', { name: 'Search ComicVine' }), 'saga');
+    await user.click(screen.getByRole('button', { name: 'Search' }));
+    await waitFor(() =>
+      expect(screen.getByTestId('candidate-40501234')).toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole('button', { name: 'Select Saga' }));
+
+    await screen.findByTestId('add-no-roots');
+    await user.type(
+      screen.getByRole('textbox', { name: 'New root folder path' }),
+      '/humble',
+    );
+    await user.click(screen.getByTestId('add-register-root'));
+
+    // The backend's refusal is rendered verbatim; the input stays for a retry.
+    const error = await screen.findByTestId('add-root-error');
+    expect(error).toHaveTextContent("path '/humble' is not writable");
+    expect(
+      screen.getByRole('textbox', { name: 'New root folder path' }),
+    ).toBeInTheDocument();
+  });
+
   it('FRG-UI-005 — confirming the add posts the payload, navigates to detail, and the refresh command is visible in progress', async () => {
     const { spy } = renderAdd();
     const user = await searchFor('saga');
@@ -523,7 +638,7 @@ describe('FRG-UI-005: lookup outcome states', () => {
     expect(screen.queryByText(/Try again in a moment/)).not.toBeInTheDocument();
   });
 
-  it('FRG-UI-020 — the credential-error guidance links to Settings -> General', async () => {
+  it('FRG-UI-020 FRG-UI-033 — the credential-error guidance links to Settings -> General', async () => {
     renderAdd({
       lookup: () => {
         throw cvAuthError();

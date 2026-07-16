@@ -162,3 +162,21 @@ async def test_collect_observations_isolates_one_failing_client(db):
     # and only the healthy client's id is reported as polled (FRG-DL-011).
     assert [o.item.download_id for o in obs] == ["ok1"]
     assert polled == {1}
+
+
+@pytest.mark.req("FRG-UI-037")
+async def test_client_completed_classifies_as_import_pending(db):
+    """The requirement's WHEN clause end-to-end at the tracking seam: the
+    download CLIENT reporting an item complete is what produces the
+    ``import_pending`` state the queue lists as "Awaiting import" — not a
+    hand-seeded row (gate finding: the queue-payload test alone was a proxy).
+    The pre-first-poll window (SAB completes between ticks) persists by
+    design; once the tick classifies, the item is never invisible."""
+    await insert_grab_history(db, download_id="d9", series_id=1, issue_id=10)
+    item = make_item(
+        "d9", status=ClientItemStatus.COMPLETED, output_path="/dl/done"
+    )
+    await reconcile_downloads(db, [_obs(item)])
+    row = await tracked_by_download_id(db, "d9")
+    assert row.state == TrackedDownloadState.IMPORT_PENDING.value
+    assert row.status == TRACKED_STATUS_OK

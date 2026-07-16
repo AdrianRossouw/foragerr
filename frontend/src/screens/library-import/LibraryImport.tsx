@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from 'react';
 import { Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Toolbar } from '../../components/Toolbar';
@@ -10,7 +16,6 @@ import {
   useRootFolders,
   useWatchedCommand,
 } from '../../api/hooks';
-import { isComicVineAuthError } from '../../api/fetcher';
 import { queryKeys } from '../../api/queryKeys';
 import { MONITOR_STRATEGIES } from '../../api/types';
 import type { LibraryImportGroup } from '../../api/types';
@@ -49,13 +54,13 @@ const IMPORT_FAILED_NOTE =
 /**
  * The library-import endpoints do live ComicVine work (proposals, override
  * validation), so a credential failure surfaces as the structural 503 marked
- * with `comicvine_api_key` (FRG-UI-005 convention) — render the same Settings
- * guidance as the add flow instead of the raw message.
+ * with `comicvine_api_key` (FRG-UI-005 convention). Render the same actionable
+ * guidance the add flow uses (FRG-UI-033): a credential error becomes the
+ * linkified "check Settings" -> Settings → General note via the shared
+ * `OutcomeErrorText`; any other error renders its verbatim message.
  */
-function errorText(error: Error): string {
-  return isComicVineAuthError(error)
-    ? 'ComicVine API key missing or invalid — check Settings.'
-    : error.message;
+function ErrorNoteText({ error }: { error: Error }): ReactNode {
+  return <OutcomeErrorText error={error} text={error.message} />;
 }
 
 /**
@@ -242,7 +247,7 @@ export function LibraryImport() {
             </div>
             {scan.isError && (
               <p role="alert" className={styles.errorNote}>
-                Scan failed: {errorText(scan.error)}
+                Scan failed: <ErrorNoteText error={scan.error} />
               </p>
             )}
             {scanFailure && (
@@ -256,7 +261,8 @@ export function LibraryImport() {
             )}
             {groupsQuery.isError && (
               <p role="alert" className={styles.errorNote}>
-                Could not load staged scan results: {errorText(groupsQuery.error)}
+                Could not load staged scan results:{' '}
+                <ErrorNoteText error={groupsQuery.error} />
               </p>
             )}
 
@@ -295,7 +301,7 @@ export function LibraryImport() {
             )}
             {patchGroup.isError && (
               <p role="alert" className={styles.errorNote}>
-                Update failed: {errorText(patchGroup.error)}
+                Update failed: <ErrorNoteText error={patchGroup.error} />
               </p>
             )}
             {/* Rendered at screen level, not inside the batch panel: the panel
@@ -312,7 +318,9 @@ export function LibraryImport() {
                 count={picked.length}
                 busy={execute.isPending || executeCommand.running}
                 status={executeCommand.status}
-                error={execute.isError ? errorText(execute.error) : null}
+                error={
+                  execute.isError ? <ErrorNoteText error={execute.error} /> : null
+                }
                 onImport={(addOptions) => {
                   // Pin the executed root NOW (like the scan does): completion
                   // must invalidate the staging the command wrote, not
@@ -644,7 +652,7 @@ function BatchOptionsPanel({
   count: number;
   busy: boolean;
   status: string | null;
-  error: string | null;
+  error: ReactNode;
   onImport: (addOptions: {
     formatProfileId: number | null;
     monitorStrategy: string;

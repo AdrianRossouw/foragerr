@@ -57,8 +57,9 @@ def test_root_feed_lists_only_non_empty_shelves(client, tmp_path):
     root = ET.fromstring(empty.text)
     assert root.findall(f"{ATOM}entry") == []
 
-    # A series with issues-but-no-files: All Series has content, Recent does
-    # NOT (the non-empty convention applies per shelf).
+    # A series with issues-but-no-files: All Series has content (the default
+    # shelf mirrors the full library, FRG-OPDS-018 owner amendment), Recent
+    # does NOT (the non-empty convention applies per shelf).
     _seed(client, tmp_path, [simple_series(n_issues=0)])
     resp = client.get("/opds")
     assert resp.status_code == 200
@@ -329,7 +330,7 @@ def test_control_chars_in_title_do_not_break_the_feed(client, tmp_path):
 
 @pytest.mark.req("FRG-OPDS-006")
 def test_multi_page_shelf_paginates_with_totals(client, tmp_path):
-    spec = [simple_series(f"Series {i:02d}", cv_volume_id=i, n_issues=0) for i in range(1, 13)]
+    spec = [simple_series(f"Series {i:02d}", cv_volume_id=i, n_issues=1) for i in range(1, 13)]
     _seed(client, tmp_path, spec)
 
     all_titles: list[str] = []
@@ -350,7 +351,7 @@ def test_multi_page_shelf_paginates_with_totals(client, tmp_path):
 def test_pagination_links_target_the_same_feed(client, tmp_path):
     """Mylar shipped next/prev links that pointed at the WRONG feed twice.
     Every nav link here must resolve back to the feed it paginates."""
-    spec = [simple_series(f"S{i:02d}", cv_volume_id=i, n_issues=0) for i in range(1, 8)]
+    spec = [simple_series(f"S{i:02d}", cv_volume_id=i, n_issues=1) for i in range(1, 8)]
     _seed(client, tmp_path, spec)
 
     feed = ET.fromstring(client.get("/opds/series", params={"page": 2, "count": 3}).text)
@@ -370,7 +371,7 @@ def test_pagination_links_target_the_same_feed(client, tmp_path):
 
 @pytest.mark.req("FRG-OPDS-006")
 def test_per_page_cap_is_enforced(client, tmp_path):
-    spec = [simple_series(f"S{i:03d}", cv_volume_id=i, n_issues=0) for i in range(1, 130)]
+    spec = [simple_series(f"S{i:03d}", cv_volume_id=i, n_issues=1) for i in range(1, 130)]
     _seed(client, tmp_path, spec)
     # Ask for a page far above the configured cap (default 100).
     feed = ET.fromstring(

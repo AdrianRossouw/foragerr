@@ -427,6 +427,41 @@ describe('FRG-UI-015: correcting a match before import', () => {
       '/settings/general',
     );
   });
+
+  it('FRG-UI-033 — a credential failure in a screen-level error banner links to Settings → General', async () => {
+    // The staged-groups read surfaces a ComicVine credential 503 (the library-
+    // import endpoints do live CV work): the "Could not load…" banner renders
+    // the same linkified guidance as the add flow, not a plain dead-end string.
+    const { fetcher } = fakeFetcher((path, init) => {
+      const method = init?.method ?? 'GET';
+      if (method === 'GET' && path === '/api/v1/rootfolder') return mockRootFolders;
+      if (method === 'GET' && path.startsWith('/api/v1/library-import?')) {
+        throw new ApiRequestError(
+          503,
+          {
+            message: 'comicvine lookup failed: ComicVine rejected the API key',
+            errors: [
+              {
+                field: 'comicvine_api_key',
+                message: 'ComicVine rejected the API key (missing or invalid)',
+              },
+            ],
+          },
+          path,
+        );
+      }
+      throw new Error(`unexpected request: ${method} ${path}`);
+    });
+    renderWithProviders(<LibraryImport />, { fetcher });
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Could not load staged scan results');
+    expect(alert).toHaveTextContent('ComicVine API key missing or invalid');
+    expect(within(alert).getByRole('link', { name: 'check Settings' })).toHaveAttribute(
+      'href',
+      '/settings/general',
+    );
+  });
 });
 
 describe('FRG-UI-015: bulk add with batch options and per-group outcomes', () => {

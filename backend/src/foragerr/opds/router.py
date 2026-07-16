@@ -240,9 +240,22 @@ def build_opds_router(base_path: str) -> APIRouter:
         exists — the same non-empty convention)."""
         db = request.app.state.db
         async with db.read_session() as session:
-            series_count = await session.scalar(
-                select(func.count()).select_from(SeriesRow)
-            )
+            series_stmt = select(func.count()).select_from(SeriesRow)
+            if request.app.state.settings.opds_hide_fileless_series:
+                # Advertise "All Series" only when the shelf would actually
+                # list something: the same file-bearing predicate the shelf
+                # applies (FRG-OPDS-018), or a filtered-empty shelf gets a
+                # nav entry that opens to nothing.
+                series_stmt = series_stmt.where(
+                    select(IssueFileRow.id)
+                    .join(IssueRow, IssueRow.id == IssueFileRow.issue_id)
+                    .where(
+                        IssueRow.series_id == SeriesRow.id,
+                        IssueFileRow.edition_issue_id.is_(None),
+                    )
+                    .exists()
+                )
+            series_count = await session.scalar(series_stmt)
             file_count = await session.scalar(
                 select(func.count()).select_from(IssueFileRow)
             )
@@ -286,14 +299,33 @@ def build_opds_router(base_path: str) -> APIRouter:
     ) -> Response:
         """All Series navigation feed (FRG-OPDS-001, 006): one entry per
         series, each linking to that series' acquisition feed (acquisition
-        kind). Paginated."""
+        kind). Paginated.
+
+        File-less series are omitted by default (FRG-OPDS-018,
+        ``opds_hide_fileless_series``) so a reader browses only shelves with
+        something to read: the SQL filter keeps only series with at least one
+        downloadable file (an ``issue_files`` row that is not an owned-via-
+        edition provenance marker — the same rows the acquisition feed serves).
+        The opt-out lists every series, empty shelves included."""
         settings = request.app.state.settings
         page_size = _effective_page_size(count, settings)
+        stmt = select(SeriesRow)
+        if settings.opds_hide_fileless_series:
+            has_file = (
+                select(IssueFileRow.id)
+                .join(IssueRow, IssueRow.id == IssueFileRow.issue_id)
+                .where(
+                    IssueRow.series_id == SeriesRow.id,
+                    IssueFileRow.edition_issue_id.is_(None),
+                )
+                .exists()
+            )
+            stmt = stmt.where(has_file)
         db = request.app.state.db
         async with db.read_session() as session:
             total, result = await _count_and_page(
                 session,
-                select(SeriesRow),
+                stmt,
                 order_by=(SeriesRow.sort_title, SeriesRow.id),
                 page=page,
                 page_size=page_size,
@@ -572,7 +604,12 @@ def build_opds_router(base_path: str) -> APIRouter:
         The id is resolved to a stored path, the path is confined to a
         registered root folder, then the original bytes are streamed with the
         format-specific comic media type and a Content-Disposition filename.
-        No archive is opened or parsed. Unknown or out-of-root id -> 404."""
+        No archive is opened or parsed. Unknown or out-of-root id -> 404.
+
+        A HEAD preflight (FRG-OPDS-017) resolves+stats the file exactly as GET
+        but streams no bytes: ``FileResponse`` fills Content-Length from the
+        stat and returns an empty body for the HEAD method — the whole file is
+        never read."""
         db = request.app.state.db
         async with db.read_session() as session:
             # The id-only, root-confined resolution shared with the page/cover
@@ -613,6 +650,29 @@ def build_opds_router(base_path: str) -> APIRouter:
         async with db.read_session() as session:
             row, resolved = await _resolve_confined_file(session, issue_file_id)
             cached_count = row.page_count
+
+        # A HEAD preflight (FRG-OPDS-017) mirrors GET's status but MUST NOT do
+        # the expensive member read/decode. Status parity still requires the
+        # same existence checks GET performs (out-of-range page, no-image or
+        # unlistable archive → 404), so validate via the cached page count when
+        # present, else one bounded listing — never a member read or render.
+        if request.method == "HEAD":
+            # Trusting a present cached_count skips the listing; a stale count
+            # could 200 a page GET would 404 — accepted (HEAD stays cheap, the
+            # cache self-heals on the next GET's write-back below).
+            if cached_count:
+                if page < 0 or page >= cached_count:
+                    raise ApiError(
+                        404, f"page {page} out of range for issue-file {issue_file_id}"
+                    )
+            else:
+                await _validate_archive_page(
+                    resolved, page, settings, what=f"issue-file {issue_file_id}"
+                )
+            # Advertised PSE type: GET may return image/png for an alpha
+            # source, but the feed link advertises jpeg — HEAD matches the
+            # advertisement without paying for a decode.
+            return Response(media_type=_PSE_IMAGE_TYPE)
 
         # 2. Read the requested page: lists the archive ONCE, off the event loop,
         #    outside any write session, and reads the member under the per-page cap.
@@ -665,6 +725,22 @@ def build_opds_router(base_path: str) -> APIRouter:
         async with db.read_session() as session:
             _row, resolved = await _resolve_confined_file(session, issue_file_id)
 
+        # A HEAD preflight (FRG-OPDS-017) mirrors GET's status but skips the
+        # extract/render+cache. Parity requires GET's existence checks: a fresh
+        # cached cover proves streamability outright; otherwise validate page 0
+        # exists (cached count or one bounded listing) — no read, no render.
+        if request.method == "HEAD":
+            covers_dir = Path(settings.config_dir) / "covers" / "pages"
+            head_cache = covers_dir / (
+                f"{issue_file_id}{'_thumb' if thumbnail else ''}.jpg"
+            )
+            if not _cover_cache_is_fresh(head_cache, resolved):
+                if not _row.page_count:
+                    await _validate_archive_page(
+                        resolved, 0, settings, what=f"issue-file {issue_file_id}"
+                    )
+            return Response(media_type=_PSE_IMAGE_TYPE)
+
         covers_dir = Path(settings.config_dir) / "covers" / "pages"
         cache_path = covers_dir / f"{issue_file_id}{'_thumb' if thumbnail else ''}.jpg"
         # Serve the cache only when it is at least as new as the source archive: a
@@ -704,6 +780,32 @@ def build_opds_router(base_path: str) -> APIRouter:
             return Response(content=out, media_type=_PSE_IMAGE_TYPE)
         return FileResponse(cache_path, media_type=_PSE_IMAGE_TYPE)
 
+    # HEAD parity (FRG-OPDS-017): reader apps and proxies preflight OPDS URLs
+    # with HEAD, but FastAPI does not add HEAD to a GET route, so a bare HEAD
+    # would 404/405 and never even reach the default-deny perimeter to receive
+    # the Basic challenge. Register each GET handler under HEAD too, EXCLUDED
+    # from the OpenAPI schema (``include_in_schema=False``) so the GET route
+    # remains the single documented operation — no duplicate-operationId. The
+    # feed handlers render as usual (cheap DB reads) and Starlette drops the body
+    # for HEAD; the file handler answers from a stat via ``FileResponse``; the
+    # page/cover handlers branch on ``request.method`` above to skip the archive
+    # read/decode entirely. The app-root perimeter still guards these routes, so
+    # an unauthenticated HEAD gets the identical 401 + Basic challenge as GET.
+    for path, handler in (
+        ("", root_feed),
+        ("/series", series_shelf),
+        ("/series/{series_id}", series_acquisition_feed),
+        ("/recent", recent_feed),
+        ("/opensearch.xml", opensearch_description),
+        ("/search", search_feed),
+        ("/file/{issue_file_id}", download_file),
+        ("/page/{issue_file_id}/{page}", stream_page),
+        ("/cover/{issue_file_id}", local_cover),
+    ):
+        router.add_api_route(
+            path, handler, methods=["HEAD"], include_in_schema=False
+        )
+
     return router
 
 
@@ -717,6 +819,22 @@ def _cover_cache_is_fresh(cache_path: Path, source_path: Path) -> bool:
         return cache_path.stat().st_mtime >= source_path.stat().st_mtime
     except OSError:
         return False
+
+
+async def _validate_archive_page(
+    resolved: Path, index: int, settings, *, what: str
+) -> int:
+    """The existence half of :func:`_read_archive_page` — one bounded listing
+    (off the event loop) + bounds check, NO member read or decode. Gives HEAD
+    the same 404 surface as GET (FRG-OPDS-017) at listing cost only. Returns
+    the member count."""
+    limits = settings.opds_pse_archive_limits()
+    members = await asyncio.to_thread(list_image_members, resolved, limits)
+    if not members:  # None (not listable) or [] (no image pages)
+        raise ApiError(404, f"no streamable pages for {what}")
+    if index < 0 or index >= len(members):
+        raise ApiError(404, f"page {index} out of range for {what}")
+    return len(members)
 
 
 async def _read_archive_page(

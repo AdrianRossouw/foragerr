@@ -495,9 +495,10 @@ class HealthService:
                 message=message,
                 remediation=(
                     "The weekly pull source could not be reached or returned bad "
-                    "data; the weekly view still renders from your local library. "
-                    "Verify 'pull_source_url' and that the service is reachable — "
-                    "it recovers automatically on the next successful refresh."
+                    "data; the Calendar still renders from your local library. "
+                    "Verify the weekly pull source URL in your configuration and "
+                    "that the service is reachable — it recovers automatically on "
+                    "the next successful refresh."
                 ),
                 last_failure=status.last_failure_at,
                 disabled_until=disabled_until,

@@ -4,7 +4,7 @@ import styles from './QueueScreen.module.css';
 
 const STATUS_LABEL: Record<QueueItemStatus, string> = {
   downloading: 'Downloading',
-  import_pending: 'Waiting to import',
+  import_pending: 'Awaiting import',
   import_blocked: 'Import blocked',
   importing: 'Importing',
   imported: 'Imported',

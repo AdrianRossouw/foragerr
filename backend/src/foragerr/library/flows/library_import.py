@@ -972,6 +972,24 @@ async def _import_group(
     return "imported"
 
 
+#: Execute outcomes that leave a group failed or blocked with a visible reason
+#: recorded on its staging row (FRG-NFR-016). Each such group is logged at
+#: WARNING after the run. A clean ``imported`` (and the pre-flight ``missing`` /
+#: ``not-confirmed`` stale-selection skips, which record no reason) are excluded.
+_WARN_OUTCOMES = frozenset(
+    {
+        "add-failed",
+        "blocked",
+        "partial",
+        "refresh-failed",
+        "no-folder",
+        "duplicate",
+        "empty",
+        "errored",
+    }
+)
+
+
 async def execute_library_import(
     db: Database,
     settings: Settings | None,
@@ -998,6 +1016,12 @@ async def execute_library_import(
     """
     now = now or utcnow()
     tallies: dict[str, int] = {}
+    # Group ids whose run left them add-failed or blocked (FRG-NFR-016): the
+    # outcomes that record a visible failure/block reason on the staging row.
+    # Each gets a WARNING carrying the group identity + reason after the run, so
+    # an operator watching container logs sees actionable causes without opening
+    # the UI (F11: the INFO totals alone hid five per-group reasons).
+    failed_group_ids: list[int] = []
     for group_id in group_ids:
         # Read + (when applicable) auto-confirm promotion in ONE write txn so
         # the check-and-promote can't race a concurrent PATCH.
@@ -1039,6 +1063,32 @@ async def execute_library_import(
                 )
                 outcome = "errored"
         tallies[outcome] = tallies.get(outcome, 0) + 1
+        if outcome in _WARN_OUTCOMES:
+            failed_group_ids.append(group_id)
+
+    # One WARNING per failed/blocked group, naming the group and its verbatim
+    # recorded reason (FRG-NFR-016) — read the annotated rows in one session so
+    # the reason is the exact message the review card shows.
+    if failed_group_ids:
+        async with db.read_session() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(LibraryImportGroupRow).where(
+                            LibraryImportGroupRow.id.in_(failed_group_ids)
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        for row in rows:
+            logger.warning(
+                "library-import: group %r %s: %s",
+                row.matching_key,
+                row.state,
+                row.message or "no reason recorded",
+            )
 
     summary = " ".join(f"{key}={count}" for key, count in sorted(tallies.items()))
     logger.info("library-import: %s", summary or "no groups selected")

@@ -14,6 +14,7 @@ import {
 import {
   useRunCommand,
   useSeriesIndex,
+  useSystemHealth,
   useToggleIssueMonitored,
   useWatchedCommand,
   useWeeklyPull,
@@ -158,6 +159,19 @@ export function CalendarScreen() {
 
   const { data, isLoading, isError } = useWeeklyPull(week);
   const records = useMemo(() => data ?? [], [data]);
+
+  // Weekly-pull-source health (FRG-UI-035): the health payload surfaces a
+  // `pull-source` component ONLY when the external source is degraded AND the
+  // pull feature is enabled (a disabled or healthy source contributes no
+  // component). So the component's mere presence — with a non-OK state — is the
+  // gate for the inline notice; a healthy or deliberately-disabled source shows
+  // nothing, and the Calendar keeps rendering from local library data.
+  const health = useSystemHealth();
+  const pullSourceDegraded = (
+    Array.isArray(health.data) ? health.data : []
+  ).some(
+    (component) => component.component === 'pull-source' && component.state !== 'ok',
+  );
 
   // Reuse the cached library index (['series'], shared with HeaderQuickSearch)
   // to suppress a new-series strip row once its series is in the library: after
@@ -411,6 +425,23 @@ export function CalendarScreen() {
             {weekRangeLabel(week)}
           </span>
         </div>
+
+        {pullSourceDegraded && (
+          <div
+            className={styles.degradedNotice}
+            role="status"
+            data-testid="calendar-degraded-notice"
+          >
+            <i
+              className={`fa-solid fa-triangle-exclamation ${styles.degradedNoticeIcon}`}
+              aria-hidden
+            />
+            <span>
+              The weekly pull source is currently unavailable — the Calendar is
+              showing your library&rsquo;s own data only.
+            </span>
+          </div>
+        )}
 
         {isLoading && <p className={styles.stateMsg}>Loading this week&rsquo;s releases…</p>}
         {isError && (
