@@ -2,7 +2,19 @@
 
 ## Approval
 
-**DRAFT — pending owner approval (FRG-PROC-009).** Registry IDs not yet allocated.
+**Approved by Adrian, 2026-07-16 (in session, FRG-PROC-009)** as part of the
+M9-remainder plan (third of three M9-tail changes, → v0.9.13). Registry IDs
+allocated at implementation kickoff. Scope notes from approval:
+
+- Item 8 (read-only roots, F14) was not explicitly decided; resolved by
+  default to the conservative option — **document** the writability
+  requirement in the manual, no behavior change — unless the owner redirects
+  before implementation.
+- A states audit (empty/loading/error coverage per screen) runs before
+  implementation; any real findings fold into this change's scope.
+- The handoff fidelity audit is **dropped** (owner: the handoff was a quick
+  sketch; fidelity is not maintained). An accessibility scan is deferred to
+  after the M9 release cycle, with axe-tooling-in-gates evaluated separately.
 
 ## Why
 

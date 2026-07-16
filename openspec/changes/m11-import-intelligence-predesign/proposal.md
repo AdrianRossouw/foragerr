@@ -1,11 +1,30 @@
-# m9-import-heuristics
+# m11-import-intelligence-predesign
 
 ## Approval
 
-**DRAFT — pending owner approval (FRG-PROC-009).** Registry IDs not yet allocated.
-Large scope; expect to split into 2–3 implementation changes at kickoff
-(parser/matcher core, flat-folder import placement, import-review UX) the way
-M6/M7 pre-designs decomposed.
+**Milestone split approved by Adrian, 2026-07-16 (in session):** import
+heuristics is promoted out of M9 into its **own milestone and release cycle**
+("M11 import-intelligence"; M10 = go-live, M7 label reserved for torrents).
+This document is the milestone **pre-design** — NOT an approved implementation
+change. At milestone kickoff it decomposes into ~3 changes (parser/matcher
+core, flat-folder placement, import-review UX), each with its own proposal,
+approval, and registry IDs, the way M6/M7 pre-designs decomposed.
+
+Milestone slotting (before M10 vs first post-1.0) is an open owner decision at
+the milestone gate. A research phase precedes the decomposition: the **corpus
+bake-off** — squash-invariant matching + DP segmentation vs publisher-filtered
+corpus vs cover-hash verification (ComicTagger's algorithm, studiable in
+`.reference/mylar3/lib/comictaggerlib/`), measured on the real 61-file Humble
+corpus for series-hit / issue-attach / wrong-edition rates. A trained
+segmentation model was considered and parked: the failure mode is systematic
+squashing, which deterministic segmentation + squash-normalized ranking
+handles without SOUP/traceability cost; revisit only if the bake-off reveals a
+genuinely noisy long tail.
+
+**Carve-out:** the corpus-reduction quick win (shipped default ignore list,
+Settings UI, hide-with-count in Add New) ships in M9 as
+`m9-publisher-ignore-defaults`; this milestone extends the same list to
+import-proposal and cover-candidate filtering (item 5 below).
 
 ## Why
 
@@ -41,12 +60,13 @@ file→issue matcher ignores the match the user just confirmed.
    folder-naming template (respecting existing-library-import mode: move —or
    copy— into per-series folders), instead of claiming the shared folder and
    colliding ("path already used by another series").
-5. **Edition preference + sanity guards.** Proposal ranking (and Add New
-   search ordering) prefers preferred-market/English publishers and de-ranks
-   or badges translations; a proposal whose volume has fewer issues than the
-   group has files gets an explicit mismatch warning ("10 files, volume has 1
-   issue"); proposal cards and the inline picker show issue counts +
-   descriptions (Add New parity) and dedupe identical rows.
+5. **Edition preference + sanity guards.** The publisher ignore list (shipped
+   in M9 by `m9-publisher-ignore-defaults`) filters import-proposal and
+   cover-candidate sets before scoring; proposal ranking prefers
+   preferred-market publishers among what remains; a proposal whose volume has
+   fewer issues than the group has files gets an explicit mismatch warning
+   ("10 files, volume has 1 issue"); proposal cards and the inline picker show
+   issue counts + descriptions (Add New parity) and dedupe identical rows.
 6. **Same-title path disambiguation.** When a new series' rendered folder
    collides with an existing series (singles vs trades volume of the same
    title/year), disambiguate the folder automatically (naming-template

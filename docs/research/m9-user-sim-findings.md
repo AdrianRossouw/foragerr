@@ -218,15 +218,16 @@ expandable file list; confidence only when meaningful. → `m9-import-heuristics
 
 ## Recommendation → proposal mapping
 
-| Draft change (pending approval) | Carries |
-|---|---|
-| `m9-cv-key-live-reload` | F1 (+ refresh-failure surfacing, health truthfulness) |
-| `m9-import-heuristics` | F8, F9, F17, F20(naming), F10, F13, F12, F15 |
-| `m9-ux-diagnosability` | F2, F16, F3, F4, F11, F19, F22, F23, F20(dialog path field), F14 (decision) |
+| Vehicle | Carries | Status (2026-07-16) |
+|---|---|---|
+| `m9-cv-key-live-reload` | F1 (+ refresh-failure surfacing, health truthfulness) | **Approved** → v0.9.11 |
+| `m9-publisher-ignore-defaults` | F17 (default ignore list, Settings UI, hide-with-count) | **Approved** → v0.9.12 |
+| `m9-ux-diagnosability` | F2, F16, F3, F4, F11, F19, F22, F23, F14 (documented) + states-audit findings | **Approved** → v0.9.13 |
+| `m11-import-intelligence-predesign` | F8, F9, F10, F12, F13, F15, F20(naming) | **Milestone split approved**; decomposes at its own kickoff after the corpus bake-off |
 
-Registry IDs are deliberately **not** allocated (lesson from M3: allocate at the approving
-proposal, not before). Each draft lists its intended requirements; IDs get allocated in
-`docs/traceability/requirements-registry.md` when Adrian approves per FRG-PROC-009.
+Approved by Adrian 2026-07-16 (in session, FRG-PROC-009); approvals recorded in each
+proposal. Registry IDs are allocated at each change's implementation kickoff (M3 lesson:
+allocate at the implementing change's proposal, never pre-allocate).
 
 ## Test-run state (for reproducing/cleanup)
 

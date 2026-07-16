@@ -2,8 +2,11 @@
 
 ## Approval
 
-**DRAFT — pending owner approval (FRG-PROC-009).** Registry IDs not yet allocated;
-allocate in `docs/traceability/requirements-registry.md` at approval.
+**Approved by Adrian, 2026-07-16 (in session, FRG-PROC-009)** as part of the
+M9-remainder plan: this change, `m9-publisher-ignore-defaults`, and
+`m9-ux-diagnosability` land as the M9 tail (v0.9.11–v0.9.13);
+`m9-import-heuristics` is split off as its own milestone. Registry IDs are
+allocated at implementation kickoff of this change.
 
 ## Why
 
