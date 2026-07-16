@@ -234,8 +234,10 @@ test('FRG-PROC-010 FRG-DDL-010 FRG-DL-007 FRG-PP-009 FRG-PP-010: grab downloads,
     { label: 'import to rename the file into the library', timeoutMs: 90_000, intervalMs: 3_000 },
   );
 
-  // Correctly renamed per the default template "{Series Title} {Issue Number:000} ({Year}) [__{IssueId}__]".
-  expect(path.basename(imported)).toMatch(/^Saga 001 \(2012\) \[__\d+__\]\.cbz$/);
+  // Correctly renamed per the CURRENT default template
+  // "{Series Title} {Issue Number:000} ({Year})" (naming-defaults dropped the
+  // [__{IssueId}__] tag from the default; {CvIssueId} is opt-in).
+  expect(path.basename(imported)).toMatch(/^Saga 001 \(2012\)\.cbz$/);
   // And byte-identical to the file the fixture served (import moves, never repackages).
   expect(readFileSync(imported).equals(readFileSync(CBZ_SOURCE))).toBe(true);
 });

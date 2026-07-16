@@ -183,7 +183,8 @@ test('FRG-PROC-010 FRG-UI-015 FRG-IMP-022 FRG-IMP-023: library import scans a ro
   expect(detail.path).toBe(`/library/${MATCH_DIR}`);
   const seriesDir = path.join(LIBRARY_DIR, MATCH_DIR);
   const renamed = readdirSync(seriesDir).filter((f) =>
-    /^Fables 00[12] \(2002\) \[__\d+__\]\.cbz$/.test(f),
+    // Current default template — no [__id__] tag (naming-defaults).
+    /^Fables 00[12] \(2002\)\.cbz$/.test(f),
   );
   expect(renamed, 'both files renamed per the template in place').toHaveLength(2);
   for (const name of renamed) {

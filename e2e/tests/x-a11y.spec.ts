@@ -40,6 +40,8 @@ const CORE_ROUTES = [
   '/settings/indexers',
   '/settings/download-clients',
   '/settings/media-management',
+  '/settings/security',
+  '/sources',
   '/system/health',
   '/system/logs',
 ] as const;
@@ -75,7 +77,12 @@ async function scanRoute(page: Page, route: string): Promise<Finding[]> {
   await expect(page.getByTestId('sidebar-status')).toBeVisible();
   // Let per-screen content paint so contrast/structure is scanned as the user
   // sees it, not a transient loading frame.
+  // Settle: fixed waits alone can scan a loading frame (false pass). Give
+  // the screen a beat, then require any visible loading placeholder to clear.
   await page.waitForTimeout(750);
+  await expect
+    .poll(async () => page.getByText(/^Loading\b/i).count(), { timeout: 10_000 })
+    .toBe(0);
 
   // Inject axe as a page-context expression (CDP eval; CSP-exempt), then run it.
   await page.evaluate(AXE_SOURCE);
