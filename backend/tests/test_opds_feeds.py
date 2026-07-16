@@ -57,8 +57,9 @@ def test_root_feed_lists_only_non_empty_shelves(client, tmp_path):
     root = ET.fromstring(empty.text)
     assert root.findall(f"{ATOM}entry") == []
 
-    # A series with issues-but-no-files: All Series has content, Recent does
-    # NOT (the non-empty convention applies per shelf).
+    # A series with issues-but-no-files: All Series has content (the default
+    # shelf mirrors the full library, FRG-OPDS-018 owner amendment), Recent
+    # does NOT (the non-empty convention applies per shelf).
     _seed(client, tmp_path, [simple_series(n_issues=0)])
     resp = client.get("/opds")
     assert resp.status_code == 200

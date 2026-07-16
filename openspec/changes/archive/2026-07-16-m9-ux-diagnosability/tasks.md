@@ -32,5 +32,5 @@
 ## 6. Docs, gate, merge
 
 - [x] 6.1 Manual: web-ui.md (calendar notice, queue states, not-found), reading-opds.md (HEAD, empty shelves), configuration.md (new OPDS setting row; read-only root folders documented as unsupported — F14 owner default)
-- [ ] 6.2 Suites + tsc green; matrix regen; soup/risk exit 0
-- [ ] 6.3 Tiered gate (medium: 4-5 angles + Codex — broad UI surface); registry flip; archive; merge --no-ff; /release v0.9.13
+- [x] 6.2 Suites + tsc green; matrix regen; soup/risk exit 0
+- [x] 6.3 Tiered gate (medium: 4-5 angles + Codex — broad UI surface); registry flip; archive; merge --no-ff; /release v0.9.13

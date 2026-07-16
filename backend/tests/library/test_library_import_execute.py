@@ -670,3 +670,55 @@ async def test_group_at_the_root_imports_normally_in_move_mode(
     assert len(paths) == 1
     assert Path(paths[0]).parent == root_folder_path / "Saga (2012)"
     assert not original.exists()  # moved into the dedicated folder
+
+
+@pytest.mark.req("FRG-NFR-016")
+async def test_add_failed_group_also_logs_a_warning(
+    db, settings, root_folder_id, root_folder_path, caplog
+):
+    """The other named outcome: two flat-folder groups confirmed to distinct
+    volumes collide on the shared series path — the second add-fails, and that
+    group too must emit its WARNING with the verbatim reason (gate finding:
+    only `blocked` was covered)."""
+    import logging
+
+    flat = root_folder_path / "flat"
+    flat.mkdir(parents=True)
+    make_large_cbz(flat / "saga_vol1.cbz")
+    make_large_cbz(flat / "fables_vol1.cbz")
+
+    cv = (
+        FakeCV()
+        .volume(101, name="Saga", start_year=2012)
+        .issues(101, [issue(9101, "1", cover_date="2012-03-01")])
+        .volume(202, name="Fables", start_year=2002)
+        .issues(202, [issue(9202, "1", cover_date="2002-07-01")])
+    )
+    factory = build_factory(settings, cv.handler())
+    commands = CommandService(db, settings)
+    await scan_library_root(db, settings, root_folder_id, factory=factory)
+    groups = await _groups_by_key(db, root_folder_id)
+    await _confirm(db, groups["saga"].id, 101)
+    await _confirm(db, groups["fables"].id, 202)
+
+    with caplog.at_level(
+        logging.WARNING, logger="foragerr.library.flows.library_import"
+    ):
+        await execute_library_import(
+            db,
+            settings,
+            [groups["saga"].id, groups["fables"].id],
+            commands=commands,
+            factory=factory,
+        )
+
+    warned = [
+        r.getMessage()
+        for r in caplog.records
+        if r.name == "foragerr.library.flows.library_import"
+        and r.levelno == logging.WARNING
+        and "add failed:" in r.getMessage()
+    ]
+    assert len(warned) == 1
+    assert "'fables'" in warned[0]  # the group identity
+    assert "already used by another series" in warned[0]  # verbatim reason

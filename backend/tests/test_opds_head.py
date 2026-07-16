@@ -120,3 +120,44 @@ def test_unauthenticated_head_still_challenges_basic(client, tmp_path):
     get = client.get("/opds")
     assert get.status_code == 401
     assert get.headers["WWW-Authenticate"] == resp.headers["WWW-Authenticate"]
+
+
+def _cbz_without_images() -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("readme.txt", b"no pages here" * 4000)
+    return buf.getvalue()
+
+
+@pytest.mark.req("FRG-OPDS-017")
+def test_head_404s_out_of_range_page_like_get(client, tmp_path):
+    """HEAD must run GET's existence checks (Codex gate finding): an
+    out-of-range page 404s on both verbs, never 200-on-HEAD/404-on-GET."""
+    fid = _seed_image_library(client, tmp_path)
+    url = f"/opds/page/{fid}/99"
+    assert client.get(url).status_code == 404
+    assert client.head(url).status_code == 404
+
+
+@pytest.mark.req("FRG-OPDS-017")
+def test_head_404s_imageless_archive_like_get(client, tmp_path):
+    """An archive with no image members 404s on page AND cover HEAD exactly
+    as on GET (no false 'cover exists' preflight)."""
+    spec = {
+        "title": "Textless",
+        "cv_volume_id": 2,
+        "issues": [
+            {
+                "cv_issue_id": 2001,
+                "number": "1",
+                "files": [
+                    {"name": "Textless 001.cbz", "data": _cbz_without_images()}
+                ],
+            }
+        ],
+    }
+    data = client.portal.call(seed, client.app, tmp_path / "library", [spec])
+    fid = data["series"][0]["issues"][0]["files"][0]["id"]
+    for url in (f"/opds/page/{fid}/0", f"/opds/cover/{fid}"):
+        assert client.get(url).status_code in (404, 502)
+        assert client.head(url).status_code == client.get(url).status_code

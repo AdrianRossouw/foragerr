@@ -240,9 +240,22 @@ def build_opds_router(base_path: str) -> APIRouter:
         exists — the same non-empty convention)."""
         db = request.app.state.db
         async with db.read_session() as session:
-            series_count = await session.scalar(
-                select(func.count()).select_from(SeriesRow)
-            )
+            series_stmt = select(func.count()).select_from(SeriesRow)
+            if request.app.state.settings.opds_hide_fileless_series:
+                # Advertise "All Series" only when the shelf would actually
+                # list something: the same file-bearing predicate the shelf
+                # applies (FRG-OPDS-018), or a filtered-empty shelf gets a
+                # nav entry that opens to nothing.
+                series_stmt = series_stmt.where(
+                    select(IssueFileRow.id)
+                    .join(IssueRow, IssueRow.id == IssueFileRow.issue_id)
+                    .where(
+                        IssueRow.series_id == SeriesRow.id,
+                        IssueFileRow.edition_issue_id.is_(None),
+                    )
+                    .exists()
+                )
+            series_count = await session.scalar(series_stmt)
             file_count = await session.scalar(
                 select(func.count()).select_from(IssueFileRow)
             )
@@ -638,11 +651,27 @@ def build_opds_router(base_path: str) -> APIRouter:
             row, resolved = await _resolve_confined_file(session, issue_file_id)
             cached_count = row.page_count
 
-        # A HEAD preflight (FRG-OPDS-017) mirrors GET's status + advertised
-        # content type but MUST NOT do the expensive archive read/decode: the id
-        # is already resolved+confined above (so a bad/out-of-root id 404s just
-        # like GET), and the advertised page media type is returned with no body.
+        # A HEAD preflight (FRG-OPDS-017) mirrors GET's status but MUST NOT do
+        # the expensive member read/decode. Status parity still requires the
+        # same existence checks GET performs (out-of-range page, no-image or
+        # unlistable archive → 404), so validate via the cached page count when
+        # present, else one bounded listing — never a member read or render.
         if request.method == "HEAD":
+            # Trusting a present cached_count skips the listing; a stale count
+            # could 200 a page GET would 404 — accepted (HEAD stays cheap, the
+            # cache self-heals on the next GET's write-back below).
+            if cached_count:
+                if page < 0 or page >= cached_count:
+                    raise ApiError(
+                        404, f"page {page} out of range for issue-file {issue_file_id}"
+                    )
+            else:
+                await _validate_archive_page(
+                    resolved, page, settings, what=f"issue-file {issue_file_id}"
+                )
+            # Advertised PSE type: GET may return image/png for an alpha
+            # source, but the feed link advertises jpeg — HEAD matches the
+            # advertisement without paying for a decode.
             return Response(media_type=_PSE_IMAGE_TYPE)
 
         # 2. Read the requested page: lists the archive ONCE, off the event loop,
@@ -696,11 +725,20 @@ def build_opds_router(base_path: str) -> APIRouter:
         async with db.read_session() as session:
             _row, resolved = await _resolve_confined_file(session, issue_file_id)
 
-        # A HEAD preflight (FRG-OPDS-017) mirrors GET's status + content type but
-        # skips the (possibly expensive) extract/render+cache: the id is resolved
-        # and root-confined above, and the cover is always served as JPEG, so the
-        # advertised type is returned with no body.
+        # A HEAD preflight (FRG-OPDS-017) mirrors GET's status but skips the
+        # extract/render+cache. Parity requires GET's existence checks: a fresh
+        # cached cover proves streamability outright; otherwise validate page 0
+        # exists (cached count or one bounded listing) — no read, no render.
         if request.method == "HEAD":
+            covers_dir = Path(settings.config_dir) / "covers" / "pages"
+            head_cache = covers_dir / (
+                f"{issue_file_id}{'_thumb' if thumbnail else ''}.jpg"
+            )
+            if not _cover_cache_is_fresh(head_cache, resolved):
+                if not _row.page_count:
+                    await _validate_archive_page(
+                        resolved, 0, settings, what=f"issue-file {issue_file_id}"
+                    )
             return Response(media_type=_PSE_IMAGE_TYPE)
 
         covers_dir = Path(settings.config_dir) / "covers" / "pages"
@@ -781,6 +819,22 @@ def _cover_cache_is_fresh(cache_path: Path, source_path: Path) -> bool:
         return cache_path.stat().st_mtime >= source_path.stat().st_mtime
     except OSError:
         return False
+
+
+async def _validate_archive_page(
+    resolved: Path, index: int, settings, *, what: str
+) -> int:
+    """The existence half of :func:`_read_archive_page` — one bounded listing
+    (off the event loop) + bounds check, NO member read or decode. Gives HEAD
+    the same 404 surface as GET (FRG-OPDS-017) at listing cost only. Returns
+    the member count."""
+    limits = settings.opds_pse_archive_limits()
+    members = await asyncio.to_thread(list_image_members, resolved, limits)
+    if not members:  # None (not listable) or [] (no image pages)
+        raise ApiError(404, f"no streamable pages for {what}")
+    if index < 0 or index >= len(members):
+        raise ApiError(404, f"page {index} out of range for {what}")
+    return len(members)
 
 
 async def _read_archive_page(

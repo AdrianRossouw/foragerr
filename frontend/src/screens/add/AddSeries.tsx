@@ -344,6 +344,9 @@ function AddOptionsPanel({
   // non-writable path) carries the backend's verbatim message, shown against
   // the input so the operator can correct the path and retry.
   const registerRoot = async () => {
+    // Enter on the input bypasses the disabled submit button — guard here or
+    // a double-submit races itself into a spurious "already registered" 400.
+    if (createRootFolder.isPending) return;
     const path = newRootPath.trim();
     if (!path) return;
     setRootRegisterError(null);

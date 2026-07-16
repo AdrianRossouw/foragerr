@@ -12,6 +12,10 @@ allocated at implementation kickoff. Scope notes from approval:
   before implementation.
 - A states audit (empty/loading/error coverage per screen) runs before
   implementation; any real findings fold into this change's scope.
+- **Gate amendment (owner, 2026-07-16):** item 6's file-less-series hiding is
+  **opt-in, not default** — the OPDS shelf mirrors the full library (wanted
+  series included) out of the box; `opds_hide_fileless_series=true` enables
+  the reading-only shelf. HEAD support unchanged.
 - The handoff fidelity audit is **dropped** (owner: the handoff was a quick
   sketch; fidelity is not maintained). An accessibility scan is deferred to
   after the M9 release cycle, with axe-tooling-in-gates evaluated separately.

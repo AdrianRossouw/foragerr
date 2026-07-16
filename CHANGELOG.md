@@ -9,6 +9,41 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.9.13] — 2026-07-16
+
+The app tells you what it knows: linked guidance, visible outages, honest
+queues, and OPDS reader-compatibility (m9-ux-diagnosability, closing the M9
+tail).
+
+### Added
+
+- The add-series dialog registers your first **root folder inline** — no
+  detour through Settings on first run; refusals show the exact reason
+  (`FRG-UI-034`).
+- The **Calendar** shows an inline notice when the weekly release source is
+  unreachable, instead of a bare empty week (`FRG-UI-035`).
+- OPDS answers **HEAD** on every feed/file/page/cover URL with GET-parity
+  status and auth, so preflighting reader apps and proxies work
+  (`FRG-OPDS-017`).
+- Opt-in `opds_hide_fileless_series`: hide series with no files from the OPDS
+  shelf. **Off by default** — the shelf mirrors your full library, wanted
+  series included (owner decision at the gate) (`FRG-OPDS-018`).
+
+### Changed
+
+- Guidance that names a settings screen now links there (ComicVine key errors,
+  root-folder notices), and health warnings speak UI language instead of
+  config-key names (`FRG-UI-033`).
+- Completed downloads awaiting import read **"Awaiting import"** in the
+  Queue — fast grabs are never invisible mid-pipeline (`FRG-UI-037`).
+- Unknown web-UI routes render a not-found screen inside the app shell, never
+  a blank page (`FRG-UI-036`).
+- Library-import failures log one WARNING per group with the verbatim reason —
+  container logs now explain what the review screen knows (`FRG-NFR-016`).
+
+Root folders must be writable (read-only mounts are refused) — now documented.
+No schema changes; no upgrade steps.
+
 ## [v0.9.12] — 2026-07-16
 
 Foreign-market reprints no longer outrank the volume you actually want

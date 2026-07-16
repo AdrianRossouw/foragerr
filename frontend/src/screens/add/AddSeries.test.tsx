@@ -638,7 +638,7 @@ describe('FRG-UI-005: lookup outcome states', () => {
     expect(screen.queryByText(/Try again in a moment/)).not.toBeInTheDocument();
   });
 
-  it('FRG-UI-020 — the credential-error guidance links to Settings -> General', async () => {
+  it('FRG-UI-020 FRG-UI-033 — the credential-error guidance links to Settings -> General', async () => {
     renderAdd({
       lookup: () => {
         throw cvAuthError();
