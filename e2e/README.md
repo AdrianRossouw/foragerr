@@ -159,8 +159,8 @@ usenet/SAB path is available as the live tier.
 
 ## SOUP note
 
-`e2e/package.json` (Playwright, TypeScript, **axe-core**) is dev/test tooling and
-is outside the scope the SOUP register declares (it tracks the product manifests
-it names); no register rows are added for it. axe-core rides the same exemption
-as Playwright — it never ships in the product image. See the change proposal's
-impact section.
+`e2e/package.json` (Playwright, TypeScript, axe-core) is dev/test tooling that
+never ships in the product image. The SOUP register grew an **e2e tooling**
+section after this README's original exemption note was written, so these
+dependencies DO carry register rows now (`docs/security/soup-register.md`) —
+`tools/soup_check.py` enforces manifest/register agreement at every gate.

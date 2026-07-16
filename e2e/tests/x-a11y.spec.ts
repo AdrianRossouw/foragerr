@@ -25,7 +25,7 @@ const AXE_SOURCE = readFileSync(require.resolve('axe-core/axe.min.js'), 'utf8');
 
 // The WCAG tag families the scan enforces (mirrors the owner-directed
 // post-cycle scan: WCAG 2.1 A/AA).
-const WCAG_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa'] as const;
+const WCAG_TAGS = ['wcag2a', 'wcag21a', 'wcag2aa', 'wcag21aa'] as const;
 
 // The authenticated core screens. Kept in one place so the coverage set is
 // obvious; every route is inside AuthGate and reached with the saved session.

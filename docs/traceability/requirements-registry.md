@@ -63,7 +63,7 @@ source. Compatibility: pre-1.0 releases may break with migration notes; from
 | FRG-PROC-016 | Known-anomalies register | dev-process | active | — |
 | FRG-PROC-017 | Regenerable README screenshots | dev-process | implemented | M4 |
 | FRG-PROC-018 | Roadmap single source of truth | dev-process | implemented | M4 |
-| FRG-PROC-019 | Accessibility scan in the e2e gate | dev-process | approved | M9 |
+| FRG-PROC-019 | Accessibility scan in the e2e gate | dev-process | implemented | M9 |
 | FRG-SER-001 | Series entity from ComicVine volume | ser | implemented | M1 |
 | FRG-SER-002 | Issue entity | ser | implemented | M1 |
 | FRG-SER-003 | Two-level monitored flags | ser | implemented | M1 |
@@ -297,7 +297,7 @@ source. Compatibility: pre-1.0 releases may break with migration notes; from
 | FRG-UI-035 | Calendar degraded-source notice | ui | implemented | M9 |
 | FRG-UI-036 | Unknown routes render a not-found screen | ui | implemented | M9 |
 | FRG-UI-037 | Completed downloads awaiting import are visible in Queue | ui | implemented | M9 |
-| FRG-UI-038 | Automated accessibility conformance of core screens | ui | approved | M9 |
+| FRG-UI-038 | Automated accessibility conformance of core screens | ui | implemented | M9 |
 | FRG-SRC-001 | store-source model and connection lifecycle | sources | implemented | M6 |
 | FRG-SRC-002 | Humble session-cookie authentication | sources | implemented | M6 |
 | FRG-SRC-003 | entitlement sync | sources | implemented | M6 |
