@@ -106,6 +106,7 @@ deliberately does not cross-check this section against a manifest).
 | Name | Version constraint | Purpose |
 |---|---|---|
 | @playwright/test | `1.49.1` | Browser-driven end-to-end test runner for the FRG-PROC-010 slice-verification harness (`e2e/tests`) |
+| axe-core | `^4.12.1` | WCAG 2.1 A/AA accessibility ruleset the harness's a11y tier injects and runs per screen (FRG-PROC-019); dev-only, never ships in the product image |
 | @types/node | `^26.1.0` | TypeScript type definitions for the harness's node-side helpers and report generator |
 | typescript | `^6.0.3` | Type-checks the e2e harness sources |
 

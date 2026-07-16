@@ -305,6 +305,22 @@ describe('FRG-UI-023: sidebar count badges are live', () => {
     );
   });
 
+  it('FRG-UI-038 — the connection dot carries a valid role and an accessible name (not a bare aria-label span)', async () => {
+    renderWithProviders(<Sidebar />, {
+      withRouter: true,
+      client: createQueryClient(),
+      fetcher: sidebarFetcher({ series: [], queueTotal: 0 }),
+    });
+
+    const dot = screen.getByTestId('connection-status');
+    // A span cannot legally carry aria-label with no role (axe
+    // aria-prohibited-attr): role="img" makes the accessible name permitted and
+    // keeps the connection state perceivable to a screen reader.
+    expect(dot).toHaveAttribute('role', 'img');
+    // The image role is exposed with its accessible name.
+    expect(screen.getByRole('img', { name: 'Connected' })).toBe(dot);
+  });
+
   it('FRG-UI-023 — a dropped socket surfaces as reconnecting even when health is clean', async () => {
     act(() => {
       useConnectionStore.setState({ status: 'disconnected' });

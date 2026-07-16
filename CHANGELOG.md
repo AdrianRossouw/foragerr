@@ -9,6 +9,33 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.9.14] — 2026-07-16
+
+Accessibility conformance, and the scanner that keeps it true
+(m9-a11y-fixes, owner-approved same day).
+
+### Added
+
+- **Accessibility gate**: the e2e harness now runs the axe-core WCAG 2.1 A/AA
+  ruleset across 14 core screens and fails on any serious or critical
+  violation (`FRG-PROC-019`). The harness is fully green — 36 scenarios, the
+  a11y tier included.
+
+### Fixed
+
+- All four serious accessibility violations found by the post-cycle scan
+  (`FRG-UI-038`): the connection indicator is now screen-reader-perceivable;
+  muted text and danger-toned text meet the 4.5:1 contrast minimum everywhere
+  (new `--color-danger-text` tone); indexer/download-client cards no longer
+  nest interactive controls (the provider name is the keyboard edit control);
+  the Health components table is keyboard-scrollable. Verified: a full axe
+  sweep of all 21 screens reports **zero violations**.
+- The e2e harness's stale expectations (pre-existing red): renaming is pinned
+  on in the harness and expectations follow the current naming template;
+  the Sources spec no longer pins the pre-extension "Coming soon" chip.
+
+No behavior changes; no upgrade steps.
+
 ## [v0.9.13] — 2026-07-16
 
 The app tells you what it knows: linked guidance, visible outages, honest

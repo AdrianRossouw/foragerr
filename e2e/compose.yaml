@@ -68,6 +68,11 @@ services:
       FORAGERR_USENET_RETENTION_DAYS: "30"
       # Poll completed downloads quickly so S4 does not wait a full minute.
       FORAGERR_TRACK_DOWNLOADS_INTERVAL_SECONDS: "60"
+      # The spine and library-import scenarios assert template renaming
+      # (FRG-PP-009/010, FRG-IMP-023); naming-defaults (v0.9.x) flipped the
+      # product default to keep-original-names, which silently broke those
+      # assertions — the harness pins renaming ON to keep exercising it.
+      FORAGERR_RENAME_ENABLED: "true"
       FORAGERR_LOG_LEVEL: INFO
     volumes:
       - ${FORAGERR_E2E_RUN}/config:/config

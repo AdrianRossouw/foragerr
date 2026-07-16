@@ -120,7 +120,18 @@ export function HealthScreen() {
 
             <section className={styles.section}>
               <h2 className={styles.sectionHeading}>Components</h2>
-              <table className={styles.table}>
+              {/* Focusable, labelled scroll region: the wide component table
+                  overflows horizontally on narrow viewports, and a scrollable
+                  region with no focusable descendants must be keyboard-reachable
+                  (axe scrollable-region-focusable, FRG-UI-038). */}
+              <div
+                className={styles.tableScroll}
+                tabIndex={0}
+                role="region"
+                aria-label="Health components"
+                data-testid="health-components-scroll"
+              >
+                <table className={styles.table}>
                 <thead>
                   <tr>
                     <th>Component</th>
@@ -158,6 +169,7 @@ export function HealthScreen() {
                   ))}
                 </tbody>
               </table>
+              </div>
             </section>
           </>
         )}

@@ -181,6 +181,25 @@ describe('FRG-UI-016: system health screen', () => {
     expect(screen.getByTestId('health-all-healthy')).toBeInTheDocument();
   });
 
+  it('FRG-UI-038 — the components table sits in a keyboard-focusable, labelled scroll region', async () => {
+    const { fetcher } = fakeFetcher((path) => {
+      if (path === '/api/v1/health') return [];
+      if (path === '/api/v1/system/health') return mockHealthyComponents;
+      throw new Error(`unexpected request: ${path}`);
+    });
+    renderWithProviders(<HealthScreen />, { fetcher });
+
+    // The wide component table overflows horizontally; its scroll container
+    // must be keyboard-reachable (axe scrollable-region-focusable) — a labelled
+    // region with tabindex=0 rather than a mouse-only overflow div.
+    const region = await screen.findByTestId('health-components-scroll');
+    expect(region).toHaveAttribute('tabindex', '0');
+    expect(region).toHaveAttribute('role', 'region');
+    expect(region).toHaveAccessibleName('Health components');
+    // The table it wraps is still rendered inside it.
+    expect(within(region).getByRole('table')).toBeInTheDocument();
+  });
+
   it('FRG-UI-016 / FRG-API-014 — Last Success / Last Failure render formatted dates, not raw ISO strings', async () => {
     const components = [
       makeHealthComponent({

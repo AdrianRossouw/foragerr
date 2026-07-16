@@ -29,6 +29,17 @@
   composes: table from '../../components/dataTable.module.css';
 }
 
+/* Keyboard-reachable horizontal scroll container for the wide component table
+ * (FRG-UI-038 / axe scrollable-region-focusable). */
+.tableScroll {
+  overflow-x: auto;
+}
+
+.tableScroll:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
 .btn {
   composes: btn from '../../components/dataTable.module.css';
 }
@@ -168,7 +179,7 @@
 }
 
 .chipError {
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   border-color: var(--color-danger);
 }
 
@@ -182,7 +193,7 @@
 
 .errorNote {
   margin: var(--spacing-xs) 0 0;
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   font-size: var(--font-size-sm);
 }
 

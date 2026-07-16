@@ -58,6 +58,31 @@ describe('FRG-UI-008: indexer settings cards', () => {
     expect(within(card).getByText('Interactive Search')).toBeInTheDocument();
   });
 
+  it('FRG-UI-038 — the card wrapper is not interactive, yet the "Edit" button is keyboard-reachable and opens the modal', async () => {
+    const user = userEvent.setup();
+    const { fetcher } = fakeFetcher(indexerResolver());
+    renderWithProviders(<IndexerSettings />, { fetcher });
+
+    const card = await screen.findByTestId('provider-card-1');
+    // The card wrapper must NOT be an interactive control — otherwise the
+    // enable switch inside it is a nested interactive (axe nested-interactive).
+    expect(card).not.toHaveAttribute('role', 'button');
+    expect(card).not.toHaveAttribute('tabindex');
+
+    // The keyboard/AT edit affordance is a real button named "Edit <name>"; it
+    // is focusable and opens the edit dialog.
+    const editButton = within(card).getByRole('button', { name: 'Edit DogNZB' });
+    editButton.focus();
+    expect(editButton).toHaveFocus();
+    await user.keyboard('{Enter}');
+    expect(
+      screen.getByRole('dialog', { name: 'Edit Indexer — Newznab' }),
+    ).toBeInTheDocument();
+
+    // The enable switch remains a sibling control, not nested in a button.
+    expect(within(card).getByRole('switch')).toBeInTheDocument();
+  });
+
   it('FRG-UI-008 — a disabled indexer\'s card reflects the disabled state', async () => {
     const disabled = [{ ...mockIndexers[0], enabled: false }];
     const { fetcher } = fakeFetcher(indexerResolver({ rows: () => disabled }));

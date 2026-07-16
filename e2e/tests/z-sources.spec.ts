@@ -40,10 +40,11 @@ test.describe('FRG-UI-029 Sources', () => {
     await expect(input).toHaveAttribute('type', 'password');
     await expect(page.getByTestId('connect-button')).toBeDisabled();
 
-    // The helper reveals the extension "coming soon" chip and the cookie name.
+    // The helper names the extension path (shipped v0.9.9 — replaced the old
+    // "coming soon" chip this spec previously pinned) and the cookie name.
     await page.getByTestId('helper-toggle').click();
     const helper = page.getByTestId('cookie-helper');
-    await expect(helper.getByText('Coming soon')).toBeVisible();
+    await expect(helper.getByText(/browser extension/i)).toBeVisible();
     await expect(helper.getByText('_simpleauth_sess')).toBeVisible();
 
     // Typing past the threshold enables Connect.

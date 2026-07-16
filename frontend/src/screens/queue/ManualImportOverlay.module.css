@@ -32,7 +32,7 @@
 }
 
 .chipBlocked {
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   border-color: var(--color-danger);
 }
 

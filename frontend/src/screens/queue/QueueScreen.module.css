@@ -70,7 +70,7 @@
 }
 
 .chipFailed {
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   border-color: var(--color-danger);
 }
 
@@ -162,7 +162,7 @@
 
 .btnDanger {
   composes: btn;
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   border-color: var(--color-danger);
   background: none;
 }
