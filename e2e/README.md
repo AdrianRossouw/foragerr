@@ -88,6 +88,16 @@ The spine (`tests/spine.spec.ts`, serial — the library grows across steps):
    an Add Series search renders the actionable credential error pointing at
    Settings, never the plain "no results" state (`FRG-UI-005`).
 
+The **accessibility tier** (`tests/x-a11y.spec.ts`, sorts after the spine so the
+library has content — `FRG-PROC-019` / `FRG-UI-038`) injects **axe-core** into
+each authenticated core screen (library, add, calendar, wanted, queue, history,
+the four settings screens, system health + logs) and runs the WCAG 2.1 A/AA
+ruleset. The suite **fails on any serious- or critical-impact violation** —
+zero-tolerance, no baseline file (the four m9-a11y-fixes findings land in the
+same change, so the clean state is the starting invariant). A failure names the
+screen, rule id, and first node selector. axe is injected from its resolved
+package source via CDP evaluation, so a strict app CSP cannot block the scan.
+
 Each test title names the FRG ids it exercises;
 `scripts/acceptance-report.mjs` converts the Playwright JSON reporter output
 into `acceptance-report.md` (scenario → ids → pass/fail/skipped). There is no
@@ -149,6 +159,8 @@ usenet/SAB path is available as the live tier.
 
 ## SOUP note
 
-`e2e/package.json` (Playwright, TypeScript) is dev/test tooling and is outside
-the scope the SOUP register declares (it tracks the product manifests it names);
-no register rows are added for it. See the change proposal's impact section.
+`e2e/package.json` (Playwright, TypeScript, **axe-core**) is dev/test tooling and
+is outside the scope the SOUP register declares (it tracks the product manifests
+it names); no register rows are added for it. axe-core rides the same exemption
+as Playwright — it never ships in the product image. See the change proposal's
+impact section.

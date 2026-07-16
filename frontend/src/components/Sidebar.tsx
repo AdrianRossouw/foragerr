@@ -239,10 +239,17 @@ export function Sidebar() {
         <span className={styles.footerText}>
           Foragerr{version ? ` ${version}` : ''} — {healthLabel}
         </span>
+        {/* role="img" (not status) so the dot carries a valid, permitted
+            accessible name: a bare span cannot hold aria-label (axe
+            aria-prohibited-attr). The enclosing footer is already the
+            role="status" aria-live region, so the connection change is
+            announced once there — a second live role here would double-announce
+            every reconnect. */}
         <span
           className={`${styles.connDot} ${CONNECTION_CLASS[connection]}`}
           data-testid="connection-status"
           data-status={connection}
+          role="img"
           aria-label={CONNECTION_LABEL[connection]}
           title={CONNECTION_LABEL[connection]}
         />

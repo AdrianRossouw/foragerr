@@ -51,12 +51,30 @@
   gap: var(--spacing-sm);
 }
 
+/* The provider name is a real <button> (the keyboard/AT edit affordance) styled
+ * as plain heading text: reset the native button chrome, keep the name styling.
+ * The card wrapper deliberately carries no interactive role, so this button is
+ * the only focusable edit control (axe nested-interactive, FRG-UI-038). */
 .cardName {
+  appearance: none;
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
   font-size: var(--font-size-lg);
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.cardName:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
 }
 
 .chipRow {

@@ -77,7 +77,13 @@
   --text-bright: #f0f0f0;
   --text-primary: #e6e6e6;
   --text-secondary: #9a9a9a;
-  --text-muted: #7a7a7a;
+  /* Muted caption/label tier. Lightened from #7a7a7a (3.53:1 on the #262626
+   * chrome — below the 4.5:1 WCAG AA floor) to #969696, which clears 4.5:1 on
+   * every shell surface it renders on (5.12:1 on #262626, 5.51:1 on #202020
+   * page, 4.98:1 on #282828 card, 4.53:1 on the lightest #2f2f2f hover) while
+   * staying below --text-secondary (#9a9a9a) so the muted < secondary hierarchy
+   * holds (FRG-UI-038). */
+  --text-muted: #969696;
   --text-faint: #5f5f5f;
   --text-on-accent: var(--color-accent-contrast);
   /* Legible near-white for a chip sitting on cover art (poster overlay chips). */
