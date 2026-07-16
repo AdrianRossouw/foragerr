@@ -98,6 +98,9 @@
   --color-info: #5d9cec;
   --color-info-text: #8ab6f0;
   --color-danger: #f05050;
+  /* Danger as TEXT on dark surfaces needs a lighter tone for 4.5:1
+     (mirrors --color-success-text; #f05050-as-text is 4.2:1 on cards). */
+  --color-danger-text: #f57373;
   --color-neutral: #9a9a9a;
   /* Per-tone tint backgrounds for a toned chip: each hue's own low-alpha wash so
    * amber/blue chip text no longer rides the green accent tint (semantic match). */

@@ -184,7 +184,7 @@
 }
 
 .statusDisconnected {
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   background: var(--color-danger);
 }
 
@@ -281,7 +281,7 @@
  * server-side termination — the operator stays signed in and can retry. */
 .logoutError {
   font-size: var(--font-size-sm);
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   white-space: nowrap;
   align-self: center;
 }

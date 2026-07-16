@@ -16,7 +16,7 @@
 .errorNote {
   max-width: 900px;
   margin: 0 auto var(--spacing-md);
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   font-size: var(--font-size-sm);
 }
 
@@ -151,7 +151,7 @@
 
 .chipBlocked {
   border-color: var(--color-danger);
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   background: none;
 }
 

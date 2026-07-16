@@ -243,7 +243,7 @@
 
 .connectError {
   margin-top: var(--spacing-md);
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   font-size: var(--font-size-sm);
 }
 
@@ -331,7 +331,7 @@
 }
 
 .dangerBtn:hover {
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   border-color: var(--color-danger);
 }
 
@@ -407,7 +407,7 @@
 }
 
 .bulkNote {
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   margin-left: var(--spacing-sm);
 }
 
@@ -612,7 +612,7 @@
 }
 
 .failedNote {
-  color: var(--color-danger);
+  color: var(--color-danger-text);
   font-size: var(--font-size-xs);
   margin-top: 2px;
 }
