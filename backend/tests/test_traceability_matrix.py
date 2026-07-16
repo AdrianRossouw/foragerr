@@ -53,14 +53,20 @@ def test_pre_baseline_statuses_are_excused_only_in_open_deltas():
     the widened exemption so a regression that reverts it is caught here, not at
     the next merge gate."""
     assert trace_tool.PRE_BASELINE_STATUSES == ("proposed", "approved")
-    # Every currently-approved FRG-SITE row is backed by the open change delta,
-    # so trace.py must run clean over real repo state (the same check the merge
-    # gate runs). A regression narrowing the status set would surface those rows
-    # as gaps and make main() exit non-zero.
+    # Every pre-baseline row must be backed by an open change delta, so
+    # trace.py runs clean over real repo state (the same check the merge gate
+    # runs). The set may legitimately be empty between change cycles (rows
+    # flip to implemented when a change archives — this is what un-pinned the
+    # original FRG-SITE canary); the tuple pin above remains the regression
+    # guard for the widened exemption itself.
     reg = trace_tool.registry_rows()
     delta_ids = trace_tool.open_change_delta_ids()
-    approved_site = [rid for rid, row in reg.items()
-                     if rid.startswith("FRG-SITE-") and row["status"] == "approved"]
-    assert approved_site, "expected the site change's approved rows to be present"
-    for rid in approved_site:
-        assert rid in delta_ids, f"{rid} approved but not in any open change delta"
+    baseline_ids = trace_tool.spec_ids()
+    unbaselined = [rid for rid, row in reg.items()
+                   if row["status"] in trace_tool.PRE_BASELINE_STATUSES
+                   and rid not in baseline_ids]
+    for rid in unbaselined:
+        assert rid in delta_ids, (
+            f"{rid} is {reg[rid]['status']}, has no baseline spec, and is not "
+            "in any open change delta"
+        )
