@@ -41,6 +41,14 @@ that prompt. The tailnet remains the recommended exposure boundary regardless
   serve a feed, so browsing is always fast, even for large libraries.
 - Long shelves are **paginated** with standard next/previous links and OpenSearch
   totals, so readers can show progress through the catalog.
+- The **All Series** shelf lists only series that actually have files to read —
+  a freshly added, still-empty series does not appear as an empty shelf, and
+  shows up the moment its first file imports. If you would rather see every
+  series regardless, set `opds_hide_fileless_series` to false (`configuration.md`).
+- Every feed, file, and page URL answers **HEAD** requests as well as GET, so
+  reader apps and proxies that preflight a URL with HEAD see the catalog exactly
+  as they would with GET (same status, auth challenge, and headers). No setup
+  needed — it just works with clients that behave this way.
 
 ## Downloads
 

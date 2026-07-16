@@ -99,7 +99,7 @@ describe('FRG-UI-006: queue screen', () => {
   it.each([
     {
       state: 'import_pending',
-      chipLabel: 'Waiting to import',
+      chipLabel: 'Awaiting import',
       messages: ['Waiting for the import pipeline'],
     },
     {
@@ -129,6 +129,25 @@ describe('FRG-UI-006: queue screen', () => {
       }
     },
   );
+
+  it('FRG-UI-037 — a completed-but-unimported download stays visible with an Awaiting import label', async () => {
+    // The mid-pipeline state (SAB complete, foragerr import not yet run) is
+    // `import_pending`: it must not vanish from the Queue, and it renders a
+    // distinct awaiting-import label rather than a bare/empty row (F19).
+    const envelope = mockQueueEnvelope([
+      mockQueueRecord({
+        id: 920,
+        state: 'import_pending',
+        status: 'ok',
+        statusMessages: [],
+      }),
+    ]);
+    const { fetcher } = fakeFetcher(() => envelope);
+    renderWithProviders(<QueueScreen />, { fetcher });
+
+    const row = await screen.findByTestId('queue-row-920');
+    expect(within(row).getByRole('button', { name: 'Awaiting import' })).toBeInTheDocument();
+  });
 
   it('FRG-UI-006 — remove dialog offers delete-data and blocklist options and confirming issues the DELETE', async () => {
     const { spy, fetcher } = fakeFetcher((path) =>

@@ -22,6 +22,7 @@ import { StatusScreen } from './screens/system/StatusScreen';
 import { HealthScreen } from './screens/system/HealthScreen';
 import { TasksScreen } from './screens/system/TasksScreen';
 import { LogsScreen } from './screens/system/LogsScreen';
+import { NotFound } from './screens/NotFound';
 
 /**
  * Routing (FRG-UI-001). All change-7 screens are real: library cluster
@@ -71,6 +72,9 @@ export function App() {
         <Route path="system/health" element={<HealthScreen />} />
         <Route path="system/tasks" element={<TasksScreen />} />
         <Route path="system/logs" element={<LogsScreen />} />
+        {/* Catch-all (FRG-UI-036): any undefined path renders the not-found
+            screen inside the shell, never a blank page. */}
+        <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>
   );

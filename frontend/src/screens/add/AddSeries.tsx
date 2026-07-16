@@ -10,6 +10,7 @@ import {
 import { SearchIcon, CloseIcon, CheckIcon, PlusIcon } from '../../components/icons';
 import {
   useAddSeries,
+  useCreateRootFolder,
   useFormatProfiles,
   useLookup,
   useRootFolders,
@@ -314,6 +315,7 @@ function AddOptionsPanel({
 }) {
   const rootFolders = useRootFolders();
   const formatProfiles = useFormatProfiles();
+  const createRootFolder = useCreateRootFolder();
   // null = not chosen yet -> default to the first entry once the list loads.
   const [rootFolderId, setRootFolderId] = useState<number | null>(null);
   const [formatProfileId, setFormatProfileId] = useState<number | null>(null);
@@ -321,6 +323,10 @@ function AddOptionsPanel({
   // '' = untouched -> the add carries NO booktype (derivation, FRG-SER-018).
   const [collectAs, setCollectAs] = useState<CollectAs>('');
   const [searchOnAdd, setSearchOnAdd] = useState(false);
+  // Inline first-run root-folder registration (FRG-UI-034): a path input +
+  // verbatim refusal shown in the no-roots branch below.
+  const [newRootPath, setNewRootPath] = useState('');
+  const [rootRegisterError, setRootRegisterError] = useState<string | null>(null);
 
   const selectedRootFolderId = rootFolderId ?? rootFolders.data?.[0]?.id ?? null;
   const selectedProfileId =
@@ -330,6 +336,25 @@ function AddOptionsPanel({
   // section where one can actually be created instead of a dead-end select.
   const noRootFolders =
     rootFolders.data !== undefined && rootFolders.data.length === 0;
+
+  // Register a root folder inline (FRG-UI-034, Sonarr pattern): POST through the
+  // same validated API the settings screen uses, then select the new folder so
+  // the dialog becomes addable in place — the search results and this open
+  // panel are untouched (no leave-and-return detour). A refusal (e.g. a
+  // non-writable path) carries the backend's verbatim message, shown against
+  // the input so the operator can correct the path and retry.
+  const registerRoot = async () => {
+    const path = newRootPath.trim();
+    if (!path) return;
+    setRootRegisterError(null);
+    try {
+      const created = await createRootFolder.mutateAsync({ path });
+      setRootFolderId(created.id);
+      setNewRootPath('');
+    } catch (error) {
+      setRootRegisterError(error instanceof Error ? error.message : String(error));
+    }
+  };
 
   const monitorOptions: SegmentOption<string>[] = MONITOR_STRATEGIES.map((s) => ({
     value: s,
@@ -341,12 +366,49 @@ function AddOptionsPanel({
     <div className={styles.addPanel} data-testid="add-options-panel">
       <div className={styles.selectGrid}>
         {noRootFolders ? (
-          <p className={styles.errorNote} role="alert" data-testid="add-no-roots">
-            No root folders are registered, so the series has nowhere to live.
-            Add your comics folder as a root folder in{' '}
-            <Link to="/settings/media-management">Media Management settings</Link>{' '}
-            first.
-          </p>
+          <div
+            className={styles.inlineRootRegister}
+            data-testid="add-no-roots"
+          >
+            <p className={styles.inlineRootHint}>
+              No root folders are registered, so the series has nowhere to live.
+              Add your comics folder here to continue.
+            </p>
+            <form
+              className={styles.inlineRootRow}
+              onSubmit={(e) => {
+                e.preventDefault();
+                void registerRoot();
+              }}
+            >
+              <input
+                type="text"
+                className={styles.inlineRootInput}
+                aria-label="New root folder path"
+                placeholder="/absolute/path/to/comics"
+                value={newRootPath}
+                onChange={(e) => setNewRootPath(e.target.value)}
+              />
+              <button
+                type="submit"
+                className={styles.addButton}
+                data-testid="add-register-root"
+                disabled={newRootPath.trim() === '' || createRootFolder.isPending}
+              >
+                <PlusIcon size={13} />
+                {createRootFolder.isPending ? 'Adding…' : 'Add root folder'}
+              </button>
+            </form>
+            {rootRegisterError && (
+              <p className={styles.errorNote} role="alert" data-testid="add-root-error">
+                {rootRegisterError}
+              </p>
+            )}
+            <p className={styles.inlineRootSecondary}>
+              You can also manage root folders in{' '}
+              <Link to="/settings/media-management">Media Management settings</Link>.
+            </p>
+          </div>
         ) : (
           <label className={styles.formField}>
             <span className={styles.fieldLabel}>Root Folder</span>

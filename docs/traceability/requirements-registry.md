@@ -291,6 +291,11 @@ source. Compatibility: pre-1.0 releases may break with migration notes; from
 | FRG-UI-030 | Command failure cause surfaced at the watch surface | ui | implemented | M9 |
 | FRG-UI-031 | Ignored publishers editable in Settings | ui | implemented | M9 |
 | FRG-UI-032 | Hidden-by-ignore-list results are recoverable in Add New | ui | implemented | M9 |
+| FRG-UI-033 | Actionable UI-language guidance with settings links | ui | approved | M9 |
+| FRG-UI-034 | Inline root-folder creation in the add dialog | ui | approved | M9 |
+| FRG-UI-035 | Calendar degraded-source notice | ui | approved | M9 |
+| FRG-UI-036 | Unknown routes render a not-found screen | ui | approved | M9 |
+| FRG-UI-037 | Completed downloads awaiting import are visible in Queue | ui | approved | M9 |
 | FRG-SRC-001 | store-source model and connection lifecycle | sources | implemented | M6 |
 | FRG-SRC-002 | Humble session-cookie authentication | sources | implemented | M6 |
 | FRG-SRC-003 | entitlement sync | sources | implemented | M6 |
@@ -323,6 +328,8 @@ source. Compatibility: pre-1.0 releases may break with migration notes; from
 | FRG-OPDS-014 | Publisher browse shelf | opds | approved | B |
 | FRG-OPDS-015 | Single OPDS version; no OPDS 2.0 | opds | approved | B |
 | FRG-OPDS-016 | RAR-backed archive access for page streaming | opds | implemented | 0.9.x |
+| FRG-OPDS-017 | HEAD requests answered on OPDS routes | opds | approved | M9 |
+| FRG-OPDS-018 | File-less series omitted from OPDS shelves | opds | approved | M9 |
 | FRG-NOTIF-001 | Generic notifier provider abstraction | notif | approved | B |
 | FRG-NOTIF-002 | Event catalog with per-connection opt-in | notif | approved | B |
 | FRG-NOTIF-003 | Event payload content | notif | approved | B |
@@ -401,6 +408,7 @@ source. Compatibility: pre-1.0 releases may break with migration notes; from
 | FRG-SEC-005 | CSRF stance and WebSocket Origin validation | sec | implemented | M8 |
 | FRG-NFR-014 | Listener request resource limits | nfr | implemented | M2 |
 | FRG-NFR-015 | Bounded log capture with configurable retention | nfr | implemented | M4 |
+| FRG-NFR-016 | Library-import group failures logged at WARNING with reasons | nfr | approved | M9 |
 | FRG-QUAL-001 | Format profile entity | qual | implemented | M1 |
 | FRG-QUAL-002 | Default profile seeded on first run | qual | implemented | M1 |
 | FRG-QUAL-003 | Release preferred-term scoring | qual | approved | B |

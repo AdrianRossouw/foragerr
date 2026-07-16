@@ -325,6 +325,51 @@ async def test_blocked_files_leave_group_reviewable_with_visible_reasons(
     assert await _issue_file_paths(db, 101) == []
 
 
+@pytest.mark.req("FRG-NFR-016")
+async def test_failed_group_logs_a_warning_with_group_and_reason(
+    db, settings, root_folder_id, root_folder_path, caplog
+):
+    """A blocked group emits one WARNING naming the group and its verbatim
+    recorded reason (F11: five failures were hidden behind an INFO totals line;
+    the per-group reasons existed only as UI card state)."""
+    import logging
+
+    corrupt = root_folder_path / "Saga (2012)" / "Saga 001 (2012).cbz"
+    corrupt.parent.mkdir(parents=True)
+    corrupt.write_bytes(b"not a zip at all" * 20_000)  # big enough, invalid
+
+    cv = (
+        FakeCV()
+        .volume(101, name="Saga", start_year=2012)
+        .issues(101, [issue(9101, "1", cover_date="2012-03-01")])
+    )
+    factory = build_factory(settings, cv.handler())
+    commands = CommandService(db, settings)
+    await scan_library_root(db, settings, root_folder_id, factory=factory)
+    groups = await _groups_by_key(db, root_folder_id)
+    await _confirm(db, groups["saga"].id, 101)
+
+    with caplog.at_level(
+        logging.WARNING, logger="foragerr.library.flows.library_import"
+    ):
+        summary = await execute_library_import(
+            db, settings, [groups["saga"].id], commands=commands, factory=factory
+        )
+
+    assert summary == "blocked=1"
+    warnings = [
+        r
+        for r in caplog.records
+        if r.name == "foragerr.library.flows.library_import"
+        and r.levelno == logging.WARNING
+        and "group" in r.getMessage()
+    ]
+    assert len(warnings) == 1
+    message = warnings[0].getMessage()
+    assert "saga" in message  # the group identity (matching_key)
+    assert "Saga 001 (2012).cbz" in message  # its verbatim recorded reason
+
+
 @pytest.mark.req("FRG-IMP-023")
 async def test_execute_auto_confirms_proposed_groups_with_a_proposal(
     db, settings, root_folder_id, root_folder_path

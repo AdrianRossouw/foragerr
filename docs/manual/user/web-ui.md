@@ -66,6 +66,10 @@ A "Skip to content" link is the first thing keyboard focus reaches (press Tab
 when the page loads): it is hidden until focused, and activating it jumps past the
 sidebar and header straight to the scrolling content region.
 
+If you navigate to a URL foragerr does not have a screen for — an out-of-date
+bookmark, say — it renders a **Page not found** screen inside the normal shell,
+with a link back to the library, rather than a blank page.
+
 ## Library
 
 The Library index lists every series in one of three view modes — Posters,
@@ -97,6 +101,13 @@ title cues as usual; an explicit choice locks the book-type so refreshes never
 overwrite it, and it can be refined on the series afterwards), and the
 optional start-search-for-missing-issues toggle, before the add flow kicks off
 its chained refresh → scan → optional search.
+
+On a fresh install with no root folder registered yet, the add panel offers a
+path input to register one **inline** — enter your comics folder, add it, and the
+dialog picks it up as the selected root so you can finish the add without leaving
+for the settings screen and losing your search. A path the server refuses (for
+example one that is not writable) shows the reason verbatim so you can correct it;
+root folders can still be managed from **Media Management** settings.
 
 As you type (three characters or more) a debounced autosuggest dropdown offers up
 to about ten candidates straight from ComicVine, without waiting for the full
@@ -169,7 +180,12 @@ Debut issues (#1s) from series you don't have appear in a separate
 foragerr never adds a series by itself. Next week's solicited releases appear
 under forward navigation once the pull source has published them, marked as not
 yet released, and the whole view keeps working from your local metadata when the
-external pull source is unconfigured or down.
+external pull source is unconfigured or down. When the weekly pull source is
+actually down, the Calendar shows an inline notice that the external source is
+unavailable and the view is rendering from your library's own data only — so a
+temporary outage never reads as "nothing ships this week". The notice clears on
+its own once the source recovers (and never appears when the pull source is
+healthy or deliberately disabled).
 
 ## Creators
 
@@ -196,8 +212,11 @@ before the feature existed.
 ## Queue
 
 The Queue screen shows every tracked download live: state (queued, downloading,
-import pending, importing, imported, failed), a human-readable status message, and
-— for blocked imports — the exact reasons the pipeline recorded (`import.md`).
+awaiting import, importing, imported, failed), a human-readable status message, and
+— for blocked imports — the exact reasons the pipeline recorded (`import.md`). A
+download that has finished in the client but has not been imported yet stays
+visible with an **Awaiting import** label until the next import pass picks it up,
+so a fast grab never shows an empty Queue mid-pipeline.
 Items can be removed from here; an item that is actively importing refuses removal
 until the import finishes, so files are never yanked out from under the importer.
 Import-blocked rows carry a **Manual import** action that opens the resolution

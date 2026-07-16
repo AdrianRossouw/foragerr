@@ -719,6 +719,15 @@ class Settings(BaseSettings):
             "served an unbounded page."
         ),
     )
+    opds_hide_fileless_series: bool = Field(
+        default=True,
+        description=(
+            "Omit series that have no downloadable files from the OPDS All "
+            "Series feed (FRG-OPDS-018), so a reader browses only shelves with "
+            "something to read; a series appears as soon as its first file "
+            "imports. Set false to list file-less series (empty shelves)."
+        ),
+    )
     opds_pse_max_members: int = Field(
         default=5000,
         ge=1,

@@ -81,6 +81,7 @@ under the top level of `config.yaml`.
 | `opds_base_path` | `FORAGERR_OPDS_BASE_PATH` | `/opds` | Base URL path the OPDS catalog is mounted at. Must start with `/`; trailing slash stripped; in-feed links are built relative to it. |
 | `opds_page_size` | `FORAGERR_OPDS_PAGE_SIZE` | `50` | Default entries per OPDS feed page when the client doesn't ask. |
 | `opds_page_size_cap` | `FORAGERR_OPDS_PAGE_SIZE_CAP` | `100` | Hard upper bound on OPDS page size; larger client requests are clamped. |
+| `opds_hide_fileless_series` | `FORAGERR_OPDS_HIDE_FILELESS_SERIES` | `true` | Omit series with no downloadable files from the OPDS **All Series** feed, so a reader browses only shelves that contain something to read; a series appears as soon as its first file imports. Set false to list file-less series (empty shelves permitted). |
 | `convert_cbr_to_cbz` | `FORAGERR_CONVERT_CBR_TO_CBZ` | `false` | Opt-in format-shift: convert CBR archives to CBZ at import (verified before the original is discarded; a failed verification keeps the CBR and the import still succeeds). On-demand per-series/per-issue conversion is available regardless via `POST /api/v1/convert/...`. |
 | `opds_pse_max_members` | `FORAGERR_OPDS_PSE_MAX_MEMBERS` | `5000` | OPDS page streaming: max members an archive may declare before it is refused for page/cover extraction (a member-count cap checked before any decompression). |
 | `opds_pse_max_page_bytes` | `FORAGERR_OPDS_PSE_MAX_PAGE_BYTES` | `67108864` (64 MiB) | OPDS page streaming: max declared decompressed size of a single page member; a larger member is refused **before** it is read (zip-bomb defense). |
@@ -287,6 +288,19 @@ its non-root PUID/PGID ownership, and secret values are never logged — treat
 host.
 
 See `deployment.md` → "Restoring from a backup" for how to use these files.
+
+## Root folders
+
+Root folders (the library locations series live under) are registered in the web
+UI under **Settings → Media Management**, or inline from the Add Series dialog on
+a fresh install — they are not a config-file setting. **A root folder must be
+writable**: foragerr registers folders through a validated API that refuses a
+path it cannot write to, naming the reason (for example `path '/x' is not
+writable`). This applies even in the existing-library "in place" import mode,
+which still records imports and can move replaced files to the recycle bin.
+Read-only mounts (a read-only NAS export, for instance) are therefore not
+supported as root folders — mount the library read-write, or point foragerr at a
+writable copy.
 
 ## Weekly pull
 

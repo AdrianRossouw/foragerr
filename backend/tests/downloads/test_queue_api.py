@@ -116,3 +116,22 @@ def test_delete_refuses_while_importing(client, tmp_path):
     body = client.get("/api/v1/queue").json()
     assert body["totalRecords"] == 1
     assert body["records"][0]["state"] == TrackedDownloadState.IMPORTING.value
+
+
+@pytest.mark.req("FRG-UI-037")
+def test_completed_unimported_download_is_visible_as_awaiting_import(client, tmp_path):
+    """A download the client reports complete but foragerr has not yet imported
+    is tracked as ``import_pending`` — it must stay in the queue payload with
+    that awaiting-import state, never vanish mid-pipeline (F19)."""
+    client.portal.call(
+        _seed_download,
+        client.app,
+        tmp_path,
+        TrackedDownloadState.IMPORT_PENDING,
+        "await-1",
+    )
+    body = client.get("/api/v1/queue").json()
+    assert body["totalRecords"] == 1
+    rec = body["records"][0]
+    assert rec["state"] == TrackedDownloadState.IMPORT_PENDING.value
+    assert rec["downloadId"] == "await-1"

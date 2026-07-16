@@ -303,3 +303,24 @@ async def test_comicvine_auth_failure_surfaces_as_error_and_recovers(db):
     ratelimit.gate().note_auth_ok()
     comp = _by_component(await service.component_view())["comicvine"]
     assert comp.state == "ok"
+
+
+@pytest.mark.req("FRG-UI-033")
+async def test_pull_source_remediation_speaks_ui_language_not_config_keys(db):
+    """The weekly-pull-source degraded remediation names UI concepts, not raw
+    config-key names (F4: it told a UI user to 'verify pull_source_url')."""
+    from foragerr.providers.backoff import PROVIDER_PULL, PULL_PROVIDER_ID
+
+    await ProviderBackoff(db).record_failure(
+        PROVIDER_PULL, PULL_PROVIDER_ID, reason="522 origin unreachable"
+    )
+    components = await _service(db).component_view()
+    pull = _by_component(components)["pull-source"]
+
+    remediation = pull.remediation or ""
+    # No snake_case config-key jargon leaks into UI-facing copy.
+    assert "pull_source_url" not in remediation
+    assert "pull_enabled" not in remediation
+    # It still names the concept in plain UI terms.
+    assert "weekly pull source url" in remediation.lower()
+    assert "calendar" in remediation.lower()
