@@ -9,6 +9,30 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.9.11] — 2026-07-16
+
+Fixes the fresh-install first-refresh failure: a ComicVine key saved in the UI
+now reaches background workers immediately (m9-cv-key-live-reload, the first of
+three M9-tail changes from the simulated-user testing round).
+
+### Fixed
+
+- A ComicVine API key saved via Settings → General now applies to background
+  work — series refreshes, library-import scans, credit fetches, scheduled
+  tasks — without a container restart. Previously only interactive lookups
+  used the saved key, so a fresh install's very first series add failed its
+  refresh until restart (`FRG-META-018`).
+- System → Health now reports a ComicVine **authentication failed** error when
+  the key is rejected (HTTP 401 or ComicVine's in-envelope `status_code 100`),
+  from any context, with remediation pointing at Settings → General; it clears
+  automatically on the next successful request. Previously Health showed OK
+  while every worker request was rejected (`FRG-META-019`).
+- A failed command now shows its recorded cause on the series page (e.g.
+  "Refresh: failed — comicvine authentication failed (HTTP 401)") instead of
+  a bare "failed" (`FRG-UI-030`).
+
+No upgrade steps; no configuration or schema changes.
+
 ## [v0.9.10] — 2026-07-15
 
 ### Added
