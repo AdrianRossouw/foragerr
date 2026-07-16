@@ -10,6 +10,22 @@
   margin: 0 auto var(--spacing-md);
 }
 
+/* Inline "Show" affordance on the hidden-by-ignore-list line (FRG-UI-032):
+   a link-styled button so it reads as an inline action inside the note. */
+.revealButton {
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--color-accent);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.revealButton:hover {
+  color: var(--color-accent-hover);
+}
+
 /* --- autosuggest dropdown (FRG-UI-005) ------------------------------------ */
 
 .suggestDropdown {

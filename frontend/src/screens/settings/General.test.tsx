@@ -18,16 +18,26 @@ import { General } from './General';
  * without ever showing the key.
  */
 
+/** Default ignored-publishers status shared by the key-focused fixtures below
+ * (the curated default list, editable) so those tests exercise the key alone. */
+const IGNORED_DEFAULT = {
+  value: 'Panini*, Urban Comics',
+  source: 'default' as const,
+};
+
 const UNSET: ComicVineConfig = {
   comicvine_api_key: { configured: false, source: 'unset' },
+  comicvine_ignored_publishers: IGNORED_DEFAULT,
 };
 
 const FILE_SET: ComicVineConfig = {
   comicvine_api_key: { configured: true, source: 'file' },
+  comicvine_ignored_publishers: IGNORED_DEFAULT,
 };
 
 const ENV_SET: ComicVineConfig = {
   comicvine_api_key: { configured: true, source: 'environment' },
+  comicvine_ignored_publishers: IGNORED_DEFAULT,
 };
 
 interface Overrides {
@@ -289,5 +299,73 @@ describe('FRG-UI-020: Settings -> General', () => {
     expect(
       screen.getByTestId('comicvine-test-disabled-hint'),
     ).toHaveTextContent('Save your changes before testing');
+  });
+});
+
+describe('FRG-UI-031: Settings -> General ignored publishers', () => {
+  const FILE_LIST: ComicVineConfig = {
+    comicvine_api_key: { configured: true, source: 'file' },
+    comicvine_ignored_publishers: { value: 'Panini*', source: 'file' },
+  };
+
+  it('FRG-UI-031 — the field is seeded from the stored value, editable, and a save persists it', async () => {
+    const user = userEvent.setup();
+    const { spy, fetcher } = fakeFetcher(
+      resolver({
+        config: () => FILE_LIST,
+        onPut: (init) => {
+          const body = init?.body as {
+            comicvine_ignored_publishers?: string;
+            comicvine_api_key?: string;
+          };
+          // The list is sent; the key is NOT (an independent field-scoped save).
+          expect(body.comicvine_ignored_publishers).toBe('Panini*, Reprint House');
+          expect(body.comicvine_api_key).toBeUndefined();
+          return {
+            comicvine_api_key: { configured: true, source: 'file' },
+            comicvine_ignored_publishers: {
+              value: 'Panini*, Reprint House',
+              source: 'file',
+            },
+          } satisfies ComicVineConfig;
+        },
+      }),
+    );
+    renderWithProviders(<General />, { fetcher });
+
+    const field = await screen.findByTestId('ignored-publishers-input');
+    expect(field).toHaveValue('Panini*'); // seeded from the echoed server value
+    await user.clear(field);
+    await user.type(field, 'Panini*, Reprint House');
+    await user.click(screen.getByTestId('ignored-publishers-save'));
+
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith(
+        '/api/v1/config/general',
+        expect.objectContaining({ method: 'PUT' }),
+      ),
+    );
+    // The saved value is echoed back and reseeds the field.
+    await waitFor(() => expect(field).toHaveValue('Panini*, Reprint House'));
+  });
+
+  it('FRG-UI-031 — an env-managed list renders read-only guidance, not an editor', async () => {
+    const ENV_LIST: ComicVineConfig = {
+      comicvine_api_key: { configured: true, source: 'file' },
+      comicvine_ignored_publishers: { value: 'Env House', source: 'env' },
+    };
+    const { fetcher } = fakeFetcher(resolver({ config: () => ENV_LIST }));
+    renderWithProviders(<General />, { fetcher });
+
+    const note = await screen.findByTestId('ignored-publishers-env-managed');
+    expect(note).toHaveTextContent('FORAGERR_COMICVINE_IGNORED_PUBLISHERS');
+    expect(note).toHaveTextContent('managed outside the UI');
+    // No editor and no save action for an env-managed list.
+    expect(
+      screen.queryByTestId('ignored-publishers-input'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId('ignored-publishers-save'),
+    ).not.toBeInTheDocument();
   });
 });

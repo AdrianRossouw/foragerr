@@ -32,19 +32,27 @@ export function useComicVineConfig(): UseQueryResult<ComicVineConfig> {
   });
 }
 
-export interface PutComicVineKeyBody {
-  comicvine_api_key: string;
+/**
+ * PUT body for Settings -> General (FRG-API-018 / FRG-UI-031). Both fields are
+ * independent and OPTIONAL: omit `comicvine_api_key` (or send blank) to keep
+ * the stored key; omit `comicvine_ignored_publishers` to keep the stored list
+ * (a string — including '' — sets it). A save touching one field leaves the
+ * other alone server-side.
+ */
+export interface PutGeneralConfigBody {
+  comicvine_api_key?: string;
+  comicvine_ignored_publishers?: string;
 }
 
 export function usePutComicVineConfig(): UseMutationResult<
   ComicVineConfig,
   Error,
-  PutComicVineKeyBody
+  PutGeneralConfigBody
 > {
   const fetcher = useFetcher();
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (body: PutComicVineKeyBody) =>
+    mutationFn: (body: PutGeneralConfigBody) =>
       fetcher<ComicVineConfig>('/api/v1/config/general', {
         method: 'PUT',
         body,
@@ -53,7 +61,14 @@ export function usePutComicVineConfig(): UseMutationResult<
     // invalidation: the next read (this screen, or a future AddSeries retry
     // that re-checks status) sees the new configured/source without a
     // separate refetch round-trip.
-    onSuccess: (saved) => client.setQueryData(queryKeys.config.general(), saved),
+    onSuccess: (saved) => {
+      client.setQueryData(queryKeys.config.general(), saved);
+      // Lookups cache complete results (staleTime: Infinity) and their key
+      // does not include the ignore-list value, so a saved list change must
+      // drop them or a re-searched term keeps the OLD filter (FRG-UI-031
+      // "applies to subsequent searches without restart").
+      client.invalidateQueries({ queryKey: queryKeys.lookup.all() });
+    },
   });
 }
 

@@ -525,11 +525,16 @@ function GroupLookup({
 }) {
   const [input, setInput] = useState('');
   const [term, setTerm] = useState('');
-  const lookup = useLookup(term);
+  // The import picker gets the same never-silently-dropped affordance as Add
+  // New (FRG-UI-032): a legitimately-owned foreign edition must stay findable
+  // here or the ignore-list default makes the group un-matchable by name.
+  const [showIgnored, setShowIgnored] = useState(false);
+  const lookup = useLookup(term, showIgnored);
 
   // An error must never leak stale candidates from a previous outcome.
   const results = lookup.isError ? undefined : lookup.data;
   const note = lookupOutcomeNote(lookup.isError, lookup.error, results, term);
+  const hiddenByIgnore = results?.hidden_by_ignore_list ?? 0;
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -541,6 +546,7 @@ function GroupLookup({
     if (next === term && retryable) {
       void lookup.refetch();
     }
+    if (next !== term) setShowIgnored(false);
     setTerm(next);
   };
 
@@ -574,6 +580,20 @@ function GroupLookup({
         </p>
       )}
       {note?.tone === 'plain' && <p className={styles.stateNote}>{note.text}</p>}
+
+      {hiddenByIgnore > 0 && !showIgnored && (
+        <p className={styles.stateNote} data-testid={`li-ignored-hidden-${folderName}`}>
+          {hiddenByIgnore} result{hiddenByIgnore === 1 ? '' : 's'} hidden by
+          your publisher ignore list —{' '}
+          <button
+            type="button"
+            className={styles.revealButton}
+            onClick={() => setShowIgnored(true)}
+          >
+            Show
+          </button>
+        </p>
+      )}
 
       {results && results.records.length > 0 && (
         <div className={styles.lookupResults}>

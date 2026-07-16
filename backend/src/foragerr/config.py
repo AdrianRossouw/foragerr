@@ -54,6 +54,25 @@ CONFIG_DIR_ENV = "FORAGERR_CONFIG_DIR"
 DEFAULT_CONFIG_DIR = Path("/config")
 CONFIG_FILENAME = "config.yaml"
 
+#: Fresh-install default for ``comicvine_ignored_publishers`` (FRG-META-020).
+#: A conservative, curated set of unambiguous FOREIGN-MARKET REPRINT publishers
+#: — houses whose comic output is overwhelmingly licensed translations of
+#: English-origin material (the German Panini reprint that outranked Marvel's
+#: own ongoing, M9 finding F17). Publishers of ORIGINAL material are deliberately
+#: excluded, however tempting the wildcard: Marvel UK (Captain Britain, Death's
+#: Head), Norma Editorial, Dolmen and Les Humanoïdes Associés all publish
+#: originals and stay OFF this list — the recoverable hide (FRG-UI-032) is the
+#: safety valve for anything a fresh install over-catches. An entry ending in
+#: ``*`` matches as a case-insensitive substring (``Panini*`` covers Panini
+#: Verlag / España / France); every other entry matches exactly. The value is a
+#: single source referenced by the Settings field default, the docs, and the
+#: tests. It seeds fresh installs ONLY — a config.yaml that already carries a
+#: value (including the empty string older releases rendered) keeps it.
+DEFAULT_IGNORED_PUBLISHERS = (
+    "Panini*, Urban Comics, Planeta DeAgostini, "
+    "Editorial Televisa, Ediciones Zinco"
+)
+
 #: The mandatory at-rest encryption passphrase env var (FRG-AUTH-011).
 #: Environment-only: never read from, or written to, a file under ``/config``.
 #: Startup fails when it is absent or empty (enforced in :func:`load_settings`).
@@ -551,10 +570,17 @@ class Settings(BaseSettings):
         ),
     )
     comicvine_ignored_publishers: str = Field(
-        default="",
+        default=DEFAULT_IGNORED_PUBLISHERS,
         description=(
-            "Comma-separated ComicVine publisher names excluded from series "
-            "search (e.g. variant-cover/reprint-only imprints). Case-insensitive."
+            "Comma-separated ComicVine publisher names hidden from series "
+            "search results (foreign-market reprint imprints that otherwise "
+            "outrank the original-language volume). Matched case-insensitively; "
+            "an entry ending in '*' matches as a substring (e.g. 'Panini*' "
+            "covers Panini Verlag/España/France), any other entry matches "
+            "exactly. Editable in Settings -> General. The curated default seeds "
+            "FRESH INSTALLS only — an existing config keeps its rendered value "
+            "(set it to an empty string to hide nothing). Hidden results are "
+            "counted, never silently dropped, and recoverable per-search."
         ),
     )
     comicvine_image_hosts: str = Field(

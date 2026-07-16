@@ -50,6 +50,13 @@ router = APIRouter(prefix="/config", tags=["config"])
 #: object cannot say which source won.
 COMICVINE_KEY_ENV_VAR = "FORAGERR_COMICVINE_API_KEY"
 
+#: The environment variable that supplies the ignored-publishers list and, like
+#: the key, outranks the config-file value. Read DIRECTLY (case-insensitive,
+#: empty ignored to mirror ``env_ignore_empty``) so the resource can report
+#: whether the effective value is env-managed — the collapsed ``Settings`` object
+#: cannot say which source won.
+COMICVINE_IGNORED_PUBLISHERS_ENV_VAR = "FORAGERR_COMICVINE_IGNORED_PUBLISHERS"
+
 #: A neutral, cheap probe term for the connectivity test (a single-page suggest
 #: search) — it exercises the effective key against ComicVine without persisting
 #: anything and without depending on any particular library content.
@@ -199,6 +206,32 @@ def _comicvine_source(settings: Settings) -> str:
     return "unset"
 
 
+def _env_var_is_set(name: str) -> bool:
+    """Whether ``name`` is present as a NON-EMPTY environment variable, matched
+    case-insensitively — mirroring pydantic-settings' env resolution (a
+    lowercase spelling shadows the file too) and ``env_ignore_empty`` (an empty
+    value does not shadow). Shared by the key and ignored-publishers source
+    helpers."""
+    return any(k.upper() == name and v for k, v in os.environ.items())
+
+
+def _ignored_publishers_source(settings: Settings) -> str:
+    """Report where the effective ignored-publishers list comes from (FRG-UI-031):
+    ``"env"`` (the env var wins), ``"file"`` (a value is stored in ``config.yaml``,
+    including the empty string older releases rendered), else ``"default"``.
+    Presence in the file — not its emptiness — distinguishes ``file`` from
+    ``default``, so an upgrader who stored an empty value keeps it. Note that
+    ``"default"`` is rare in practice: first-run rendering writes non-secret
+    defaults as real values, so even fresh installs report ``file`` — the
+    branch covers a hand-edited config whose line was removed."""
+    if _env_var_is_set(COMICVINE_IGNORED_PUBLISHERS_ENV_VAR):
+        return "env"
+    stored = _read_config(Path(settings.config_dir) / CONFIG_FILENAME)
+    if "comicvine_ignored_publishers" in stored:
+        return "file"
+    return "default"
+
+
 class ComicVineKeyStatus(BaseModel):
     """Configured-state + source for the ComicVine key — NEVER the value."""
 
@@ -208,35 +241,59 @@ class ComicVineKeyStatus(BaseModel):
     source: str
 
 
-class GeneralConfig(BaseModel):
-    """The Settings → General resource: the ComicVine credential STATUS only.
+class IgnoredPublishersStatus(BaseModel):
+    """The ignored-publishers list VALUE + its source (FRG-UI-031).
 
-    A write-only credential surface — the read reports whether the key is
-    configured and its source but never returns the key value or any substring
-    of it (FRG-API-018 / FRG-META-002).
+    Unlike the key this is not a secret: the value is echoed so the Settings
+    field can render it for editing. ``source`` is ``"env"``/``"file"``/``"default"``
+    — an env-managed value renders read-only (the env var would shadow a write)."""
+
+    value: str
+    source: str
+
+
+class GeneralConfig(BaseModel):
+    """The Settings → General resource: the ComicVine credential STATUS plus the
+    editable ignored-publishers list.
+
+    The key is a write-only credential surface — the read reports whether it is
+    configured and its source but never the value or any substring of it
+    (FRG-API-018 / FRG-META-002). The ignored-publishers list IS echoed (not a
+    secret) with its source so the field can render editable or read-only
+    (FRG-UI-031).
     """
 
     comicvine_api_key: ComicVineKeyStatus
+    comicvine_ignored_publishers: IgnoredPublishersStatus
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "GeneralConfig":
-        source = _comicvine_source(settings)
+        key_source = _comicvine_source(settings)
         return cls(
             comicvine_api_key=ComicVineKeyStatus(
-                configured=source != "unset", source=source
-            )
+                configured=key_source != "unset", source=key_source
+            ),
+            comicvine_ignored_publishers=IgnoredPublishersStatus(
+                value=settings.comicvine_ignored_publishers,
+                source=_ignored_publishers_source(settings),
+            ),
         )
 
 
 class GeneralConfigUpdate(BaseModel):
-    """PUT body for the General resource: the ComicVine key, write-only.
+    """PUT body for the General resource (FRG-API-018 / FRG-UI-031).
 
-    A blank value means "leave the stored key unchanged" (the write-only
-    "leave blank to keep" convention provider secret fields use), NOT "clear
-    it" — so an unchanged form save never wipes the key.
+    ``comicvine_api_key``: a blank value means "leave the stored key unchanged"
+    (the write-only "leave blank to keep" convention), NOT "clear it".
+
+    ``comicvine_ignored_publishers``: ``None`` (the default, or an omitted field)
+    means "leave the stored list unchanged"; a STRING — including the empty
+    string — sets it, so an operator CAN clear the list to hide nothing. The two
+    fields are independent, so a save that only touches one leaves the other.
     """
 
     comicvine_api_key: str = ""
+    comicvine_ignored_publishers: str | None = None
 
 
 class ComicVineTestResponse(BaseModel):
@@ -256,35 +313,55 @@ async def get_general(request: Request) -> GeneralConfig:
 
 @router.put("/general", response_model=GeneralConfig)
 async def put_general(body: GeneralConfigUpdate, request: Request):
-    """Persist a UI-written ComicVine key and apply it live (FRG-API-018).
+    """Persist UI-written General settings and apply them live (FRG-API-018 /
+    FRG-UI-031). The ComicVine key and the ignored-publishers list are handled
+    INDEPENDENTLY so a save that touches only one leaves the other alone.
 
-    - When the key is env-supplied (``source == "environment"``) the update is
-      REJECTED as environment-managed (a 409 naming the env var) rather than
-      persisting a value the environment would shadow on reload — no
-      silently-ineffective editor (design decision 4).
-    - A BLANK key keeps the currently-stored value (write-only "leave blank to
-      keep"); nothing is written.
-    - A non-blank key is merged into ``config.yaml`` through the documented
+    - **ComicVine key**: a BLANK key keeps the stored value (write-only "leave
+      blank to keep") — no write, no env check. A non-blank key when the key is
+      env-supplied (``source == "environment"``) is REJECTED as
+      environment-managed (a 409 naming the env var) rather than persisting a
+      value the environment would shadow on reload (design decision 4).
+    - **Ignored publishers**: ``None`` (omitted) leaves the stored list; a string
+      (including empty, to hide nothing) is written — unless the list is
+      env-managed, which is rejected the same way as the key.
+    - Applied fields are merged into ``config.yaml`` through the documented
       writer via the shared ``_apply`` read-modify-write-reload, which swaps
-      ``app.state.settings`` (live-apply, no restart) and re-registers the
-      secret with the log-redaction filter.
+      ``app.state.settings`` (live-apply, no restart) and re-registers secrets
+      with the log-redaction filter.
     """
     current: Settings = request.app.state.settings
-    if _comicvine_source(current) == "environment":
-        raise ApiError(
-            409,
-            "the ComicVine API key is managed by the "
-            f"{COMICVINE_KEY_ENV_VAR} environment variable, which takes "
-            "precedence over the config file; unset it to edit the key here",
-            field="comicvine_api_key",
-        )
+    updates: dict[str, Any] = {}
 
     key = body.comicvine_api_key.strip()
-    if not key:
-        # Blank ⇒ keep the stored value; report the (unchanged) current status.
+    if key:
+        if _comicvine_source(current) == "environment":
+            raise ApiError(
+                409,
+                "the ComicVine API key is managed by the "
+                f"{COMICVINE_KEY_ENV_VAR} environment variable, which takes "
+                "precedence over the config file; unset it to edit the key here",
+                field="comicvine_api_key",
+            )
+        updates["comicvine_api_key"] = key
+
+    if body.comicvine_ignored_publishers is not None:
+        if _ignored_publishers_source(current) == "env":
+            raise ApiError(
+                409,
+                "the ignored-publishers list is managed by the "
+                f"{COMICVINE_IGNORED_PUBLISHERS_ENV_VAR} environment variable, "
+                "which takes precedence over the config file; unset it to edit "
+                "the list here",
+                field="comicvine_ignored_publishers",
+            )
+        updates["comicvine_ignored_publishers"] = body.comicvine_ignored_publishers
+
+    if not updates:
+        # Nothing to change (blank key, list untouched); report current status.
         return GeneralConfig.from_settings(current)
 
-    return await _apply(request, {"comicvine_api_key": key}, GeneralConfig)
+    return await _apply(request, updates, GeneralConfig)
 
 
 @router.post("/comicvine/test", response_model=ComicVineTestResponse)

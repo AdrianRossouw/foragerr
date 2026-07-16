@@ -472,3 +472,43 @@ def test_interval_range_descriptions_match_enforced_bounds():
     for name, (floor, ceiling) in INTERVAL_RANGES.items():
         description = Settings.model_fields[name].description or ""
         assert f"{floor}..{ceiling}" in description
+
+
+# --------------------------------------------------------------------------
+# FRG-META-020 — curated default publisher ignore list
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.req("FRG-META-020")
+def test_fresh_install_seeds_curated_ignore_list(config_dir):
+    """A fresh install renders its documented config.yaml with the curated
+    default list, and the effective settings carry it — so a first search
+    excludes matching-publisher volumes out of the box."""
+    from foragerr.config import DEFAULT_IGNORED_PUBLISHERS
+
+    settings = load_settings()
+    parsed = yaml.safe_load(
+        (config_dir / CONFIG_FILENAME).read_text(encoding="utf-8")
+    )
+    assert parsed["comicvine_ignored_publishers"] == DEFAULT_IGNORED_PUBLISHERS
+    assert settings.comicvine_ignored_publishers == DEFAULT_IGNORED_PUBLISHERS
+    # The default is a real, conservative list: a wildcard entry is present and
+    # publishers of ORIGINAL material are deliberately absent (FRG-META-020).
+    assert "Panini*" in DEFAULT_IGNORED_PUBLISHERS  # wildcard entry
+    assert "Marvel UK" not in DEFAULT_IGNORED_PUBLISHERS  # publishes originals
+    assert "Humano" not in DEFAULT_IGNORED_PUBLISHERS  # Les Humanoïdes Associés
+
+
+@pytest.mark.req("FRG-META-020")
+def test_stored_empty_ignore_list_survives_upgrade(config_dir):
+    """An upgraded install that already carries a value — including the empty
+    string older releases rendered — keeps it; the new default never overwrites
+    a stored value (the pull_enabled upgrade precedent)."""
+    load_settings()  # first run seeds the documented default
+    config_file = config_dir / CONFIG_FILENAME
+    data = yaml.safe_load(config_file.read_text(encoding="utf-8"))
+    data["comicvine_ignored_publishers"] = ""  # older release's empty value
+    config_file.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+    settings = load_settings()
+    assert settings.comicvine_ignored_publishers == ""  # stored value wins

@@ -360,3 +360,18 @@
   opacity: 0.5;
   cursor: default;
 }
+
+/* Publisher-ignore reveal (FRG-UI-032 parity with Add New). */
+.revealButton {
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--color-accent);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.revealButton:hover {
+  color: var(--color-accent-hover);
+}

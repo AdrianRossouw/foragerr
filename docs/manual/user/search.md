@@ -57,6 +57,21 @@ ordered comparator chain: format-profile rung first, then preferred-term/release
 score, then indexer priority, then release age (bucketed so a few hours' difference
 doesn't dominate), then closeness to your preferred size.
 
+## Add New: hidden publishers
+
+Adding a series searches ComicVine, whose catalogue is full of foreign-market
+reprints — a search for a current Marvel or DC title often surfaces German,
+Spanish or French reprint editions above the original-language volume. foragerr
+hides results from a configurable list of reprint publishers
+(`comicvine_ignored_publishers`, editable in **Settings → General**) so the
+volume you actually want ranks first. Nothing is dropped silently: when a search
+hides results the Add New screen shows a line — "N result(s) hidden by your
+publisher ignore list — Show" — and clicking **Show** reveals them for that
+search, each marked with an *Ignored* badge, alongside a link to edit the list.
+The reveal is per-search and never changes the stored list. New installs start
+with a conservative default list; existing installs keep whatever they had (see
+`../admin/configuration.md`).
+
 ## Interactive search
 
 An interactive search runs live against interactive-enabled indexers and returns every

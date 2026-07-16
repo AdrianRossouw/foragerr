@@ -147,7 +147,17 @@ export const queryKeys = {
   // refetch against live ComicVine (rate-limited) on each push while the add
   // screen is open.
   lookup: {
-    term: (term: string) => ['lookup', term] as const,
+    // Prefix for both variants below — the ignore-list save invalidates the
+    // whole family (FRG-UI-031: a changed list must reach re-searched terms).
+    all: () => ['lookup'] as const,
+    // `includeIgnored` (FRG-UI-032) keys a SEPARATE cache entry so the
+    // publisher-ignore-list reveal never overwrites the default result set —
+    // the two coexist and the screen swaps between them. Default false keeps
+    // the historical `['lookup', term]` key byte-identical.
+    term: (term: string, includeIgnored = false) =>
+      includeIgnored
+        ? (['lookup', term, 'include-ignored'] as const)
+        : (['lookup', term] as const),
     // Suggest (FRG-API-017) is a SEPARATE cache family from the full lookup
     // above, even though both key off `term`: it is a different envelope
     // shape ({records, complete} — no `truncated`) and a different endpoint,

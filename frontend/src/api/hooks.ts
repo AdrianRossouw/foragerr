@@ -249,13 +249,20 @@ export function useDeleteContainment(
  * rejects with an `ApiRequestError`; screens classify credential failures
  * structurally via `isComicVineAuthError`.
  */
-export function useLookup(term: string): UseQueryResult<LookupResponse> {
+export function useLookup(
+  term: string,
+  includeIgnored = false,
+): UseQueryResult<LookupResponse> {
   const fetcher = useFetcher();
   return useQuery({
-    queryKey: queryKeys.lookup.term(term),
+    queryKey: queryKeys.lookup.term(term, includeIgnored),
+    // The `includeIgnored=true` param (FRG-UI-032) reveals publisher-ignore-list
+    // volumes flagged `ignored`; omitted entirely by default so the historical
+    // request URL (and every test that pins it) stays unchanged.
     queryFn: () =>
       fetcher<LookupResponse>(
-        `/api/v1/series/lookup?term=${encodeURIComponent(term)}`,
+        `/api/v1/series/lookup?term=${encodeURIComponent(term)}` +
+          (includeIgnored ? '&includeIgnored=true' : ''),
       ),
     enabled: term.length > 0,
     // A complete, uncapped candidate list is stable within a session; never

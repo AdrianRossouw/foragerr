@@ -169,6 +169,7 @@ type CardCandidate = Pick<
   | 'have_it'
   | 'count_of_issues'
   | 'description'
+  | 'ignored'
 >;
 
 /** Monitor-strategy display labels, shared with the library-import batch panel. */
@@ -268,6 +269,11 @@ function CandidateCard({
               <Chip tone="accent" className={styles.haveBadge} testId={`${testId}-have`}>
                 <CheckIcon size={11} />
                 In library
+              </Chip>
+            )}
+            {candidate.ignored && (
+              <Chip tone="muted" testId={`${testId}-ignored`}>
+                Ignored
               </Chip>
             )}
           </span>
@@ -449,7 +455,10 @@ export function AddSeries() {
   const [selectedSuggestionId, setSelectedSuggestionId] = useState<
     number | null
   >(null);
-  const lookup = useLookup(term);
+  // Per-search reveal of publisher-ignore-list volumes (FRG-UI-032); reset on
+  // every new search so a fresh term always starts with them hidden.
+  const [showIgnored, setShowIgnored] = useState(false);
+  const lookup = useLookup(term, showIgnored);
   const suggest = useSuggest(input);
   const addSeries = useAddSeries();
 
@@ -468,6 +477,7 @@ export function AddSeries() {
     setTerm('');
     setSelectedId(null);
     setSelectedSuggestionId(null);
+    setShowIgnored(false);
     navigate(`${location.pathname}${location.search}`, {
       replace: true,
       state: null,
@@ -478,6 +488,11 @@ export function AddSeries() {
   // the results list and the outcome note both derive from this one value.
   const results = lookup.isError ? undefined : lookup.data;
   const note = lookupOutcomeNote(lookup.isError, lookup.error, results, term);
+  // Publisher-ignore-list count (FRG-UI-032): how many candidates the server
+  // hid. The recoverable "N hidden — Show" line renders only while they are
+  // hidden and only when there is at least one; once revealed the line becomes
+  // an "Edit list" pointer and the candidates show flagged.
+  const hiddenByIgnore = results?.hidden_by_ignore_list ?? 0;
 
   // The autosuggest dropdown shows once the trimmed term clears the same
   // >=3-char threshold `useSuggest` gates on. It stays visible while ONE OF
@@ -526,6 +541,7 @@ export function AddSeries() {
     e.preventDefault();
     setSelectedId(null);
     setSelectedSuggestionId(null);
+    setShowIgnored(false);
     const next = normalizeLookupTerm(input);
     // A same-term re-submit after an error or a degraded/capped outcome must
     // retry for real (FRG-UI-005): setting an identical term re-renders
@@ -641,6 +657,34 @@ export function AddSeries() {
           </p>
         )}
         {note?.tone === 'plain' && <p className={styles.stateNote}>{note.text}</p>}
+
+        {hiddenByIgnore > 0 && !showIgnored && (
+          <p
+            className={styles.stateNote}
+            role="status"
+            data-testid="ignored-hidden-line"
+          >
+            {hiddenByIgnore} result{hiddenByIgnore === 1 ? '' : 's'} hidden by
+            your publisher ignore list —{' '}
+            <button
+              type="button"
+              className={styles.revealButton}
+              onClick={() => setShowIgnored(true)}
+            >
+              Show
+            </button>
+          </p>
+        )}
+        {hiddenByIgnore > 0 && showIgnored && (
+          <p
+            className={styles.stateNote}
+            role="status"
+            data-testid="ignored-shown-line"
+          >
+            Showing results hidden by your publisher ignore list.{' '}
+            <Link to="/settings/general">Edit list</Link>
+          </p>
+        )}
 
         <div className={styles.results}>
           {results?.records.map((candidate) => (

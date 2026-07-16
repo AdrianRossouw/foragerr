@@ -143,6 +143,11 @@ class SeriesCandidate:
 
     series: SeriesRecord
     plausibility: Plausibility
+    #: True when this candidate's publisher matched the configured ignore list
+    #: (FRG-META-007). Only ever set on a candidate returned by the explicit
+    #: include-ignored mode — the default search omits ignored candidates
+    #: entirely, so every candidate it returns carries ``False``.
+    ignored: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,6 +165,11 @@ class SearchResult:
     #: clean, complete empty result. (Auth failures no longer reach here —
     #: they propagate as ``ComicVineAuthError``.)
     complete: bool
+    #: How many candidates were excluded by the publisher ignore list
+    #: (FRG-META-007). Reported so the caller can surface a recoverable
+    #: "N hidden" count instead of a silent drop; counts the matches even in
+    #: include-ignored mode (where those candidates are still returned, flagged).
+    ignored_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)

@@ -9,6 +9,32 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.9.12] — 2026-07-16
+
+Foreign-market reprints no longer outrank the volume you actually want
+(m9-publisher-ignore-defaults, second M9-tail change).
+
+### Added
+
+- **Curated default publisher ignore list** on fresh installs: `Panini*,
+  Urban Comics, Planeta DeAgostini, Editorial Televisa, Ediciones Zinco`.
+  Existing configs keep their stored value — upgraders opt in by editing the
+  setting (`FRG-META-020`). Entries containing `*` match anywhere in the
+  publisher name (`FRG-META-007`).
+- The ignored-publishers list is now **editable in Settings → General**, with
+  the usual environment-managed read-only indication (`FRG-UI-031`).
+- Add New (and the library-import inline picker) show **"N result(s) hidden by
+  your publisher ignore list — Show"** instead of dropping results silently;
+  revealed candidates carry an Ignored badge (`FRG-UI-032`).
+
+### Changed
+
+- Automatic ComicVine match proposals (library import, store sources) also
+  respect the ignore list — a translated volume no longer wins an auto-match
+  over the original (documented in the manual).
+
+No schema changes. Upgraders keep current behavior unless they adopt the list.
+
 ## [v0.9.11] — 2026-07-16
 
 Fixes the fresh-install first-refresh failure: a ComicVine key saved in the UI
