@@ -349,6 +349,13 @@ export interface LookupResponse {
   records: LookupCandidate[];
   complete: boolean;
   truncated: boolean;
+  /**
+   * How many candidates the publisher ignore list hid (FRG-META-007 /
+   * FRG-UI-032). > 0 lets Add New offer a recoverable "N hidden — Show"
+   * reveal instead of a silent drop; 0 (or absent, on an older payload) shows
+   * no line.
+   */
+  hidden_by_ignore_list?: number;
 }
 
 /** ComicVine search candidate with plausibility annotations (FRG-META-007). */
@@ -371,6 +378,12 @@ export interface LookupCandidate {
   year_proximity: number | null;
   target_issue_plausible: boolean | null;
   have_it: boolean;
+  /**
+   * True when this candidate was hidden by the publisher ignore list and is
+   * only present because the search was reissued with include-ignored
+   * (FRG-META-007 / FRG-UI-032). Absent/false on the default search.
+   */
+  ignored?: boolean;
 }
 
 /**
@@ -602,10 +615,22 @@ export interface NamingTokens {
  */
 export type ComicVineKeySource = 'unset' | 'file' | 'environment';
 
+/**
+ * Source of the ignored-publishers list (FRG-UI-031): `env` (the
+ * FORAGERR_COMICVINE_IGNORED_PUBLISHERS var wins — the field renders
+ * read-only), `file` (stored in config.yaml), or `default` (the curated
+ * fresh-install default). Unlike the key, the list value IS echoed.
+ */
+export type IgnoredPublishersSource = 'env' | 'file' | 'default';
+
 export interface ComicVineConfig {
   comicvine_api_key: {
     configured: boolean;
     source: ComicVineKeySource;
+  };
+  comicvine_ignored_publishers: {
+    value: string;
+    source: IgnoredPublishersSource;
   };
 }
 

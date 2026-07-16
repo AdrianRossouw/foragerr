@@ -59,8 +59,61 @@ async def test_ignored_publisher_excluded_others_only_annotated(tmp_path):
     async with client:
         result = await client.search_series("Saga")
     ids = {c.series.cv_volume_id for c in result.candidates}
-    assert 3 not in ids  # ignored-publisher volume hard-dropped
+    assert 3 not in ids  # ignored-publisher volume excluded from the default list
     assert {1, 2} <= ids  # the rest survive, merely annotated
+    assert result.ignored_count == 1  # excluded, not silently dropped — counted
+
+
+@pytest.mark.req("FRG-META-007")
+def test_publisher_ignore_list_matches_wildcard_and_exact():
+    """The matcher parses each entry once: an entry ending in ``*`` is a
+    case-insensitive substring probe (``*`` stripped), any other entry an exact
+    (case-insensitive) name match."""
+    from foragerr.metadata.comicvine import PublisherIgnoreList
+
+    matcher = PublisherIgnoreList.parse("Panini*, Urban Comics")
+    # Wildcard: substring, case-insensitive, across market suffixes.
+    assert matcher.matches("Panini Verlag") is True
+    assert matcher.matches("panini españa") is True
+    assert matcher.matches("PANINI") is True
+    # Exact: whole-name only, case-insensitive.
+    assert matcher.matches("urban comics") is True
+    assert matcher.matches("Urban Comics France") is False  # exact, not substring
+    # Non-matches and the empty/None publisher.
+    assert matcher.matches("Image Comics") is False
+    assert matcher.matches(None) is False
+    assert matcher.matches("") is False
+
+
+@pytest.mark.req("FRG-META-007")
+def test_publisher_ignore_list_bare_star_is_ignored():
+    """A bare ``*`` entry would match every publisher — it is dropped so an
+    over-broad list entry cannot silently hide the whole result set."""
+    from foragerr.metadata.comicvine import PublisherIgnoreList
+
+    matcher = PublisherIgnoreList.parse("*, Reprint House")
+    assert matcher.matches("Image Comics") is False
+    assert matcher.matches("Reprint House") is True
+
+
+@pytest.mark.req("FRG-META-007")
+async def test_include_ignored_returns_flagged_candidates(tmp_path):
+    """Include-ignored mode returns the previously excluded volumes, each flagged
+    ``ignored`` so a reader can recover a hidden edition; the count still
+    reports how many matched."""
+    client, _ = make_client(
+        tmp_path,
+        lambda r: json_response(search_envelope(_volumes(), total=3)),
+        comicvine_ignored_publishers="Reprint House",
+        comicvine_min_interval_seconds=0.05,
+    )
+    async with client:
+        result = await client.search_series("Saga", include_ignored=True)
+    by_id = {c.series.cv_volume_id: c for c in result.candidates}
+    assert set(by_id) == {1, 2, 3}  # the ignored volume is present again
+    assert by_id[3].ignored is True  # flagged as ignore-listed
+    assert by_id[1].ignored is False and by_id[2].ignored is False
+    assert result.ignored_count == 1  # still counts the match
 
 
 @pytest.mark.req("FRG-META-007")

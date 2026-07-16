@@ -331,6 +331,10 @@ class LookupCandidateResource(BaseModel):
     year_proximity: int | None
     target_issue_plausible: bool | None
     have_it: bool
+    #: True when this candidate was hidden by the publisher ignore list and is
+    #: only present because the caller asked to include ignored results
+    #: (FRG-META-007). Always ``False`` on the default (exclude) lookup.
+    ignored: bool = False
 
 
 class LookupResponse(BaseModel):
@@ -340,12 +344,15 @@ class LookupResponse(BaseModel):
     result (``complete=True, records=[]``); ``truncated`` marks a walk
     deliberately stopped at the configured result cap (retry cannot help —
     narrow the term), distinct from a transient degrade (retry may help).
-    An auth failure never reaches here — it maps to a 503 error response
-    instead."""
+    ``hidden_by_ignore_list`` reports how many candidates the publisher ignore
+    list excluded (FRG-META-007/FRG-UI-032) so the add screen can offer a
+    recoverable "N hidden" reveal instead of a silent drop. An auth failure
+    never reaches here — it maps to a 503 error response instead."""
 
     records: list[LookupCandidateResource]
     complete: bool
     truncated: bool
+    hidden_by_ignore_list: int = 0
 
 
 class SuggestCandidateResource(BaseModel):
@@ -695,8 +702,14 @@ async def list_series_groups(
 # NOTE: registered BEFORE "/{series_id}" so "lookup" is never swallowed by
 # the int-typed path parameter.
 @router.get("/lookup", response_model=LookupResponse)
-async def lookup_series(term: str, request: Request) -> LookupResponse:
+async def lookup_series(
+    term: str, request: Request, includeIgnored: bool = False
+) -> LookupResponse:
     """Live ComicVine volume search; no library side effect (FRG-API-003).
+
+    ``includeIgnored`` (default false) reveals publisher-ignore-listed volumes,
+    each flagged ``ignored`` (FRG-META-007/FRG-UI-032); the default search omits
+    them but always reports ``hidden_by_ignore_list`` so the count is honest.
 
     NOTE on the single ``except`` arm below: ``ComicVineClient._paginate``
     (which ``search_series`` rides) carves out ``ComicVineAuthError`` — a
@@ -715,7 +728,7 @@ async def lookup_series(term: str, request: Request) -> LookupResponse:
     factory = comicvine_factory(settings)
     try:
         async with ComicVineClient(settings, factory) as cv:
-            result = await cv.search_series(term)
+            result = await cv.search_series(term, include_ignored=includeIgnored)
     except ComicVineError as exc:
         raise _comicvine_error_to_api_error(exc) from exc
 
@@ -749,11 +762,13 @@ async def lookup_series(term: str, request: Request) -> LookupResponse:
                 year_proximity=candidate.plausibility.year_proximity,
                 target_issue_plausible=candidate.plausibility.target_issue_plausible,
                 have_it=candidate.series.cv_volume_id in have,
+                ignored=candidate.ignored,
             )
             for candidate in candidates
         ],
         complete=result.complete,
         truncated=result.truncated,
+        hidden_by_ignore_list=result.ignored_count,
     )
 
 

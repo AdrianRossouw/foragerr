@@ -32,19 +32,27 @@ export function useComicVineConfig(): UseQueryResult<ComicVineConfig> {
   });
 }
 
-export interface PutComicVineKeyBody {
-  comicvine_api_key: string;
+/**
+ * PUT body for Settings -> General (FRG-API-018 / FRG-UI-031). Both fields are
+ * independent and OPTIONAL: omit `comicvine_api_key` (or send blank) to keep
+ * the stored key; omit `comicvine_ignored_publishers` to keep the stored list
+ * (a string — including '' — sets it). A save touching one field leaves the
+ * other alone server-side.
+ */
+export interface PutGeneralConfigBody {
+  comicvine_api_key?: string;
+  comicvine_ignored_publishers?: string;
 }
 
 export function usePutComicVineConfig(): UseMutationResult<
   ComicVineConfig,
   Error,
-  PutComicVineKeyBody
+  PutGeneralConfigBody
 > {
   const fetcher = useFetcher();
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (body: PutComicVineKeyBody) =>
+    mutationFn: (body: PutGeneralConfigBody) =>
       fetcher<ComicVineConfig>('/api/v1/config/general', {
         method: 'PUT',
         body,

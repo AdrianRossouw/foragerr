@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Toolbar } from '../../components/Toolbar';
 import { SchemaForm } from '../../components/schemaForm/SchemaForm';
 import type {
@@ -61,9 +61,15 @@ const KNOWN_FIELDS: ReadonlySet<string> = new Set(['comicvine_api_key']);
 export function General() {
   const configQuery = useComicVineConfig();
   const putConfig = usePutComicVineConfig();
+  // A second, independent mutation for the ignored-publishers save so its
+  // pending state does not entangle with the key Save (both hit PUT /general,
+  // which handles the two fields independently — a save touching one leaves
+  // the other alone server-side).
+  const putIgnored = usePutComicVineConfig();
   const testComicVine = useTestComicVine();
 
   const [keyValue, setKeyValue] = useState('');
+  const [ignoredValue, setIgnoredValue] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<ComicVineTestResult | null>(null);
@@ -72,6 +78,17 @@ export function General() {
   const source = config?.comicvine_api_key.source;
   const configured = config?.comicvine_api_key.configured ?? false;
   const envManaged = source === 'environment';
+
+  const ignoredSource = config?.comicvine_ignored_publishers.source;
+  const ignoredEnvManaged = ignoredSource === 'env';
+  // Seed the editable list from the server value whenever it changes (initial
+  // load, and after a save — the mutation writes the server's response back
+  // into the cache, so the reseed matches what was just saved and never
+  // clobbers in-progress edits between loads).
+  const serverIgnored = config?.comicvine_ignored_publishers.value;
+  useEffect(() => {
+    if (serverIgnored !== undefined) setIgnoredValue(serverIgnored);
+  }, [serverIgnored]);
 
   const clearFeedback = () => {
     setFieldErrors({});
@@ -95,6 +112,17 @@ export function General() {
     putConfig.mutate(
       { comicvine_api_key: keyValue },
       { onSuccess: () => setKeyValue(''), onError: onFailure },
+    );
+  };
+
+  const onSaveIgnored = () => {
+    clearFeedback();
+    // A string (including '') sets the list; the key field is omitted, so the
+    // stored key is untouched. Errors fold into the form-level message (the
+    // list is not in KNOWN_FIELDS, so mapApiError routes them there).
+    putIgnored.mutate(
+      { comicvine_ignored_publishers: ignoredValue },
+      { onError: onFailure },
     );
   };
 
@@ -208,6 +236,58 @@ export function General() {
               >
                 {testResult.message}
               </div>
+            )}
+          </section>
+        )}
+
+        {config && (
+          <section className={styles.section}>
+            <h2 className={styles.sectionHeading}>Ignored Publishers</h2>
+
+            {ignoredEnvManaged ? (
+              <p
+                className={styles.envNote}
+                role="status"
+                data-testid="ignored-publishers-env-managed"
+              >
+                Set by the <code>FORAGERR_COMICVINE_IGNORED_PUBLISHERS</code>{' '}
+                environment variable — managed outside the UI. To change it, edit
+                the environment variable and restart foragerr.
+              </p>
+            ) : (
+              <>
+                <label className={styles.fieldLabel} htmlFor="ignored-publishers">
+                  Publishers hidden from Add New search results
+                </label>
+                <textarea
+                  id="ignored-publishers"
+                  className={styles.textarea}
+                  data-testid="ignored-publishers-input"
+                  value={ignoredValue}
+                  onChange={(e) => {
+                    clearFeedback();
+                    setIgnoredValue(e.target.value);
+                  }}
+                  rows={3}
+                />
+                <p className={styles.sectionHelp}>
+                  Comma-separated publisher names — foreign-market reprint
+                  imprints that otherwise outrank the original volume. An entry
+                  ending in <code>*</code> matches as a wildcard (e.g.{' '}
+                  <code>Panini*</code> covers Panini Verlag/España/France); any
+                  other entry matches exactly. Hidden results are counted and stay
+                  recoverable per-search in Add New.
+                </p>
+                <button
+                  type="button"
+                  className={styles.saveButton}
+                  data-testid="ignored-publishers-save"
+                  disabled={putIgnored.isPending}
+                  onClick={onSaveIgnored}
+                >
+                  {putIgnored.isPending ? 'Saving…' : 'Save ignored publishers'}
+                </button>
+              </>
             )}
           </section>
         )}

@@ -16,6 +16,7 @@ import {
 import { useUiStore } from '../../store/uiStore';
 import { ApiRequestError, isComicVineAuthError } from '../../api/fetcher';
 import { SUGGEST_DEBOUNCE_MS } from '../../api/hooks';
+import type { LookupCandidate, LookupResponse } from '../../api/types';
 import { AddSeries, normalizeLookupTerm } from './AddSeries';
 import { SeriesDetail } from '../series/SeriesDetail';
 
@@ -1127,5 +1128,101 @@ describe('FRG-UI-005 / FRG-UI-019: autosuggest / quick-search seam (gate review)
     // Suggest is suppressed post-submit, so the lookup's alert is not
     // duplicated by an identical suggest credential alert.
     expect(screen.getAllByRole('alert')).toHaveLength(1);
+  });
+});
+
+/**
+ * FRG-UI-032 — publisher-ignore-list results are recoverable in Add New: the
+ * screen shows an explicit hidden count with a one-click reveal that refetches
+ * with include-ignored and badges the flagged candidates, plus a path to edit
+ * the list; nothing renders when the count is zero.
+ */
+describe('FRG-UI-032: hidden-by-ignore-list results are recoverable', () => {
+  const IGNORED_CANDIDATE: LookupCandidate = {
+    cv_volume_id: 40507777,
+    name: 'Saga',
+    publisher: 'Panini Verlag',
+    start_year: 2015,
+    image_url: null,
+    count_of_issues: 10,
+    description: null,
+    name_similarity: 0.9,
+    year_proximity: 3,
+    target_issue_plausible: null,
+    have_it: false,
+    ignored: true,
+  };
+
+  /** Default search hides one volume; the include-ignored search reveals it flagged. */
+  function ignoreLookup(path: string): LookupResponse {
+    if (path === '/api/v1/series/lookup?term=saga&includeIgnored=true') {
+      return {
+        records: [...mockLookupCandidates, IGNORED_CANDIDATE],
+        complete: true,
+        truncated: false,
+        hidden_by_ignore_list: 1,
+      };
+    }
+    if (path === '/api/v1/series/lookup?term=saga') {
+      return {
+        records: mockLookupCandidates,
+        complete: true,
+        truncated: false,
+        hidden_by_ignore_list: 1,
+      };
+    }
+    return {
+      records: [],
+      complete: true,
+      truncated: false,
+      hidden_by_ignore_list: 0,
+    };
+  }
+
+  it('FRG-UI-032 — a hidden-count line reveals flagged candidates on Show, with an Edit-list link to Settings', async () => {
+    renderAdd({ lookup: ignoreLookup });
+    const user = await searchFor('saga');
+
+    const line = await screen.findByTestId('ignored-hidden-line');
+    expect(line).toHaveTextContent(
+      '1 result hidden by your publisher ignore list',
+    );
+    // The hidden candidate is not shown until the reveal is activated.
+    expect(screen.queryByTestId('candidate-40507777')).not.toBeInTheDocument();
+
+    await user.click(within(line).getByRole('button', { name: 'Show' }));
+
+    // Revealed: the flagged candidate appears carrying its "Ignored" badge...
+    const revealed = await screen.findByTestId('candidate-40507777');
+    expect(
+      within(revealed).getByTestId('candidate-40507777-ignored'),
+    ).toHaveTextContent('Ignored');
+    // ...the hidden-count line is replaced by an Edit-list pointer to Settings...
+    expect(
+      screen.queryByTestId('ignored-hidden-line'),
+    ).not.toBeInTheDocument();
+    const shown = screen.getByTestId('ignored-shown-line');
+    expect(
+      within(shown).getByRole('link', { name: 'Edit list' }),
+    ).toHaveAttribute('href', '/settings/general');
+    // ...and a non-ignored candidate carries no badge.
+    expect(
+      screen.queryByTestId('candidate-40501234-ignored'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('FRG-UI-032 — no hidden-results line renders when nothing was hidden', async () => {
+    renderAdd(); // defaultLookup carries no hidden_by_ignore_list
+    await searchFor('saga');
+
+    await waitFor(() =>
+      expect(screen.getByTestId('candidate-40501234')).toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByTestId('ignored-hidden-line'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId('ignored-shown-line'),
+    ).not.toBeInTheDocument();
   });
 });

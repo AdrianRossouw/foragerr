@@ -725,6 +725,59 @@ def test_lookup_capped_walk_is_200_truncated(tmp_path, monkeypatch):
     assert len(body["records"]) == 1  # cut to the cap
 
 
+@pytest.mark.req("FRG-META-007")
+def test_lookup_reports_hidden_count_and_reveals_flagged_with_include_ignored(
+    tmp_path, monkeypatch
+):
+    """The lookup envelope carries ``hidden_by_ignore_list`` (never a silent
+    drop), and ``includeIgnored=true`` returns the hidden volumes flagged
+    ``ignored`` so the add screen can recover them (FRG-META-007 / FRG-UI-032)."""
+    cfg = tmp_path / "cfg"
+    cfg.mkdir()
+    ignore_settings = flows_settings(
+        cfg, comicvine_ignored_publishers="Panini*, Reprint House"
+    )
+    volumes = [
+        {"id": 101, "name": "Saga", "start_year": "2012",
+         "publisher": {"name": "Image Comics"}},
+        {"id": 102, "name": "Saga", "start_year": "2013",
+         "publisher": {"name": "Panini Verlag"}},  # wildcard match
+        {"id": 103, "name": "Saga", "start_year": "2014",
+         "publisher": {"name": "Reprint House"}},  # exact match
+    ]
+    factory = build_factory(settings=ignore_settings, handler=_search_handler(volumes))
+    monkeypatch.setattr(
+        "foragerr.api.series.comicvine_factory", lambda _settings: factory
+    )
+
+    app = create_app(ignore_settings)
+    with TestClient(app) as ignore_client:
+        # Default: hidden volumes excluded but COUNTED.
+        default = ignore_client.get(
+            "/api/v1/series/lookup", params={"term": "Saga"}
+        )
+        assert default.status_code == 200
+        body = default.json()
+        assert body["hidden_by_ignore_list"] == 2
+        ids = {r["cv_volume_id"] for r in body["records"]}
+        assert ids == {101}  # only the non-ignored volume
+        assert all(r["ignored"] is False for r in body["records"])
+
+        # includeIgnored: the hidden volumes come back, flagged.
+        revealed = ignore_client.get(
+            "/api/v1/series/lookup",
+            params={"term": "Saga", "includeIgnored": "true"},
+        )
+        assert revealed.status_code == 200
+        rbody = revealed.json()
+        assert rbody["hidden_by_ignore_list"] == 2  # still counted
+        by_id = {r["cv_volume_id"]: r for r in rbody["records"]}
+        assert set(by_id) == {101, 102, 103}
+        assert by_id[101]["ignored"] is False
+        assert by_id[102]["ignored"] is True
+        assert by_id[103]["ignored"] is True
+
+
 @pytest.mark.req("FRG-API-003")
 def test_lookup_clean_empty_is_200_complete_with_no_records(client, monkeypatch):
     """A complete walk that genuinely matched nothing stays a 200 with

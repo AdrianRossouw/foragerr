@@ -126,7 +126,7 @@ def _patch_cv(monkeypatch, recorder: _CVRecorder) -> None:
 @pytest.mark.req("FRG-API-018")
 def test_get_reports_unset_when_no_key_configured(client):
     body = client.get("/api/v1/config/general").json()
-    assert body == {"comicvine_api_key": {"configured": False, "source": "unset"}}
+    assert body["comicvine_api_key"] == {"configured": False, "source": "unset"}
 
 
 @pytest.mark.req("FRG-API-018")
@@ -139,9 +139,7 @@ def test_get_reports_file_source_and_never_the_value(tmp_path):
         resp = client.get("/api/v1/config/general")
         assert resp.status_code == 200
         body = resp.json()
-        assert body == {
-            "comicvine_api_key": {"configured": True, "source": "file"}
-        }
+        assert body["comicvine_api_key"] == {"configured": True, "source": "file"}
         # The value (and no substring of it) is not in the response.
         assert _KEY not in resp.text
 
@@ -152,8 +150,9 @@ def test_get_reports_environment_source_when_env_set(client, monkeypatch):
     monkeypatch.setenv("FORAGERR_COMICVINE_API_KEY", _KEY)
     resp = client.get("/api/v1/config/general")
     body = resp.json()
-    assert body == {
-        "comicvine_api_key": {"configured": True, "source": "environment"}
+    assert body["comicvine_api_key"] == {
+        "configured": True,
+        "source": "environment",
     }
     assert _KEY not in resp.text
 
@@ -174,8 +173,9 @@ def test_put_persists_key_applies_live_and_registers_redaction(
     )
     assert put.status_code == 200
     # The response reports the new status/source but NEVER echoes the key.
-    assert put.json() == {
-        "comicvine_api_key": {"configured": True, "source": "file"}
+    assert put.json()["comicvine_api_key"] == {
+        "configured": True,
+        "source": "file",
     }
     assert _KEY not in put.text
 
@@ -211,9 +211,9 @@ def test_blank_put_keeps_the_stored_key(tmp_path):
         assert (
             client.app.state.settings.comicvine_api_key.get_secret_value() == _KEY
         )
-        assert client.get("/api/v1/config/general").json() == {
-            "comicvine_api_key": {"configured": True, "source": "file"}
-        }
+        assert client.get("/api/v1/config/general").json()[
+            "comicvine_api_key"
+        ] == {"configured": True, "source": "file"}
 
 
 @pytest.mark.req("FRG-API-018")
@@ -350,8 +350,9 @@ def test_lowercase_env_spelling_is_detected_as_environment(client, monkeypatch):
     ineffective editor. GET reports ``environment``; PUT is rejected 409."""
     monkeypatch.setenv("foragerr_comicvine_api_key", _KEY)
     get = client.get("/api/v1/config/general")
-    assert get.json() == {
-        "comicvine_api_key": {"configured": True, "source": "environment"}
+    assert get.json()["comicvine_api_key"] == {
+        "configured": True,
+        "source": "environment",
     }
     assert _KEY not in get.text
     put = client.put(
@@ -380,9 +381,9 @@ def test_empty_env_does_not_shadow_file_key(tmp_path, monkeypatch):
     recorder = _CVRecorder()
     _patch_cv(monkeypatch, recorder)
     with TestClient(app) as client:
-        assert client.get("/api/v1/config/general").json() == {
-            "comicvine_api_key": {"configured": True, "source": "file"}
-        }
+        assert client.get("/api/v1/config/general").json()[
+            "comicvine_api_key"
+        ] == {"configured": True, "source": "file"}
         # PUT is allowed (not env-managed) and applies live.
         new_key = "CV-NEW-KEY-xyz789"
         put = client.put(
@@ -416,6 +417,118 @@ def test_no_key_material_in_any_response_or_log(tmp_path, monkeypatch, caplog):
         assert _KEY not in resp.text
     logged = "\n".join(r.getMessage() for r in caplog.records)
     assert _KEY not in logged
+
+
+# --- Ignored-publishers list: value + source + PUT (FRG-UI-031) --------------
+
+
+@pytest.mark.req("FRG-UI-031")
+def test_get_reports_default_ignore_list_value_and_source(client):
+    """The General resource echoes the effective ignored-publishers VALUE (not a
+    secret) with its source; a fresh install reports the curated default."""
+    from foragerr.config import DEFAULT_IGNORED_PUBLISHERS
+
+    body = client.get("/api/v1/config/general").json()
+    assert body["comicvine_ignored_publishers"] == {
+        "value": DEFAULT_IGNORED_PUBLISHERS,
+        "source": "default",
+    }
+
+
+@pytest.mark.req("FRG-UI-031")
+def test_get_reports_file_source_when_list_stored(tmp_path):
+    """A value present in config.yaml — even one differing from the default —
+    reports ``source="file"`` and echoes the stored value (presence in the
+    file, not the value itself, is what distinguishes file from default)."""
+    cfg = tmp_path / "cfg"
+    cfg.mkdir()
+    (cfg / CONFIG_FILENAME).write_text(
+        "comicvine_ignored_publishers: Reprint House\n", encoding="utf-8"
+    )
+    settings = make_settings(cfg, comicvine_ignored_publishers="Reprint House")
+    app = create_app(settings)
+    with TestClient(app) as client:
+        body = client.get("/api/v1/config/general").json()
+    assert body["comicvine_ignored_publishers"] == {
+        "value": "Reprint House",
+        "source": "file",
+    }
+
+
+@pytest.mark.req("FRG-UI-031")
+def test_put_persists_ignore_list_and_applies_live(client, monkeypatch):
+    """A PUT persists the list into config.yaml through the documented writer,
+    swaps app.state.settings live, and the next search applies it — while a
+    blank key in the same body leaves the key untouched."""
+    recorder = _CVRecorder()
+    _patch_cv(monkeypatch, recorder)
+    put = client.put(
+        "/api/v1/config/general",
+        json={"comicvine_ignored_publishers": "Panini*, Reprint House"},
+    )
+    assert put.status_code == 200
+    assert put.json()["comicvine_ignored_publishers"] == {
+        "value": "Panini*, Reprint House",
+        "source": "file",
+    }
+    # Written into config.yaml and live-applied.
+    parsed = yaml.safe_load(
+        (Path(client.app.state.settings.config_dir) / CONFIG_FILENAME).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert parsed["comicvine_ignored_publishers"] == "Panini*, Reprint House"
+    assert (
+        client.app.state.settings.comicvine_ignored_publishers
+        == "Panini*, Reprint House"
+    )
+
+
+@pytest.mark.req("FRG-UI-031")
+def test_put_can_clear_ignore_list_to_empty(client):
+    """Unlike the key (blank = keep), an explicit empty string CLEARS the list so
+    an operator can choose to hide nothing."""
+    put = client.put(
+        "/api/v1/config/general", json={"comicvine_ignored_publishers": ""}
+    )
+    assert put.status_code == 200
+    assert client.app.state.settings.comicvine_ignored_publishers == ""
+    assert put.json()["comicvine_ignored_publishers"]["value"] == ""
+
+
+@pytest.mark.req("FRG-UI-031")
+def test_env_supplied_ignore_list_is_readonly_and_rejects_writes(
+    client, monkeypatch
+):
+    """An env-supplied list reports ``source="env"`` and refuses writes with a
+    409 naming the variable — mirroring the key's env-managed contract."""
+    monkeypatch.setenv("FORAGERR_COMICVINE_IGNORED_PUBLISHERS", "Env House")
+    # The env var wins over the file, so the source is reported env-managed
+    # (which drives the read-only Settings field, FRG-UI-031). The effective
+    # value pydantic resolves at boot is echoed for display.
+    get = client.get("/api/v1/config/general").json()
+    assert get["comicvine_ignored_publishers"]["source"] == "env"
+    put = client.put(
+        "/api/v1/config/general",
+        json={"comicvine_ignored_publishers": "Attempted House"},
+    )
+    assert put.status_code == 409
+    body = put.json()
+    assert "FORAGERR_COMICVINE_IGNORED_PUBLISHERS" in body["message"]
+    assert body["errors"][0]["field"] == "comicvine_ignored_publishers"
+
+
+@pytest.mark.req("FRG-UI-031")
+def test_env_managed_list_does_not_block_editing_the_key(client, monkeypatch):
+    """The two fields are independent: an env-managed LIST must not block a key
+    write (and vice versa) — the endpoint checks each field it is actually
+    changing, not the whole request."""
+    monkeypatch.setenv("FORAGERR_COMICVINE_IGNORED_PUBLISHERS", "Env House")
+    recorder = _CVRecorder()
+    _patch_cv(monkeypatch, recorder)
+    put = client.put("/api/v1/config/general", json={"comicvine_api_key": _KEY})
+    assert put.status_code == 200
+    assert client.app.state.settings.comicvine_api_key.get_secret_value() == _KEY
 
 
 @pytest.mark.req("FRG-META-018")

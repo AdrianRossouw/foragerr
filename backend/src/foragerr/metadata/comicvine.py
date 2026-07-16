@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Callable, Mapping, Sequence
 
@@ -119,6 +120,43 @@ def split_csv(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+@dataclass(frozen=True, slots=True)
+class PublisherIgnoreList:
+    """The parsed ``comicvine_ignored_publishers`` list (FRG-META-007).
+
+    Entries are parsed ONCE (at client construction) into two case-folded sets:
+    exact-match names and substring probes (an entry containing ``*`` becomes a
+    substring test with the ``*`` characters removed, so ``Panini*`` covers
+    Panini Verlag / España / France). :meth:`matches` is the single decision
+    point shared by ``search_series`` (which counts, and optionally includes,
+    the matches) and ``suggest_series`` (which drops them)."""
+
+    exact: frozenset[str]
+    substrings: tuple[str, ...]
+
+    @classmethod
+    def parse(cls, raw: str) -> "PublisherIgnoreList":
+        exact: set[str] = set()
+        substrings: list[str] = []
+        for entry in split_csv(raw):
+            folded = entry.casefold()
+            if "*" in folded:
+                probe = folded.replace("*", "")
+                if probe:  # a bare "*" would match everything — ignore it
+                    substrings.append(probe)
+            else:
+                exact.add(folded)
+        return cls(exact=frozenset(exact), substrings=tuple(substrings))
+
+    def matches(self, publisher: str | None) -> bool:
+        if not publisher:
+            return False
+        folded = publisher.casefold()
+        if folded in self.exact:
+            return True
+        return any(probe in folded for probe in self.substrings)
+
+
 def _name_filter(term: str) -> str:
     """Neutralise CV ``filter`` metacharacters in a raw search term so it
     cannot inject additional filter fields (``,`` separates fields, ``:``
@@ -159,8 +197,8 @@ class ComicVineClient:
         self._page_size = settings.comicvine_page_size
         self._max_pages = settings.comicvine_max_pages
         self._search_cap = settings.comicvine_search_result_cap
-        self._ignored_publishers = frozenset(
-            p.casefold() for p in split_csv(settings.comicvine_ignored_publishers)
+        self._ignored_publishers = PublisherIgnoreList.parse(
+            settings.comicvine_ignored_publishers
         )
 
     # -- public API ---------------------------------------------------------
@@ -278,10 +316,18 @@ class ComicVineClient:
         return tuple(out)
 
     async def search_series(
-        self, term: str, *, target_issue: str | int | None = None
+        self,
+        term: str,
+        *,
+        target_issue: str | int | None = None,
+        include_ignored: bool = False,
     ) -> SearchResult:
         """Search volumes by name; return bounded, plausibility-annotated
-        candidates with ignored-publisher volumes removed (FRG-META-007)."""
+        candidates (FRG-META-007). Ignored-publisher volumes are COUNTED
+        (``SearchResult.ignored_count``) rather than silently dropped: by
+        default they are omitted from the candidate list, but with
+        ``include_ignored`` they are returned flagged (``SeriesCandidate.ignored``)
+        so a caller can recover a hidden edition for one search."""
         query = term.strip()
         filter_value = _name_filter(query)
         base_params = {
@@ -293,16 +339,20 @@ class ComicVineClient:
             "volumes/", base_params, map_volume, cap_items=self._search_cap
         )
         candidates: list[SeriesCandidate] = []
+        ignored_count = 0
         for record in page.items:
-            publisher = (record.publisher or "").casefold()
-            if publisher and publisher in self._ignored_publishers:
-                continue
+            is_ignored = self._ignored_publishers.matches(record.publisher)
+            if is_ignored:
+                ignored_count += 1
+                if not include_ignored:
+                    continue
             candidates.append(
                 SeriesCandidate(
                     series=record,
                     plausibility=plausibility(
                         query, record, target_issue=target_issue
                     ),
+                    ignored=is_ignored,
                 )
             )
         return SearchResult(
@@ -310,6 +360,7 @@ class ComicVineClient:
             total_results=page.total_results,
             truncated=page.truncated,
             complete=page.complete,
+            ignored_count=ignored_count,
         )
 
     async def suggest_series(self, term: str) -> SuggestResult:
@@ -362,8 +413,7 @@ class ComicVineClient:
             if not isinstance(raw, dict):
                 continue
             record = map_volume(raw)
-            publisher = (record.publisher or "").casefold()
-            if publisher and publisher in self._ignored_publishers:
+            if self._ignored_publishers.matches(record.publisher):
                 continue
             candidates.append(record)
 
