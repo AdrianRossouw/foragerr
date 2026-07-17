@@ -287,7 +287,7 @@ test('FRG-PROC-010 FRG-UI-018: the calendar renders an unconfigured-source week 
   await expect(page.getByText('No releases this week for that filter.')).toBeVisible();
 });
 
-test('FRG-PROC-010 FRG-OPDS-001 FRG-OPDS-002 FRG-OPDS-003 FRG-OPDS-005: OPDS navigates to a byte-identical comic download', async () => {
+test('FRG-PROC-010 FRG-OPDS-001 FRG-OPDS-002 FRG-OPDS-003 FRG-OPDS-005 FRG-OPDS-019: OPDS navigates to a byte-identical comic download and a reachable cover', async () => {
   // Root navigation feed advertises the All Series shelf.
   const root = await api.get('/opds');
   expect(root.status()).toBe(200);
@@ -312,6 +312,23 @@ test('FRG-PROC-010 FRG-OPDS-001 FRG-OPDS-002 FRG-OPDS-003 FRG-OPDS-005: OPDS nav
   expect(download.headers()['content-type']).toContain(COMIC_MIME);
   const body = Buffer.from(await download.body());
   expect(body.equals(readFileSync(CBZ_SOURCE))).toBe(true);
+
+  // FRG-OPDS-019: follow the advertised cover link — a reader must be able to
+  // LOAD the image the feed points it at (the Panels couch-test bug was an
+  // /api link the OPDS realm rejects). The link must be on the /opds realm.
+  // Attribute order is rel, type, href, so scan whole <link> tags for the
+  // image rel and pull its href regardless of attribute order.
+  const imageLink = acqText
+    .match(/<link\b[^>]*>/g)
+    ?.find((l) => /rel="http:\/\/opds-spec\.org\/image"/.test(l));
+  const coverHref = imageLink?.match(/href="([^"]+)"/)?.[1];
+  expect(coverHref, 'an on-realm cover link (not /api)').toBeTruthy();
+  expect(coverHref, 'cover link on the OPDS realm').toMatch(/^\/opds\//);
+  expect(acqText).not.toContain('/api/v1/series');
+  const cover = await api.get(coverHref!);
+  expect(cover.status(), 'cover loads under the OPDS auth the feed uses').toBe(200);
+  expect(cover.headers()['content-type']).toContain('image/');
+  expect(Buffer.from(await cover.body()).length).toBeGreaterThan(0);
 });
 
 // FORAGERR_SABNZBD_API_KEY here is a HARNESS-ONLY gate variable for opting into
