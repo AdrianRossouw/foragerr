@@ -196,9 +196,10 @@ def test_cover_and_thumbnail_links_point_at_local_cache(client, tmp_path):
     data = _seed(client, tmp_path, [simple_series(n_issues=1)])
     series_id = data["series"][0]["id"]
 
-    # A series WITH a cached ComicVine cover uses the local series cover-cache
-    # URL for both image links (FRG-OPDS-002); the cover-less local-first-page
-    # fallback (FRG-OPDS-011) is covered separately in the stream suite.
+    # A series WITH a cached ComicVine cover uses the OPDS-REALM series-cover
+    # route for both image links (FRG-OPDS-019) — NOT the /api route, which an
+    # OPDS reader's Basic credentials cannot reach; the cover-less
+    # local-first-page fallback (FRG-OPDS-011) is covered in the stream suite.
     async def _mark_cover_cached(app):
         from foragerr.db.base import utcnow
         from foragerr.library.models import SeriesRow
@@ -217,8 +218,9 @@ def test_cover_and_thumbnail_links_point_at_local_cache(client, tmp_path):
         for link in _links(entry)
         if link["rel"] and "image" in link["rel"]
     }
-    assert rels["http://opds-spec.org/image"] == f"/api/v1/series/{series_id}/cover"
-    assert rels["http://opds-spec.org/image/thumbnail"] == f"/api/v1/series/{series_id}/cover"
+    assert rels["http://opds-spec.org/image"] == f"/opds/series-cover/{series_id}"
+    assert rels["http://opds-spec.org/image/thumbnail"] == f"/opds/series-cover/{series_id}"
+    assert "/api/v1/series" not in body  # never the off-realm API route
     # No remote ComicVine/CDN image host leaks into the feed (only the Atom/
     # OPDS namespace + rel URIs legitimately contain a scheme).
     for host in ("comicvine", "gamespot", "cbsistatic"):
@@ -379,3 +381,30 @@ def test_per_page_cap_is_enforced(client, tmp_path):
     )
     assert feed.find(f"{OS}itemsPerPage").text == "100"
     assert len(feed.findall(f"{ATOM}entry")) == 100
+
+
+def test_series_cover_route_serves_cached_bytes_with_head_parity(client, tmp_path):
+    """The OPDS-realm series-cover route (FRG-OPDS-019) serves the cached
+    cover the feed now points readers at, with HEAD parity and a 404 when
+    absent — the bytes an OPDS client could not previously reach on /api."""
+    data = _seed(client, tmp_path, [simple_series(n_issues=1)])
+    series_id = data["series"][0]["id"]
+
+    # Missing cover: deterministic 404 on both verbs.
+    url = f"/opds/series-cover/{series_id}"
+    assert client.get(url).status_code == 404
+    assert client.head(url).status_code == 404
+
+    # Write a cached cover exactly where the API route caches it.
+    covers = Path(client.app.state.settings.config_dir) / "covers"
+    covers.mkdir(parents=True, exist_ok=True)
+    (covers / f"{series_id}.jpg").write_bytes(b"\xff\xd8\xff\xe0cover-bytes")
+
+    get = client.get(url)
+    assert get.status_code == 200
+    assert get.headers["content-type"] == "image/jpeg"
+    assert get.content == b"\xff\xd8\xff\xe0cover-bytes"
+    head = client.head(url)
+    assert head.status_code == 200
+    assert head.headers["content-type"] == get.headers["content-type"]
+    assert head.content == b""

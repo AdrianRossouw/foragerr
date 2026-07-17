@@ -294,3 +294,4 @@ def test_rotation_drops_the_stale_bootstrap_key(tmp_path):
             headers={"X-Api-Key": new_key, **_ORIGIN},
         ).status_code == 404
         assert getattr(app.state, "bootstrap_api_key", None) is None
+
