@@ -60,11 +60,13 @@ class ApiKeyRotateBody(BaseModel):
 def _set_session_cookie(
     response: Response, request: Request, token: str, tier: str, settings
 ) -> None:
-    # `Secure` tracks the actual request scheme rather than being forced on:
+    # `Secure` tracks the EFFECTIVE request scheme rather than being forced on:
     # the reference deployment runs plain HTTP inside a Tailscale tailnet (TLS
     # termination is DEP's story), so forcing Secure would silently drop the
-    # cookie and lock the operator out. When a proxy terminates TLS the request
-    # scheme is https and the flag is set. HttpOnly keeps JS from reading it;
+    # cookie and lock the operator out. Behind a TLS-terminating proxy the
+    # operator sets `trusted_proxies` (FRG-SEC-007) and the trusted-proxy
+    # middleware rewrites the scope scheme from X-Forwarded-Proto, so this
+    # line sees https and sets the flag. HttpOnly keeps JS from reading it;
     # SameSite=Lax is the CSRF baseline (FRG-SEC-005 adds the Origin check).
     response.set_cookie(
         key=sessions_mod.COOKIE_NAME,

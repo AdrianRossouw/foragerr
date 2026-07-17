@@ -286,6 +286,19 @@ class Settings(BaseSettings):
             "'https://comics.example.org'."
         ),
     )
+    trusted_proxies: str = Field(
+        default="",
+        description=(
+            "Comma-separated addresses of TLS-terminating reverse proxies this "
+            "deployment runs (FRG-SEC-007). Only when a request's DIRECT peer "
+            "is on this list are X-Forwarded-Proto / X-Forwarded-For honored — "
+            "the effective scheme then drives the session cookies' Secure flag "
+            "and the effective client address drives rate limiting and audit "
+            "attribution. Empty (default): forwarded headers are never "
+            "consulted. Set this ONLY to the address of a proxy you run; a "
+            "wrongly trusted peer can spoof its scheme and address."
+        ),
+    )
     host: str = Field(
         default="0.0.0.0",
         description="Interface the HTTP listener binds to.",

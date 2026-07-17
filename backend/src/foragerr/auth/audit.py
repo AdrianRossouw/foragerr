@@ -65,7 +65,13 @@ def _field(key: str, value: Any) -> str:
 
 
 def client_ip(request: HTTPConnection | None) -> str:
-    """The direct-connection client IP (``X-Forwarded-For`` is not trusted).
+    """The effective client IP from the connection scope.
+
+    Raw ``X-Forwarded-For`` is never read here: for a peer on the operator's
+    ``trusted_proxies`` list the scope's client was already rewritten by the
+    trusted-proxy middleware (FRG-SEC-007), and for any other peer the scope
+    holds the direct connection — so this function stays the one shared
+    resolution for the perimeter, login route, and rate limiter alike.
 
     The one shared implementation — the perimeter and login route import this
     rather than each keeping a copy. ``None`` request (startup/re-seed events)

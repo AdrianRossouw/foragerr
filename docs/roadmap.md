@@ -53,33 +53,33 @@ throttling (429 + growing `Retry-After`, never a lockout) and a unified
 
 ## M9 — UI refinement
 
-A dedicated polish milestone, placed after authentication because auth is the
-last milestone that adds screens (login, sessions, and API-key management get
-polished alongside everything else). Scope seeds — final scope set at proposal
-time, likely against a fresh design handoff:
-
-- Deferred UX items carried from the M4/M5 gates (bulk-monitor
-  discoverability, shift-range selection, overview show-more, and the rest of
-  the deferred-items lists in the archived change proposals).
-- A design-handoff fidelity audit across all shipped screens.
-- State completeness: empty, error, loading, and first-run states everywhere.
-- iPad/tablet ergonomics (OPDS reading is iPad-first; the management UI is
-  desktop-dense today).
-- Keyboard and accessibility pass; UI-responsiveness re-verification at the
-  full feature set; README screenshot refresh as the closing act.
-- A deliberate API/configuration warts review, so 1.0's clean slate starts
-  clean.
+**Complete** (v0.9.1–v0.9.16, closed 2026-07-16). The polish milestone
+delivered across the 0.9.x dogfood series: deferred UX items from the M4/M5
+gates, design-fidelity and state-completeness passes, iPad/tablet
+ergonomics, the accessibility scan in the e2e gate, credential-runtime and
+health-truthfulness fixes surfaced by structured dogfood, OPDS per-issue
+covers, and the public project site.
 
 ## M10 — Go-live and 1.0
 
-The release milestone: what it takes for strangers to deploy foragerr safely,
-and the capstone of the regulated-development demonstration.
+**In progress** (kicked off 2026-07-17; design authority: the m10-go-live
+pre-design). The release milestone: what it takes for strangers to deploy
+foragerr safely, and the capstone of the regulated-development
+demonstration. Sequenced as: deployment-posture hardening (first, in
+flight), then the release pipeline (GHCR publishing, dev/rc/release
+channels, change control, credential scoping), then V&V/qualification
+(IQ/OQ/PQ), audit durability, and the pentest.
 
-- A formal release process: dev/rc/release semantic-versioning scheme and a
-  release-level gate distinct from the per-change merge gate.
+- Deployment security posture: HTTP security headers, opt-in trusted-proxy
+  handling, unauthenticated-disclosure hygiene, and the committed posture
+  record (`docs/security/posture.md`).
+- A formal release process: GHCR image publishing, dev/rc/release
+  semantic-versioning channels, a release-level gate distinct from the
+  per-change merge gate, and change control for official releases.
 - The penetration-test decision (whether, scope, and by whom) made and
   recorded.
-- Backup/restore and upgrade-path proofs.
+- Backup/restore and upgrade-path proofs; IQ/OQ/PQ deployment
+  qualification with non-leaky records rendered on the project site.
 - Manual completeness audit against the shipped feature set.
 - The 1.0 compatibility promise takes effect: strict SemVer on REST, OPDS,
   configuration, and environment variables from here on.

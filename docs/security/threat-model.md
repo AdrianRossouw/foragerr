@@ -1753,6 +1753,45 @@ New surface: the repository's first GitHub Actions workflow
 - No new SOUP in the application; the four pinned workflow actions are recorded
   in the SOUP register's CI section.
 
+### 2026-07-17 — m10-deployment-posture (M10 change 1)
+
+Surface changed and its disposition (COMP 1 perimeter; first M10 change —
+the hardening pass the pentest scope statement will cite via
+`docs/security/posture.md`, the new posture authority this change adds):
+
+- **Trusted-proxy handling exists** (FRG-SEC-007): the documented
+  X-Forwarded-For refusal (COMP 1 / the rate limiter's S1 caveat) is
+  DELIBERATELY revised — forwarded headers are now honored, but only when
+  the request's direct peer is on the operator's explicit `trusted_proxies`
+  allowlist (default empty = prior behavior, negative-tested). Resolution
+  happens once at the perimeter by scope rewrite, so the session-cookie
+  `Secure` flag, the FRG-NFR-014 rate-limiter key, and `auth.*` audit
+  attribution can never disagree. This closes the
+  Secure-cookie-never-set-behind-TLS-proxy gap. Misconfiguration risk
+  recorded as RISK-052 (Spoofing; residual accepted as inherent).
+- **Security response headers on every response** (FRG-SEC-006): nosniff,
+  same-origin referrer policy, frame-ancestors denial, per-surface CSP
+  (deny-all on data surfaces, self-only on the SPA with the recorded
+  `style-src 'unsafe-inline'` loosening — posture.md §4). No CORS
+  middleware exists, by tested position. Low new surface: one outermost
+  pure-ASGI middleware, header-emission only.
+- **Unauthenticated disclosure shrinks** (FRG-SEC-008, MODIFIED
+  FRG-DEP-007): `/health` no longer reveals the DB path, migration
+  revisions, scheduler task list, or error strings — overall status +
+  failing component names only; the detail moved behind the perimeter
+  (`/api/v1/system/health/components`). Unhandled errors are proven (by
+  test) to return the generic envelope with no traceback; no debug flag
+  exists. COMP 1's information-disclosure rows should be read with this
+  narrowing.
+- **Aged residuals decided**: RISK-008 formally re-accepted (dormant, no
+  extraction path exists); FRG-DEP-012 diagnostic bundle re-accepted to
+  backlog (posture.md §8). RISK-005's zipfile residual position restated
+  unchanged.
+
+No new STRIDE categories; no new SOUP; no new listener or credential. Net
+effect is surface reduction plus one deliberate, allowlist-gated trust
+revision (RISK-052).
+
 ## Coverage summary
 
 - **Well covered by the five drafts** (mitigation named, no new requirement needed): OPDS
