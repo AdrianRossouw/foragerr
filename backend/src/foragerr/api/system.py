@@ -25,6 +25,7 @@ import logging
 import os
 import platform
 import time
+from typing import Any
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -195,10 +196,24 @@ async def system_status(request: Request) -> SystemStatus:
     )
 
 
+@router.get("/system/health/components")
+async def probe_component_detail(request: Request) -> dict[str, Any]:
+    """The container-probe detail formerly on root ``/health`` — database,
+    workers, scheduler, and migration state with their diagnostics — now
+    behind the perimeter (FRG-SEC-008; MODIFIED FRG-DEP-007). The root probe
+    keeps only overall status + failing names."""
+    from foragerr.api.health import probe_components
+
+    components = await probe_components(request.app)
+    failing = [name for name, comp in components.items() if comp.get("status") != "up"]
+    return {"status": "up" if not failing else "down", "components": components}
+
+
 @router.get("/health", response_model=list[HealthWarningItem])
 async def health_warnings(request: Request) -> list[HealthWarningItem]:
     """The actionable health-warnings list (FRG-API-014), distinct from the
-    root, unauthenticated ``GET /health`` liveness probe (untouched, DEP)."""
+    root, unauthenticated ``GET /health`` liveness probe (slimmed in M10 —
+    detail on ``/system/health/components``)."""
     service = health_service_from_app(request.app)
     warnings = await service.warnings()
     return [

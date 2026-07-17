@@ -21,6 +21,7 @@ from foragerr.api.command import router as command_router
 from foragerr.api.errors import ApiError, register_error_handlers
 from foragerr.api.health import cache_migration_head
 from foragerr.api.limits import install_request_limits
+from foragerr.api.posture import install_posture
 from foragerr.api.health import router as health_router
 from foragerr.api.issues import router as issues_router
 from foragerr.api.series import router as series_router
@@ -59,3 +60,10 @@ def register_api(app: FastAPI) -> None:
     # Resolve the immutable migration head once at startup so /health never
     # parses Alembic on the event loop per probe (FRG-DEP-007).
     app.state.startup_hooks.append(cache_migration_head)
+
+    # Deployment posture (FRG-SEC-006/007/008): added AFTER the limits
+    # middleware so trusted-proxy resolution runs before rate-limiting keys on
+    # the client address, and the security-headers middleware sits outermost —
+    # stamping headers on every response, including the limits middleware's
+    # own rejections and the generic unhandled-error 500.
+    install_posture(app)

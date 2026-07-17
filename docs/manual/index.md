@@ -12,7 +12,7 @@ Markdown manual in-repo, not a versioned or published document.
   importing files, using the web UI, and reading over OPDS.
 - **Admin guide** (`admin/`) — for someone deploying and configuring the application:
   configuration file and environment variables, secrets handling, network exposure,
-  and deployment.
+  deployment, and deployment security.
 
 For the project's purpose, security posture, and way of working, see the repository
 [`README.md`](../../README.md).
@@ -37,6 +37,7 @@ docs/manual/
     authentication.md       mandatory login, bootstrap credentials, sessions
     network.md              port, Tailscale-only posture, authentication
     deployment.md            Docker image build, run, upgrade
+    security.md              TLS stories, trusted proxy, FDE, container flags
 ```
 
 ## Currency statement (FRG-PROC-011)

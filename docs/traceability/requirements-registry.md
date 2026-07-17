@@ -379,6 +379,7 @@ source. Compatibility: pre-1.0 releases may break with migration notes; from
 | FRG-DEP-012 | secrets-stripped diagnostic bundle | dep | approved | B |
 | FRG-DEP-013 | First-run default DDL provider seeding | dep | implemented | M2 |
 | FRG-DEP-014 | Open-source license (GPL-3.0) | dep | implemented | — |
+| FRG-DEP-017 | Documented deployment security posture | dep | implemented | M10 |
 | FRG-AUTH-001 | M1/M2 no-auth accepted risk | auth | withdrawn | M1 |
 | FRG-AUTH-002 | single-user web login | auth | implemented | M8 |
 | FRG-AUTH-003 | password storage with modern KDF | auth | implemented | M8 |
@@ -410,6 +411,9 @@ source. Compatibility: pre-1.0 releases may break with migration notes; from
 | FRG-SEC-003 | Archive-processing safety (bomb / zip-slip limits) | sec | implemented | M1 |
 | FRG-SEC-004 | Filesystem path confinement (safe-join) | sec | implemented | M1 |
 | FRG-SEC-005 | CSRF stance and WebSocket Origin validation | sec | implemented | M8 |
+| FRG-SEC-006 | HTTP security response headers | sec | implemented | M10 |
+| FRG-SEC-007 | Opt-in trusted-proxy handling | sec | implemented | M10 |
+| FRG-SEC-008 | Unauthenticated disclosure and error hygiene | sec | implemented | M10 |
 | FRG-NFR-014 | Listener request resource limits | nfr | implemented | M2 |
 | FRG-NFR-015 | Bounded log capture with configurable retention | nfr | implemented | M4 |
 | FRG-NFR-016 | Library-import group failures logged at WARNING with reasons | nfr | implemented | M9 |

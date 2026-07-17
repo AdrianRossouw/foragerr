@@ -9,6 +9,52 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.9.17] — 2026-07-18
+
+Deployment-security hardening (m10-deployment-posture), the first M10 go-live
+change: security headers everywhere, opt-in trusted-proxy support, minimal
+unauthenticated disclosure, and the committed security posture record.
+
+### Added
+
+- Opt-in trusted-proxy handling (`FORAGERR_TRUSTED_PROXIES` /
+  `trusted_proxies`): behind a TLS-terminating proxy you run, session cookies
+  now carry `Secure` and rate-limiting/audit attribute requests to the real
+  client address. Forwarded headers from any unlisted peer are ignored, as
+  before; forwarded entries are validated as IP literals and fail closed.
+  (FRG-SEC-007)
+- Security response headers on every response — `X-Content-Type-Options:
+  nosniff`, `Referrer-Policy: same-origin`, `X-Frame-Options: DENY`, and a
+  per-surface Content-Security-Policy (deny-all on API/OPDS/health, self-only
+  on the web UI). No CORS surface exists, by tested position. (FRG-SEC-006)
+- `docs/security/posture.md` — the deployment security posture record (TLS
+  delegation, at-rest storage classes and the full-database-encryption
+  rejection, DoS envelope, residual decisions) — and a manual
+  deployment-security page (TLS stories, full-disk-encryption
+  recommendation, container run flags, downgrade warning). (FRG-DEP-017)
+
+### Changed
+
+- **`GET /health` body is now minimal** (FRG-DEP-007, FRG-SEC-008): overall
+  status plus failing component names only — the database path, migration
+  revisions, scheduler task list, and error text no longer appear
+  unauthenticated. Status codes are unchanged (Docker HEALTHCHECK and
+  monitors keep working). **Upgrade note:** if you scraped `/health` for
+  component detail, authenticate and use
+  `GET /api/v1/system/health/components` instead.
+- Unhandled server errors now always return a generic error envelope with the
+  traceback confined to the server log; the `Server` response header is
+  suppressed. (FRG-SEC-008)
+
+### Security
+
+- Aged residuals decided: RISK-008 (DDL extraction) formally re-accepted as
+  dormant with a review trigger; FRG-DEP-012 diagnostic bundle re-accepted to
+  backlog; trusted-proxy misconfiguration recorded as RISK-052.
+
+Requirements: FRG-SEC-006, FRG-SEC-007, FRG-SEC-008, FRG-DEP-007 (modified),
+FRG-DEP-017.
+
 ## [v0.9.16] — 2026-07-17
 
 Each comic issue shows its own cover in OPDS readers (m9-opds-per-issue-cover),

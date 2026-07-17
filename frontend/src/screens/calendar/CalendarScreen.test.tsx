@@ -68,10 +68,12 @@ describe('FRG-UI-018: Calendar agenda', () => {
     const week = currentIsoWeek();
     const days = weekDates(week);
     const wedKey = isoDateKey(days[2]); // Wednesday
+    // LOCAL y/m/d, mirroring the screen's own todayKey — near a day boundary
+    // the UTC date differs and the Today badge lands on a day this fixture
+    // would otherwise leave rowless.
+    const now = new Date();
     const todayKey = isoDateKey(
-      new Date(
-        Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()),
-      ),
+      new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())),
     );
     const records = [
       linkedRow('Saga', wedKey),

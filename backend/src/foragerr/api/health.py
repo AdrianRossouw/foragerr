@@ -69,23 +69,30 @@ async def _scheduler_health(scheduler: Any) -> dict[str, Any]:
     return {"status": "up", "tasks": tasks}
 
 
-@router.get("/health", include_in_schema=False)
-async def health(request: Request, response: Response) -> dict[str, Any]:
-    app = request.app
+async def probe_components(app: Any) -> dict[str, dict[str, Any]]:
+    """The container-probe component detail (database, workers, scheduler,
+    migrations). Shared by the slim root probe (which reduces it to names)
+    and the authenticated system surface (which returns it whole)."""
     db = app.state.db
-    commands = app.state.commands
-    scheduler = app.state.scheduler
-
-    components = {
+    return {
         "database": await db.health(),
-        "workers": commands.health(),
-        "scheduler": await _scheduler_health(scheduler),
+        "workers": app.state.commands.health(),
+        "scheduler": await _scheduler_health(app.state.scheduler),
         "migrations": await _migration_health(
             getattr(app.state, "migration_head", None), db.db_path
         ),
     }
+
+
+@router.get("/health", include_in_schema=False)
+async def health(request: Request, response: Response) -> dict[str, Any]:
+    # FRG-SEC-008 / FRG-DEP-007: this endpoint is unauthenticated (Docker
+    # HEALTHCHECK), so the body is MINIMAL — overall status, plus the failing
+    # component NAMES when unhealthy. Paths, revisions, task lists, and error
+    # text stay behind auth on /api/v1/system/health/components.
+    components = await probe_components(request.app)
     failing = [name for name, comp in components.items() if comp.get("status") != "up"]
-    body = {"status": "up" if not failing else "down", "components": components}
     if failing:
         response.status_code = 503
-    return body
+        return {"status": "down", "failing": failing}
+    return {"status": "up"}

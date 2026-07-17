@@ -35,6 +35,7 @@ under the top level of `config.yaml`.
 | `session_timeout_seconds` | `FORAGERR_SESSION_TIMEOUT_SECONDS` | `86400` (24 h) | Standard-session sliding-inactivity timeout (`FRG-AUTH-004`); each authenticated request pushes it forward. See `authentication.md`. |
 | `remember_timeout_seconds` | `FORAGERR_REMEMBER_TIMEOUT_SECONDS` | `7776000` (90 d) | "Remember this device" sliding timeout. A default, not a floor. See `authentication.md`. |
 | `auth_origin_allowlist` | `FORAGERR_AUTH_ORIGIN_ALLOWLIST` | *(empty)* | Comma-separated extra allowed Origins for the CSRF check and the WebSocket handshake, beyond the deployment's own origin — set this for a reverse-proxied deployment. See `authentication.md`. |
+| `trusted_proxies` | `FORAGERR_TRUSTED_PROXIES` | *(empty)* | Comma-separated addresses of TLS-terminating proxies you run (`FRG-SEC-007`). Only a listed direct peer's `X-Forwarded-Proto`/`X-Forwarded-For` are honored (Secure cookies, real client attribution). Set only to a proxy you run — see `security.md`. |
 | `host` | `FORAGERR_HOST` | `0.0.0.0` | Interface the HTTP listener binds to. |
 | `port` | `FORAGERR_PORT` | `8789` | TCP port for the HTTP listener. |
 | `log_level` | `FORAGERR_LOG_LEVEL` | `INFO` | One of DEBUG/INFO/WARNING/ERROR/CRITICAL. |

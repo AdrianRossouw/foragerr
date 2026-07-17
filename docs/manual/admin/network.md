@@ -44,9 +44,11 @@ the clear.
 ### Failed-attempt throttling needs real client IPs
 
 foragerr's failed-login throttling keys on the **direct TCP peer address**
-(`request.client.host`); it never trusts `X-Forwarded-For`. That keeps an
-attacker from impersonating many source IPs, but it means the isolation
-between clients is only as good as the address foragerr actually sees:
+(`request.client.host`); it trusts `X-Forwarded-For` only from a proxy you
+have explicitly listed in `FORAGERR_TRUSTED_PROXIES` (see `security.md` —
+default: never). That keeps an attacker from impersonating many source IPs,
+but it means the isolation between clients is only as good as the address
+foragerr actually sees:
 
 - **Docker bridge networking with the userland proxy** (the default for a
   plain `ports:` mapping) can make *every* external client appear to come from
@@ -69,15 +71,18 @@ between clients is only as good as the address foragerr actually sees:
    OPDS.
 
 If you do run foragerr behind a reverse proxy with its own TLS termination,
-see `authentication.md` → "Reverse proxies and the WebSocket Origin check"
-for the one setting (`FORAGERR_AUTH_ORIGIN_ALLOWLIST`) that needs to know
-about it.
+two settings need to know about it: `FORAGERR_TRUSTED_PROXIES` (Secure
+cookies + real client attribution — see `security.md`) and
+`FORAGERR_AUTH_ORIGIN_ALLOWLIST` (the WebSocket Origin check — see
+`authentication.md` → "Reverse proxies and the WebSocket Origin check").
 
 ### Endpoints that answer without credentials
 
 The `/health` endpoint (`FRG-DEP-007`) answers without credentials by design — it
 exists for container health checks (Docker `HEALTHCHECK`) and must respond
-regardless of any authentication configuration. The login screen (and the
+regardless of any authentication configuration. Its body is minimal (overall
+status plus failing component names only); the detailed component view
+requires authentication — see `security.md`. The login screen (and the
 static assets it needs to render) is the only other unauthenticated route —
 every API call the screen itself makes is still authenticated.
 
