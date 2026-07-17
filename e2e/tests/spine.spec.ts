@@ -325,6 +325,11 @@ test('FRG-PROC-010 FRG-OPDS-001 FRG-OPDS-002 FRG-OPDS-003 FRG-OPDS-005 FRG-OPDS-
   expect(coverHref, 'an on-realm cover link (not /api)').toBeTruthy();
   expect(coverHref, 'cover link on the OPDS realm').toMatch(/^\/opds\//);
   expect(acqText).not.toContain('/api/v1/series');
+  // FRG-OPDS-020: the issue entry's cover is its OWN per-issue-file cover, not
+  // a series-level image repeated across issues.
+  expect(coverHref, 'per-issue cover, not the shared series cover').toMatch(
+    /^\/opds\/cover\/\d+/,
+  );
   const cover = await api.get(coverHref!);
   expect(cover.status(), 'cover loads under the OPDS auth the feed uses').toBe(200);
   expect(cover.headers()['content-type']).toContain('image/');

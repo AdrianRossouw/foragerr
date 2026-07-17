@@ -391,9 +391,8 @@ def build_opds_router(base_path: str) -> APIRouter:
             )
             pairs = result.all()
 
-        cover = _cover_url(base_path, series_id)
         entries = tuple(
-            _issue_file_entry(base_path, series, issue_file, issue, cover)
+            _issue_file_entry(base_path, series, issue_file, issue)
             for issue_file, issue in pairs
         )
 
@@ -444,7 +443,7 @@ def build_opds_router(base_path: str) -> APIRouter:
             triples = result.all()
 
         entries = tuple(
-            _issue_file_entry(base_path, series, issue_file, issue, _cover_url(base_path, series.id))
+            _issue_file_entry(base_path, series, issue_file, issue)
             for issue_file, issue, series in triples
         )
 
@@ -952,20 +951,27 @@ async def _render_bounded(
 def _series_nav_entry(base_path: str, row: SeriesRow) -> Entry:
     """One navigation entry linking into a series' acquisition feed — the
     shape shared by the All Series shelf and the search feed (FRG-OPDS-001,
-    FRG-OPDS-007)."""
+    FRG-OPDS-007). Carries the series-level ComicVine cover (FRG-OPDS-020) when
+    one is cached, so the SHELF shows one cover per series — the correct home
+    for the single volume image, unlike the per-issue entries."""
+    links: list[Link] = [
+        Link(
+            href=f"{base_path}/series/{row.id}",
+            rel=REL_SUBSECTION,
+            # This link resolves to a feed of downloadable issues
+            # -> acquisition kind.
+            type=ACQ_KIND,
+        ),
+    ]
+    if row.cover_cached_at is not None:
+        cover = _cover_url(base_path, row.id)
+        links.append(Link(href=cover, rel=REL_IMAGE, type=_PSE_IMAGE_TYPE))
+        links.append(Link(href=cover, rel=REL_THUMBNAIL, type=_PSE_IMAGE_TYPE))
     return Entry(
         id=f"{base_path}/series/{row.id}",
         title=row.title,
         updated=row.refreshed_at or row.added_at,
-        links=(
-            Link(
-                href=f"{base_path}/series/{row.id}",
-                rel=REL_SUBSECTION,
-                # This link resolves to a feed of downloadable issues
-                # -> acquisition kind.
-                type=ACQ_KIND,
-            ),
-        ),
+        links=tuple(links),
     )
 
 
@@ -985,20 +991,20 @@ def _issue_file_entry(
     series: SeriesRow,
     issue_file: IssueFileRow,
     issue: IssueRow,
-    cover_url: str,
 ) -> Entry:
     """One acquisition entry for a downloadable issue-file, built from DB
-    fields only (FRG-OPDS-002, FRG-OPDS-008, FRG-OPDS-011).
+    fields only (FRG-OPDS-002, FRG-OPDS-008, FRG-OPDS-020).
 
     Reads ``issue_file.page_count`` straight from the row (NO archive I/O at feed
     render — the M1 zero-I/O invariant): a POSITIVE count means the archive is
     listable with pages, so an OPDS-PSE stream link is emitted alongside the
     whole-file acquisition link (PSE is strictly additive — a non-PSE reader
     ignores it); a NULL (unlistable/legacy) OR 0-page count emits no PSE link.
-    Image/thumbnail links point
-    at the local first-page cover endpoint ONLY when the series has no remote
-    ComicVine cover cached (``cover_cached_at is None``); when a remote cover
-    exists the existing series cover-cache URL is kept unchanged."""
+    Image/thumbnail links always point at this issue-file's own first-page
+    cover render (FRG-OPDS-020) — the per-issue cover, distinct from every
+    other issue and matching what the reader opens to. The one series-level
+    ComicVine cover is carried on the shelf/nav entry instead (never repeated
+    per issue)."""
     number = issue.issue_number or "?"
     title = issue.title or f"{series.title} #{number}"
     # updated: file-added timestamp, falling back to the issue's release date.
@@ -1033,12 +1039,14 @@ def _issue_file_entry(
             )
         )
 
-    if series.cover_cached_at is not None:
-        image_href = cover_url
-        thumb_href = cover_url
-    else:
-        image_href = f"{base_path}/cover/{issue_file.id}"
-        thumb_href = f"{base_path}/cover/{issue_file.id}?thumbnail"
+    # Each issue entry shows ITS OWN cover — the file's first page
+    # (FRG-OPDS-020). The series-level ComicVine cover is a single volume image;
+    # using it here made every issue in a series render identically in the
+    # reader AND mismatch that issue's actual first page. The first page IS the
+    # comic's cover, so the per-issue-file render is both distinct and correct;
+    # the volume cover belongs on the series/shelf entry, not repeated per issue.
+    image_href = f"{base_path}/cover/{issue_file.id}"
+    thumb_href = f"{base_path}/cover/{issue_file.id}?thumbnail"
     links.append(Link(href=image_href, rel=REL_IMAGE, type=_PSE_IMAGE_TYPE))
     links.append(Link(href=thumb_href, rel=REL_THUMBNAIL, type=_PSE_IMAGE_TYPE))
 

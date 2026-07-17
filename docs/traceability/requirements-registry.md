@@ -333,6 +333,7 @@ source. Compatibility: pre-1.0 releases may break with migration notes; from
 | FRG-OPDS-017 | HEAD requests answered on OPDS routes | opds | implemented | M9 |
 | FRG-OPDS-018 | File-less series can be hidden from OPDS shelves | opds | implemented | M9 |
 | FRG-OPDS-019 | Series cover served on the OPDS auth realm | opds | implemented | M9 |
+| FRG-OPDS-020 | Per-issue cover on issue entries; series cover on the shelf | opds | implemented | M9 |
 | FRG-NOTIF-001 | Generic notifier provider abstraction | notif | approved | B |
 | FRG-NOTIF-002 | Event catalog with per-connection opt-in | notif | approved | B |
 | FRG-NOTIF-003 | Event payload content | notif | approved | B |
