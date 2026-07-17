@@ -69,16 +69,16 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
-    cap_add:          # the s6 init needs these to drop to PUID/PGID
-      - CHOWN
+    cap_add:          # the entrypoint's gosu privilege-drop needs these
+      - CHOWN         # to remap PUID/PGID and hand off unprivileged
       - SETUID
       - SETGID
       - DAC_OVERRIDE
 ```
 
 A read-only root filesystem (`read_only: true` + tmpfs for `/run`,`/tmp`)
-is compatible with the image if you accept the s6-overlay trade-offs;
-`/config` stays a writable volume either way. Keep PUID/PGID remapped to
+is compatible with the image if you accept the entrypoint's writable-path
+trade-offs; `/config` stays a writable volume either way. Keep PUID/PGID remapped to
 an unprivileged user (see `deployment.md`).
 
 ## What unauthenticated callers see
@@ -87,9 +87,10 @@ By design, almost nothing: `/health` answers credential-free for Docker
 health checks, but its body is only an overall status (plus failing
 component *names* when unhealthy). The detailed component view —
 migration state, task lists, diagnostics — moved behind authentication at
-`/api/v1/system/health/components`; the System → Health screen uses it. If
-you previously scraped `/health` for detail, authenticate with an API key
-and use the components endpoint instead.
+`/api/v1/system/health/components` (the System → Health screen in the UI
+shows its own richer per-component view). If you previously scraped
+`/health` for detail, authenticate with an API key and use the components
+endpoint instead.
 
 Error responses never contain tracebacks or internal paths; there is no
 debug switch that changes that.

@@ -12,8 +12,9 @@ The unauthenticated response body SHALL be **minimal**: overall status, plus
 contain no filesystem path, migration revision, version string, task list,
 or error text (FRG-SEC-008). The full per-component diagnostic detail
 (component statuses, revisions, error strings) SHALL be available to
-authenticated callers on the system surface, where the admin UI consumes
-it.
+authenticated callers on the system surface (an API-key/session request to
+`/api/v1/system/health/components`; the admin UI's System → Health screen
+continues to use its richer FRG-NFR-011 component view).
 
 - **Milestone**: M1; unauthenticated-body minimization M10.
 - **Source**: sonarr-architecture.md §7.1 (Health resource, CheckHealth task); mylar-feature-surface .md §8 (BACKENDSTATUS-style flags — mylar-comicvine.md §1.3).

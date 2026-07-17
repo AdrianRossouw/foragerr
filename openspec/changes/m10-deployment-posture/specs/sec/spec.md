@@ -88,8 +88,11 @@ surface:
   failing component names (contract owned by FRG-DEP-007); detailed
   component diagnostics require authentication;
 - unauthenticated perimeter rejections (401) carry no detail beyond the
-  standard envelope — no hint of valid usernames, key formats, or route
-  existence variance.
+  standard envelope — no hint of valid usernames or key formats, and no
+  body-content variance between routes. (Status-code variance — 401 for a
+  matched route vs 404/405 from the router — is an accepted residual: the
+  perimeter is a route dependency, and the route table is public in the
+  source repository. Recorded in the posture document.)
 
 #### Scenario: Unhandled error is generic
 

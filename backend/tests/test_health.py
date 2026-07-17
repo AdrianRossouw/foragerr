@@ -10,8 +10,8 @@ from fastapi.testclient import TestClient
 from foragerr.app import create_app
 from foragerr.config import Settings
 
-#: Internal detail that must NEVER appear in the unauthenticated probe body.
-_DISCLOSURE_MARKERS = ("path", "revision", "current", "head", "error", "tasks", "components")
+#: Internal detail that must NEVER appear in the unauthenticated probe text.
+_DISCLOSURE_MARKERS = ("revision", "error", "tasks", "components", "/config")
 
 
 @pytest.fixture
@@ -47,10 +47,9 @@ def test_healthy_probe_is_minimal_and_credential_free(app):
         client.headers.pop("X-Api-Key", None)  # genuinely unauthenticated
         response = client.get("/health")
     assert response.status_code == 200
-    body = response.json()
-    assert body == {"status": "up"}
+    assert response.json() == {"status": "up"}
     for marker in _DISCLOSURE_MARKERS:
-        assert marker not in body
+        assert marker not in response.text
 
 
 @pytest.mark.req("FRG-DEP-007")

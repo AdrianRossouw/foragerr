@@ -34,6 +34,7 @@ lumps under ``style-src`` (rationale in ``docs/security/posture.md``).
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 
@@ -65,19 +66,61 @@ _CSP_SPA = (
 #: response before ours are appended so a header can never appear twice.
 _OWNED = (b"content-security-policy", b"x-content-type-options", b"referrer-policy", b"x-frame-options")
 
-_FORWARDED_SCHEMES = {"http", "https", "ws", "wss"}
+#: X-Forwarded-Proto values accepted per scope type. ws/wss are not valid
+#: forwarded protos for an HTTP request — accepting them there would silently
+#: clear the cookie Secure decision on a misconfigured (but trusted) proxy.
+_FORWARDED_SCHEMES = {
+    "http": {"http", "https"},
+    "websocket": {"http", "https", "ws", "wss"},
+}
 
 
 def _parse_trusted(raw: str) -> frozenset[str]:
-    """The comma-separated ``trusted_proxies`` setting as a peer-address set."""
-    return frozenset(part.strip() for part in raw.split(",") if part.strip())
+    """The comma-separated ``trusted_proxies`` setting as a peer-address set.
+
+    IP entries are canonicalized so they compare with normalized XFF
+    candidates; a non-IP entry (a hostname peer — Docker service names, test
+    clients) is kept verbatim and can only ever match the DIRECT peer, since
+    wire candidates must parse as IPs.
+    """
+    return frozenset(
+        _normalize_address(part) or part.strip() for part in raw.split(",") if part.strip()
+    )
 
 
-def _header(scope: Scope, name: bytes) -> str | None:
-    for key, value in scope.get("headers") or ():
-        if key == name:
-            return value.decode("latin-1")
-    return None
+def _joined_header(scope: Scope, name: bytes) -> str:
+    """ALL values for ``name``, comma-joined in field order (RFC 7230 §3.2.2).
+
+    A proxy that emits its forwarded contribution as a SEPARATE header rather
+    than appending must still end up rightmost — taking only the first header
+    would hand the attacker-supplied duplicate the win.
+    """
+    return ", ".join(
+        value.decode("latin-1") for key, value in scope.get("headers") or () if key == name
+    )
+
+
+def _normalize_address(entry: str) -> str | None:
+    """One forwarded-for candidate as a canonical IP string, else ``None``.
+
+    Handles ``[v6]``, ``[v6]:port``, and ``v4:port`` forms; anything that is
+    not an IP literal after that is rejected — a malformed entry must never
+    become a rate-limit key or an audit ``ip=`` field.
+    """
+    candidate = entry.strip()
+    if not candidate:
+        return None
+    if candidate.startswith("["):
+        host, _, rest = candidate[1:].partition("]")
+        if rest not in ("",) and not rest.startswith(":"):
+            return None
+        candidate = host
+    elif candidate.count(":") == 1:  # v4:port (a bare v6 has 2+ colons)
+        candidate = candidate.partition(":")[0]
+    try:
+        return str(ipaddress.ip_address(candidate))
+    except ValueError:
+        return None
 
 
 class TrustedProxyMiddleware:
@@ -87,30 +130,40 @@ class TrustedProxyMiddleware:
         self.app = app
         self.trusted = trusted_proxies
 
+    def _is_trusted(self, host: str) -> bool:
+        # Direct peers and XFF entries match canonically when they parse as
+        # IPs; a non-IP trusted entry (a hostname peer) matches verbatim.
+        return host in self.trusted or (_normalize_address(host) or "") in self.trusted
+
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] in ("http", "websocket") and self.trusted:
             client = scope.get("client")
-            if client is not None and client[0] in self.trusted:
+            if client is not None and self._is_trusted(client[0]):
                 self._resolve(scope)
         await self.app(scope, receive, send)
 
     def _resolve(self, scope: Scope) -> None:
-        proto = _header(scope, b"x-forwarded-proto")
+        proto = _joined_header(scope, b"x-forwarded-proto")
         if proto:
-            # A chained proxy may send "https, http"; the first entry is the
-            # client-facing hop, which is the one the Secure flag cares about.
-            scheme = proto.split(",")[0].strip().lower()
-            if scheme in _FORWARDED_SCHEMES:
+            # The LAST entry is the nearest (trusted) hop's assertion — an
+            # attacker-prepended entry or duplicate header never wins.
+            scheme = proto.split(",")[-1].strip().lower()
+            if scheme in _FORWARDED_SCHEMES[scope["type"]]:
                 if scope["type"] == "websocket":
                     scheme = {"http": "ws", "https": "wss"}.get(scheme, scheme)
                 scope["scheme"] = scheme
-        forwarded_for = _header(scope, b"x-forwarded-for")
+        forwarded_for = _joined_header(scope, b"x-forwarded-for")
         if forwarded_for:
-            # Rightmost entry not itself a trusted proxy = the real client as
-            # seen by OUR proxy; anything left of it is client-controlled text.
+            # Rightmost VALID entry not itself a trusted proxy = the real
+            # client as seen by OUR proxy; anything left of it is
+            # client-controlled text. An invalid entry fails CLOSED: stop
+            # scanning and keep the direct peer — garbage must never leapfrog
+            # into rate-limit keys or audit attribution.
             for entry in reversed(forwarded_for.split(",")):
-                address = entry.strip().strip("[]")
-                if address and address not in self.trusted:
+                address = _normalize_address(entry)
+                if address is None:
+                    break
+                if address not in self.trusted:
                     scope["client"] = (address, 0)
                     break
 
@@ -118,8 +171,9 @@ class TrustedProxyMiddleware:
 class SecurityHeadersMiddleware:
     """Security headers on every response; unhandled errors become generic 500s."""
 
-    def __init__(self, app: ASGIApp) -> None:
+    def __init__(self, app: ASGIApp, *, opds_base_path: str = "/opds") -> None:
         self.app = app
+        self.opds_base = opds_base_path.rstrip("/") or "/opds"
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -127,7 +181,15 @@ class SecurityHeadersMiddleware:
             return
 
         path = scope.get("path", "")
-        is_data = path == "/health" or path.startswith("/api/") or path.startswith("/opds")
+        # Same boundary rule as the perimeter's _is_opds: exact segment match,
+        # from the CONFIGURED base — a custom opds_base_path must not silently
+        # demote OPDS feeds to the SPA policy, and /opdsx is not OPDS.
+        is_data = (
+            path == "/health"
+            or path.startswith("/api/")
+            or path == self.opds_base
+            or path.startswith(self.opds_base + "/")
+        )
         csp = _CSP_DATA if is_data else _CSP_SPA
         extra = [
             (b"content-security-policy", csp.encode("latin-1")),
@@ -182,7 +244,5 @@ def install_posture(app) -> None:
     client).
     """
     settings = app.state.settings
-    app.add_middleware(
-        TrustedProxyMiddleware, trusted_proxies=_parse_trusted(settings.trusted_proxies)
-    )
-    app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(TrustedProxyMiddleware, trusted_proxies=settings.trusted_proxy_set())
+    app.add_middleware(SecurityHeadersMiddleware, opds_base_path=settings.opds_base_path)

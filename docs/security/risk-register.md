@@ -80,8 +80,8 @@ node that governs the row's current state.
 
 ## Counts
 
-- **Total**: 49
-- **Mitigated**: 42 — RISK-001–007, 009–014, 018–030, 032, 033, 035–041, 043–045, 047, 048, 049.
+- **Total**: 52
+- **Mitigated**: 45 — RISK-001–007, 009–014, 018–030, 032, 033, 035–041, 043–045, 047–052.
   Six of these (RISK-004, 009, 018, 033, 037, 038) carry only their original requirement
   mapping with no per-row implementation marker — flagged in-row for owner confirmation
   (2026-07-13 compaction).

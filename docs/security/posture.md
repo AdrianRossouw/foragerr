@@ -99,13 +99,24 @@ As little as the container contract allows (FRG-SEC-008):
   server-side structured log only. No debug flag exists in the packaged
   application.
 - Perimeter 401s: the uniform envelope, no username/key-format hints.
+- The `Server` header is suppressed (no software fingerprint).
+
+**Accepted residual — status-code route variance:** the perimeter is a
+route dependency, so an unauthenticated caller can distinguish a matched
+route (401) from an unmatched path (404) or wrong method (405). The route
+table is public in the source repository, so this discloses nothing not
+already published; closing it would mean moving authentication ahead of
+routing for no confidentiality gain. Review trigger: the repository going
+private, or any route whose *existence* becomes sensitive.
 
 ## 6. Container runtime
 
 The manual recommends: `--security-opt no-new-privileges`, `cap_drop: ALL`
-(the linuxserver.io s6 init needs the defaults it re-adds itself — see the
-manual for the exact compose stanza), a read-only rootfs where the operator
-accepts the s6 trade-offs, and PUID/PGID remapping (FRG-DEP-002 volumes).
+(the entrypoint's privilege-drop step — a `gosu`-based PUID/PGID remap per
+the linuxserver.io *contract*, not a full s6-overlay tree — needs a small
+`cap_add` set back; see the manual for the exact compose stanza), a
+read-only rootfs where the operator accepts the entrypoint's writable-path
+trade-offs, and PUID/PGID remapping (FRG-DEP-002 volumes).
 These are deployment-layer controls: recommended and documented, not
 enforced by the application.
 

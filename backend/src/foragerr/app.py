@@ -545,6 +545,7 @@ def main() -> None:
         host=settings.host,
         port=settings.port,
         log_config=None,  # keep foragerr's structured logging configuration
+        server_header=False,  # no software fingerprint to bare callers (FRG-SEC-008)
     )
     _ForagerrServer(config).run()
 

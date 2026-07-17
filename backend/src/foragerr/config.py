@@ -1260,6 +1260,13 @@ class Settings(BaseSettings):
             if origin.strip()
         }
 
+    def trusted_proxy_set(self) -> frozenset[str]:
+        """Configured trusted proxy peers (FRG-SEC-007), parsed by the
+        posture middleware's normalizer so IP entries compare canonically."""
+        from foragerr.api.posture import _parse_trusted
+
+        return _parse_trusted(self.trusted_proxies)
+
     def secret_fields(self) -> dict[str, SecretStr]:
         """All secret-typed settings by field name."""
         return {

@@ -202,6 +202,120 @@ def test_forwarded_chain_skips_trusted_entries():
 
 
 @pytest.mark.req("FRG-SEC-007")
+def test_duplicate_forwarded_headers_join_in_field_order():
+    """A proxy emitting its XFF contribution as a SEPARATE header (not an
+    append) must still win: values are comma-joined in field order, so the
+    proxy's entry is rightmost and the attacker's separate header loses."""
+    inner = _CaptureApp()
+    middleware = TrustedProxyMiddleware(inner, trusted_proxies=frozenset({"10.0.0.2"}))
+    _run(
+        middleware,
+        _scope(
+            "10.0.0.2",
+            [
+                (b"x-forwarded-for", b"198.51.100.99"),  # attacker-supplied
+                (b"x-forwarded-for", b"203.0.113.7"),  # proxy-observed, separate header
+            ],
+        ),
+    )
+    assert inner.scope["client"][0] == "203.0.113.7"
+
+
+@pytest.mark.req("FRG-SEC-007")
+def test_malformed_forwarded_entry_fails_closed():
+    """A non-IP entry can never become a rate-limit key or audit ip= field —
+    resolution stops and the direct peer stands."""
+    inner = _CaptureApp()
+    middleware = TrustedProxyMiddleware(inner, trusted_proxies=frozenset({"10.0.0.2"}))
+    _run(
+        middleware,
+        _scope(
+            "10.0.0.2",
+            [(b"x-forwarded-for", b'198.51.100.7 surface=api_key ip="fake"')],
+        ),
+    )
+    assert inner.scope["client"][0] == "10.0.0.2"  # untouched direct peer
+
+
+@pytest.mark.req("FRG-SEC-007")
+def test_ipv6_and_port_forms_normalize():
+    inner = _CaptureApp()
+    middleware = TrustedProxyMiddleware(inner, trusted_proxies=frozenset({"10.0.0.2"}))
+    _run(
+        middleware,
+        _scope("10.0.0.2", [(b"x-forwarded-for", b"[2001:db8::7]:443")]),
+    )
+    assert inner.scope["client"][0] == "2001:db8::7"
+
+    inner2 = _CaptureApp()
+    middleware2 = TrustedProxyMiddleware(inner2, trusted_proxies=frozenset({"10.0.0.2"}))
+    _run(
+        middleware2,
+        _scope("10.0.0.2", [(b"x-forwarded-for", b"203.0.113.9:41000")]),
+    )
+    assert inner2.scope["client"][0] == "203.0.113.9"
+
+
+@pytest.mark.req("FRG-SEC-007")
+def test_ws_proto_rejected_on_http_scope():
+    """ws/wss are not valid X-Forwarded-Proto values for an HTTP request; a
+    misconfigured trusted proxy must not silently clear the Secure decision."""
+    inner = _CaptureApp()
+    middleware = TrustedProxyMiddleware(inner, trusted_proxies=frozenset({"10.0.0.2"}))
+    _run(middleware, _scope("10.0.0.2", [(b"x-forwarded-proto", b"wss")]))
+    assert inner.scope["scheme"] == "http"
+
+
+@pytest.mark.req("FRG-SEC-007")
+def test_websocket_scope_resolves_scheme_and_client():
+    """The websocket scope gets the same resolution, with the https→wss remap,
+    so WS audit attribution matches HTTP."""
+    inner = _CaptureApp()
+    middleware = TrustedProxyMiddleware(inner, trusted_proxies=frozenset({"10.0.0.2"}))
+    scope = _scope(
+        "10.0.0.2",
+        [
+            (b"x-forwarded-proto", b"https"),
+            (b"x-forwarded-for", b"203.0.113.7"),
+        ],
+    )
+    scope["type"] = "websocket"
+    scope["scheme"] = "ws"
+    _run(middleware, scope)
+    assert inner.scope["scheme"] == "wss"
+    assert inner.scope["client"][0] == "203.0.113.7"
+
+
+@pytest.mark.req("FRG-SEC-007")
+def test_attacker_prepended_proto_entry_loses():
+    """XFP takes the LAST entry (nearest trusted hop); a client-prepended
+    duplicate or extra entry never decides the effective scheme."""
+    inner = _CaptureApp()
+    middleware = TrustedProxyMiddleware(inner, trusted_proxies=frozenset({"10.0.0.2"}))
+    _run(
+        middleware,
+        _scope(
+            "10.0.0.2",
+            [
+                (b"x-forwarded-proto", b"https"),  # attacker-supplied header
+                (b"x-forwarded-proto", b"http"),  # proxy's own observation
+            ],
+        ),
+    )
+    assert inner.scope["scheme"] == "http"
+
+
+@pytest.mark.req("FRG-SEC-007")
+def test_env_var_binds_the_setting(tmp_path, monkeypatch):
+    path = tmp_path / "cfg-env"
+    path.mkdir()
+    monkeypatch.setenv("FORAGERR_TRUSTED_PROXIES", "10.9.9.9, proxyhost")
+    settings = Settings(config_dir=path)
+    assert settings.trusted_proxies == "10.9.9.9, proxyhost"
+    assert settings.trusted_proxy_set() == frozenset({"10.9.9.9", "proxyhost"})
+
+
+@pytest.mark.req("FRG-SEC-007")
 def test_secure_cookie_set_behind_trusted_proxy(proxied_app):
     """End to end through the real app: the TestClient peer is configured as
     the trusted proxy, X-Forwarded-Proto https → login cookies carry Secure;
@@ -241,10 +355,61 @@ def test_no_secure_cookie_without_trust(app):
     assert "Secure" not in set_cookie
 
 
+@pytest.mark.req("FRG-SEC-007")
+def test_audit_attribution_uses_forwarded_client(proxied_app, caplog):
+    """End-to-end proof of the consumer-agreement scenario's client half: a
+    failed login through the trusted proxy is audited (and therefore
+    throttle-keyed — same client_ip call) against the FORWARDED address, not
+    the direct peer."""
+    import logging as _logging
+
+    with TestClient(proxied_app) as client:
+        with caplog.at_level(_logging.INFO, logger="foragerr.auth"):
+            response = client.post(
+                "/api/v1/auth/login",
+                json={"username": TEST_ADMIN_USER, "password": "wrong", "remember": False},
+                headers={"X-Forwarded-For": "203.0.113.77"},
+            )
+    assert response.status_code == 401
+    auth_lines = [r.getMessage() for r in caplog.records if "auth.login.failure" in r.getMessage()]
+    assert auth_lines, "expected an auth.login.failure audit event"
+    assert any("ip=203.0.113.77" in line for line in auth_lines)
+    assert not any("ip=testclient" in line for line in auth_lines)
+
+
+@pytest.mark.req("FRG-SEC-006")
+def test_opds_surface_carries_data_policy(app):
+    """The OPDS 401 (a real reader's first contact) carries the deny-all data
+    CSP and keeps its Basic challenge."""
+    with TestClient(app) as client:
+        client.headers.pop("X-Api-Key", None)
+        response = client.get("/opds")
+    assert response.status_code == 401
+    _assert_baseline(response)
+    assert response.headers["content-security-policy"].startswith("default-src 'none'")
+    assert "Basic" in response.headers.get("www-authenticate", "")
+
+
+@pytest.mark.req("FRG-SEC-006")
+def test_custom_opds_base_path_keeps_data_policy(tmp_path):
+    """A reconfigured opds_base_path must not demote OPDS to the SPA policy —
+    the classifier reads the setting, not a literal."""
+    path = tmp_path / "cfg-opds"
+    path.mkdir()
+    custom = create_app(Settings(config_dir=path, opds_base_path="/catalog"))
+    with TestClient(custom) as client:
+        client.headers.pop("X-Api-Key", None)
+        moved = client.get("/catalog")
+        spa_like = client.get("/opdsx")  # boundary: NOT the opds base
+    assert moved.headers["content-security-policy"].startswith("default-src 'none'")
+    assert spa_like.headers["content-security-policy"].startswith("default-src 'self'")
+
+
 # -- FRG-SEC-008: disclosure and error hygiene --------------------------------
 
 
 @pytest.mark.req("FRG-SEC-008")
+@pytest.mark.req("FRG-SEC-006")
 def test_unhandled_error_is_generic_with_headers(app, monkeypatch):
     """A handler blowing up yields the uniform envelope with a generic
     message — no traceback, exception class, or path — and still carries the
@@ -265,6 +430,35 @@ def test_unhandled_error_is_generic_with_headers(app, monkeypatch):
     assert "foragerr.db" not in response.text
     assert "Traceback" not in response.text
     _assert_baseline(response)
+
+
+@pytest.mark.req("FRG-SEC-008")
+def test_mid_stream_failure_reraises_without_second_start():
+    """An exception AFTER http.response.start cannot be converted into a 500 —
+    the middleware re-raises and never emits a second response start."""
+    import asyncio
+
+    from foragerr.api.posture import SecurityHeadersMiddleware
+
+    async def exploding_app(scope, receive, send):
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        raise RuntimeError("mid-stream failure")
+
+    sent = []
+
+    async def _recording_send(message):
+        sent.append(message)
+
+    async def _receive():  # pragma: no cover - never called
+        return {"type": "http.request"}
+
+    middleware = SecurityHeadersMiddleware(exploding_app)
+    scope = {"type": "http", "method": "GET", "path": "/api/v1/x", "headers": []}
+    with pytest.raises(RuntimeError, match="mid-stream failure"):
+        asyncio.run(middleware(scope, _receive, _recording_send))
+    starts = [m for m in sent if m["type"] == "http.response.start"]
+    assert len(starts) == 1  # the original start, stamped — never a second
+    assert any(k == b"content-security-policy" for k, _ in starts[0]["headers"])
 
 
 @pytest.mark.req("FRG-SEC-008")
