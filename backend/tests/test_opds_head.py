@@ -161,3 +161,25 @@ def test_head_404s_imageless_archive_like_get(client, tmp_path):
     for url in (f"/opds/page/{fid}/0", f"/opds/cover/{fid}"):
         assert client.get(url).status_code in (404, 502)
         assert client.head(url).status_code == client.get(url).status_code
+
+
+@pytest.mark.req("FRG-OPDS-019")
+def test_series_cover_route_is_on_the_opds_realm(client, tmp_path):
+    """The feed's cover links resolve to this OPDS-realm route (asserted in the
+    feeds suite); here we prove the route lives on the OPDS Basic realm — it is
+    reachable when authenticated (a missing cover 404s, not 401) and issues the
+    OPDS Basic challenge when credential-free, unlike the /api cover route an
+    OPDS reader cannot authenticate against (the Panels couch-test bug)."""
+    data = client.portal.call(seed, client.app, tmp_path / "library", [simple_series()])
+    series_id = data["series"][0]["id"]
+    url = f"/opds/series-cover/{series_id}"
+
+    # Authenticated (harness auto-attaches X-Api-Key): route reached, no cover -> 404.
+    assert client.get(url).status_code == 404
+    assert client.head(url).status_code == 404
+
+    # Credential-free: the OPDS Basic challenge, exactly like every /opds route.
+    client.headers.pop("X-Api-Key", None)
+    resp = client.get(url)
+    assert resp.status_code == 401
+    assert resp.headers["WWW-Authenticate"].lower().startswith("basic")

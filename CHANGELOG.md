@@ -9,6 +9,22 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.9.15] — 2026-07-17
+
+Covers load in OPDS readers again (m9-opds-cover-realm) — found and fixed
+during the on-device Panels test.
+
+### Fixed
+
+- OPDS feeds advertised each series cover at `/api/v1/series/{id}/cover`, a
+  route behind the web-UI/API-key perimeter rather than the OPDS Basic realm —
+  so a reader authenticated for the catalog was rejected (401) following the
+  cover link, and covers never appeared. Covers are now served at
+  `/opds/series-cover/{id}` on the OPDS realm, with HEAD parity; the feed
+  points there (`FRG-OPDS-019`). Verified end-to-end on a real reader.
+
+No schema or configuration changes; no upgrade steps.
+
 ## [v0.9.14] — 2026-07-16
 
 Accessibility conformance, and the scanner that keeps it true

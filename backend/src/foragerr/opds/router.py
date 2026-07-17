@@ -121,9 +121,13 @@ async def _count_and_page(session, stmt, *, order_by, page: int, page_size: int)
     return (total or 0), result
 
 
-def _cover_url(series_id: int) -> str:
-    """Local cover-cache endpoint (FRG-META-013) — never a remote CDN URL."""
-    return f"/api/v1/series/{series_id}/cover"
+def _cover_url(base_path: str, series_id: int) -> str:
+    """Cached series-cover endpoint on the OPDS realm (FRG-META-013) — never a
+    remote CDN URL, and never the ``/api`` route: an OPDS reader authenticates
+    with OPDS Basic, which the API perimeter rejects, so a feed advertising an
+    ``/api`` image link leaves every cover unloadable (a reader 401s following
+    it). Kept under ``base_path`` so it rides the same Basic realm as the feed."""
+    return f"{base_path}/series-cover/{series_id}"
 
 
 #: Local first-page cover render widths (FRG-OPDS-011). The full cover is
@@ -387,7 +391,7 @@ def build_opds_router(base_path: str) -> APIRouter:
             )
             pairs = result.all()
 
-        cover = _cover_url(series_id)
+        cover = _cover_url(base_path, series_id)
         entries = tuple(
             _issue_file_entry(base_path, series, issue_file, issue, cover)
             for issue_file, issue in pairs
@@ -440,7 +444,7 @@ def build_opds_router(base_path: str) -> APIRouter:
             triples = result.all()
 
         entries = tuple(
-            _issue_file_entry(base_path, series, issue_file, issue, _cover_url(series.id))
+            _issue_file_entry(base_path, series, issue_file, issue, _cover_url(base_path, series.id))
             for issue_file, issue, series in triples
         )
 
@@ -702,6 +706,25 @@ def build_opds_router(base_path: str) -> APIRouter:
         )
         return Response(content=out, media_type=content_type)
 
+    @router.get("/series-cover/{series_id}")
+    async def series_cover(series_id: int, request: Request) -> Response:
+        """The cached ComicVine series cover, served on the OPDS Basic realm
+        (FRG-OPDS-019). The feed advertises THIS as an entry's image/thumbnail
+        link when the series has a remote cover cached; it serves the identical
+        bytes as the web-UI ``/api/v1/series/{id}/cover`` route but under OPDS
+        auth, so a reader that authenticated with Basic can actually load it
+        (the ``/api`` route rejects Basic — the bug this route fixes). Missing
+        cover -> 404, exactly like the API route. ``series_id`` is an int, so
+        the cache path is a fixed ``covers/<id>.jpg`` under the config dir with
+        no request-controlled path component."""
+        settings = request.app.state.settings
+        cover_path = Path(settings.config_dir) / "covers" / f"{series_id}.jpg"
+        if not cover_path.is_file():
+            raise ApiError(404, f"no cached cover for series {series_id}")
+        # HEAD parity (FRG-OPDS-017): FileResponse fills Content-Length from a
+        # single stat and answers HEAD with headers + empty body.
+        return FileResponse(cover_path, media_type=_PSE_IMAGE_TYPE)
+
     @router.get("/cover/{issue_file_id}")
     async def local_cover(issue_file_id: int, request: Request) -> Response:
         """Local first-page cover for a cover-less issue (FRG-OPDS-011).
@@ -800,6 +823,7 @@ def build_opds_router(base_path: str) -> APIRouter:
         ("/search", search_feed),
         ("/file/{issue_file_id}", download_file),
         ("/page/{issue_file_id}/{page}", stream_page),
+        ("/series-cover/{series_id}", series_cover),
         ("/cover/{issue_file_id}", local_cover),
     ):
         router.add_api_route(

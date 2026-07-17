@@ -85,10 +85,11 @@ A few things worth knowing:
   `.cbz` at import time (off by default; the converted file is verified before the
   original is removed) — see `convert_cbr_to_cbz` in `admin/configuration.md`.
   On-demand conversion is also available per series and per issue.
-- Every issue also shows a **cover**: if there's no ComicVine cover on file,
-  foragerr generates one from the comic's first page and serves it itself — so
-  covers and thumbnails always appear, and your reader never has to reach out to a
-  third-party image host to show them.
+- Every issue also shows a **cover**: the cached ComicVine cover when one is on
+  file, or one foragerr generates from the comic's first page when there isn't.
+  Both are served by foragerr over the same OPDS login your reader already uses,
+  so covers and thumbnails always appear and your reader never has to reach out
+  to a third-party image host — nor to any endpoint it isn't authenticated for.
 - Pages are served in natural reading order, and the reader can ask for a reduced
   width to save bandwidth. An operator can tune the streaming limits (see the
   `opds_pse_*` settings in `admin/configuration.md`); the defaults are fine for
