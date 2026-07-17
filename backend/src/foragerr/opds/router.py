@@ -1046,11 +1046,13 @@ def _issue_file_entry(
     # comic's cover, so the per-issue-file render is both distinct and correct;
     # the volume cover belongs on the series/shelf entry, not repeated per issue.
     #
-    # Guarded on a POSITIVE page_count (the same readable-first-page signal the
-    # PSE link uses): an image-less/unlistable/legacy file has no renderable
-    # first page, so ``/opds/cover/{id}`` would 404 — fall back to the cached
-    # series cover, or advertise no image at all, never a link that breaks.
-    if issue_file.page_count:
+    # Fall back only on a KNOWN-empty archive (page_count == 0: listed, no
+    # images) — there ``/opds/cover/{id}`` would 404, so use the cached series
+    # cover or no image, never a broken link. A positive count clearly has a
+    # first page; a NULL count is merely not-yet-counted (legacy/unwalked), NOT
+    # known-empty, so it still gets its per-file cover — the render lists
+    # on-demand, exactly as before this change.
+    if issue_file.page_count != 0:
         image_href = f"{base_path}/cover/{issue_file.id}"
         thumb_href = f"{base_path}/cover/{issue_file.id}?thumbnail"
         links.append(Link(href=image_href, rel=REL_IMAGE, type=_PSE_IMAGE_TYPE))
