@@ -1045,10 +1045,20 @@ def _issue_file_entry(
     # reader AND mismatch that issue's actual first page. The first page IS the
     # comic's cover, so the per-issue-file render is both distinct and correct;
     # the volume cover belongs on the series/shelf entry, not repeated per issue.
-    image_href = f"{base_path}/cover/{issue_file.id}"
-    thumb_href = f"{base_path}/cover/{issue_file.id}?thumbnail"
-    links.append(Link(href=image_href, rel=REL_IMAGE, type=_PSE_IMAGE_TYPE))
-    links.append(Link(href=thumb_href, rel=REL_THUMBNAIL, type=_PSE_IMAGE_TYPE))
+    #
+    # Guarded on a POSITIVE page_count (the same readable-first-page signal the
+    # PSE link uses): an image-less/unlistable/legacy file has no renderable
+    # first page, so ``/opds/cover/{id}`` would 404 — fall back to the cached
+    # series cover, or advertise no image at all, never a link that breaks.
+    if issue_file.page_count:
+        image_href = f"{base_path}/cover/{issue_file.id}"
+        thumb_href = f"{base_path}/cover/{issue_file.id}?thumbnail"
+        links.append(Link(href=image_href, rel=REL_IMAGE, type=_PSE_IMAGE_TYPE))
+        links.append(Link(href=thumb_href, rel=REL_THUMBNAIL, type=_PSE_IMAGE_TYPE))
+    elif series.cover_cached_at is not None:
+        cover = _cover_url(base_path, series.id)
+        links.append(Link(href=cover, rel=REL_IMAGE, type=_PSE_IMAGE_TYPE))
+        links.append(Link(href=cover, rel=REL_THUMBNAIL, type=_PSE_IMAGE_TYPE))
 
     return Entry(
         id=f"{base_path}/file/{issue_file.id}",

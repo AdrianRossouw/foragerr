@@ -2,10 +2,12 @@
 
 _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.mjs` — do not edit by hand (FRG-PROC-010)._
 
-- **Verdict:** GREEN
-- **Scenarios:** 37 (36 pass, 0 fail, 1 skipped, 0 flaky, 0 not run)
-- **Run started:** 2026-07-17T01:29:29.042Z
-- **Duration:** 118.5s
+- **Verdict:** RED
+- **Scenarios:** 37 (34 pass, 1 fail, 1 skipped, 1 flaky, 0 not run)
+- **Flaky:** 1 scenario(s) failed then passed on retry (rescued, but not clean — see the FLAKY rows below).
+- **Reporter stats:** 1 unexpected failure(s).
+- **Run started:** 2026-07-17T13:32:16.023Z
+- **Duration:** 164.1s
 
 ## Scenario → requirement coverage
 
@@ -16,12 +18,12 @@ _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.m
 | PASS | FRG-PROC-010 FRG-DEP-013: the seeded DDL pair ships disabled and is enabled as an explicit opt-in | FRG-DEP-013, FRG-PROC-010 |
 | PASS | FRG-PROC-010 FRG-SER-005 FRG-UI-005: add a series from the ComicVine fixture lands issues | FRG-PROC-010, FRG-SER-005, FRG-UI-005 |
 | PASS | FRG-PROC-010 FRG-UI-008: created indexers are visible in settings | FRG-PROC-010, FRG-UI-008 |
-| PASS | FRG-PROC-010 FRG-UI-007 FRG-SRCH-001: interactive search renders verbatim rejection reasons | FRG-PROC-010, FRG-SRCH-001, FRG-UI-007 |
+| FLAKY | FRG-PROC-010 FRG-UI-007 FRG-SRCH-001: interactive search renders verbatim rejection reasons | FRG-PROC-010, FRG-SRCH-001, FRG-UI-007 |
 | PASS | FRG-PROC-010 FRG-DDL-010 FRG-DL-007 FRG-PP-009 FRG-PP-010: grab downloads, imports and renames into the library | FRG-DDL-010, FRG-DL-007, FRG-PP-009, FRG-PP-010, FRG-PROC-010 |
 | PASS | FRG-PROC-010 FRG-UI-003 FRG-SER-009: the library browse shows the series with updated stats | FRG-PROC-010, FRG-SER-009, FRG-UI-003 |
 | PASS | FRG-PROC-010 FRG-CRTR-001 FRG-UI-027: creator credits ingest end-to-end and render on the grid | FRG-CRTR-001, FRG-PROC-010, FRG-UI-027 |
 | PASS | FRG-PROC-010 FRG-UI-018: the calendar renders an unconfigured-source week without error | FRG-PROC-010, FRG-UI-018 |
-| PASS | FRG-PROC-010 FRG-OPDS-001 FRG-OPDS-002 FRG-OPDS-003 FRG-OPDS-005 FRG-OPDS-019: OPDS navigates to a byte-identical comic download and a reachable cover | FRG-OPDS-001, FRG-OPDS-002, FRG-OPDS-003, FRG-OPDS-005, FRG-OPDS-019, FRG-PROC-010 |
+| FAIL | FRG-PROC-010 FRG-OPDS-001 FRG-OPDS-002 FRG-OPDS-003 FRG-OPDS-005 FRG-OPDS-019: OPDS navigates to a byte-identical comic download and a reachable cover | FRG-OPDS-001, FRG-OPDS-002, FRG-OPDS-003, FRG-OPDS-005, FRG-OPDS-019, FRG-PROC-010 |
 | SKIPPED | FRG-PROC-010: live SABnzbd tier (skipped — no credentials) | FRG-PROC-010 |
 | PASS | FRG-PROC-019 FRG-UI-038: core screens carry zero serious/critical axe WCAG 2.1 A/AA violations | FRG-PROC-019, FRG-UI-038 |
 | PASS | FRG-PROC-010 FRG-UI-015 FRG-IMP-022 FRG-IMP-023: library import scans a root, reviews matches and imports existing files in place without a download | FRG-IMP-022, FRG-IMP-023, FRG-PROC-010, FRG-UI-015 |
@@ -70,30 +72,38 @@ _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.m
 | FRG-DL-007 | PASS |
 | FRG-IMP-022 | PASS |
 | FRG-IMP-023 | PASS |
-| FRG-OPDS-001 | PASS |
-| FRG-OPDS-002 | PASS |
-| FRG-OPDS-003 | PASS |
-| FRG-OPDS-005 | PASS |
+| FRG-OPDS-001 | FAIL |
+| FRG-OPDS-002 | FAIL |
+| FRG-OPDS-003 | FAIL |
+| FRG-OPDS-005 | FAIL |
 | FRG-OPDS-013 | PASS |
-| FRG-OPDS-019 | PASS |
+| FRG-OPDS-019 | FAIL |
 | FRG-PP-009 | PASS |
 | FRG-PP-010 | PASS |
-| FRG-PROC-010 | PASS |
+| FRG-PROC-010 | FAIL |
 | FRG-PROC-019 | PASS |
 | FRG-SCHED-002 | PASS |
 | FRG-SEC-005 | PASS |
 | FRG-SER-005 | PASS |
 | FRG-SER-009 | PASS |
-| FRG-SRCH-001 | PASS |
+| FRG-SRCH-001 | FLAKY |
 | FRG-UI-003 | PASS |
 | FRG-UI-005 | PASS |
-| FRG-UI-007 | PASS |
+| FRG-UI-007 | FLAKY |
 | FRG-UI-008 | PASS |
 | FRG-UI-015 | PASS |
 | FRG-UI-018 | PASS |
 | FRG-UI-027 | PASS |
 | FRG-UI-029 | PASS |
 | FRG-UI-038 | PASS |
+
+## Failed scenarios
+
+- **FRG-PROC-010 FRG-OPDS-001 FRG-OPDS-002 FRG-OPDS-003 FRG-OPDS-005 FRG-OPDS-019: OPDS navigates to a byte-identical comic download and a reachable cover** (spine.spec.ts)
+
+## Flaky scenarios (rescued on retry)
+
+- **FRG-PROC-010 FRG-UI-007 FRG-SRCH-001: interactive search renders verbatim rejection reasons** (spine.spec.ts) — statuses: passed → failed
 
 ---
 

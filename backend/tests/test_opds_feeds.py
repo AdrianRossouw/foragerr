@@ -200,15 +200,16 @@ def test_issue_entries_carry_distinct_per_issue_covers(client, tmp_path):
     # Even WITH a cached series cover, each issue entry advertises its OWN
     # first-page cover render (FRG-OPDS-020) — distinct per issue and matching
     # the page the reader opens, never one series image repeated across issues.
-    async def _mark_cover_cached(app):
+    async def _cache_cover_and_page_counts(app):
         from foragerr.db.base import utcnow
-        from foragerr.library.models import SeriesRow
+        from foragerr.library.models import IssueFileRow, SeriesRow
 
         async with app.state.db.write_session() as session:
-            row = await session.get(SeriesRow, series_id)
-            row.cover_cached_at = utcnow()
+            (await session.get(SeriesRow, series_id)).cover_cached_at = utcnow()
+            for fid in file_ids:  # imported files carry a positive page count
+                (await session.get(IssueFileRow, fid)).page_count = 10
 
-    client.portal.call(_mark_cover_cached, client.app)
+    client.portal.call(_cache_cover_and_page_counts, client.app)
 
     body = client.get(f"/opds/series/{series_id}").text
     feed = ET.fromstring(body)
@@ -447,3 +448,38 @@ def test_series_cover_route_serves_cached_bytes_with_head_parity(client, tmp_pat
     assert head.status_code == 200
     assert head.headers["content-type"] == get.headers["content-type"]
     assert head.content == b""
+
+
+@pytest.mark.req("FRG-OPDS-020")
+def test_pageless_file_falls_back_to_series_cover_not_a_broken_link(client, tmp_path):
+    """A file with no renderable first page (page_count 0 — image-less/legacy)
+    cannot have a per-issue cover, so a cached-cover series falls back to the
+    series cover rather than advertising a /opds/cover link that would 404
+    (gate finding); with no cached cover it advertises no image at all."""
+    data = _seed(client, tmp_path, [simple_series(n_issues=1)])
+    series_id = data["series"][0]["id"]
+    file_id = data["series"][0]["issues"][0]["files"][0]["id"]
+
+    async def _set_state(app, cache: bool):
+        from foragerr.db.base import utcnow
+        from foragerr.library.models import IssueFileRow, SeriesRow
+
+        async with app.state.db.write_session() as session:
+            (await session.get(IssueFileRow, file_id)).page_count = 0
+            row = await session.get(SeriesRow, series_id)
+            row.cover_cached_at = utcnow() if cache else None
+
+    # Cached series cover -> fallback to it.
+    client.portal.call(_set_state, client.app, True)
+    feed = ET.fromstring(client.get(f"/opds/series/{series_id}").text)
+    (entry,) = feed.findall(f"{ATOM}entry")
+    imgs = {l["rel"]: l["href"] for l in _links(entry) if l["rel"] and "image" in l["rel"]}
+    assert imgs["http://opds-spec.org/image"] == f"/opds/series-cover/{series_id}"
+    assert "/opds/cover/" not in client.get(f"/opds/series/{series_id}").text
+
+    # No cached cover -> no image link at all (never a broken one).
+    client.portal.call(_set_state, client.app, False)
+    feed = ET.fromstring(client.get(f"/opds/series/{series_id}").text)
+    (entry,) = feed.findall(f"{ATOM}entry")
+    imgs = [l for l in _links(entry) if l["rel"] and "image" in l["rel"]]
+    assert imgs == []

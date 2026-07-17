@@ -73,11 +73,20 @@ openssl x509 -req -in "${CERTS}/getcomics.csr" -CA "${CERTS}/ca.pem" \
 # this, imports it, and OPDS serves it back; the spec compares against this file.
 python3 - "${RUN_DIR}/data/saga-001.cbz" <<'PY'
 import io, sys, zipfile
-# Comfortably above BOTH floors: the DDL verify floor (10 KiB) and the importer's
-# sample/junk floor (100 KiB) — a real comic archive is well over both.
+from PIL import Image
+# A REAL decodable JPEG page — the OPDS per-issue cover render (FRG-OPDS-020)
+# extracts and decodes page 0, so the fixture's first page must be a genuine
+# image, not magic-bytes-plus-zeros. Noise so it compresses large; padded past
+# BOTH floors (DDL verify 10 KiB, importer sample/junk 100 KiB). Trailing zeros
+# after the JPEG EOI are ignored by decoders, so the page still renders.
+page = io.BytesIO()
+Image.effect_noise((800, 1200), 64).convert("RGB").save(page, "JPEG", quality=80)
+member = page.getvalue()
+if len(member) < 200_000:
+    member += b"\x00" * (200_000 - len(member))
 buf = io.BytesIO()
 with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as z:
-    z.writestr("001.jpg", b"\xff\xd8\xff\xe0" + b"\x00" * 200_000)
+    z.writestr("001.jpg", member)
 open(sys.argv[1], "wb").write(buf.getvalue())
 PY
 chmod -R 777 "${RUN_DIR}"
