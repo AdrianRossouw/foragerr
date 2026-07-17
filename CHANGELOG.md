@@ -9,6 +9,23 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.9.16] — 2026-07-17
+
+Each comic issue shows its own cover in OPDS readers (m9-opds-per-issue-cover),
+the second fix from the on-device Panels test.
+
+### Fixed
+
+- OPDS acquisition feeds gave every issue in a series the one cached ComicVine
+  volume cover, so all issues rendered identically in a reader and mismatched
+  each issue's actual first page. Each issue entry now advertises its own
+  first-page cover — distinct per issue and matching what it opens to — while
+  the single series cover moves to the shelf/nav entry, where one-per-series is
+  correct (`FRG-OPDS-020`). A file with no renderable first page falls back to
+  the series cover, never a broken link. Verified on a real reader.
+
+No schema or configuration changes; no upgrade steps.
+
 ## [v0.9.15] — 2026-07-17
 
 Covers load in OPDS readers again (m9-opds-cover-realm) — found and fixed

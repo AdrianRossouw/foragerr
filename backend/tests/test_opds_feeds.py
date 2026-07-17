@@ -192,39 +192,79 @@ def test_acquisition_feed_excludes_owned_via_edition_rows(client, tmp_path):
 
 
 @pytest.mark.req("FRG-OPDS-002")
-def test_cover_and_thumbnail_links_point_at_local_cache(client, tmp_path):
-    data = _seed(client, tmp_path, [simple_series(n_issues=1)])
+def test_issue_entries_carry_distinct_per_issue_covers(client, tmp_path):
+    data = _seed(client, tmp_path, [simple_series(n_issues=3)])
     series_id = data["series"][0]["id"]
+    file_ids = [f["id"] for iss in data["series"][0]["issues"] for f in iss["files"]]
 
-    # A series WITH a cached ComicVine cover uses the OPDS-REALM series-cover
-    # route for both image links (FRG-OPDS-019) — NOT the /api route, which an
-    # OPDS reader's Basic credentials cannot reach; the cover-less
-    # local-first-page fallback (FRG-OPDS-011) is covered in the stream suite.
-    async def _mark_cover_cached(app):
+    # Even WITH a cached series cover, each issue entry advertises its OWN
+    # first-page cover render (FRG-OPDS-020) — distinct per issue and matching
+    # the page the reader opens, never one series image repeated across issues.
+    async def _cache_cover_and_page_counts(app):
+        from foragerr.db.base import utcnow
+        from foragerr.library.models import IssueFileRow, SeriesRow
+
+        async with app.state.db.write_session() as session:
+            (await session.get(SeriesRow, series_id)).cover_cached_at = utcnow()
+            for fid in file_ids:  # imported files carry a positive page count
+                (await session.get(IssueFileRow, fid)).page_count = 10
+
+    client.portal.call(_cache_cover_and_page_counts, client.app)
+
+    body = client.get(f"/opds/series/{series_id}").text
+    feed = ET.fromstring(body)
+    images = []
+    for entry in feed.findall(f"{ATOM}entry"):
+        rels = {
+            link["rel"]: link["href"]
+            for link in _links(entry)
+            if link["rel"] and "image" in link["rel"]
+        }
+        images.append(rels["http://opds-spec.org/image"])
+        # image + thumbnail address the same per-file cover (thumbnail variant).
+        assert rels["http://opds-spec.org/image"].startswith("/opds/cover/")
+        assert "thumbnail" in rels["http://opds-spec.org/image/thumbnail"]
+
+    # One distinct cover per issue-file — NOT the shared series-cover URL.
+    assert sorted(images) == sorted(f"/opds/cover/{fid}" for fid in file_ids)
+    assert f"/opds/series-cover/{series_id}" not in body  # not repeated per issue
+    assert "/api/v1/series" not in body
+    for host in ("comicvine", "gamespot", "cbsistatic"):
+        assert host not in body.lower()
+
+
+@pytest.mark.req("FRG-OPDS-020")
+def test_shelf_nav_entry_carries_the_series_cover_only_when_cached(client, tmp_path):
+    """The single series-level ComicVine cover belongs on the shelf nav entry —
+    one cover per series — advertised only when a cover is actually cached."""
+    data = _seed(
+        client,
+        tmp_path,
+        [simple_series("Cached", cv_volume_id=1), simple_series("Bare", cv_volume_id=2)],
+    )
+    cached_id = data["series"][0]["id"]
+
+    async def _mark(app):
         from foragerr.db.base import utcnow
         from foragerr.library.models import SeriesRow
 
         async with app.state.db.write_session() as session:
-            row = await session.get(SeriesRow, series_id)
-            row.cover_cached_at = utcnow()
+            (await session.get(SeriesRow, cached_id)).cover_cached_at = utcnow()
 
-    client.portal.call(_mark_cover_cached, client.app)
+    client.portal.call(_mark, client.app)
 
-    body = client.get(f"/opds/series/{series_id}").text
-    feed = ET.fromstring(body)
-    (entry,) = feed.findall(f"{ATOM}entry")
-    rels = {
-        link["rel"]: link["href"]
-        for link in _links(entry)
-        if link["rel"] and "image" in link["rel"]
-    }
-    assert rels["http://opds-spec.org/image"] == f"/opds/series-cover/{series_id}"
-    assert rels["http://opds-spec.org/image/thumbnail"] == f"/opds/series-cover/{series_id}"
-    assert "/api/v1/series" not in body  # never the off-realm API route
-    # No remote ComicVine/CDN image host leaks into the feed (only the Atom/
-    # OPDS namespace + rel URIs legitimately contain a scheme).
-    for host in ("comicvine", "gamespot", "cbsistatic"):
-        assert host not in body.lower()
+    shelf = ET.fromstring(client.get("/opds/series").text)
+    by_title = {e.find(f"{ATOM}title").text: e for e in shelf.findall(f"{ATOM}entry")}
+    cached_imgs = [
+        l["href"] for l in _links(by_title["Cached"])
+        if l["rel"] and "image" in l["rel"]
+    ]
+    bare_imgs = [
+        l["href"] for l in _links(by_title["Bare"])
+        if l["rel"] and "image" in l["rel"]
+    ]
+    assert cached_imgs == [f"/opds/series-cover/{cached_id}"] * 2  # image + thumbnail
+    assert bare_imgs == []  # no cover cached -> no image link
 
 
 @pytest.mark.req("FRG-OPDS-002")
@@ -408,3 +448,38 @@ def test_series_cover_route_serves_cached_bytes_with_head_parity(client, tmp_pat
     assert head.status_code == 200
     assert head.headers["content-type"] == get.headers["content-type"]
     assert head.content == b""
+
+
+@pytest.mark.req("FRG-OPDS-020")
+def test_pageless_file_falls_back_to_series_cover_not_a_broken_link(client, tmp_path):
+    """A file with no renderable first page (page_count 0 — image-less/legacy)
+    cannot have a per-issue cover, so a cached-cover series falls back to the
+    series cover rather than advertising a /opds/cover link that would 404
+    (gate finding); with no cached cover it advertises no image at all."""
+    data = _seed(client, tmp_path, [simple_series(n_issues=1)])
+    series_id = data["series"][0]["id"]
+    file_id = data["series"][0]["issues"][0]["files"][0]["id"]
+
+    async def _set_state(app, cache: bool):
+        from foragerr.db.base import utcnow
+        from foragerr.library.models import IssueFileRow, SeriesRow
+
+        async with app.state.db.write_session() as session:
+            (await session.get(IssueFileRow, file_id)).page_count = 0
+            row = await session.get(SeriesRow, series_id)
+            row.cover_cached_at = utcnow() if cache else None
+
+    # Cached series cover -> fallback to it.
+    client.portal.call(_set_state, client.app, True)
+    feed = ET.fromstring(client.get(f"/opds/series/{series_id}").text)
+    (entry,) = feed.findall(f"{ATOM}entry")
+    imgs = {l["rel"]: l["href"] for l in _links(entry) if l["rel"] and "image" in l["rel"]}
+    assert imgs["http://opds-spec.org/image"] == f"/opds/series-cover/{series_id}"
+    assert "/opds/cover/" not in client.get(f"/opds/series/{series_id}").text
+
+    # No cached cover -> no image link at all (never a broken one).
+    client.portal.call(_set_state, client.app, False)
+    feed = ET.fromstring(client.get(f"/opds/series/{series_id}").text)
+    (entry,) = feed.findall(f"{ATOM}entry")
+    imgs = [l for l in _links(entry) if l["rel"] and "image" in l["rel"]]
+    assert imgs == []
