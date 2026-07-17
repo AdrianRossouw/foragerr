@@ -62,5 +62,5 @@ Security-touching change → full review fleet + Codex at the gate
 - [x] 5.2 Full suite green (backend, frontend, e2e via run.sh incl.
       negative paths); full review fleet + Codex (security-touching tier);
       fixes applied
-- [ ] 5.3 CHANGELOG + version bump on branch; merge `--no-ff`; tag; push;
+- [x] 5.3 CHANGELOG + version bump on branch; merge `--no-ff`; tag; push;
       `gh release create` (per /release)
