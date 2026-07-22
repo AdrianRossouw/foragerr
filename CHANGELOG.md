@@ -9,6 +9,19 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.9.18] — 2026-07-23
+
+Live-dogfood fix: Humble downloads refused their own CDN.
+
+### Fixed
+
+- Humble Bundle downloads failed with "download URL is outside the provider
+  allowlist: cdn.humble.com": live Humble serves signed URLs from
+  cdn.humble.com as well as the dl.humble.com the research fixtures had
+  observed. The source-download allowlist now trusts the two Humble-operated
+  apex domains (dot-boundary subdomain matching, HTTPS-only and md5
+  verification unchanged). (FRG-SRC-006)
+
 ## [v0.9.17] — 2026-07-18
 
 Deployment-security hardening (m10-deployment-posture), the first M10 go-live

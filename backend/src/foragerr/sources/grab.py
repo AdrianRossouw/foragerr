@@ -57,9 +57,12 @@ logger = logging.getLogger("foragerr.sources.grab")
 #: Command / task name for a single-entitlement grab.
 SOURCE_GRAB_TASK = "source-grab"
 
-#: The Humble CDN download hosts (research doc: dl.humble.com). HTTPS-only; the
-#: AllowList matches an exact host or a subdomain of a listed host.
-HUMBLE_CDN_HOSTS: frozenset[str] = frozenset({"dl.humble.com", "humblebundle.com"})
+#: The Humble CDN download hosts. HTTPS-only; the AllowList matches an exact
+#: host or a subdomain of a listed host. Both Humble-operated apex domains are
+#: trusted so their CDN naming can drift without refusing real downloads:
+#: live URLs have served from dl.humble.com AND cdn.humble.com (the latter
+#: seen 2026-07-22 in live use — the research doc had only observed dl.*).
+HUMBLE_CDN_HOSTS: frozenset[str] = frozenset({"humble.com", "humblebundle.com"})
 
 #: Streaming hash chunk (matches the DDL streaming chunk).
 _HASH_CHUNK = 64 * 1024
