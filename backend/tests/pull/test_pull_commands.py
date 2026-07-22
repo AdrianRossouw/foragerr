@@ -311,7 +311,9 @@ async def test_config_keys_defaults_and_documented_rendering(config_dir):
     rendered with their documentation into config.yaml (FRG-NFR-009)."""
     settings = Settings(config_dir=config_dir)
     assert settings.pull_enabled is True  # ON by default (owner decision 2026-07-11)
-    assert settings.pull_source_url.startswith("https://walksoftly")
+    # talkhard = walksoftly's successor (upstream retired 2026-05; adopted
+    # after live 523s, 2026-07-22).
+    assert settings.pull_source_url.startswith("https://talkhard")
     assert settings.pull_refresh_interval_seconds == 14400
 
     body = render_documented_config()

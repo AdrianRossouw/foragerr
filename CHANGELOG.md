@@ -9,6 +9,20 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.9.19] — 2026-07-23
+
+The weekly pull source moved: walksoftly retired, talkhard succeeds it.
+
+### Fixed
+
+- The default weekly-pull source (`pull_source_url`) pointed at the retired
+  `walksoftly.itsaninja.party` host (dead with HTTP 523 since at least
+  2026-07-20; upstream retired it 2026-05 per the Mylar community fork). The
+  default now points at its successor, `talkhard.notaninja.party`, same API
+  contract. Existing installs that never overrode the setting pick the new
+  default up on upgrade; an explicit `pull_source_url` in config.yaml is
+  honored unchanged. (FRG-PULL-002)
+
 ## [v0.9.18] — 2026-07-23
 
 Live-dogfood fix: Humble downloads refused their own CDN.

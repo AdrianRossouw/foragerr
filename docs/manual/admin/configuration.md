@@ -74,7 +74,7 @@ under the top level of `config.yaml`.
 | `comicvine_image_hosts` | `FORAGERR_COMICVINE_IMAGE_HOSTS` | `comicvine.gamespot.com,comicvine1.cbsistatic.com,static.comicvine.com` | Allowlisted cover-image hostnames. |
 | `track_downloads_interval_seconds` | `FORAGERR_TRACK_DOWNLOADS_INTERVAL_SECONDS` | `60` | Minimum 60s (download pool is serialized). |
 | `pull_enabled` | `FORAGERR_PULL_ENABLED` | `true` | Master switch for the external weekly-pull source fetch (FRG-PULL-002). **On by default** (owner decision 2026-07-11) so the Calendar carries the week's releases out of the box; set `false` to opt out — the weekly view then works from local library metadata alone, the scheduled `pull-refresh` task no-ops, and no third-party traffic is issued. See "Weekly pull" below. |
-| `pull_source_url` | `FORAGERR_PULL_SOURCE_URL` | `https://walksoftly.itsaninja.party/newcomics.php` | URL of the unofficial weekly-pull JSON source. Fetched only when `pull_enabled` is true, over the hardened **external** egress profile — a loopback/private/link-local host is refused per-hop and surfaced as a degraded source, never used to reach an internal host. An empty value disables the fetch. |
+| `pull_source_url` | `FORAGERR_PULL_SOURCE_URL` | `https://talkhard.notaninja.party/newcomics.php` | URL of the unofficial weekly-pull JSON source. Fetched only when `pull_enabled` is true, over the hardened **external** egress profile — a loopback/private/link-local host is refused per-hop and surfaced as a degraded source, never used to reach an internal host. An empty value disables the fetch. |
 | `pull_refresh_interval_seconds` | `FORAGERR_PULL_REFRESH_INTERVAL_SECONDS` | `14400` (4h) | How often the scheduled `pull-refresh` task runs. Clamped **up** to a documented 1 hour (3600s) floor to protect the unofficial source — a smaller value is raised, not rejected. A manual force-run bypasses the interval gate. |
 | `auto_redownload_failed` | `FORAGERR_AUTO_REDOWNLOAD_FAILED` | `true` | Self-healing re-search after a failed download. |
 | `source_sync_interval_seconds` | `FORAGERR_SOURCE_SYNC_INTERVAL_SECONDS` | `86400` (daily) | How often the scheduled store-source sync task (`FRG-SRC-003`) polls every connected source (e.g. Humble Bundle) for new entitlements. Clamped **up** to a documented 1 hour (3600 s) floor at task registration to stay polite to the store API — a smaller value is raised, not rejected. A manual "Sync now" on a source runs immediately regardless of this interval. See `../user/sources.md`. |
@@ -325,7 +325,7 @@ yet — enqueues the ordinary `refresh-series` metadata refresh so the issue is
 created and your series' monitor-new-items policy decides whether it becomes wanted.
 The pull side never writes issue status itself.
 
-- **`pull_source_url`** defaults to the walksoftly / League-of-Comic-Geeks-derived
+- **`pull_source_url`** defaults to the talkhard / League-of-Comic-Geeks-derived
   JSON API. It is fetched over the hardened **external** egress profile (see
   `docs/security/`): the resolved host is validated per-hop and a
   loopback/private/link-local address is refused, so a mistyped or hostile URL can
