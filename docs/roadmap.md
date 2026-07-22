@@ -12,14 +12,21 @@ own approved OpenSpec change, and sequencing or scope may shift. Where
 requirement IDs are already allocated they are cited; many future items have no
 IDs yet, because IDs are allocated at proposal time.
 
-**The 1.0 cut** (owner decision, 2026-07-11): version 1.0 is reached at the end
-of M10, after the sources (M6), authentication (M8), UI refinement (M9), and
-go-live (M10) milestones. The bar is "safe for strangers to deploy" —
-authentication is the hard gate. Torrents (M7) move past 1.0 in sequence; the
-milestone keeps its label because registry rows cite it, and labels are never
-renumbered. Before 1.0, releases may still make breaking changes with migration
-notes; at 1.0 the public surfaces (REST API, OPDS, configuration, environment
-variables) start a clean slate under strict semantic versioning.
+**The 1.0 cut** (owner decision 2026-07-11; amended 2026-07-22): version 1.0
+is reached at the end of M10, after the sources (M6), authentication (M8),
+UI refinement (M9), torrents (M7), and go-live (M10) milestones. The bar is
+"safe for strangers to deploy" — authentication is the hard gate — **and,
+per the 2026-07-22 amendment, acquisition-complete**: live dogfood showed
+current-title completion from usenet + DDL alone falls short of the
+product's core promise, so torrents move inside 1.0. M7 keeps its label
+because registry rows cite it, and labels are never renumbered. It is
+sequenced *inside* M10: after the release-pipeline change, before
+qualification and the pentest, so 1.0's qualification and penetration test
+cover the torrent surface rather than certifying a smaller product than
+ships. Before 1.0, releases may still make breaking changes with migration
+notes; at 1.0 the public surfaces (REST API, OPDS, configuration,
+environment variables) start a clean slate under strict semantic
+versioning.
 
 ## M6 — Sources
 
@@ -65,10 +72,11 @@ covers, and the public project site.
 **In progress** (kicked off 2026-07-17; design authority: the m10-go-live
 pre-design). The release milestone: what it takes for strangers to deploy
 foragerr safely, and the capstone of the regulated-development
-demonstration. Sequenced as: deployment-posture hardening (first, in
-flight), then the release pipeline (GHCR publishing, dev/rc/release
-channels, change control, credential scoping), then V&V/qualification
-(IQ/OQ/PQ), audit durability, and the pentest.
+demonstration. Sequenced as: deployment-posture hardening (shipped,
+v0.9.17), then the release pipeline (GHCR publishing, dev/rc/release
+channels, change control, credential scoping), then **torrents (M7,
+resequenced into 1.0 — see its section)**, then V&V/qualification
+(IQ/OQ/PQ), audit durability, and the pentest over the full surface.
 
 - Deployment security posture: HTTP security headers, opt-in trusted-proxy
   handling, unauthenticated-disclosure hygiene, and the committed posture
@@ -84,15 +92,20 @@ channels, change control, credential scoping), then V&V/qualification
 - The 1.0 compatibility promise takes effect: strict SemVer on REST, OPDS,
   configuration, and environment variables from here on.
 
-## M7 — Torrents (post-1.0)
+## M7 — Torrents (in 1.0, resequenced 2026-07-22)
 
-The first milestone after 1.0 and its flagship feature; the label predates the
-1.0 cut and is kept because registry rows cite it. A torrent download client
-alongside the existing clients, with Torznab indexing through an existing
-Prowlarr/Jackett instance, seeding-aware import, and honouring each tracker's
-seeding requirements (per-torrent ratio and seed-time limits) before a
-completed download is removed. Run packs — the season-pack analogue that
-dominates comic torrents — are in scope.
+Moved inside the 1.0 cut by owner decision 2026-07-22 (previously the
+post-1.0 flagship; the label is kept because registry rows cite it). Lands
+between M10's release-pipeline change and its qualification/pentest
+changes. A torrent download client alongside the existing clients, with
+Torznab indexing through an existing Prowlarr/Jackett instance,
+seeding-aware import, and honouring each tracker's seeding requirements
+(per-torrent ratio and seed-time limits) before a completed download is
+removed. The centerpiece is **pack handling**: one downloaded pack
+satisfying many wanted issues (never re-fetching the same pack per issue),
+with weekly packs matched against the pull list — planned as its own
+capability so single-download-many-issues also benefits the existing
+usenet/DDL paths, with the torrent transport layered on top.
 
 - Requirements: `FRG-TOR-001` (torrent protocol), `FRG-TOR-002` (client),
   `FRG-TOR-003` (magnet/.torrent handling), `FRG-TOR-004` (seeding-aware

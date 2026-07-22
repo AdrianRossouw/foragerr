@@ -38,6 +38,12 @@ moved `M5`→`M8`.
 1.0 cut decided 2026-07-11 with owner approval (recorded at the M6 kickoff,
 2026-07-12): 1.0 = M6 → M8 → M9 (UI refinement, new) → M10 (go-live, new).
 Torrents move past 1.0 in sequence; `M7` rows keep their milestone label and
+no id is renumbered. **Amended 2026-07-22 with owner approval: torrents
+(M7) move INSIDE 1.0** — sequenced within M10, after the release-pipeline
+change and before qualification/pentest, so 1.0 qualification covers the
+torrent surface. Rationale: live-dogfood completion-rate evidence (usenet +
+DDL alone under-serve current titles); pack handling (one download → many
+wanted issues) planned as its own capability. `M7` rows keep their label;
 no id is renumbered. The archive.org importer leaves M6 — when picked up
 post-1.0 it is shaped as an indexer + direct-download capability, not a store
 source. Compatibility: pre-1.0 releases may break with migration notes; from
