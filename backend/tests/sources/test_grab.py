@@ -38,7 +38,11 @@ def _grab_factory(config_dir, handler) -> HttpClientFactory:
     policy-acceptable public IP, over an injected mock transport."""
     settings = make_settings(config_dir)
     resolver = StubResolver(
-        {"www.humblebundle.com": [PUBLIC_V4], "dl.humble.com": [PUBLIC_V4]}
+        {
+            "www.humblebundle.com": [PUBLIC_V4],
+            "dl.humble.com": [PUBLIC_V4],
+            "cdn.humble.com": [PUBLIC_V4],
+        }
     )
     return HttpClientFactory(
         settings, resolver=resolver, transport=httpx.MockTransport(handler)
@@ -138,6 +142,7 @@ async def test_happy_path_verifies_and_hands_off_to_import(db, config_dir):
     assert "handed off to import" in summary
 
     # The entitlement is NOT yet imported — it waits on the drain (FRG-SRC-006):
+    # (see also test_cdn_host_variant_is_allowlisted below)
     # ownership is never claimed before the file lands in the library.
     after = await repo.get_entitlement(db, ent.id)
     assert after.download_state == "import_pending"
@@ -292,6 +297,46 @@ async def test_grab_with_undecryptable_cookie_fails_not_stranded(db, config_dir)
     after = await repo.get_entitlement(db, ent.id)
     assert after.download_state == "failed"
     assert "encryption key" in after.download_error
+
+
+@pytest.mark.req("FRG-SRC-006")
+async def test_cdn_host_variant_is_allowlisted(db, config_dir):
+    """Live Humble serves signed URLs from cdn.humble.com as well as
+    dl.humble.com (observed 2026-07-22 — the research doc had only seen
+    dl.*); both apex domains are trusted so Humble-side CDN naming drift
+    never refuses a real download. Regression for the live failure
+    'download URL is outside the provider allowlist: cdn.humble.com'."""
+    ent = await _matched_entitlement(db, config_dir, md5=FILE_MD5)
+    settings = make_settings(config_dir)
+    handler = _handler(
+        order_body=_order_body(
+            "synth_singleissue_01", "https://cdn.humble.com/synth_hero_01.cbz?t=x"
+        )
+    )
+    summary = await run_grab(
+        db, _grab_factory(config_dir, handler), settings, ent.id, min_interval=0.0
+    )
+    assert "handed off to import" in summary
+
+
+@pytest.mark.req("FRG-SRC-006")
+async def test_apex_suffix_match_has_a_dot_boundary(db, config_dir):
+    """`humble.com` on the allowlist must NOT admit `evilhumble.com` — the
+    subdomain rule matches on a dot boundary, never a bare suffix."""
+    ent = await _matched_entitlement(db, config_dir, md5=FILE_MD5)
+    settings = make_settings(config_dir)
+    handler = _handler(
+        order_body=_order_body(
+            "synth_singleissue_01", "https://evilhumble.com/x.cbz"
+        ),
+        serve_file=False,
+    )
+    summary = await run_grab(
+        db, _grab_factory(config_dir, handler), settings, ent.id, min_interval=0.0
+    )
+    assert "download failed" in summary
+    after = await repo.get_entitlement(db, ent.id)
+    assert after.download_state == "failed"
 
 
 @pytest.mark.req("FRG-SRC-006")
