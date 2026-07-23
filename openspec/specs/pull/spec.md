@@ -58,7 +58,8 @@ degraded.
 ### Requirement: FRG-PULL-002 — External pull-source fetch
 
 The system SHALL fetch weekly release data from a **configurable** external source
-(default: the walksoftly / League-of-Comic-Geeks-derived JSON API), covering at
+(default: the talkhard / League-of-Comic-Geeks-derived JSON API — successor to
+the retired walksoftly host, 2026-05), covering at
 least the current and previous release weeks per run. The fetch SHALL use the
 shared hardened egress factory's **external** profile (FRG-SEC-001) applied to the
 configured source URL — refusing loopback/private/link-local targets and applying

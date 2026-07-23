@@ -641,10 +641,11 @@ class Settings(BaseSettings):
         ),
     )
     pull_source_url: str = Field(
-        default="https://walksoftly.itsaninja.party/newcomics.php",
+        default="https://talkhard.notaninja.party/newcomics.php",
         description=(
             "URL of the external weekly-pull JSON source (FRG-PULL-002): the "
-            "walksoftly / League-of-Comic-Geeks-derived API. Fetched over the "
+            "talkhard / League-of-Comic-Geeks-derived API (successor to the "
+            "retired walksoftly host, 2026-05). Fetched over the "
             "hardened 'external' egress profile (FRG-SEC-001) — a loopback/private/"
             "link-local host is refused per-hop and surfaced as a degraded source, "
             "never used to reach an internal host. Only fetched when pull_enabled "
