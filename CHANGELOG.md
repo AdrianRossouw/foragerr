@@ -9,6 +9,21 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.9.20] — 2026-07-23
+
+Pull weeks now file under their shipdate's ISO week.
+
+### Fixed
+
+- Stored pull weeks were keyed by the number *requested from* the source;
+  talkhard indexes weeks one lower than ISO (walksoftly happened to align),
+  so an entire week of releases filed under the previous week — the Calendar
+  showed "this week" empty while the comics sat one page back. Entries now
+  pool across fetched payloads and store under the ISO week of their own
+  release date, immune to any source's numbering convention; an empty
+  non-future payload is skipped rather than ever wiping a derived week.
+  (FRG-PULL-002, FRG-PULL-003)
+
 ## [v0.9.19] — 2026-07-23
 
 The weekly pull source moved: walksoftly retired, talkhard succeeds it.
