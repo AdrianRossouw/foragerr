@@ -92,6 +92,13 @@ async def list_week(session: AsyncSession, week: str) -> list[PullEntryRow]:
     return list(result.scalars().all())
 
 
+async def any_week_stored(session: AsyncSession) -> bool:
+    """Whether the pull store holds ANY entry — the FRG-PULL-010 backfill gate
+    (an empty store means fresh install / never fetched)."""
+    result = await session.execute(select(PullEntryRow.id).limit(1))
+    return result.scalar_one_or_none() is not None
+
+
 async def get_entry(session: AsyncSession, entry_id: int) -> PullEntryRow | None:
     return await session.get(PullEntryRow, entry_id)
 

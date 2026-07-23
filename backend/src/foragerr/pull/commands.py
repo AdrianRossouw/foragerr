@@ -70,6 +70,11 @@ logger = logging.getLogger("foragerr.pull.commands")
 #: Scheduler task + command name (1:1 for this task, like ``backup-database``).
 PULL_REFRESH_TASK = "pull-refresh"
 
+#: Hard ceiling on the FRG-PULL-010 first-run backfill window — a month-ish is
+#: discovery; deeper history is an archive concern, and the cap bounds the
+#: worst-case request fan-out to the third-party source.
+PULL_BACKFILL_MAX_WEEKS = 12
+
 #: Documented minimum interval (1 hour) the scheduler clamps a smaller
 #: configured ``pull_refresh_interval_seconds`` up to, protecting the unofficial
 #: third-party source (FRG-PULL-006, owner decision). Mirrors
@@ -171,6 +176,30 @@ async def _handle_pull_refresh(command: PullRefreshCommand, ctx: HandlerContext)
     factory = make_pull_factory(settings)
     today = dt.date.today()
     weeks = _fetch_weeks(today)
+    # FRG-PULL-010: an EMPTY store (fresh install) widens the window by the
+    # configured number of additional previous weeks, so the Calendar starts
+    # with recent history instead of a bare screen. One-shot by construction —
+    # once anything is stored the standard window applies.
+    backfill = min(settings.pull_backfill_weeks, PULL_BACKFILL_MAX_WEEKS)
+    if settings.pull_backfill_weeks > PULL_BACKFILL_MAX_WEEKS:
+        logger.info(
+            "pull backfill: pull_backfill_weeks=%d clamped to %d",
+            settings.pull_backfill_weeks,
+            PULL_BACKFILL_MAX_WEEKS,
+        )
+    if backfill > 0:
+        async with ctx.db.read_session() as session:
+            store_empty = not await repo.any_week_stored(session)
+        if store_empty:
+            for back in range(2, backfill + 2):
+                iso_year, iso_week, _ = (today - dt.timedelta(days=7 * back)).isocalendar()
+                pair = (iso_week, iso_year)
+                if pair not in weeks:
+                    weeks.append(pair)
+            logger.info(
+                "pull backfill: empty store, widening window by %d previous week(s)",
+                backfill,
+            )
     future_week = _future_week(today)
     future_key = _week_key(*future_week)
     async with PullSourceClient(factory, source_url, backoff=backoff) as client:
@@ -220,29 +249,35 @@ async def _handle_pull_refresh(command: PullRefreshCommand, ctx: HandlerContext)
             iso_year, iso_week, _ = entry.release_date.isocalendar()
             derived.setdefault(_week_key(iso_week, iso_year), []).append(entry)
 
-    for week_key in sorted(derived):
-        # One transaction per week (FRG-DB-007): replace-on-refresh + match
-        # commit together, so a mid-week failure never half-replaces the week.
-        async with ctx.db.write_session() as session:
+    # ONE transaction for the whole run's storage + matching (FRG-DB-007):
+    # replace-on-refresh and match writes for every derived week commit
+    # together, so a mid-run failure rolls the entire run back — nothing is
+    # half-replaced, and (Codex gate finding, 2026-07-23) an interrupted
+    # FIRST run can never leave a partial store that the FRG-PULL-010
+    # empty-store gate would then read as "backfill already done".
+    all_results = []
+    async with ctx.db.write_session() as session:
+        for week_key in sorted(derived):
             rows = await repo.replace_week(session, week_key, derived[week_key])
             results = await matching.match_week(session, rows)
-        stored_entries += len(rows)
-        # FRG-PULL-005 trigger: a matched watched series whose local issue does
-        # not exist yet (matched_series_id set, matched_issue_id None) enqueues
-        # the EXISTING refresh-series, deduplicated on the queue. The pull side
-        # writes no issue status (D4). Enqueue OUTSIDE the write session — the
-        # single-writer lock is released, and enqueue opens its own session.
-        for result in results:
-            if result.matched_series_id is None or result.matched_issue_id is not None:
-                continue
-            if result.matched_series_id in refreshed:
-                continue
-            refreshed.add(result.matched_series_id)
-            await ctx.commands.enqueue(
-                "refresh-series",
-                {"series_id": result.matched_series_id},
-                triggered_by=PULL_REFRESH_TRIGGERED_BY,
-            )
+            stored_entries += len(rows)
+            all_results.extend(results)
+    # FRG-PULL-005 trigger: a matched watched series whose local issue does
+    # not exist yet (matched_series_id set, matched_issue_id None) enqueues
+    # the EXISTING refresh-series, deduplicated on the queue. The pull side
+    # writes no issue status (D4). Enqueue OUTSIDE the write session — the
+    # single-writer lock is released, and enqueue opens its own session.
+    for result in all_results:
+        if result.matched_series_id is None or result.matched_issue_id is not None:
+            continue
+        if result.matched_series_id in refreshed:
+            continue
+        refreshed.add(result.matched_series_id)
+        await ctx.commands.enqueue(
+            "refresh-series",
+            {"series_id": result.matched_series_id},
+            triggered_by=PULL_REFRESH_TRIGGERED_BY,
+        )
 
     parts = [
         f"{len(outcome.weeks)} week(s)",
