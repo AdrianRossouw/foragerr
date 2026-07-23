@@ -67,6 +67,17 @@ def _host_allowed(host: str) -> bool:
     return any(host == h or host.endswith("." + h) for h in COVER_HOSTS)
 
 
+def _hop_check(url) -> None:
+    """Per-hop validator handed to the factory: every hop of the redirect
+    walk — not just the first URL — must stay on the cover allowlist."""
+    scheme = getattr(url, "scheme", "")
+    host = getattr(url, "host", "") or ""
+    if scheme != "https" or not _host_allowed(host):
+        raise ValueError(
+            f"cover hop {host!r} (scheme {scheme!r}) is outside the cover allowlist"
+        )
+
+
 def _sniff_image(body: bytes) -> str | None:
     for magic, content_type in _IMAGE_MAGICS:
         if body.startswith(magic):
@@ -107,7 +118,13 @@ async def proxy_cover(request: Request, src: str = Query(..., max_length=1024)) 
         try:
             # The factory enforces the byte cap, TLS, per-hop SSRF egress
             # checks, and the bounded redirect walk (FRG-SEC-001/NFR-006).
-            result = await client.get(src, max_bytes=MAX_COVER_BYTES)
+            # hop_check additionally pins EVERY hop — including redirect
+            # targets — to the cover allowlist: a CV URL that 302s to a
+            # non-CV public host is refused, not followed (the egress policy
+            # alone would allow any public host).
+            result = await client.get(
+                src, max_bytes=MAX_COVER_BYTES, hop_check=_hop_check
+            )
         except Exception as exc:  # noqa: BLE001 - upstream fetch boundary
             logger.info("cover proxy fetch failed for %s: %s", parts.hostname, exc)
             raise ApiError(502, "cover fetch failed") from exc

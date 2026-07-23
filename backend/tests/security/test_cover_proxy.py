@@ -123,3 +123,22 @@ def test_cache_serves_repeats_without_refetch(app, monkeypatch):
             assert r.status_code == 200
             assert r.headers["content-type"].startswith("image/jpeg")
     assert len(fake.calls) == 1  # LRU-cached after first fetch
+
+
+@pytest.mark.req("FRG-META-021")
+def test_hop_check_pins_redirect_targets_to_allowlist():
+    """The per-hop validator refuses any hop off the cover allowlist — a CV
+    URL 302ing to a public non-CV host is refused, not followed."""
+    class _Url:
+        def __init__(self, scheme, host):
+            self.scheme = scheme
+            self.host = host
+
+    cover_proxy._hop_check(_Url("https", "comicvine.gamespot.com"))  # ok
+    for scheme, host in (
+        ("https", "evil.example.com"),
+        ("https", "evilcomicvine.com"),
+        ("http", "comicvine.gamespot.com"),
+    ):
+        with pytest.raises(ValueError):
+            cover_proxy._hop_check(_Url(scheme, host))
