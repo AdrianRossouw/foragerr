@@ -249,29 +249,35 @@ async def _handle_pull_refresh(command: PullRefreshCommand, ctx: HandlerContext)
             iso_year, iso_week, _ = entry.release_date.isocalendar()
             derived.setdefault(_week_key(iso_week, iso_year), []).append(entry)
 
-    for week_key in sorted(derived):
-        # One transaction per week (FRG-DB-007): replace-on-refresh + match
-        # commit together, so a mid-week failure never half-replaces the week.
-        async with ctx.db.write_session() as session:
+    # ONE transaction for the whole run's storage + matching (FRG-DB-007):
+    # replace-on-refresh and match writes for every derived week commit
+    # together, so a mid-run failure rolls the entire run back — nothing is
+    # half-replaced, and (Codex gate finding, 2026-07-23) an interrupted
+    # FIRST run can never leave a partial store that the FRG-PULL-010
+    # empty-store gate would then read as "backfill already done".
+    all_results = []
+    async with ctx.db.write_session() as session:
+        for week_key in sorted(derived):
             rows = await repo.replace_week(session, week_key, derived[week_key])
             results = await matching.match_week(session, rows)
-        stored_entries += len(rows)
-        # FRG-PULL-005 trigger: a matched watched series whose local issue does
-        # not exist yet (matched_series_id set, matched_issue_id None) enqueues
-        # the EXISTING refresh-series, deduplicated on the queue. The pull side
-        # writes no issue status (D4). Enqueue OUTSIDE the write session — the
-        # single-writer lock is released, and enqueue opens its own session.
-        for result in results:
-            if result.matched_series_id is None or result.matched_issue_id is not None:
-                continue
-            if result.matched_series_id in refreshed:
-                continue
-            refreshed.add(result.matched_series_id)
-            await ctx.commands.enqueue(
-                "refresh-series",
-                {"series_id": result.matched_series_id},
-                triggered_by=PULL_REFRESH_TRIGGERED_BY,
-            )
+            stored_entries += len(rows)
+            all_results.extend(results)
+    # FRG-PULL-005 trigger: a matched watched series whose local issue does
+    # not exist yet (matched_series_id set, matched_issue_id None) enqueues
+    # the EXISTING refresh-series, deduplicated on the queue. The pull side
+    # writes no issue status (D4). Enqueue OUTSIDE the write session — the
+    # single-writer lock is released, and enqueue opens its own session.
+    for result in all_results:
+        if result.matched_series_id is None or result.matched_issue_id is not None:
+            continue
+        if result.matched_series_id in refreshed:
+            continue
+        refreshed.add(result.matched_series_id)
+        await ctx.commands.enqueue(
+            "refresh-series",
+            {"series_id": result.matched_series_id},
+            triggered_by=PULL_REFRESH_TRIGGERED_BY,
+        )
 
     parts = [
         f"{len(outcome.weeks)} week(s)",
