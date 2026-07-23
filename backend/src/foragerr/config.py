@@ -640,6 +640,18 @@ class Settings(BaseSettings):
             "traffic is issued. A source outage degrades health, never the view."
         ),
     )
+    pull_backfill_weeks: int = Field(
+        default=4,
+        ge=0,
+        description=(
+            "How many additional PREVIOUS release weeks to fetch when the pull "
+            "store is empty (FRG-PULL-010) — a fresh install's Calendar starts "
+            "with a month of history instead of a bare screen. One-shot by "
+            "construction: once any week is stored, refreshes use the standard "
+            "previous/current/next window. 0 disables; values above 12 are "
+            "clamped to 12."
+        ),
+    )
     pull_source_url: str = Field(
         default="https://talkhard.notaninja.party/newcomics.php",
         description=(

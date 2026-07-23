@@ -653,3 +653,48 @@ async def test_empty_nonfuture_payload_never_clobbers_derived_rows(
     async with db.read_session() as session:
         stored = await repo.list_week(session, WEEK_KEY)
     assert [r.series_name for r in stored] == ["Spawn"]  # untouched
+
+
+@pytest.mark.req("FRG-PULL-010")
+async def test_empty_store_widens_window_by_backfill_weeks(
+    db, tmp_path, config_dir, command_registry, monkeypatch
+):
+    """A fresh install (empty pull store) fetches the configured number of
+    additional previous weeks; the requested window is standard + backfill."""
+    marker = _install_client(monkeypatch, _outcome())
+    ctx, _svc = await _ctx(db, _settings(config_dir, pull_backfill_weeks=4))
+
+    await _handle_pull_refresh(PullRefreshCommand(), ctx)
+
+    requested = marker["client"].calls[0]
+    assert len(requested) == 3 + 4  # prev/current/next + 4 backfill weeks
+
+
+@pytest.mark.req("FRG-PULL-010")
+async def test_nonempty_store_uses_standard_window(
+    db, tmp_path, config_dir, command_registry, monkeypatch
+):
+    day = dt.date(2026, 7, 8)
+    async with db.write_session() as session:
+        await repo.replace_week(session, WEEK_KEY, [_entry("Spawn", "2", day=day)])
+    marker = _install_client(monkeypatch, _outcome())
+    ctx, _svc = await _ctx(db, _settings(config_dir, pull_backfill_weeks=4))
+
+    await _handle_pull_refresh(PullRefreshCommand(), ctx)
+
+    assert len(marker["client"].calls[0]) == 3  # standard window only
+
+
+@pytest.mark.req("FRG-PULL-010")
+async def test_backfill_zero_disables_and_overcap_clamps(
+    db, tmp_path, config_dir, command_registry, monkeypatch
+):
+    marker = _install_client(monkeypatch, _outcome())
+    ctx, _svc = await _ctx(db, _settings(config_dir, pull_backfill_weeks=0))
+    await _handle_pull_refresh(PullRefreshCommand(), ctx)
+    assert len(marker["client"].calls[0]) == 3  # disabled: no widening even when empty
+
+    marker2 = _install_client(monkeypatch, _outcome())
+    ctx2, _svc2 = await _ctx(db, _settings(config_dir, pull_backfill_weeks=50))
+    await _handle_pull_refresh(PullRefreshCommand(), ctx2)
+    assert len(marker2["client"].calls[0]) == 3 + 12  # clamped to the documented cap

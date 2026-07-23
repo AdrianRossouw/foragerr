@@ -9,6 +9,18 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.9.21] — 2026-07-23
+
+Fresh installs start with a month of pull history.
+
+### Added
+
+- First-run pull backfill (`pull_backfill_weeks`, default 4, `0` disables,
+  capped at 12): when the pull store is empty, the weekly refresh also
+  fetches the previous few release weeks, so a new install's Calendar shows
+  what came out recently instead of a bare screen. One-shot by construction
+  — once any week is stored, refreshes use the standard window. (FRG-PULL-010)
+
 ## [v0.9.20] — 2026-07-23
 
 Pull weeks now file under their shipdate's ISO week.

@@ -119,7 +119,7 @@ source. Compatibility: pre-1.0 releases may break with migration notes; from
 | FRG-PULL-007 | Pull view actions | pull | implemented | M4 |
 | FRG-PULL-008 | New-series surfacing (no auto-add) | pull | implemented | M4 |
 | FRG-PULL-009 | Future/solicited releases | pull | implemented | M4 |
-| FRG-PULL-010 | First-run backfill window | pull | proposed | M10 |
+| FRG-PULL-010 | First-run backfill window | pull | implemented | M10 |
 | FRG-CRTR-001 | Per-issue creator credits ingest | crtr | implemented | M5 |
 | FRG-CRTR-002 | Creator and credit storage/reconciliation | crtr | implemented | M5 |
 | FRG-CRTR-003 | One-time credits backfill | crtr | implemented | M5 |
