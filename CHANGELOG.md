@@ -9,7 +9,7 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
-## [v0.9.22] — 2026-07-23
+## [v0.9.23] — 2026-07-23
 
 Candidate covers are back — proxied same-origin, CSP untouched.
 
@@ -23,6 +23,14 @@ Candidate covers are back — proxied same-origin, CSP untouched.
   against the allowlist — verifies responses are real images by magic bytes,
   caps sizes, and bounds concurrency and caching. The CSP is unchanged.
   (FRG-META-021)
+
+## [v0.9.22] — 2026-07-23
+
+Erroneous tag — release tooling created this tag against the v0.9.21 merge
+commit before the cover-proxy change had merged, so its content is identical
+to v0.9.21. Kept because pushed tags are immutable (FRG-PROC-013); the
+cover-proxy release it was meant to be is v0.9.23. Its GitHub Release notes
+carry the same correction.
 
 ## [v0.9.21] — 2026-07-23
 
