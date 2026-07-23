@@ -1792,6 +1792,23 @@ No new STRIDE categories; no new SOUP; no new listener or credential. Net
 effect is surface reduction plus one deliberate, allowlist-gated trust
 revision (RISK-052).
 
+### 2026-07-23 — fix-cover-proxy (0.9.x regression fix)
+
+New attack surface and its disposition (COMP 1 / COMP 8 boundary):
+
+- **Candidate-cover proxy exists** (FRG-META-021, `/api/v1/metadata/cover`):
+  an authenticated endpoint fetching a CLIENT-SUPPLIED URL — the most
+  SSRF-prone endpoint shape. Layered mitigations: default-deny perimeter
+  (auth before any logic); HTTPS-only + ComicVine-media host allowlist with
+  dot-boundary subdomain matching (lookalike suffixes tested); the fetch
+  rides the hardened `external` egress profile (FRG-SEC-001 per-hop
+  validation, TLS, bounded redirect walk, byte cap); response verified as a
+  real image by magic bytes before a byte is served (an upstream HTML/JSON
+  body can never reach the browser as an "image"); bounded in-memory LRU.
+  Restores the candidate covers the v0.9.17 self-contained CSP blocked,
+  WITHOUT widening the CSP — the FRG-SEC-006 posture is unchanged.
+  Abuse scenarios are tagged tests (`backend/tests/security/test_cover_proxy.py`).
+
 ## Coverage summary
 
 - **Well covered by the five drafts** (mitigation named, no new requirement needed): OPDS

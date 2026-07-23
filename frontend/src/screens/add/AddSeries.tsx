@@ -17,6 +17,7 @@ import {
   useSuggest,
 } from '../../api/hooks';
 import { isComicVineAuthError } from '../../api/fetcher';
+import { candidateCoverUrl } from '../../api/urls';
 import type {
   AddSeriesNavigationState,
   LookupCandidate,
@@ -251,7 +252,7 @@ function CandidateCard({
       >
         <Poster
           initial={(candidate.name ?? '?').charAt(0)}
-          src={candidate.image_url}
+          src={candidateCoverUrl(candidate.image_url)}
           alt={`${candidate.name ?? 'volume'} cover`}
           frameClassName={styles.posterFrame}
           fallbackClassName={styles.posterFallback}
