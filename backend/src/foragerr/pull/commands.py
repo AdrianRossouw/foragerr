@@ -187,25 +187,44 @@ async def _handle_pull_refresh(command: PullRefreshCommand, ctx: HandlerContext)
     refreshed: set[int] = set()
     stored_entries = 0
     future_skipped = 0
+    # The stored week is derived from each entry's SHIPDATE, never from the
+    # number the source was asked for: week indexing is a source-side
+    # convention (walksoftly matched ISO; its successor talkhard runs one
+    # lower, which mis-filed a whole week until 2026-07-23). Entries from all
+    # fetched payloads are pooled, then grouped by their release date's ISO
+    # week, so a payload spanning a boundary or a source with any numbering
+    # offset still files every entry in the week a reader will look for it.
+    derived: dict[str, list] = {}
     for week in outcome.weeks:
         week_key = _week_key(week.week, week.year)
-        # FRG-PULL-009: an empty payload for the *future* week means the source
-        # has no solicited data for it yet — skip that week only (no replace_week
-        # write, so a previously stored future week is never clobbered by an empty
-        # refresh). Current/previous weeks store normally, and this is NOT an
-        # outage (a 619 for the future week is already skipped upstream). An empty
-        # current/previous payload keeps its existing store-empty semantics.
-        if week_key == future_key and not week.entries:
-            future_skipped += 1
-            logger.info(
-                "pull source: no future-week data for %s yet; skipping that week",
-                week_key,
-            )
+        if not week.entries:
+            # FRG-PULL-009: an empty payload for the *future* week means the
+            # source has no solicited data yet — a logged skip. An empty
+            # payload for any OTHER requested number is also only skipped:
+            # with derived keying the requested number no longer names a
+            # stored week, so writing an empty week under it could clobber
+            # rows that a differently-numbered payload just filed there.
+            if week_key == future_key:
+                future_skipped += 1
+                logger.info(
+                    "pull source: no future-week data for %s yet; skipping that week",
+                    week_key,
+                )
+            else:
+                logger.info(
+                    "pull source: empty payload for requested %s; stored weeks untouched",
+                    week_key,
+                )
             continue
+        for entry in week.entries:
+            iso_year, iso_week, _ = entry.release_date.isocalendar()
+            derived.setdefault(_week_key(iso_week, iso_year), []).append(entry)
+
+    for week_key in sorted(derived):
         # One transaction per week (FRG-DB-007): replace-on-refresh + match
         # commit together, so a mid-week failure never half-replaces the week.
         async with ctx.db.write_session() as session:
-            rows = await repo.replace_week(session, week_key, week.entries)
+            rows = await repo.replace_week(session, week_key, derived[week_key])
             results = await matching.match_week(session, rows)
         stored_entries += len(rows)
         # FRG-PULL-005 trigger: a matched watched series whose local issue does

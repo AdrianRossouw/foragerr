@@ -587,3 +587,69 @@ async def test_outage_on_future_week_skips_only_that_week_prior_survives(
     assert "degraded" not in summary  # a single future-week outage is not a degrade
     assert "future week(s) skipped" in summary
     assert "source outage" in summary
+
+
+@pytest.mark.req("FRG-PULL-003")
+async def test_stored_week_derives_from_shipdate_not_requested_number(
+    db, tmp_path, config_dir, command_registry, monkeypatch
+):
+    """A source whose week indexing is offset from ISO (talkhard runs one
+    lower than walksoftly did, 2026-07) must still file entries under the
+    ISO week of their SHIPDATE — the requested number never names the
+    stored week. Regression for the mislabeled week of 2026-07-23."""
+    await seed_series_issue(db, tmp_path)
+    # Payload labeled week 28 whose shipdates fall in ISO week 2026-W29.
+    off_week_day = dt.date(2026, 7, 15)  # ISO 2026-W29
+    marker = _install_client(
+        monkeypatch,
+        PullFetchOutcome(
+            weeks=(
+                PullWeekResult(
+                    week=WEEK,  # requested/source-labeled 28
+                    year=YEAR,
+                    entries=(_entry("Spawn", "4", day=off_week_day),),
+                ),
+            ),
+            skipped=(),
+            degraded=False,
+            outage_reason=None,
+        ),
+    )
+    ctx, _svc = await _ctx(db, _settings(config_dir))
+
+    await _handle_pull_refresh(PullRefreshCommand(), ctx)
+
+    async with db.read_session() as session:
+        under_requested = await repo.list_week(session, WEEK_KEY)  # 2026-W28
+        under_derived = await repo.list_week(session, "2026-W29")
+    assert under_requested == []
+    assert [r.series_name for r in under_derived] == ["Spawn"]
+
+
+@pytest.mark.req("FRG-PULL-003")
+async def test_empty_nonfuture_payload_never_clobbers_derived_rows(
+    db, tmp_path, config_dir, command_registry, monkeypatch
+):
+    """An empty payload for a requested number must not wipe rows another
+    payload filed under that ISO week: with derived keying the requested
+    number no longer names a stored week."""
+    await seed_series_issue(db, tmp_path)
+    day = dt.date(2026, 7, 8)  # ISO 2026-W28
+    async with db.write_session() as session:
+        await repo.replace_week(session, WEEK_KEY, [_entry("Spawn", "2", day=day)])
+    marker = _install_client(
+        monkeypatch,
+        PullFetchOutcome(
+            weeks=(PullWeekResult(week=WEEK, year=YEAR, entries=()),),
+            skipped=(),
+            degraded=False,
+            outage_reason=None,
+        ),
+    )
+    ctx, _svc = await _ctx(db, _settings(config_dir))
+
+    await _handle_pull_refresh(PullRefreshCommand(), ctx)
+
+    async with db.read_session() as session:
+        stored = await repo.list_week(session, WEEK_KEY)
+    assert [r.series_name for r in stored] == ["Spawn"]  # untouched
