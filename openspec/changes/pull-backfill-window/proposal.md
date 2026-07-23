@@ -63,6 +63,7 @@ FRG-PULL-010 is allocated in the registry by this proposal.
 
 ## Approval
 
-_Pending owner approval (FRG-PROC-009). Requested by Adrian 2026-07-23
+**Approved by Adrian 2026-07-23** — "and you can do the backfill", in
+session, against the presented proposal. Originally requested same day
 ("could we also back fill like a month or so from the source? i just
 figure a fresh install would like to see what they missed out on")._
