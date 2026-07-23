@@ -27,6 +27,7 @@ the most abuse-prone endpoint shape there is):
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections import OrderedDict
 from urllib.parse import urlsplit
@@ -100,6 +101,19 @@ def reset_cache() -> None:
     _cache.clear()
 
 
+#: Concurrent upstream fetches (Codex hardening note): the listener rate cap
+#: already bounds per-client request rates, but a burst of DISTINCT cover URLs
+#: from one authenticated picker session shouldn't fan out unboundedly either.
+_fetch_semaphore: "asyncio.Semaphore | None" = None
+
+
+def _semaphore() -> "asyncio.Semaphore":
+    global _fetch_semaphore
+    if _fetch_semaphore is None:
+        _fetch_semaphore = asyncio.Semaphore(4)
+    return _fetch_semaphore
+
+
 @router.get("/cover")
 async def proxy_cover(request: Request, src: str = Query(..., max_length=1024)) -> Response:
     """Fetch one allowlisted cover and serve it same-origin (FRG-META-021)."""
@@ -108,6 +122,12 @@ async def proxy_cover(request: Request, src: str = Query(..., max_length=1024)) 
         raise ApiError(400, "cover src must be https", field="src")
     if not parts.hostname or not _host_allowed(parts.hostname):
         raise ApiError(400, "cover src host is not an allowed metadata host", field="src")
+    # Canonical cache/fetch key (Codex hardening note): case-normalized
+    # scheme+host, fragment dropped — variant spellings of one URL share one
+    # cache entry and can't multiply fetches.
+    src = parts._replace(
+        scheme="https", netloc=(parts.netloc or "").lower(), fragment=""
+    ).geturl()
 
     cached = _cache.get(src)
     if cached is not None:
@@ -122,9 +142,10 @@ async def proxy_cover(request: Request, src: str = Query(..., max_length=1024)) 
             # targets — to the cover allowlist: a CV URL that 302s to a
             # non-CV public host is refused, not followed (the egress policy
             # alone would allow any public host).
-            result = await client.get(
-                src, max_bytes=MAX_COVER_BYTES, hop_check=_hop_check
-            )
+            async with _semaphore():
+                result = await client.get(
+                    src, max_bytes=MAX_COVER_BYTES, hop_check=_hop_check
+                )
         except Exception as exc:  # noqa: BLE001 - upstream fetch boundary
             logger.info("cover proxy fetch failed for %s: %s", parts.hostname, exc)
             raise ApiError(502, "cover fetch failed") from exc
