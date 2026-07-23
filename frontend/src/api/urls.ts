@@ -28,3 +28,15 @@ export function coverUrl(
   if (series.cover_cached_at == null) return null;
   return `/api/v1/series/${series.id}/cover?v=${encodeURIComponent(series.cover_cached_at)}`;
 }
+
+/**
+ * Same-origin proxy URL for a CANDIDATE cover (FRG-META-021) — lookup and
+ * review surfaces get their `image_url` from ComicVine, and the SPA's
+ * self-contained CSP (`img-src 'self'`, FRG-SEC-006) rightly blocks a direct
+ * hotlink. The backend proxies allowlisted CV media hosts; anything else
+ * (or null) renders the poster fallback instead of a blocked request.
+ */
+export function candidateCoverUrl(imageUrl: string | null | undefined): string | null {
+  if (!imageUrl) return null;
+  return `/api/v1/metadata/cover?src=${encodeURIComponent(imageUrl)}`;
+}

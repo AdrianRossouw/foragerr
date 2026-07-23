@@ -110,6 +110,7 @@ source. Compatibility: pre-1.0 releases may break with migration notes; from
 | FRG-META-018 | Runtime credential application across execution contexts | meta | implemented | M9 |
 | FRG-META-019 | ComicVine authentication-failure health truthfulness | meta | implemented | M9 |
 | FRG-META-020 | Curated default publisher ignore list | meta | implemented | M9 |
+| FRG-META-021 | Proxied metadata imagery | meta | implemented | M10 |
 | FRG-PULL-001 | Metadata-derived weekly release view | pull | implemented | M3 |
 | FRG-PULL-002 | External pull-source fetch | pull | implemented | M3 |
 | FRG-PULL-003 | Idempotent per-week storage | pull | implemented | M3 |

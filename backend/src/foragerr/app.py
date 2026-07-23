@@ -249,6 +249,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from foragerr.api.rename import router as rename_router
 
     app.include_router(config_resources_router, prefix="/api/v1")
+    # Same-origin candidate-cover proxy (FRG-META-021): keeps the SPA CSP
+    # self-contained while lookup/review surfaces render CV covers.
+    from foragerr.api.cover_proxy import router as cover_proxy_router
+
+    app.include_router(cover_proxy_router, prefix="/api/v1")
     app.include_router(rename_router, prefix="/api/v1")
     # On-demand CBR→CBZ conversion (FRG-PP-018): importing the library flows
     # above registered the convert-series/convert-issue pp-pool commands; mount
