@@ -167,9 +167,26 @@ changes 2, 4, 5 touch user-facing docs; declared per proposal.
 
 ## Approval
 
-_Pending owner review of THIS document (FRG-PROC-009). Nothing in this
-milestone is approved yet — including its sequencing and any standing
-grant; the owner explicitly reset premature approval records on
-2026-07-27. Decisions requested: (1) the five-change decomposition, (2)
-M11-before-M10-resumption sequencing, (3) whether M11 runs under a
-standing grant or gate-by-gate._
+**Approved by Adrian, 2026-07-27** — "i think i'm ok with this plan then.
+register approvals." — given against this document as amended in review
+(his correction incorporated at c717e66: ComicVine is the matching
+universe; no terminal review states). The approval covers the three
+decisions this document requested:
+
+1. **Decomposition**: the five changes as written (source-import-trust →
+   review-experience → cv-budget → acquisition-responsiveness →
+   discovery-surface), non-goals recorded.
+2. **Sequencing**: M11 runs now, before M10 resumes. 1.0 order: M11 →
+   m10-release-pipeline (own approval still pending) → M7 torrents →
+   m10-vnv-qualification → m10-audit-durability → m10-pentest → v1.0.0.
+3. **Standing grant**: M11 runs autonomously (M2/M5-style) — each
+   implementing change's proposal cites this grant in its Approval
+   section; full tiered gates + Codex + e2e + release per change; live
+   rig verification; HARD STOP at M11 close for owner review. The bugfix
+   grant continues unchanged. Intent-presuming defaults still require
+   owner sign-off (2026-07-11 rule).
+
+Process note, recorded deliberately: the premature approval registered
+earlier the same day from a quick-choice prompt was disavowed by the
+owner and reverted; THIS approval followed a read of the committed
+document, per the m7/m10 pre-design pattern.
