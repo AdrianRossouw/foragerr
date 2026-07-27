@@ -61,12 +61,20 @@ Saga-TPB verification.*
 *Findings #7, #8, #9(UI half), #11 + owner ask "jump to the correct
 volume id".*
 
-- **Match-picker search**: free-text search of the library AND ComicVine
-  from any review row (CV search rides the budget lanes of change 3 if
-  landed, else the existing limiter).
-- **Honest proposals**: minimum-confidence floor + token-overlap gate on
-  candidates; "no plausible match" as a first-class state instead of the
-  least-bad library series; CV-search candidates alongside library ones.
+- **ComicVine is the matching universe** (owner direction 2026-07-27):
+  proposals and search operate against CV's catalog; the library is a
+  shortcut overlay (a candidate already in the library links directly, one
+  that isn't is ADDED AND MATCHED in a single action). Library-only
+  candidate ranking — the v0 behavior that proposed "Absolute Green
+  Arrow" — is retired.
+- **Free-text CV search on every row**: always available regardless of
+  proposal state; picking a result either links (in library) or
+  add-and-matches (not yet added) in one motion. Rides the change-3
+  budget lanes if landed, else the existing limiter.
+- **Honest proposals, never terminal**: minimum-confidence floor +
+  token-overlap gate; "no plausible match" describes only the AUTOMATIC
+  verdict and always sits beside the live CV search — no review row is
+  ever a dead end.
 - **Scale tools**: bulk actions (ignore/match/exclude per bundle/order,
   apply-match-to-group); review rows collapse by franchise/series reusing
   the M3 grouping keys (145 Spawn rows → one expandable group).
