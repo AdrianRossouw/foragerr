@@ -60,6 +60,7 @@ class NewznabClient:
         *,
         indexer_id: int,
         min_interval: float = ratelimit.DEFAULT_MIN_INTERVAL,
+        priority: bool = False,
     ) -> None:
         base = settings_model.base_url.rstrip("/")
         self._api_url = base if base.endswith("/api") else f"{base}/api"
@@ -69,6 +70,10 @@ class NewznabClient:
         self._client = factory.external()
         self._indexer_id = indexer_id
         self._min_interval = min_interval
+        # Every request this client makes inherits the class of the search that
+        # built it: an interactive search's requests take the gate's next slot
+        # ahead of waiting background ones (FRG-SRCH-015).
+        self._priority = priority
 
     @property
     def default_categories(self) -> list[int]:
@@ -108,7 +113,9 @@ class NewznabClient:
 
     async def _get(self, params: Mapping[str, Any]) -> bytes:
         # Per-indexer 2 s spacing gate — applied to EVERY request incl. paging.
-        await ratelimit.acquire(self._indexer_id, self._min_interval)
+        await ratelimit.acquire(
+            self._indexer_id, self._min_interval, priority=self._priority
+        )
         full = {
             **self._additional,
             "apikey": self._api_key,

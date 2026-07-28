@@ -72,9 +72,10 @@ logger = logging.getLogger("foragerr.search_ops.pipeline")
 #: One engine instance is stateless and reused across every search.
 _ENGINE = DecisionEngine()
 
-#: The one fetch path that is time-budgeted (FRG-SRCH-015): a human is waiting
-#: on it behind the listener's request guard. ``rss``/``auto`` (the scheduled
-#: backlog and automatic searches) stay politeness-first and unbudgeted.
+#: The one fetch path that is time-budgeted — and the one that takes precedence
+#: at the per-indexer politeness gate (FRG-SRCH-015): a human is waiting on it
+#: behind the listener's request guard. ``rss``/``auto`` (the scheduled backlog
+#: and automatic searches) stay politeness-first, unbudgeted and unprioritised.
 BUDGETED_PATH = "interactive"
 
 #: How long a cancelled indexer task is given to unwind before the fan-out
@@ -297,6 +298,7 @@ async def _search_one_indexer(
     caps_cache,
     retention_days: int | None,
     min_interval: float,
+    interactive: bool = False,
 ) -> IndexerSearchOutcome:
     """Search one indexer, mapping even an unexpected error to a failed outcome.
 
@@ -313,6 +315,7 @@ async def _search_one_indexer(
             caps_cache=caps_cache,
             retention_days=retention_days,
             min_interval=min_interval,
+            interactive=interactive,
         )
     except Exception as exc:  # noqa: BLE001 — last-resort isolation
         logger.exception(
@@ -517,6 +520,7 @@ async def _fan_search(
     retention_days: int | None,
     min_interval: float,
     time_budget: float | None = None,
+    interactive: bool = False,
 ) -> tuple[list[ReleaseCandidate], list[IndexerSearchOutcome]]:
     """Search every selected indexer concurrently, isolating each so one cannot
     wedge the others (FRG-NFR-010). Outcomes preserve ``rows`` order; the
@@ -525,7 +529,12 @@ async def _fan_search(
     ``time_budget`` (interactive path only, FRG-SRCH-015) bounds each indexer's
     share: at the deadline the finished indexers' results are returned and the
     stragglers are cancelled and reported as timed out. Without it the fan-out
-    is the original unbudgeted gather — scheduled work waits politely."""
+    is the original unbudgeted gather — scheduled work waits politely.
+
+    ``interactive`` is the same path distinction seen at the politeness gate:
+    these requests take the next slot ahead of background ones queued on the
+    same indexer, so a search issued during an add sweep spends its budget on
+    real pages instead of on the sweep's queue (FRG-SRCH-015)."""
 
     def make_search(row: IndexerRow):
         return _search_one_indexer(
@@ -536,6 +545,7 @@ async def _fan_search(
             caps_cache=caps_cache,
             retention_days=retention_days,
             min_interval=min_interval,
+            interactive=interactive,
         )
 
     if time_budget is None:
@@ -559,6 +569,7 @@ async def search_prepared(
     issue_id: int | None,
     min_interval: float = DEFAULT_MIN_INTERVAL,
     time_budget: float | None = None,
+    interactive: bool = False,
 ) -> SearchResult | None:
     """Run one issue's search over a prepared series + fleet, and decide.
 
@@ -569,7 +580,13 @@ async def search_prepared(
     ``time_budget`` is opt-in and defaults to unbudgeted, which is exactly what
     the scheduled backlog/series walks want (they call this directly and never
     pass one). :func:`run_search` derives it from the fetch path so only the
-    interactive path is bounded (FRG-SRCH-015)."""
+    interactive path is bounded (FRG-SRCH-015).
+
+    ``interactive`` likewise defaults to background, so those same walks queue
+    politely; it is a SEPARATE flag from ``time_budget`` rather than
+    ``time_budget is not None`` because the budget is also absent whenever no
+    settings were supplied — a caller with a person waiting would then silently
+    lose its precedence at the gate."""
     series = prepared.series
     issue: IssueRow | None = None
     if issue_id is not None:
@@ -589,6 +606,7 @@ async def search_prepared(
         retention_days=fleet.config.retention_days,
         min_interval=min_interval,
         time_budget=time_budget,
+        interactive=interactive,
     )
     outcomes = outcomes + list(fleet.failed_outcomes)
 
@@ -632,7 +650,9 @@ async def run_search(
 
     On the ``interactive`` path each indexer is bounded by the configured time
     budget so a slow provider cannot hold the operator's request past the
-    listener guard; every other path stays unbudgeted (FRG-SRCH-015).
+    listener guard; every other path stays unbudgeted (FRG-SRCH-015). That same
+    path also takes precedence at the per-indexer politeness gate, so the budget
+    is spent fetching pages rather than queueing behind a background sweep.
     """
     fleet = await select_fleet(db, settings=settings, path=path)
     prepared = await prepare_series(db, fleet, series_id)
@@ -648,4 +668,5 @@ async def run_search(
         issue_id=issue_id,
         min_interval=min_interval,
         time_budget=search_budget_for_path(settings, path),
+        interactive=path == BUDGETED_PATH,
     )

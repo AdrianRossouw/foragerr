@@ -219,6 +219,103 @@ async def test_scheduled_path_is_never_budgeted(
     assert slow.candidates  # it waited politely and got its results
 
 
+#: A background sweep's shape at one indexer's politeness gate: several
+#: concurrent searches of the SAME indexer, looping. Deep enough that a FIFO
+#: gate would cost an arriving interactive search more than its whole budget.
+SWEEP_WIDTH = 8
+SWEEP_INTERVAL = 0.1
+#: One search is ~8 gate-spaced requests (the query ladder + caps). Prioritised,
+#: each costs at most two politeness slots, so the whole search lands well
+#: inside this; queued behind the sweep each would cost ``SWEEP_WIDTH`` slots
+#: and the search could not finish a fraction of the ladder in time.
+SWEEP_BUDGET = 3.0
+
+
+@pytest.mark.req("FRG-SRCH-015")
+async def test_interactive_search_takes_precedence_over_a_background_sweep(
+    db, format_profile_id, root_folder_id, _tiny_budget_floor
+):
+    """The acceptance case, end to end through the real client and the real
+    process-global gate: a background sweep is occupying one indexer's
+    politeness gate when an interactive search arrives for the same indexer.
+
+    Queued FIFO the interactive search would spend ``SWEEP_WIDTH`` politeness
+    slots per request — more than its whole budget — and come back timed out and
+    empty, which is exactly the starved-empty partial the rig produced. With the
+    interactive path marked, it is admitted at the next slot and spends its
+    budget on real pages."""
+    series_id = await make_series(
+        db, format_profile_id=format_profile_id, root_folder_id=root_folder_id
+    )
+    issue_id = await make_issue(db, series_id=series_id, issue_number="7")
+    tmp_path = db.db_path.parent
+    ratelimit.reset_gates()
+    factory = _live_factory(tmp_path)
+    backoff = ProviderBackoff(db)
+    caps_cache = CapsCache()
+    stop = asyncio.Event()
+
+    try:
+        async with fixture_server(_newznab_handler(guid="busy-1")) as base:
+            await make_indexer(db, name="Busy", base_url=base)
+            fleet = await pipeline.select_fleet(db, settings=None, path="auto")
+            row = fleet.rows[0]
+            target = pipeline.QueryTarget(
+                series_title="Saga", issue_number="7", year=2012
+            )
+
+            async def sweeper() -> None:
+                # The production background path verbatim: no budget, no
+                # priority — a scheduled walk hitting this indexer over and over.
+                while not stop.is_set():
+                    await pipeline._search_one_indexer(
+                        row,
+                        target,
+                        factory=factory,
+                        backoff=backoff,
+                        caps_cache=caps_cache,
+                        retention_days=None,
+                        min_interval=SWEEP_INTERVAL,
+                    )
+
+            sweep = [asyncio.create_task(sweeper()) for _ in range(SWEEP_WIDTH)]
+            await asyncio.sleep(SWEEP_INTERVAL * 2)  # the sweep owns the gate
+            started = time.monotonic()
+            result = await run_search(
+                db=db,
+                settings=make_settings(
+                    tmp_path, indexer_search_time_budget_seconds=SWEEP_BUDGET
+                ),
+                factory=factory,
+                backoff=backoff,
+                caps_cache=caps_cache,
+                series_id=series_id,
+                issue_id=issue_id,
+                path="interactive",
+                min_interval=SWEEP_INTERVAL,
+            )
+            elapsed = time.monotonic() - started
+    finally:
+        stop.set()
+        for task in sweep:
+            task.cancel()
+        await asyncio.gather(*sweep, return_exceptions=True)
+
+    assert result is not None
+    busy = next(o for o in result.indexer_outcomes if o.indexer_name == "Busy")
+    assert busy.timed_out is False, "the sweep starved the interactive search"
+    assert busy.candidates, "no real results — the search returned starved-empty"
+    assert result.decisions
+    assert elapsed < SWEEP_BUDGET
+
+    # And politeness held throughout: the gate is the one the sweep was using,
+    # its spacing untouched by the precedence (nothing went out early).
+    gate = ratelimit._gate_for(fleet.rows[0].id)
+    assert not gate._lock.locked()
+    assert gate._priority_waiters == 0
+    assert gate._drained.is_set()
+
+
 @pytest.mark.req("FRG-SRCH-015")
 def test_budget_applies_to_the_interactive_path_only(tmp_path: Path):
     """The path gate is structural — the scheduled paths cannot be budgeted by
@@ -339,6 +436,21 @@ async def test_cancelling_a_politeness_wait_leaves_the_gate_clean():
         follow.cancel()
         with pytest.raises(asyncio.CancelledError):
             await follow
+
+        # Same again for a PRIORITY waiter (an interactive search cancelled at
+        # its budget), which additionally holds the gate's precedence counter:
+        # leaking it would wedge every background request on this indexer.
+        priority = asyncio.create_task(ratelimit.acquire(1, 10.0, priority=True))
+        await asyncio.sleep(0.05)
+        assert gate._priority_waiters == 1
+        priority.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await priority
+
+        assert not gate._lock.locked()
+        assert gate._last == stamped  # still no early stamp
+        assert gate._priority_waiters == 0  # the counter came back...
+        assert gate._drained.is_set()  # ...and background waiters are released
     finally:
         ratelimit.reset_gates()
 
@@ -385,7 +497,9 @@ def _no_rate_gate(monkeypatch):
     Deliberately NOT autouse: the gate's own cancellation behavior is under test
     in this module, and a module-wide patch would quietly hollow that out."""
 
-    async def _immediate(indexer_id: int, min_interval: float = 0.0) -> None:
+    async def _immediate(
+        indexer_id: int, min_interval: float = 0.0, *, priority: bool = False
+    ) -> None:
         return
 
     monkeypatch.setattr("foragerr.indexers.ratelimit.acquire", _immediate)

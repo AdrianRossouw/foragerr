@@ -63,11 +63,20 @@ services:
       FORAGERR_COMICVINE_API_KEY: ${E2E_CV_API_KEY-e2e-example-key}
       FORAGERR_COMICVINE_IMAGE_HOSTS: mockhub
       FORAGERR_COMICVINE_MIN_INTERVAL_SECONDS: "0.1"
-      # Mock indexers answer in milliseconds; a small interactive budget keeps
-      # API-driven searches comfortably inside playwright timeouts even when a
-      # background sweep (the default add sweep is real behavior now) contends
-      # on the politeness gates — and exercises the budget path end-to-end.
-      FORAGERR_INDEXER_SEARCH_TIME_BUDGET_SECONDS: "8"
+      # The interactive budget must clear the POLITENESS floor, which the mock
+      # indexers' millisecond responses have nothing to do with: one interactive
+      # newznab search walks a ~7-rung query ladder, and every rung is spaced by
+      # the 2 s per-indexer gate (FRG-IDX-008) — ~14 s of deliberate waiting on
+      # an idle stack. A budget under that cancels every newznab search on
+      # principle (the harness ran 8 s and got a timed-out outcome even with
+      # nothing else running). The shipped default is the honest harness value:
+      # it fits the ladder, still bounds a genuinely slow indexer, and — with
+      # the add sweep contending on the same gates — is what the interactive
+      # gate precedence (FRG-SRCH-015) has to keep the search inside. 25 s is
+      # the most the default 30 s listener guard allows (guard - 5 s margin);
+      # the shipped 20 s default left the ~16 s ladder (caps + 7 rungs, cold
+      # cache) only a few seconds of slack and the scenario flaked on it.
+      FORAGERR_INDEXER_SEARCH_TIME_BUDGET_SECONDS: "25"
       # A retention window so the deliberately-old Newznab release is rejected
       # with a verbatim reason for the interactive-search scenario.
       FORAGERR_USENET_RETENTION_DAYS: "30"

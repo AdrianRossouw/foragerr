@@ -190,8 +190,13 @@ async def search_indexer(
     caps_cache: CapsCache,
     retention_days: int | None = None,
     min_interval: float = DEFAULT_MIN_INTERVAL,
+    interactive: bool = False,
 ) -> IndexerSearchOutcome:
-    """Search one indexer for one target (see module docstring for the steps)."""
+    """Search one indexer for one target (see module docstring for the steps).
+
+    ``interactive`` marks the one path with a person waiting on it: its
+    requests take precedence at the per-indexer politeness gate over background
+    ones already queued there, without changing the spacing (FRG-SRCH-015)."""
     provider = get_search_provider(row.implementation)
     if provider is not None:
         # A non-Newznab provider (e.g. GetComics, protocol ``ddl``) owns its
@@ -206,6 +211,7 @@ async def search_indexer(
             caps_cache=caps_cache,
             retention_days=retention_days,
             min_interval=min_interval,
+            interactive=interactive,
         )
 
     outcome = IndexerSearchOutcome(indexer_id=row.id, indexer_name=row.name)
@@ -235,7 +241,11 @@ async def search_indexer(
     seen_guids: set[str] = set()
 
     async with NewznabClient(
-        settings_model, factory, indexer_id=row.id, min_interval=min_interval
+        settings_model,
+        factory,
+        indexer_id=row.id,
+        min_interval=min_interval,
+        priority=interactive,
     ) as client:
         caps = await _resolve_caps(client, row.id, caps_cache)
         outcome.degraded_caps = caps.degraded

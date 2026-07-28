@@ -29,7 +29,9 @@ def _no_rate_gate(monkeypatch):
     """Neutralize the per-indexer 2 s spacing gate — the release API path uses
     the production ``DEFAULT_MIN_INTERVAL``, and these transport-stubbed tests
     have no reason to wait it out."""
-    async def _immediate(indexer_id: int, min_interval: float = 0.0) -> None:
+    async def _immediate(
+        indexer_id: int, min_interval: float = 0.0, *, priority: bool = False
+    ) -> None:
         return
 
     monkeypatch.setattr("foragerr.indexers.ratelimit.acquire", _immediate)
