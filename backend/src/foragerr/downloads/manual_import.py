@@ -42,13 +42,14 @@ from foragerr.commands.registry import BaseCommand, register_command, register_h
 from foragerr.commands.service import HandlerContext
 from foragerr.config import Settings
 from foragerr.db import Database, utcnow
-from foragerr.downloads.imports import build_import_context
+from foragerr.downloads.imports import build_import_context, finalize_download_import
 from foragerr.downloads.models import TrackedDownloadRow
 from foragerr.downloads.repo import load_mappings
 from foragerr.importer import (
     IMPORT_FILE_MUTATION_GROUP,
     CompletedDownloadSource,
     ImportCandidate,
+    ImportOutcome,
     ImportStatus,
     ManualImportSource,
     ManualOverride,
@@ -189,12 +190,14 @@ def confine_under_roots(raw_path: str, roots: list[str]) -> str | None:
 
 async def _completed_source_for_download(
     db: Database, download_id: str
-) -> CompletedDownloadSource:
+) -> tuple[CompletedDownloadSource, int]:
     """Rebuild the :class:`CompletedDownloadSource` for a tracked download id.
 
     The single place the download-shaped source is assembled (latest tracked row,
     its remote-path mappings, output path, grab-record join), so the listing and
-    the execute path share IDENTICAL download context (FRG-PP-016). Raises a
+    the execute path share IDENTICAL download context (FRG-PP-016). Returns the
+    source together with that tracked row's id, which the execute path needs to
+    apply the terminal state to the SAME row it drew the files from. Raises a
     typed 404 when no such download is tracked."""
     async with db.read_session() as session:
         row = (
@@ -213,12 +216,15 @@ async def _completed_source_for_download(
     mappings = (
         await load_mappings(db, row.client_id) if row.client_id is not None else []
     )
-    return CompletedDownloadSource(
-        download_id=row.download_id,
-        output_path=row.output_path or "",
-        client_id=row.client_id,
-        client_title=row.title,
-        mappings=tuple(mappings),
+    return (
+        CompletedDownloadSource(
+            download_id=row.download_id,
+            output_path=row.output_path or "",
+            client_id=row.client_id,
+            client_title=row.title,
+            mappings=tuple(mappings),
+        ),
+        row.id,
     )
 
 
@@ -230,7 +236,7 @@ async def _build_read_source(
     download_id: str | None,
 ) -> ManualImportSource:
     if download_id is not None:
-        completed = await _completed_source_for_download(db, download_id)
+        completed, _row_id = await _completed_source_for_download(db, download_id)
         return ManualImportSource(download=completed)
 
     assert path is not None
@@ -342,6 +348,14 @@ async def execute_manual_import(
     managed root (defence in depth even though the API validated them at enqueue):
     a file outside every root is dropped rather than imported from an arbitrary
     location.
+
+    A download-scoped group also ENDS like the automatic drain: its executed
+    outcomes are folded through the drain's own
+    :func:`~foragerr.downloads.imports.finalize_download_import`, so the tracked
+    queue row leaves ``import_blocked`` (emitting the same queue event) and a
+    store download's entitlement mirrors the verdict with FRG-SRC-007
+    owned-via-edition reconciliation — in this same write transaction
+    (FRG-PP-016, FRG-SRC-006). Arbitrary-folder picks touch no tracked row.
     """
     now = now or utcnow()
     ctx = await build_import_context(db, settings, now=now, offload=offload)
@@ -357,9 +371,11 @@ async def execute_manual_import(
         else:
             plain.append(spec)
 
-    # A plan is a source plus the set of local paths to keep (``None`` = keep all,
-    # for the files-only source which gathers exactly its inputs).
-    plans: list[tuple[ManualImportSource, set[str] | None]] = []
+    # A plan is a source, the set of local paths to keep (``None`` = keep all, for
+    # the files-only source which gathers exactly its inputs), and the tracked
+    # download to finalize afterwards as ``(download_id, row_id)`` (``None`` for
+    # arbitrary-folder picks, which own no queue row).
+    plans: list[tuple[ManualImportSource, set[str] | None, tuple[str, int] | None]] = []
     dropped = 0
 
     if plain:
@@ -378,12 +394,16 @@ async def execute_manual_import(
             overrides[confined] = _override_for(spec)
         if resolved:
             plans.append(
-                (ManualImportSource(files=tuple(resolved), overrides=overrides), None)
+                (
+                    ManualImportSource(files=tuple(resolved), overrides=overrides),
+                    None,
+                    None,
+                )
             )
 
     for download_id, specs in by_download.items():
         try:
-            completed = await _completed_source_for_download(db, download_id)
+            completed, row_id = await _completed_source_for_download(db, download_id)
         except ManualImportError:
             dropped += len(specs)
             logger.warning(
@@ -395,22 +415,43 @@ async def execute_manual_import(
         overrides = {spec.path: _override_for(spec) for spec in specs}
         picked = {spec.path for spec in specs}
         plans.append(
-            (ManualImportSource(download=completed, overrides=overrides), picked)
+            (
+                ManualImportSource(download=completed, overrides=overrides),
+                picked,
+                (download_id, row_id),
+            )
         )
 
     imported = blocked = failed = 0
     async with db.write_session() as session:
-        for source, picked in plans:
+        for source, picked, tracked in plans:
+            outcomes: list[ImportOutcome] = []
             for candidate in await gather(source, session, ctx):
                 if picked is not None and candidate.local_path not in picked:
                     continue  # a download file the operator did not pick
                 outcome = await import_candidate(session, candidate, ctx)
+                outcomes.append(outcome)
                 if outcome.status is ImportStatus.IMPORTED:
                     imported += 1
                 elif outcome.status is ImportStatus.FAILED:
                     failed += 1
                 else:
                     blocked += 1
+            if tracked is not None and outcomes:
+                # The drain's ending, on the drain's own aggregation policy: the
+                # queue row leaves import_blocked with the same event, and a
+                # store entitlement mirrors + reconciles (FRG-PP-016,
+                # FRG-SRC-006/007). Skipped when nothing ran for this download
+                # (every picked path unmatched) — an attempt that imported
+                # nothing must not rewrite the row's state from thin air.
+                dl_id, row_id = tracked
+                await finalize_download_import(
+                    session,
+                    row_id=row_id,
+                    download_id=dl_id,
+                    outcomes=outcomes,
+                    now=ctx.now,
+                )
 
     summary = f"imported={imported} blocked={blocked} failed={failed}"
     if dropped:
