@@ -238,6 +238,7 @@ milestone-to-minor mapping. No id renumbered.
 | FRG-IMP-023 | Existing-library import staging and review | imp | implemented | M2 |
 | FRG-IMP-024 | Embedded metadata read during import | imp | implemented | M2 |
 | FRG-IMP-025 | Story-arc reading-order prefix | imp | approved | B |
+| FRG-IMP-026 | Issue-word filler stripping | imp | approved | M11 |
 | FRG-PP-001 | Single shared import pipeline | pp | implemented | M1 |
 | FRG-PP-002 | Completed-download handling state machine | pp | implemented | M1 |
 | FRG-PP-003 | Grab reconciliation by download ID | pp | implemented | M1 |
@@ -258,6 +259,8 @@ milestone-to-minor mapping. No id renumbered.
 | FRG-PP-018 | CBR-to-CBZ conversion and library-wide retagging | pp | implemented | 0.9.x |
 | FRG-PP-019 | Permissions and ownership enforcement | pp | approved | B |
 | FRG-PP-020 | Non-destructive defaults (no rename, no internal-id tags) | pp | implemented | 0.9.x |
+| FRG-PP-021 | Provenance-authoritative series resolution | pp | approved | M11 |
+| FRG-PP-022 | Ordinal-fallback issue resolution under a known series | pp | approved | M11 |
 | FRG-API-001 | Versioned, OpenAPI-documented REST API | api | implemented | M1 |
 | FRG-API-002 | Standard error and resource conventions | api | implemented | M1 |
 | FRG-API-003 | Series resources with ComicVine lookup | api | implemented | M1 |
@@ -327,6 +330,8 @@ milestone-to-minor mapping. No id renumbered.
 | FRG-SRC-005 | session expiry as a modeled state | sources | implemented | M6 |
 | FRG-SRC-006 | entitlement download and import handoff | sources | implemented | M6 |
 | FRG-SRC-007 | collected-edition reconciliation never suppresses singles | sources | implemented | M6 |
+| FRG-SRC-008 | Review-proposal freshness after library mutations | sources | approved | M11 |
+| FRG-SRC-009 | Failed source-download visibility and retry | sources | approved | M11 |
 | FRG-EXT-001 | Explicit-action cookie-to-clipboard copy | extension | implemented | 0.9.x |
 | FRG-EXT-002 | Least-privilege, no-network permission surface | extension | implemented | 0.9.x |
 | FRG-EXT-003 | Cross-browser parity and reproducible self-distributed build | extension | implemented | 0.9.x |
