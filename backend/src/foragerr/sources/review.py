@@ -151,6 +151,16 @@ async def add_entitlement(
     (which chains add → refresh → scan), links the created series onto the row,
     and queues the download (FRG-SRC-004/006). Raises when no CV id is available
     or no root folder is configured.
+
+    **Freshness (FRG-SRC-008).** The library moves underneath a review list: a
+    proposal computed at sync time may name a volume that is now present (an
+    earlier add on a sibling entitlement, or a manual add). Adding it again is
+    not an error the operator can act on, so the add DEGRADES to a match against
+    the existing series — the identical outcome to the match action, grab
+    queueing included. Only a genuine ``add_series`` failure still surfaces as a
+    400. After a successful add the sibling entitlements whose proposals named
+    the same volume are re-resolved (:func:`_reresolve_sibling_proposals`) so
+    their next single action succeeds on the first click.
     """
     from foragerr.library import repo as library_repo
     from foragerr.library.flows.add import add_series
@@ -167,6 +177,15 @@ async def add_entitlement(
             "existing series instead",
             status=422,
         )
+    # Already in the library → this is a match, not an add (FRG-SRC-008). Checked
+    # BEFORE the root-folder requirement: matching needs no root folder, and a
+    # rootless install would otherwise 409 on what is really a match.
+    existing_series_id = await _series_id_for_volume(db, cvid)
+    if existing_series_id is not None:
+        return await match_entitlement(
+            db, entitlement_id, series_id=existing_series_id, commands=commands
+        )
+
     root_id = root_folder_id
     if root_id is None:
         async with db.read_session() as session:
@@ -192,9 +211,52 @@ async def add_entitlement(
             f"add-series failed for volume {cvid}: {exc}", status=400
         ) from exc
 
+    # The series now exists: re-resolve every OTHER still-in-review proposal that
+    # named this volume before linking the acting row (FRG-SRC-008).
+    await _reresolve_sibling_proposals(
+        db,
+        cv_volume_id=cvid,
+        series_id=result.series.id,
+        series_title=result.series.title,
+        exclude_entitlement_id=entitlement_id,
+    )
     return await match_entitlement(
         db, entitlement_id, series_id=result.series.id, commands=commands
     )
+
+
+async def retry_download(
+    db, entitlement_id: int, *, commands=None
+) -> SourceEntitlementRow:
+    """Re-queue a FAILED entitlement download (FRG-SRC-009).
+
+    The explicit operator retry for the per-entitlement failed-download surface:
+    valid only from ``download_state = "failed"`` (any other state is a 409 —
+    there is nothing to retry, and re-queueing an in-flight or imported grab
+    would duplicate work), clears the recorded ``download_error``, and re-queues
+    through the standard :func:`_queue_grab` seam so the grab path, its
+    idempotency, and its tracked-download handoff are unchanged.
+    """
+    async with db.read_session() as session:
+        row = await session.get(SourceEntitlementRow, entitlement_id)
+        if row is None:
+            raise EntitlementActionError(
+                f"entitlement {entitlement_id} not found", status=404
+            )
+        if row.download_state != "failed":
+            state = row.download_state or "not started"
+            raise EntitlementActionError(
+                f"entitlement {entitlement_id} is {state}, not failed — "
+                "retry applies only to a failed download",
+                status=409,
+            )
+        if not _is_grabbable(row):
+            raise EntitlementActionError(
+                f"entitlement {entitlement_id} has no downloadable copy to retry",
+                status=409,
+            )
+    await _queue_grab(db, entitlement_id, commands)
+    return await _reload(db, entitlement_id)
 
 
 async def ignore_entitlement(db, entitlement_id: int) -> SourceEntitlementRow:
@@ -345,15 +407,120 @@ async def _bulk(db, entitlement_ids: list[int], action) -> BulkResult:
 # --- helpers ----------------------------------------------------------------
 
 
-def _proposed_cv_id(row: SourceEntitlementRow) -> int | None:
-    """The ComicVine volume id from a stored proposal, if it is a CV proposal."""
+async def _series_id_for_volume(db, cv_volume_id: int) -> int | None:
+    """The library series id holding ``cv_volume_id``, or ``None`` (FRG-SRC-008).
+
+    The same uniqueness the add flow enforces (``add_series`` rejects a volume
+    that is already in the library), read BEFORE the add so the review action can
+    degrade to a match instead of surfacing that rejection to the operator."""
+    from sqlalchemy import select
+
+    from foragerr.library.models import SeriesRow
+
+    async with db.read_session() as session:
+        return await session.scalar(
+            select(SeriesRow.id).where(SeriesRow.cv_volume_id == cv_volume_id)
+        )
+
+
+async def _reresolve_sibling_proposals(
+    db,
+    *,
+    cv_volume_id: int,
+    series_id: int,
+    series_title: str | None,
+    exclude_entitlement_id: int,
+) -> int:
+    """Point still-in-review proposals of the just-added volume at the new series.
+
+    A store order routinely yields several entitlements for one volume (an issue
+    run, a bundle re-purchase, a CBZ/PDF twin). Their proposals were computed as
+    ComicVine *adds* against ``cv_volume_id``; once the add has created the
+    series, an add on any of them would fail as "already in the library" — so
+    each is rewritten in place into a ``library``-kind MATCH proposal targeting
+    the new series (FRG-SRC-008), with ``proposed_series_id`` set so a single
+    click matches.
+
+    Scope guarantees:
+
+    * only ``review_status = "new"`` rows are touched — a matched or ignored row
+      is an operator decision and is never overwritten;
+    * the acting entitlement is excluded (its own link is written by the
+      following :func:`match_entitlement`);
+    * the ranked ``candidates`` list is preserved verbatim (the UI still offers
+      the alternatives) and ``auto`` is forced ``False`` — a rewrite is a
+      *convenience*, never a licence for the auto-sync path to accept without
+      review.
+
+    Runs as ONE write transaction, so the whole sibling set moves together.
+    Returns the number of rows rewritten.
+    """
     import json
 
-    if not row.proposed_match_json:
+    from sqlalchemy import select
+
+    rewritten = 0
+    async with db.write_session() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(SourceEntitlementRow).where(
+                        SourceEntitlementRow.review_status == "new",
+                        SourceEntitlementRow.id != exclude_entitlement_id,
+                        SourceEntitlementRow.proposed_match_json.is_not(None),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        now = utcnow()
+        for row in rows:
+            data = _loads_proposal(row.proposed_match_json)
+            if data is None or data.get("cv_volume_id") != cv_volume_id:
+                continue
+            if data.get("kind") == "library" and data.get("series_id") == series_id:
+                continue  # already resolved (a re-run) — leave it alone
+            data.update(
+                {
+                    "kind": "library",
+                    "series_id": series_id,
+                    "title": series_title or data.get("title"),
+                    "auto": False,
+                }
+            )
+            row.proposed_match_json = json.dumps(data, sort_keys=True)
+            row.proposed_series_id = series_id
+            row.updated_at = now
+            rewritten += 1
+    if rewritten:
+        logger.info(
+            "sources.review: re-resolved %d sibling proposal(s) for cv volume %d "
+            "onto series %d",
+            rewritten,
+            cv_volume_id,
+            series_id,
+        )
+    return rewritten
+
+
+def _loads_proposal(raw: str | None) -> dict | None:
+    """A stored proposal as a dict, or ``None`` when absent/unparseable."""
+    import json
+
+    if not raw:
         return None
     try:
-        data = json.loads(row.proposed_match_json)
+        data = json.loads(raw)
     except ValueError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _proposed_cv_id(row: SourceEntitlementRow) -> int | None:
+    """The ComicVine volume id from a stored proposal, if it is a CV proposal."""
+    data = _loads_proposal(row.proposed_match_json)
+    if data is None:
         return None
     cvid = data.get("cv_volume_id")
     return cvid if isinstance(cvid, int) else None
@@ -375,4 +542,5 @@ __all__ = [
     "ignore_entitlement",
     "match_entitlement",
     "restore_entitlement",
+    "retry_download",
 ]

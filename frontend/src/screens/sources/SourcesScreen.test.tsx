@@ -66,6 +66,8 @@ interface FetcherState {
   /** Optional reconnect handler overriding the default success. */
   onReconnect?: () => void;
   reconnectError?: ApiRequestError;
+  /** Error the retry-download endpoint rejects with (e.g. a 409 conflict). */
+  retryError?: ApiRequestError;
   /** Library series the match-picker / booktype lookups resolve against;
    * defaults to a single "Descender" series (booktype null) when omitted. */
   librarySeries?: SeriesResource[];
@@ -129,6 +131,21 @@ function makeFetcher(state: FetcherState): Fetcher {
       }
       if (path === '/api/v1/sources/entitlements/bulk') {
         return { applied: 2, skipped: 0, errors: [] };
+      }
+      // Retry re-queues a failed download: the backend clears the failure, so
+      // the in-memory row flips out of `failed` for the refetch that follows.
+      const retryMatch = path.match(
+        /^\/api\/v1\/sources\/entitlements\/(\d+)\/retry-download$/,
+      );
+      if (retryMatch) {
+        if (state.retryError) throw state.retryError;
+        const id = Number(retryMatch[1]);
+        state.entitlements = state.entitlements.map((e) =>
+          e.id === id
+            ? { ...e, download_state: 'queued', download_error: null }
+            : e,
+        );
+        return state.entitlements.find((e) => e.id === id);
       }
       if (
         path.endsWith('/match') ||
@@ -632,5 +649,94 @@ describe('FRG-UI-029: a matched row prefers the linked series booktype over the 
       within(row).getByText('PDF', { selector: '[class*="chip"]' }),
     ).toBeInTheDocument();
     expect(within(row).queryByTestId('booktype-badge')).toBeNull();
+  });
+});
+
+/*
+ * FRG-SRC-009 — a failed source download is not a dead end: the row carries the
+ * failure reason AND an explicit Retry that re-queues the grab.
+ */
+describe('FRG-SRC-009: failed-download retry affordance', () => {
+  const source = makeSource({ id: 5, connection_state: 'connected' });
+
+  const failed = ent({
+    id: 40,
+    human_name: 'Synthetic Hero #1',
+    review_status: 'matched',
+    matched_series_id: 1,
+    download_state: 'failed',
+    download_error: 'md5 mismatch on the downloaded file',
+  });
+
+  it('FRG-SRC-009 — a failed row shows the reason and a Retry that posts retry-download', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [failed],
+      calls: [],
+    };
+    renderScreen(state);
+
+    const row = await screen.findByTestId('entitlement-row-40');
+    // The honest reason is still shown alongside the new affordance.
+    expect(row).toHaveTextContent('md5 mismatch on the downloaded file');
+
+    await user.click(within(row).getByTestId('retry-40'));
+    await waitFor(() =>
+      expect(
+        state.calls.find(
+          (c) =>
+            c.path === '/api/v1/sources/entitlements/40/retry-download' &&
+            c.init?.method === 'POST',
+        ),
+      ).toBeTruthy(),
+    );
+    // The re-queued row is no longer failed, so the affordance retires with it.
+    await waitFor(() =>
+      expect(screen.queryByTestId('retry-40')).toBeNull(),
+    );
+  });
+
+  it('FRG-SRC-009 — a rejected retry (409 on a no-longer-failed row) leaves the row intact', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [failed],
+      calls: [],
+      retryError: new ApiRequestError(
+        409,
+        { message: 'entitlement 40 is queued, not failed', errors: [] },
+        '/api/v1/sources/entitlements/40/retry-download',
+      ),
+    };
+    renderScreen(state);
+
+    const row = await screen.findByTestId('entitlement-row-40');
+    await user.click(within(row).getByTestId('retry-40'));
+    await waitFor(() =>
+      expect(
+        state.calls.find((c) => c.path.endsWith('/40/retry-download')),
+      ).toBeTruthy(),
+    );
+    // Nothing is lost on a stale click: the reason and the affordance remain.
+    expect(await screen.findByTestId('retry-40')).toBeEnabled();
+    expect(screen.getByTestId('entitlement-row-40')).toHaveTextContent(
+      'md5 mismatch on the downloaded file',
+    );
+  });
+
+  it('FRG-SRC-009 — rows that have not failed carry no Retry', async () => {
+    renderScreen({
+      sources: [source],
+      entitlements: [
+        ent({ id: 41, review_status: 'matched', download_state: 'imported' }),
+        ent({ id: 42, review_status: 'new', download_state: null }),
+      ],
+      calls: [],
+    });
+
+    await screen.findByTestId('entitlement-row-41');
+    expect(screen.queryByTestId('retry-41')).toBeNull();
+    expect(screen.queryByTestId('retry-42')).toBeNull();
   });
 });

@@ -57,6 +57,7 @@ from foragerr.sources.review import (
     ignore_entitlement,
     match_entitlement,
     restore_entitlement,
+    retry_download,
 )
 from foragerr.sources.service import (
     SourceConnectError,
@@ -477,6 +478,24 @@ async def restore_entitlement_endpoint(
     """Restore an ignored entitlement to ``new`` with a recomputed proposal."""
     return await _run_action(
         request, lambda db, commands: restore_entitlement(db, entitlement_id)
+    )
+
+
+@router.post(
+    "/entitlements/{entitlement_id}/retry-download",
+    response_model=EntitlementResource,
+)
+async def retry_download_endpoint(
+    entitlement_id: int, request: Request
+) -> EntitlementResource:
+    """Re-queue a failed entitlement download (FRG-SRC-009).
+
+    Failed-only: an entitlement in any other download state is a 409 and nothing
+    changes. On success the recorded failure is cleared and the grab is re-queued
+    through the standard source-grab task."""
+    return await _run_action(
+        request,
+        lambda db, commands: retry_download(db, entitlement_id, commands=commands),
     )
 
 

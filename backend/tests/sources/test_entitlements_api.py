@@ -17,6 +17,7 @@ from foragerr.app import create_app
 from foragerr.library import repo as library_repo
 from foragerr.quality.models import DEFAULT_PROFILE_NAME, FormatProfileRow
 from foragerr.sources import ratelimit, repo
+from foragerr.sources.models import SourceEntitlementRow
 from foragerr.sources.registry import TYPE_HUMBLE
 from foragerr.sources.service import run_sync
 from foragerr.sources.settings import HumbleSettings
@@ -142,6 +143,116 @@ async def test_match_endpoint_links_series(app_client):
     body = resp.json()
     assert body["review_status"] == "matched"
     assert body["matched_series_id"] == series_id
+
+
+class _FakeCommands:
+    """Stands in for ``app.state.commands`` so an accepted grab is recorded
+    rather than actually dispatched to a worker mid-assertion."""
+
+    def __init__(self, real):
+        self.enqueued: list[tuple] = []
+        self._real = real
+
+    async def enqueue(self, name, payload=None, *, triggered_by="manual"):
+        from types import SimpleNamespace
+
+        self.enqueued.append((name, payload, triggered_by))
+        return SimpleNamespace(id=len(self.enqueued), status="queued")
+
+    async def drain(self, *args, **kwargs):
+        # The app's shutdown hook drains whatever sits on app.state.commands —
+        # forward to the real service so its workers still stop cleanly.
+        return await self._real.drain(*args, **kwargs)
+
+
+async def _series_with_cv(app, *, cv_volume_id: int, title: str) -> int:
+    """A library series carrying ``cv_volume_id`` (root folder + profile wired)."""
+    from sqlalchemy import select
+
+    async with app.state.db.read_session() as session:
+        fp_id = (
+            await session.execute(
+                select(FormatProfileRow.id).where(
+                    FormatProfileRow.name == DEFAULT_PROFILE_NAME
+                )
+            )
+        ).scalar_one()
+    root = Path(app.state.settings.config_dir) / f"root-{cv_volume_id}"
+    root.mkdir()
+    async with app.state.db.write_session() as session:
+        rf = await library_repo.create_root_folder(session, str(root))
+        series = await library_repo.create_series(
+            session,
+            cv_volume_id=cv_volume_id,
+            title=title,
+            format_profile_id=fp_id,
+            root_folder_id=rf.id,
+            path=str(root / title),
+        )
+        return series.id
+
+
+@pytest.mark.req("FRG-SRC-008")
+async def test_add_endpoint_degrades_to_match_when_volume_is_in_library(app_client):
+    """POST /add on a volume that is ALREADY a library series matches it instead
+    of 400-ing (FRG-SRC-008) — the same outcome as the match action. Nothing
+    reaches ComicVine (no key is configured here), so a real add would fail."""
+    app = app_client.app
+    source_id = await _populate(app)
+    eid = await _first_comic_id(app, source_id)
+    series_id = await _series_with_cv(app, cv_volume_id=9100, title="Synthetic Hero")
+    app.state.commands = _FakeCommands(app.state.commands)
+
+    resp = app_client.post(
+        f"/api/v1/sources/entitlements/{eid}/add", json={"cv_volume_id": 9100}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["review_status"] == "matched"
+    assert body["matched_series_id"] == series_id
+    # Accepting queues the grab exactly as a match would.
+    assert body["download_state"] == "queued"
+    assert app.state.commands.enqueued == [
+        ("source-grab", {"entitlement_id": eid}, "accept")
+    ]
+
+
+@pytest.mark.req("FRG-SRC-009")
+async def test_retry_download_endpoint_requeues_then_conflicts(app_client):
+    """POST /retry-download clears the failure and re-queues (FRG-SRC-009); a
+    second retry — now queued, not failed — is a 409 with no state change."""
+    app = app_client.app
+    source_id = await _populate(app)
+    eid = await _first_comic_id(app, source_id)
+    app.state.commands = _FakeCommands(app.state.commands)
+
+    async with app.state.db.write_session() as session:
+        row = await session.get(SourceEntitlementRow, eid)
+        row.review_status = "matched"
+        row.download_state = "failed"
+        row.download_error = "md5 mismatch on the downloaded file"
+
+    resp = app_client.post(f"/api/v1/sources/entitlements/{eid}/retry-download")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["download_state"] == "queued"
+    assert body["download_error"] is None
+    assert app.state.commands.enqueued == [
+        ("source-grab", {"entitlement_id": eid}, "accept")
+    ]
+
+    conflict = app_client.post(f"/api/v1/sources/entitlements/{eid}/retry-download")
+    assert conflict.status_code == 409
+    after = await repo.get_entitlement(app.state.db, eid)
+    assert after.download_state == "queued"  # unchanged by the rejected retry
+    assert len(app.state.commands.enqueued) == 1  # and never a second grab
+
+
+@pytest.mark.req("FRG-SRC-009")
+async def test_retry_download_unknown_entitlement_is_404(app_client):
+    app_client.app  # noqa: B018 — ensure the app/db fixtures are live
+    resp = app_client.post("/api/v1/sources/entitlements/999999/retry-download")
+    assert resp.status_code == 404
 
 
 @pytest.mark.req("FRG-SRC-004")

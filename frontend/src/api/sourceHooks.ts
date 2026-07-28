@@ -269,6 +269,30 @@ export function useRestoreEntitlement(): UseMutationResult<
   });
 }
 
+/**
+ * POST /sources/entitlements/{id}/retry-download — re-queue a FAILED download
+ * (FRG-SRC-009). Failed-only on the server: a row in any other download state
+ * rejects with a 409 `ApiRequestError` and nothing changes. Success clears the
+ * recorded failure and re-queues the grab, so the usual sources-family
+ * invalidation re-renders the row out of its failed state.
+ */
+export function useRetryDownload(): UseMutationResult<
+  EntitlementResource,
+  Error,
+  number
+> {
+  const fetcher = useFetcher();
+  const invalidate = useInvalidateSources();
+  return useMutation({
+    mutationFn: (entitlementId) =>
+      fetcher<EntitlementResource>(
+        `/api/v1/sources/entitlements/${entitlementId}/retry-download`,
+        { method: 'POST' },
+      ),
+    onSuccess: invalidate,
+  });
+}
+
 export interface BulkEntitlementResult {
   applied: number;
   skipped: number;

@@ -616,3 +616,22 @@
   font-size: var(--font-size-xs);
   margin-top: 2px;
 }
+
+/* The retry affordance sits inline with the failure reason (FRG-SRC-009). */
+.retryBtn {
+  border: none;
+  background: transparent;
+  color: var(--color-accent);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.retryBtn:hover {
+  text-decoration: underline;
+}
+
+.retryBtn:disabled {
+  color: var(--text-muted);
+  cursor: default;
+}
