@@ -17,15 +17,15 @@
 
 ## 2. Health + meter (FRG-META-016, FRG-API-025, FRG-UI-040)
 
-- [ ] 2.1 Approaching-limit health state from the existing 80% data,
+- [x] 2.1 Approaching-limit health state from the existing 80% data,
       independent dimension, names bucket/usage/paused lane
       (FRG-META-016)
-- [ ] 2.2 SystemHealthComponent additive detail w/ budget numbers;
+- [x] 2.2 SystemHealthComponent additive detail w/ budget numbers;
       unauthenticated surface unchanged (FRG-API-025)
-- [ ] 2.3 Settings General full meter; Sources compact above-fraction
+- [x] 2.3 Settings General full meter; Sources compact above-fraction
       indicator; lookup outcome note carries the typed resume message
       (FRG-UI-040)
-- [ ] 2.4 Tests: approaching-state appears/clears, detail shape +
+- [x] 2.4 Tests: approaching-state appears/clears, detail shape +
       no-unauth-leak, meter render states, outcome-note fidelity
       (FRG-META-016, FRG-API-025, FRG-UI-040)
 

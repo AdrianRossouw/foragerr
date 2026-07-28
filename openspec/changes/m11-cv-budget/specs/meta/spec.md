@@ -127,8 +127,19 @@ counter.
   ceiling while requests are still being admitted
 - **THEN** application health shows a distinct approaching-limit warning
   naming the bucket, its usage against its ceiling, and the lane paused
-  first — before any request has been refused — and the warning clears
-  when the window rolls the bucket back under the fraction.
+  first — before any interactive request has been refused (the batch
+  lane may already be pausing at its share, and the message says so
+  when it is) — and the warning clears when the window rolls the bucket
+  back under the fraction.
+
+#### Scenario: A paused batch lane alone is not a health warning
+
+- **WHEN** batch consumers have reached their share of a path budget
+  while total usage remains below the warning fraction
+- **THEN** application health stays ok (the pause is the designed
+  steady state of a heavy background run, not an anomaly), while the
+  budget detail still carries the bucket so the meter can show the
+  paused lane
 
 #### Scenario: Window rolls — capacity returns without operator action
 
