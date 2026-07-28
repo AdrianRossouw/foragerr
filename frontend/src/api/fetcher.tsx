@@ -66,6 +66,25 @@ export function isComicVineAuthError(error: unknown): boolean {
   );
 }
 
+/**
+ * The backend's typed ComicVine budget-deferral message, or `null` (FRG-UI-040).
+ *
+ * A budget refusal is NOT a failure: the request was never sent, and the
+ * backend already knows when capacity returns. It says so in a message carrying
+ * that resume time, which a generic "try again in a moment" would throw away —
+ * leaving the operator to retry blindly against a wall that has not moved.
+ * Classification is structural, on the same `errors[]` field channel
+ * `isComicVineAuthError` uses (`comicvine_budget`), never a match on prose.
+ */
+export function comicVineBudgetMessage(error: unknown): string | null {
+  if (!(error instanceof ApiRequestError)) return null;
+  const hit = (error.body?.errors ?? []).find(
+    (entry) => entry.field === 'comicvine_budget',
+  );
+  if (!hit) return null;
+  return error.body?.message || hit.message;
+}
+
 export type Fetcher = <T>(path: string, init?: FetcherInit) => Promise<T>;
 
 /**

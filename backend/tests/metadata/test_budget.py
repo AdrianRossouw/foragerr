@@ -30,6 +30,7 @@ from foragerr.metadata.ratelimit import (
     BUDGET_CEILING,
     BUDGET_FLOOR,
     BUDGET_WINDOW_SECONDS,
+    LANE_INTERACTIVE,
     effective_budget,
 )
 
@@ -240,7 +241,13 @@ async def test_every_wire_request_consumes_exactly_one_budget_unit_covers_includ
 @pytest.mark.req("FRG-NFR-004")
 async def test_client_request_raises_typed_budget_error_at_ceiling(tmp_path):
     """Through the real client: once a path is at its (tiny configured) ceiling,
-    the next request on it raises the typed error before reaching the wire."""
+    the next request on it raises the typed error before reaching the wire.
+
+    The client is built on the INTERACTIVE lane (FRG-META-022): the full path
+    ceiling is the interactive lane's limit, so this is where the unchanged
+    FRG-META-016 full-ceiling behaviour is observed at the client seam. A batch
+    client would (correctly) pause earlier, at its share — covered in
+    ``test_lanes.py``."""
     stamps: list[float] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -250,6 +257,7 @@ async def test_client_request_raises_typed_budget_error_at_ceiling(tmp_path):
     client, transport = make_client(
         tmp_path,
         handler,
+        lane=LANE_INTERACTIVE,
         comicvine_min_interval_seconds=0.25,
         comicvine_hourly_path_budget=10,  # clamps UP to the floor of 10
     )

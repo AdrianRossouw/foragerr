@@ -66,6 +66,8 @@ under the top level of `config.yaml`.
 | `comicvine_insecure_base` | `FORAGERR_COMICVINE_INSECURE_BASE` | `false` | Test affordance only: permits a plain-http `comicvine_base_url` on a fixture network. Never set in production. |
 | `comicvine_min_interval_seconds` | `FORAGERR_COMICVINE_MIN_INTERVAL_SECONDS` | `2.0` | Minimum seconds between any two ComicVine requests, process-wide. |
 | `comicvine_hourly_path_budget` | `FORAGERR_COMICVINE_HOURLY_PATH_BUDGET` | `150` | Soft per-resource-path hourly request ceiling. ComicVine limits each API key to 200 requests/hour **per path** (volume, issue, search, …); spacing alone can still exhaust that over an hour. When a path reaches this ceiling over a rolling hour foragerr defers further requests on it locally (a logged, health-visible deferral with a resume time — **not** a server-visible rate-limit signal) and resumes as the window rolls. The default 150 leaves headroom under ComicVine's limit for other tools sharing the key. Clamped to `10..200` (never above 200) with a warning if set outside it. |
+| `comicvine_batch_budget_share` | `FORAGERR_COMICVINE_BATCH_BUDGET_SHARE` | `0.70` | The share of each path budget that background (batch) work — refreshes, credit backfills, cover caching, source enrichment, bulk recompute — may consume, leaving the remainder as a reserve for interactive requests (search, add, review-row search, restore). Batch work that hits its share defers exactly like a budget refusal (logged, health-visible, resumes as the window rolls) while interactive requests keep working. Clamped to `0.30..0.95` with a warning. Splitting traffic across multiple ComicVine keys is deliberately unsupported. |
+| `comicvine_error_retry_spacing_seconds` | `FORAGERR_COMICVINE_ERROR_RETRY_SPACING_SECONDS` | `43200` | Minimum spacing before the *scheduled* enrichment path re-attempts an entitlement whose ComicVine consultation errored (a 500, a transport failure). Keeps a persistently failing row from burning budget every night. The default (12 h) is deliberately **below** `source_sync_interval_seconds` (24 h): a spacing equal to the sync interval loses the race with it, so an errored row would be skipped for a whole extra day and retried only every *other* night. Keep it under your sync interval if you change either. Operator actions (restore, the review row's search, the bulk recompute) are never spaced; manual "Sync now" runs the scheduled path and *does* space. |
 | `comicvine_refresh_max_skip_days` | `FORAGERR_COMICVINE_REFRESH_MAX_SKIP_DAYS` | `7` | Maximum age of the last complete issue walk for which a refresh may skip the issue walk when ComicVine reports the volume unchanged. A full walk always runs at least this often as a correctness backstop. Clamped up to a floor of 1 day. |
 | `comicvine_page_size` | `FORAGERR_COMICVINE_PAGE_SIZE` | `100` | ComicVine's own page-size cap. |
 | `comicvine_max_pages` | `FORAGERR_COMICVINE_MAX_PAGES` | `200` | Hard cap on pages walked per list endpoint. |
@@ -160,7 +162,7 @@ the enable steps and RISK-015/RISK-016 in `docs/security/risk-register.md`.
 
 ## ComicVine health states
 
-The **ComicVine** component on System → Health reports three distinct non-OK
+The **ComicVine** component on System → Health reports four distinct non-OK
 states, all of which clear on their own without a restart:
 
 - **Authentication failed** — ComicVine rejected the configured API key (HTTP
@@ -180,9 +182,25 @@ states, all of which clear on their own without a restart:
   decision (ComicVine saw nothing) and is expected under heavy refresh/credit
   activity; it resumes automatically as the rolling hour clears. Only raise the
   budget up to ComicVine's documented 200/hour/path limit — never higher.
+- **Approaching the budget ceiling** — a path crossed the warning fraction of
+  its budget while requests are still being admitted. The warning names the
+  path, the usage against the ceiling, and which lane is paused first (batch
+  work defers before interactive requests are ever affected). It clears as the
+  rolling hour drains the window.
 
-Paths approaching (but not yet at) their ceiling appear in the health payload's
-per-path budget detail before any deferral happens, so a build-up is visible early.
+A **paused background lane is not a health warning.** Background work stopping at
+its `comicvine_batch_budget_share` is the reserve doing its job — your own
+searches, adds and review actions keep working, and background work resumes on
+its own — so it does not appear in Health. It is shown on the meter instead,
+with its own resume countdown, because the numbers are still worth seeing.
+
+The **budget meter** (Settings → General, beside the ComicVine key) shows all of
+it continuously: per-path usage, the batch share and where it ends, and any
+resume countdown for either the path or the background lane. The Sources review
+screen shows a compact indicator only for a path near its ceiling — the meter is
+where you go to look, the indicator is for when you were not looking. ComicVine's
+API exposes no usage counters of its own (verified), so this local meter is the
+authoritative view of your spend.
 
 ## Listener resource limits
 

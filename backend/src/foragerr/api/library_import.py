@@ -236,7 +236,9 @@ async def _validate_cv_volume(request: Request, cv_volume_id: int) -> SeriesReco
     settings = request.app.state.settings
     factory = comicvine_factory(settings)
     try:
-        async with ComicVineClient(settings, factory) as cv:
+        # Interactive lane (FRG-META-022): the operator is staging an import
+        # group and waiting on this validation.
+        async with ComicVineClient(settings, factory, lane="interactive") as cv:
             return await cv.get_volume(cv_volume_id)
     except ComicVineAuthError as exc:
         # The shared static wording + the machine-readable field discriminator

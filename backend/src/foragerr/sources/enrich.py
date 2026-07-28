@@ -27,10 +27,35 @@ Rows whose computation RAN and found nothing plausible are stamped with the
 explicit no-plausible-match marker (FRG-SRC-010) rather than left NULL, so the
 review UI can tell "we looked, there is nothing" from "not looked at yet". Only
 deferrals — a budget hit, or a ComicVine call that failed — leave a row NULL.
+
+Frugality (FRG-SRC-013). A run is bounded by a budget it does not control, so
+the order it works in decides whether the queue CONVERGES. Every row a run
+touches is stamped ``proposal_attempted_at`` — proposed, marked, deferred at the
+budget wall, or errored alike — and the pending set is walked
+never-attempted-first then oldest-attempt-first. A failing or deferred head
+therefore moves behind the rows it did not reach, so it can only ever delay its
+OWN retry; before this, an oldest-id-first walk restarted at the same doomed
+rows every night and the tail was never seen at all. Rows whose ComicVine
+consultation ERRORED additionally wait out
+``comicvine_error_retry_spacing_seconds`` on this scheduled path. The three
+operator-initiated paths — restore, the review row's per-row search, and the
+bulk recompute — ignore the spacing entirely, because the operator asking IS the
+retry decision. (Manual "Sync now" is NOT one of them: it runs the same
+scheduled command, so it spaces exactly as the nightly run does.) The stamps
+order work and nothing else: a budget-deferred row still has a NULL proposal and
+is still eligible, exactly as FRG-SRC-010 requires.
+
+Two revisit shapes rejoin the pending set rather than staying frozen:
+``library-fallback`` proposals once a ComicVine key IS configured (they were
+computed catalog-blind — verdicts and guesses about the shelf, not the catalog),
+and — through the operator-triggered :func:`recompute_proposals` — proposals
+stored before the CV-first universe existed.
 """
 
 from __future__ import annotations
 
+import datetime as dt
+import json
 import logging
 
 from foragerr.db.base import utcnow
@@ -39,11 +64,13 @@ from foragerr.sources import repo, review
 from foragerr.sources.matching import (
     AUTO_MATCH_THRESHOLD,
     UNIVERSE_COMICVINE,
+    UNIVERSE_LIBRARY_FALLBACK,
+    VERDICT_NO_PLAUSIBLE_MATCH,
     LibrarySeriesLite,
     ProposedMatch,
     compute_proposed_match,
 )
-from foragerr.sources.models import MATCHED_VIA_AUTO, SourceEntitlementRow
+from foragerr.sources.models import MATCHED_VIA_AUTO
 
 logger = logging.getLogger("foragerr.sources.enrich")
 
@@ -67,22 +94,161 @@ async def _load_library(db) -> list[LibrarySeriesLite]:
     ]
 
 
-def build_cv_client(settings):
+def comicvine_configured(settings) -> bool:
+    """Whether this deployment has a usable ComicVine key at all.
+
+    The ONE key check every "is ComicVine available here?" caller shares — the
+    client builder below, and the surfaces that must answer the question WITHOUT
+    paying for a client (an endpoint deciding whether a ComicVine-only action is
+    even runnable). A second copy would be a second place to get it wrong."""
+    try:
+        key = settings.comicvine_api_key.get_secret_value()
+    except Exception:  # noqa: BLE001 — a missing/odd key means "no CV"
+        return False
+    return bool(key.strip())
+
+
+def build_cv_client(settings, *, lane: str = "batch"):
     """A live ComicVine client when an api key is configured, else ``None``.
 
     Public because the operator-initiated restore endpoints need the same
     "is ComicVine available to this deployment at all?" answer, and a second
-    copy of the key check would be a second place to get it wrong."""
-    try:
-        key = settings.comicvine_api_key.get_secret_value()
-    except Exception:  # noqa: BLE001 — a missing/odd key means "no CV"
-        return None
-    if not key.strip():
+    copy of the key check would be a second place to get it wrong.
+
+    ``lane`` (FRG-META-022) defaults to ``batch`` — this function's own callers
+    are the nightly enrichment run — and the operator-initiated endpoints pass
+    ``interactive`` so an exhausted batch share never blocks the person waiting
+    at the review screen."""
+    if not comicvine_configured(settings):
         return None
     from foragerr.library.flows._common import comicvine_factory
     from foragerr.metadata.comicvine import ComicVineClient
 
-    return ComicVineClient(settings, comicvine_factory(settings))
+    return ComicVineClient(settings, comicvine_factory(settings), lane=lane)
+
+
+def _proposal_data(raw: str | None) -> dict | None:
+    """The stored proposal JSON as a dict, or ``None`` when absent/unreadable."""
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def is_library_fallback(raw: str | None) -> bool:
+    """True for ANY proposal computed WITHOUT ComicVine (FRG-SRC-013).
+
+    The universe alone is the signature, because the whole stored proposal — a
+    no-match marker AND a ranked best guess — was produced against the local
+    shelf rather than the catalog. Both are answers to a question the review
+    screen does not ask, and both are non-NULL, so both freeze the row out of
+    every later pass. Once a key exists the row deserves a catalog answer and
+    rejoins the pending set.
+
+    Keying on the verdict as well would have covered only half the keyless era:
+    a shelf-ranked BEST (universe ``library-fallback`` with a candidate) is the
+    more consequential half — it is what the review screen renders as a
+    proposal — and it would have been the one shape neither revisit path could
+    reach. A proposal computed WITH ComicVine is a real answer and stays put.
+    """
+    data = _proposal_data(raw)
+    return bool(data and data.get("universe") == UNIVERSE_LIBRARY_FALLBACK)
+
+
+def is_marker(raw: str | None) -> bool:
+    """True for any stored no-plausible-match marker (FRG-SRC-010)."""
+    data = _proposal_data(raw)
+    return bool(data and data.get("verdict") == VERDICT_NO_PLAUSIBLE_MATCH)
+
+
+def predates_cv_universe(raw: str | None) -> bool:
+    """True for a stored proposal written before the ComicVine-first universe.
+
+    ``universe`` is the signature: it was added with the CV-first ranking
+    (FRG-SRC-010), so a stored proposal LACKING the key was ranked against the
+    local library alone, whatever it claims. That absence is what the bulk
+    recompute targets — it cannot be inferred from the value of any other field.
+
+    A stored value that will not parse counts as pre-universe too. It is
+    non-NULL, so the enrichment pass skips it forever; it has no readable
+    universe, so no other predicate claims it; and it renders as nothing on the
+    review screen. Recomputing it is the only way it can ever become a proposal
+    again, and the cost of being wrong is one ComicVine call. Only a genuinely
+    absent proposal (``None``/empty) stays the enrichment pass's business.
+    """
+    if not raw:
+        return False
+    data = _proposal_data(raw)
+    if data is None:
+        return True
+    return "universe" not in data
+
+
+def _error_spacing_blocked(row, *, now: dt.datetime, spacing_seconds: int) -> bool:
+    """True while an ERRORED row is still inside its re-attempt spacing.
+
+    Only errors are spaced. A row deferred at the budget wall carries a stamp
+    too, but its computation never ran — spacing it would turn a rolling-window
+    refusal into a day-long freeze, which is the opposite of frugal.
+    """
+    if spacing_seconds <= 0 or not row.proposal_attempt_error:
+        return False
+    attempted = row.proposal_attempted_at
+    if attempted is None:
+        return False
+    return (now - attempted) < dt.timedelta(seconds=spacing_seconds)
+
+
+def eligible_for_enrichment(row, *, cv_configured: bool) -> bool:
+    """Whether a ``new`` comic row still WANTS a proposal (FRG-SRC-013).
+
+    Eligibility is a property of the stored proposal, never of an attempt stamp:
+
+    * a NULL proposal — never computed, or deferred/errored last time
+      (FRG-SRC-010: a deferral leaves the row eligible, and no stamp changes
+      that);
+    * ANY ``library-fallback`` proposal on a run where ComicVine IS configured —
+      marker or shelf-ranked best alike, the keyless answer a key has now made
+      answerable. Not just the marker: a keyless run that DID find a shelf
+      candidate stored it as a fallback best, and gating on the no-match verdict
+      left exactly those rows — the ones showing the operator a proposal — frozen
+      on a keyed deployment.
+    """
+    if row.proposed_match_json is None:
+        return True
+    return cv_configured and is_library_fallback(row.proposed_match_json)
+
+
+def select_pending(
+    rows,
+    *,
+    cv_configured: bool,
+    now: dt.datetime,
+    spacing_seconds: int,
+) -> tuple[list, int]:
+    """``(pending, spaced)`` for a scheduled enrichment pass.
+
+    ``rows`` arrives already in work order — never-attempted-first then
+    oldest-attempt-first (``repo.list_entitlements(order_by_attempt=True)``) —
+    so this only decides membership: the eligible rows, minus those still inside
+    their error spacing (counted, never silently dropped).
+    """
+    eligible = [
+        row for row in rows if eligible_for_enrichment(row, cv_configured=cv_configured)
+    ]
+    pending = [
+        row
+        for row in eligible
+        if not _error_spacing_blocked(row, now=now, spacing_seconds=spacing_seconds)
+    ]
+    return pending, len(eligible) - len(pending)
+
+
+def _spacing_seconds(settings) -> int:
+    return int(getattr(settings, "comicvine_error_retry_spacing_seconds", 0) or 0)
 
 
 async def enrich_source(db, settings, source, *, commands=None, cv_client=None) -> str:
@@ -90,16 +256,12 @@ async def enrich_source(db, settings, source, *, commands=None, cv_client=None) 
 
     Returns a one-line summary. ``cv_client`` may be injected (tests); otherwise
     a client is built only when CV is configured, and always closed.
-    """
-    pending = [
-        e
-        for e in await repo.list_entitlements(
-            db, source.id, classification="comic", review_status="new"
-        )
-        if e.proposed_match_json is None
-    ]
-    library = await _load_library(db)
 
+    The client is built FIRST because the pending set depends on it: whether a
+    ``library-fallback`` marker is a frozen keyless verdict (revisit it) or the
+    honest answer of an unconfigured deployment (leave it) is decided by whether
+    ComicVine is available to this run.
+    """
     owns_client = cv_client is None
     if cv_client is None:
         cv_client = build_cv_client(settings)
@@ -110,8 +272,24 @@ async def enrich_source(db, settings, source, *, commands=None, cv_client=None) 
     cv_configured = cv_client is not None
 
     proposals: dict[int, ProposedMatch] = {}
+    attempts: dict[int, repo.ProposalAttempt] = {}
     deferred = 0
     try:
+        candidates = await repo.list_entitlements(
+            db,
+            source.id,
+            classification="comic",
+            review_status="new",
+            order_by_attempt=True,
+        )
+        pending, spaced = select_pending(
+            candidates,
+            cv_configured=cv_configured,
+            now=utcnow(),
+            spacing_seconds=_spacing_seconds(settings),
+        )
+        library = await _load_library(db)
+
         for index, ent in enumerate(pending):
             try:
                 proposal = await compute_proposed_match(
@@ -124,6 +302,13 @@ async def enrich_source(db, settings, source, *, commands=None, cv_client=None) 
                 # Nothing library-only is computed in its place — a fallback
                 # proposal would freeze the row out of the pending set and could
                 # be auto-accepted, which is precisely what deferral prevents.
+                #
+                # The row the wall stopped ON is still stamped (attempted, not
+                # errored): that is what advances the next run's starting point
+                # past the prefix this run got through, instead of grinding the
+                # same head every night. Rows it never reached keep a NULL stamp
+                # and therefore sort FIRST next time.
+                attempts[ent.id] = repo.ProposalAttempt()
                 deferred = len(pending) - index
                 logger.info(
                     "enrich: ComicVine budget exhausted (%s); %d item(s) left "
@@ -134,14 +319,24 @@ async def enrich_source(db, settings, source, *, commands=None, cv_client=None) 
                 break
             if proposal is None:
                 # CV was consulted and could not answer: no verdict exists, so
-                # the row stays NULL/retryable rather than recording one.
+                # the row stays NULL/retryable rather than recording one — and
+                # the error is recorded so the spacing can hold it back next run.
+                attempts[ent.id] = repo.ProposalAttempt(errored=True)
                 continue
             proposals[ent.id] = proposal
+            attempts[ent.id] = repo.ProposalAttempt(
+                proposed_series_id=proposal.proposed_series_id,
+                proposed_match_json=proposal.to_json(),
+                store=True,
+                # Compare-and-swap against what this pass READ: NULL for the
+                # ordinary case, the stale marker for a fallback revisit.
+                expect_json=ent.proposed_match_json,
+            )
     finally:
         if owns_client and cv_client is not None:
             await cv_client.aclose()
 
-    await _persist_proposals(db, proposals)
+    await repo.record_proposal_attempts(db, attempts)
 
     accepted = 0
     if source.auto_sync:
@@ -149,27 +344,12 @@ async def enrich_source(db, settings, source, *, commands=None, cv_client=None) 
             db, settings, proposals, commands=commands, cv_configured=cv_configured
         )
     matched = sum(1 for p in proposals.values() if not p.is_no_match)
+    spacing_note = f", {spaced} spaced" if spaced > 0 else ""
     return (
         f"enrich: {matched}/{len(pending)} proposed, "
-        f"{len(proposals) - matched} no-match, {deferred} deferred, "
+        f"{len(proposals) - matched} no-match, {deferred} deferred{spacing_note}, "
         f"{accepted} auto-accepted (auto_sync={'on' if source.auto_sync else 'off'})"
     )
-
-
-async def _persist_proposals(db, proposals: dict[int, ProposedMatch]) -> None:
-    if not proposals:
-        return
-    now = utcnow()
-    async with db.write_session() as session:
-        for eid, proposal in proposals.items():
-            row = await session.get(SourceEntitlementRow, eid)
-            # Only stamp a still-new, still-unproposed item — never clobber an
-            # operator decision that landed between the read and this write.
-            if row is None or row.review_status != "new" or row.proposed_match_json:
-                continue
-            row.proposed_series_id = proposal.proposed_series_id
-            row.proposed_match_json = proposal.to_json()
-            row.updated_at = now
 
 
 async def _auto_accept(
@@ -253,6 +433,13 @@ async def _auto_accept(
                     cv_volume_id=proposal.best.cv_volume_id,
                     matched_via=MATCHED_VIA_AUTO,
                     require_new=True,
+                    # Nobody is waiting on an auto-accept: it runs from the
+                    # nightly enrichment batch, and the add's ComicVine
+                    # existence check must be capped at the batch share like
+                    # the rest of it (FRG-META-022). Left interactive, a
+                    # 1,318-item auto-sync would spend the reserve that exists
+                    # to keep the operator's own searches answering.
+                    lane="batch",
                 )
             else:
                 continue
@@ -262,4 +449,141 @@ async def _auto_accept(
     return accepted
 
 
-__all__ = ["build_cv_client", "enrich_source"]
+def is_recompute_target(row, *, include_markers: bool) -> bool:
+    """Whether the bulk recompute should refresh this row's stored proposal.
+
+    A row with NO stored proposal is never a target: the enrichment pass already
+    owns those, and duplicating them here would spend budget twice on the same
+    backlog. What recompute exists for is the proposal that is STORED and stale:
+
+    * one written before the ComicVine-first universe (no ``universe`` key —
+      library-ranked whatever it looks like), the v0.11.0 upgrade gap;
+    * one written IN the ``library-fallback`` universe — the same gap one
+      version later. A keyless deployment's proposals are shelf-ranked for
+      exactly the reason a pre-universe one is, and this walk cannot run at all
+      without a key (see :func:`recompute_proposals`), so reaching them here is
+      unconditional rather than an opt-in. Without it, a deployment that added
+      its key AFTER a keyless sync had a class of rows no revisit path could
+      touch;
+    * on explicit opt-in, a ComicVine no-plausible-match marker — the operator
+      saying "look again", e.g. after the library or the catalog moved. Opt-in
+      because re-asking ComicVine about every real verdict is exactly the kind
+      of unprompted spend this change exists to stop.
+    """
+    raw = row.proposed_match_json
+    if raw is None:
+        return False
+    if predates_cv_universe(raw) or is_library_fallback(raw):
+        return True
+    return include_markers and is_marker(raw)
+
+
+async def recompute_proposals(
+    db, settings, source, *, include_markers: bool = False, cv_client=None
+) -> str:
+    """Refresh stale stored proposals for one source, resumably (FRG-SRC-013).
+
+    The operator-triggered half of the frugality work (design D6). It walks
+    ``new`` rows only — a matched or ignored row is a DECISION and is never
+    recomputed (FRG-SRC-008/012 stickiness) — in the D5 attempt order, refreshing
+    each target's stored proposal and stamping the attempt. The stamp is what
+    makes it resumable: a refreshed row sorts to the back, so a re-run after a
+    budget window picks up where this one stopped, with no cursor to persist.
+
+    Stopping is clean by construction. A :class:`ComicVineBudgetExhausted` ends
+    the walk with the prefix already refreshed; every row it did not reach KEEPS
+    its existing proposal (a stale proposal is still a proposal, and losing it
+    would empty the review screen instead of improving it). A per-row ComicVine
+    error is recorded and the walk continues — one unanswerable title must not
+    end the batch.
+
+    Requires a configured ComicVine key: without one the recomputation could only
+    produce ``library-fallback`` rankings, which would REPLACE stale catalog-
+    shaped proposals with shelf-local guesses — strictly backwards. It never
+    accepts, matches or downloads anything; it only refreshes what the operator
+    then reviews.
+    """
+    owns_client = cv_client is None
+    if cv_client is None:
+        # Batch lane (FRG-META-022 / design D2), stated explicitly even though it
+        # is the default: this is operator-TRIGGERED but not operator-WAITED —
+        # a bulk backfill must never eat the reserve that keeps the operator's
+        # own interactive searches answering while it runs.
+        cv_client = build_cv_client(settings, lane="batch")
+    if cv_client is None:
+        return (
+            "recompute: ComicVine is not configured; nothing recomputed "
+            "(a recompute without a catalog could only downgrade proposals)"
+        )
+
+    attempts: dict[int, repo.ProposalAttempt] = {}
+    errored = 0
+    remaining = 0
+    exhausted = False
+    try:
+        candidates = await repo.list_entitlements(
+            db,
+            source.id,
+            classification="comic",
+            review_status="new",
+            order_by_attempt=True,
+        )
+        targets = [
+            row
+            for row in candidates
+            if is_recompute_target(row, include_markers=include_markers)
+        ]
+        library = await _load_library(db)
+
+        for index, ent in enumerate(targets):
+            try:
+                proposal = await compute_proposed_match(
+                    human_name=ent.human_name, library=library, cv_client=cv_client
+                )
+            except ComicVineBudgetExhausted as exc:
+                attempts[ent.id] = repo.ProposalAttempt()
+                remaining = len(targets) - index
+                exhausted = True
+                logger.info(
+                    "recompute: ComicVine budget exhausted (%s); %d row(s) keep "
+                    "their existing proposal — re-run to resume",
+                    exc,
+                    remaining,
+                )
+                break
+            if proposal is None:
+                attempts[ent.id] = repo.ProposalAttempt(errored=True)
+                errored += 1
+                continue
+            attempts[ent.id] = repo.ProposalAttempt(
+                proposed_series_id=proposal.proposed_series_id,
+                proposed_match_json=proposal.to_json(),
+                store=True,
+                # Compare-and-swap on the stale value this walk read: an operator
+                # action that rewrote the proposal mid-walk wins.
+                expect_json=ent.proposed_match_json,
+            )
+    finally:
+        if owns_client:
+            await cv_client.aclose()
+
+    refreshed = await repo.record_proposal_attempts(db, attempts)
+    tail = " (budget exhausted; re-run to resume)" if exhausted else ""
+    return (
+        f"recompute: {refreshed} refreshed, {errored} errored, "
+        f"{remaining} remaining{tail}"
+    )
+
+
+__all__ = [
+    "build_cv_client",
+    "comicvine_configured",
+    "eligible_for_enrichment",
+    "enrich_source",
+    "is_library_fallback",
+    "is_marker",
+    "is_recompute_target",
+    "predates_cv_universe",
+    "recompute_proposals",
+    "select_pending",
+]

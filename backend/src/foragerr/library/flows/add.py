@@ -76,6 +76,7 @@ async def add_series(
     booktype_locked: bool = False,
     enqueue_refresh: bool = True,
     factory: HttpClientFactory | None = None,
+    lane: str = "interactive",
 ) -> AddSeriesResult:
     """Validate and add a series, then enqueue its refresh chain.
 
@@ -102,6 +103,14 @@ async def add_series(
     that run the refresh themselves (the library-import flow awaits it
     directly so files can match issues deterministically; enqueuing here too
     would double every ComicVine fetch and scan).
+
+    ``lane`` (FRG-META-022) is the priority lane of this add's ComicVine
+    existence check, and defaults to ``interactive`` because almost every add IS
+    an operator clicking Add and waiting. It is a PARAMETER because one caller
+    is not: store-source auto-sync reaches this function from the nightly
+    enrichment batch, with nobody waiting, and a background add spending the
+    interactive reserve is exactly the reserve failing at its one job — a
+    1,318-item auto-sync could drain it before the operator's first search.
     """
     validate_monitor_strategy(monitor_strategy)
     validate_monitor_new_items(monitor_new_items)
@@ -109,8 +118,10 @@ async def add_series(
     factory = factory or comicvine_factory(settings)
 
     # --- ComicVine existence check (network; outside any write lock) --------
+    # Whoever is waiting on this add decides the lane (FRG-META-022) — the
+    # operator by default, batch when a background caller says so.
     try:
-        async with ComicVineClient(settings, factory) as cv:
+        async with ComicVineClient(settings, factory, lane=lane) as cv:
             record: SeriesRecord = await cv.get_volume(cv_volume_id)
     except ComicVineAuthError as exc:
         # Credential failure gets the ONE shared actionable wording every

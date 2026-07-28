@@ -4,6 +4,7 @@ import { observeElementRect, useVirtualizer } from '@tanstack/react-virtual';
 import { Menu } from '../../components/Menu';
 import { SegmentedControl } from '../../components/SegmentedControl';
 import { Toggle } from '../../components/Toggle';
+import { ComicVineBudgetChip } from '../../components/ComicVineBudget';
 import { EntitlementRow } from './EntitlementRow';
 import { EntitlementGroupHeader } from './EntitlementGroupHeader';
 import { PublisherRules } from './PublisherRules';
@@ -13,6 +14,7 @@ import {
   useBulkEntitlements,
   useDisconnectSource,
   useEntitlements,
+  useRecomputeProposals,
   useSyncSource,
   useUpdateSource,
 } from '../../api/sourceHooks';
@@ -107,9 +109,20 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
   const [failureVerb, setFailureVerb] = useState<string>('accepted');
   const [showFailures, setShowFailures] = useState(false);
   const [bundleMenuOpen, setBundleMenuOpen] = useState(false);
+  /**
+   * Outcome of the last "Recompute proposals" trigger (FRG-SRC-013): the action
+   * enqueues background work, so there is nothing to watch on-screen — an
+   * inline note is the whole feedback, and a refusal (no ComicVine key) lands
+   * in the same place rather than in a toast the operator can miss.
+   */
+  const [recomputeNote, setRecomputeNote] = useState<{
+    text: string;
+    error: boolean;
+  } | null>(null);
 
   const queryClient = useQueryClient();
   const syncNow = useSyncSource();
+  const recompute = useRecomputeProposals();
   const updateSource = useUpdateSource();
   const disconnect = useDisconnectSource();
   const bulk = useBulkEntitlements();
@@ -352,6 +365,12 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
           </span>
         </div>
         <div className={styles.accountActions}>
+          {/* Quiet by default (FRG-UI-040): this appears only once a ComicVine
+              path bucket is at/above its warning fraction. The review queue is
+              where an operator spends the budget without thinking about it —
+              accepting rows, searching, restoring — so this is where the
+              "about to run out" fact has to land, and nowhere else. */}
+          <ComicVineBudgetChip />
           <span className={styles.autoLabel}>
             Auto-sync new purchases
             <Toggle
@@ -383,6 +402,39 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
             />{' '}
             {syncing ? 'Syncing…' : 'Sync now'}
           </button>
+          {/* Bulk proposal refresh (FRG-SRC-013): proposals stored before the
+              ComicVine-first universe (or while no key was configured) are
+              non-NULL and so can never re-enter the nightly enrichment pass —
+              this is the operator's way to ask for them again. The default
+              request leaves markers alone (`include_markers` stays API-only):
+              re-asking about every "we looked, there is nothing" row is real
+              budget spend, and no affordance for it fits this bar without
+              putting a second decision in front of the primary action. */}
+          <button
+            type="button"
+            className={styles.textBtn}
+            disabled={recompute.isPending}
+            data-testid="recompute-proposals"
+            title="Re-run matching for items still awaiting review, in budget-polite batches"
+            onClick={() => {
+              setRecomputeNote(null);
+              recompute.mutate(
+                { sourceId: source.id },
+                {
+                  onSuccess: () =>
+                    setRecomputeNote({
+                      text: 'Recompute queued — running in the background.',
+                      error: false,
+                    }),
+                  onError: (err) =>
+                    setRecomputeNote({ text: err.message, error: true }),
+                },
+              );
+            }}
+          >
+            <i className="fa-solid fa-wand-magic-sparkles" aria-hidden />{' '}
+            {recompute.isPending ? 'Queueing…' : 'Recompute proposals'}
+          </button>
           <button
             type="button"
             className={styles.dangerBtn}
@@ -393,6 +445,31 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
           </button>
         </div>
       </div>
+
+      {/* Recompute outcome (FRG-SRC-013) — queued as an info line, a refusal in
+          the screen's error-note idiom, both carrying the server's own words. */}
+      {recomputeNote &&
+        (recomputeNote.error ? (
+          <p
+            className={styles.connectError}
+            role="alert"
+            data-testid="recompute-note"
+          >
+            {recomputeNote.text}
+          </p>
+        ) : (
+          <div
+            className={styles.infoLine}
+            role="status"
+            data-testid="recompute-note"
+          >
+            <i
+              className={`fa-solid fa-circle-info ${styles.infoIcon}`}
+              aria-hidden
+            />
+            <span>{recomputeNote.text}</span>
+          </div>
+        ))}
 
       {source.auto_sync && (
         <div className={styles.infoLine}>

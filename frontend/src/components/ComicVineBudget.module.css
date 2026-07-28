@@ -1,0 +1,123 @@
+/*
+ * ComicVine budget meter (FRG-UI-040). Reads as instrumentation, not alarm:
+ * neutral track, accent fill, warning tint only once a bucket is at its
+ * ceiling. Colors come only from the token layer.
+ */
+
+.meter {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  margin-top: var(--spacing-md);
+}
+
+.heading {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-secondary);
+}
+
+.quiet {
+  margin: 0;
+  max-width: 60ch;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-width: 60ch;
+}
+
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rowHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+  font-size: var(--font-size-sm);
+}
+
+.bucket {
+  color: var(--text-primary);
+  font-family: var(--font-mono, monospace);
+}
+
+.usage {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.track {
+  position: relative;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+  background: var(--surface-menu);
+  border: 1px solid var(--surface-border);
+}
+
+.fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--color-accent);
+  opacity: 0.9;
+}
+
+.track[data-exhausted='true'] .fill {
+  background: var(--color-warning-text);
+}
+
+/* Where the background lane's share ends; the gap to its right is the
+   interactive reserve. */
+.batchMark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--surface-border);
+}
+
+.rowNote {
+  display: flex;
+  gap: var(--spacing-sm);
+  justify-content: space-between;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+}
+
+.resume {
+  white-space: nowrap;
+}
+
+.exhaustedNote {
+  margin: 0;
+  max-width: 60ch;
+  font-size: var(--font-size-sm);
+  color: var(--color-warning-text);
+}
+
+/* The compact review-bar indicator. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px var(--spacing-sm);
+  border-radius: var(--radius-pill);
+  background: var(--color-warning-tint);
+  color: var(--color-warning-text);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+}

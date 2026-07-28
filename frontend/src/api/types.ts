@@ -876,6 +876,52 @@ export interface SystemHealthComponent {
   last_success: string | null;
   last_failure: string | null;
   disabled_until: string | null;
+  /**
+   * Optional structured payload (FRG-API-025). Today only the `comicvine`
+   * component fills it — with its budget meter — and only while a path bucket
+   * has something to report; every other component, and the quiet case, leave
+   * it null/absent. Optional here rather than nullable-required so a fixture
+   * or an older backend that omits it still type-checks.
+   */
+  detail?: ComicVineBudgetDetail | null;
+}
+
+/**
+ * One ComicVine path bucket's hourly budget (FRG-API-025). `used`/`ceiling`
+ * are the whole path's rolling-hour usage; `batch_used`/`batch_ceiling` are the
+ * background lane's share of it (FRG-META-022) and are `null` when the backend
+ * published no lane figures — a meter must then say nothing about lanes rather
+ * than render an invented zero.
+ *
+ * A reported bucket is NOT necessarily a hot one: the backend also reports a
+ * bucket whose background lane has paused, which happens well below the ceiling.
+ * `approaching` is the backend's own answer to "is this one near its ceiling?",
+ * so a surface that should stay quiet until then reads the flag instead of
+ * re-deriving the warning fraction here.
+ *
+ * The two countdowns match the two walls: `resume_seconds` is > 0 only once the
+ * whole path is at its ceiling, `batch_resume_seconds` only while the background
+ * lane is paused.
+ */
+export interface ComicVineBudgetBucket {
+  bucket: string;
+  used: number;
+  ceiling: number;
+  batch_used: number | null;
+  batch_ceiling: number | null;
+  approaching: boolean;
+  resume_seconds: number;
+  batch_resume_seconds: number;
+}
+
+/** The ComicVine component's budget detail (FRG-API-025) — see FRG-UI-040. */
+export interface ComicVineBudgetDetail {
+  /** Reported buckets, hottest first; only buckets worth showing are sent. */
+  buckets: ComicVineBudgetBucket[];
+  /** ComicVine's own 429/ban back-off, distinct from the local budget. */
+  degraded: boolean;
+  /** At least one bucket is at its ceiling and requests are being refused. */
+  exhausted: boolean;
 }
 
 /**

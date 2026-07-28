@@ -135,6 +135,25 @@ class SourceEntitlementRow(Base):
         StrictInteger, nullable=True
     )
     proposed_match_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: When a proposal-computing pass last TOUCHED this row (FRG-SRC-013,
+    #: migration ``0027_entitlement_proposal_attempt``) — stamped whether that
+    #: pass proposed, marked no-plausible-match, deferred on the ComicVine
+    #: budget, or errored. Enrichment walks its pending set
+    #: never-attempted-first (NULL) then oldest-attempt-first, so a failing or
+    #: deferred head delays only its own retry, never the tail's first attempt.
+    #: It orders work; it NEVER gates eligibility (FRG-SRC-010).
+    proposal_attempted_at: Mapped[dt.datetime | None] = mapped_column(
+        StrictDateTime, nullable=True
+    )
+    #: Whether the attempt :attr:`proposal_attempted_at` records ERRORED on the
+    #: ComicVine consultation (FRG-SRC-013). Its own column because the row
+    #: cannot otherwise tell a CV error from a budget deferral — both keep
+    #: ``proposed_match_json`` NULL and both carry a stamp — and only the errored
+    #: one is subject to the re-attempt spacing. ``None`` on a never-attempted
+    #: row (and on one attempted before the column existed).
+    proposal_attempt_error: Mapped[bool | None] = mapped_column(
+        Boolean, nullable=True
+    )
     #: Operator-chosen match target (review workflow; ``None`` until matched).
     matched_series_id: Mapped[int | None] = mapped_column(
         StrictInteger, nullable=True

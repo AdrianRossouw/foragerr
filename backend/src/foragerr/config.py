@@ -569,6 +569,22 @@ class Settings(BaseSettings):
             "10..200 range with a warning if set outside it — never above 200."
         ),
     )
+    comicvine_batch_budget_share: float = Field(
+        default=0.70,
+        description=(
+            "Share of each ComicVine path budget that BACKGROUND (batch) work "
+            "may spend (FRG-META-022). Scheduled refreshes, credit backfills, "
+            "cover caching, source enrichment and bulk recomputes run in the "
+            "batch lane; anything an operator is waiting on (lookup, add, "
+            "review search, connection test) runs in the interactive lane. "
+            "Batch requests are refused once they have used this share of a "
+            "path's hourly budget, so the remainder stays as an interactive "
+            "reserve; interactive requests may use the full budget. Lowering "
+            "this reserves more for interactive use and slows background work; "
+            "raising it does the opposite. Clamped to 0.30..0.95 with a "
+            "warning if set outside it."
+        ),
+    )
     comicvine_refresh_max_skip_days: int = Field(
         default=7,
         description=(
@@ -602,6 +618,26 @@ class Settings(BaseSettings):
             "Comma-separated allowlist of hostnames the cover fetcher may "
             "download images from. Not hardcoded so operators can adjust it "
             "when ComicVine's image CDN changes."
+        ),
+    )
+    comicvine_error_retry_spacing_seconds: int = Field(
+        default=43200,
+        ge=0,
+        description=(
+            "Minimum wait before SCHEDULED source enrichment re-attempts a row "
+            "whose last ComicVine consultation ERRORED (FRG-SRC-013). Without "
+            "it a persistently unanswerable row is re-queried every nightly run "
+            "forever, spending budget that the rest of the backlog needs. Only "
+            "genuine errors are spaced: a row deferred by the budget wall is "
+            "retried at its next turn with no wait, because a window refusal is "
+            "not a failure of the row. Operator-initiated paths (restore, the "
+            "per-row search, the bulk recompute) ignore the spacing entirely — "
+            "the operator asking is itself the retry decision. The default "
+            "43200 (12 h) sits BELOW the daily sync interval so an errored row "
+            "is retried on the next scheduled run, not skipped for one: a "
+            "spacing equal to the interval loses the race with it and turns "
+            "'retry tomorrow' into 'retry every other day'. Set 0 to disable "
+            "spacing."
         ),
     )
     # Per-provider credentials (DogNZB/NZB.su/SABnzbd API keys) live in per-row

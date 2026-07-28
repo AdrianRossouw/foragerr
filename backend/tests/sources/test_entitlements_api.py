@@ -164,7 +164,9 @@ async def test_restore_endpoint_threads_a_comicvine_client_when_one_exists(
 
     fake = _FakeCV()
     monkeypatch.setattr(
-        "foragerr.sources.enrich.build_cv_client", lambda settings: fake
+        # ``**_`` absorbs the lane the operator seam now declares (FRG-META-022):
+        # this test is about the client being threaded and closed, not the lane.
+        "foragerr.sources.enrich.build_cv_client", lambda settings, **_: fake
     )
     assert api_sources._operator_cv_client  # the seam under test
 

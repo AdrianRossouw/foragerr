@@ -21,7 +21,13 @@ from foragerr.metadata.errors import (
     ComicVineUnavailable,
     CoverHostNotAllowed,
 )
-from foragerr.metadata.ratelimit import effective_budget, effective_interval, gate
+from foragerr.metadata.ratelimit import (
+    LANE_BATCH,
+    effective_batch_share,
+    effective_budget,
+    effective_interval,
+    gate,
+)
 
 logger = logging.getLogger("foragerr.metadata.covers")
 
@@ -65,10 +71,15 @@ async def cache_cover(
             f"cover image host {parsed.hostname!r} is not in the configured allowlist"
         )
 
+    # Cover caching is always background work — nobody is blocked on a poster
+    # arriving — so it spends from the batch lane explicitly (FRG-META-022),
+    # never from the interactive reserve an operator's search depends on.
     await gate().acquire(
         effective_interval(settings),
         bucket=COVER_BUDGET_BUCKET,
         budget=effective_budget(settings),
+        lane=LANE_BATCH,
+        batch_share=effective_batch_share(settings),
     )
     async with factory.external() as client:
         try:

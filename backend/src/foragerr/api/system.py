@@ -100,6 +100,17 @@ class SystemHealthComponent(BaseModel):
     (e.g. ``"Indexer: DogNZB"``) the Health screen renders — the domain
     ``ComponentHealth`` already carries both, so this resource surfaces the
     one the frontend was missing rather than re-deriving it.
+
+    ``detail`` (FRG-API-025) is an ADDITIVE, optional structured payload for
+    components that have numbers worth rendering. Today exactly one component
+    fills it: ComicVine carries its budget meter
+    (``{buckets: [{bucket, used, ceiling, batch_used, batch_ceiling,
+    resume_seconds}], degraded, exhausted}``) so Settings and the review screen
+    can render real usage (FRG-UI-040) with no new endpoint. It is ``null``
+    whenever there is nothing to say — including the quiet case where no bucket
+    has crossed the warning fraction — and this surface stays AUTHENTICATED:
+    the unauthenticated root ``GET /health`` probe is untouched and carries no
+    budget numbers. Clients unaware of the field are unaffected.
     """
 
     component: str
@@ -109,6 +120,7 @@ class SystemHealthComponent(BaseModel):
     last_success: dt.datetime | None
     last_failure: dt.datetime | None
     disabled_until: dt.datetime | None
+    detail: dict[str, Any] | None = None
 
     @classmethod
     def from_domain(cls, component: ComponentHealth) -> "SystemHealthComponent":
@@ -120,6 +132,7 @@ class SystemHealthComponent(BaseModel):
             last_success=component.last_success,
             last_failure=component.last_failure,
             disabled_until=component.disabled_until,
+            detail=component.detail,
         )
 
 

@@ -549,11 +549,19 @@ def _comicvine_error_to_api_error(exc: ComicVineError) -> ApiError:
         # (FRG-META-016) — no key material, only the bucket + a duration. Mapped
         # to the same 503 the lookup family uses; the frontend surfaces the
         # message through its existing lookup-error path.
+        #
+        # ``field`` is the STRUCTURAL discriminator (FRG-UI-040): the outcome
+        # note has to tell a budget deferral apart from a generic lookup
+        # failure to show this resume time instead of "try again in a moment",
+        # and this API classifies on the errors[] field channel — never on
+        # message prose (the same rule ``comicvine_api_key`` follows above).
+        # It names a condition, not a form input, so no form field claims it.
         minutes = max(1, round(exc.retry_after_seconds / 60))
         return ApiError(
             _COMICVINE_LOOKUP_ERROR_STATUS,
             "ComicVine hourly request budget exhausted for this lookup; "
             f"retries in about {minutes} minute(s).",
+            field="comicvine_budget",
         )
     return ApiError(
         _COMICVINE_LOOKUP_ERROR_STATUS, f"comicvine lookup failed: {exc}"
@@ -727,7 +735,10 @@ async def lookup_series(
     settings = request.app.state.settings
     factory = comicvine_factory(settings)
     try:
-        async with ComicVineClient(settings, factory) as cv:
+        # Interactive lane (FRG-META-022): an operator is waiting on this
+        # search, so it draws on the full path budget rather than the batch
+        # share background work is capped at.
+        async with ComicVineClient(settings, factory, lane="interactive") as cv:
             result = await cv.search_series(term, include_ignored=includeIgnored)
     except ComicVineError as exc:
         raise _comicvine_error_to_api_error(exc) from exc
@@ -790,7 +801,9 @@ async def suggest_series(term: str, request: Request) -> SuggestResponse:
     settings = request.app.state.settings
     factory = comicvine_factory(settings)
     try:
-        async with ComicVineClient(settings, factory) as cv:
+        # Interactive lane (FRG-META-022): as-you-type suggestion is the most
+        # operator-facing CV traffic there is.
+        async with ComicVineClient(settings, factory, lane="interactive") as cv:
             result = await cv.suggest_series(term)
     except ComicVineError as exc:
         raise _comicvine_error_to_api_error(exc) from exc

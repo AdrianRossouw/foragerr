@@ -16,7 +16,7 @@ import {
   useRootFolders,
   useSuggest,
 } from '../../api/hooks';
-import { isComicVineAuthError } from '../../api/fetcher';
+import { comicVineBudgetMessage, isComicVineAuthError } from '../../api/fetcher';
 import { candidateCoverUrl } from '../../api/urls';
 import type {
   AddSeriesNavigationState,
@@ -67,7 +67,8 @@ export function stripHtml(raw: string): string {
 /**
  * Classify the lookup outcome into the single note that renders (FRG-UI-005):
  * exactly one outcome state at a time, in precedence order — credential error
- * (structural, via the errors[] field discriminator) → generic error →
+ * (structural, via the errors[] field discriminator) → budget deferral (the
+ * backend's typed message with its resume time, FRG-UI-040) → generic error →
  * degraded walk that returned nothing (error styling, retry guidance) →
  * capped result (narrow the term; candidates still render) → incomplete
  * result (candidates still render) → complete-and-empty → candidates only.
@@ -85,12 +86,18 @@ export function lookupOutcomeNote(
   term: string,
 ): { tone: 'error' | 'status' | 'plain'; text: string } | null {
   if (isError) {
-    return {
-      tone: 'error',
-      text: isComicVineAuthError(error)
-        ? 'ComicVine API key missing or invalid — check Settings.'
-        : 'ComicVine lookup failed. Try again in a moment.',
-    };
+    if (isComicVineAuthError(error)) {
+      return {
+        tone: 'error',
+        text: 'ComicVine API key missing or invalid — check Settings.',
+      };
+    }
+    // A budget deferral knows WHEN it clears (FRG-UI-040); pass the backend's
+    // typed message through verbatim rather than flattening it into the
+    // generic try-again string, which would hide the one useful fact.
+    const budget = comicVineBudgetMessage(error);
+    if (budget) return { tone: 'error', text: budget };
+    return { tone: 'error', text: 'ComicVine lookup failed. Try again in a moment.' };
   }
   if (!data) return null;
   if (!data.complete && data.records.length === 0) {

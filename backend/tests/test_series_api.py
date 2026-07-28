@@ -607,8 +607,13 @@ def test_lookup_budget_exhausted_surfaces_honest_resume_message(client, monkeypa
 
     response = client.get("/api/v1/series/lookup", params={"term": "Saga"})
     assert response.status_code == 503
-    message = response.json()["message"].lower()
+    body = response.json()
+    message = body["message"].lower()
     assert "budget" in message and "retries in about 10 minute" in message
+    # The structural discriminator the outcome note classifies on (FRG-UI-040):
+    # a budget deferral is told apart from a generic lookup failure by the
+    # errors[] field, never by sniffing this prose.
+    assert [e["field"] for e in body["errors"]] == ["comicvine_budget"]
 
 
 @pytest.mark.req("FRG-API-003")
