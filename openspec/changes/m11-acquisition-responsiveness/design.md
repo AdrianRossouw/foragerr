@@ -105,6 +105,27 @@ delta (recorded in the proposal).
   first ENABLED indexer (count transitions 0→1); re-creates on a
   populated deployment don't fire.
 
+## Deferred follow-ups (recorded at the simplify pass, 2026-07-28)
+
+1. Straggler rechase: keep parking, reconsider `_rechase_stragglers`
+   (speculative; forces tests to reset a module global) — either drop
+   or move the set onto an injectable object.
+2. Collapse the two overlapping cancelled-unwind guards
+   (`_being_cancelled` vs the `task.result()` wrapper) to one — the
+   result-wrapper is the more general.
+3. `iter_archive_files` grows an any-extension/first-only mode so
+   `_holds_any_file` can go.
+4. `search_budget_for_path` + exports: inline at the one call site,
+   trim the package surface.
+5. `_had_enabled_indexer`: guard the create-path read behind
+   body.enabled and restate its comment as the upgrade-suppression it
+   is (the marker owns concurrency).
+6. Health component parallel-structure watch: extract a shared builder
+   if a third aggregate component arrives; align `_stamp` usage.
+7. Synthetic-fixture enforcement belongs in the four shared support
+   modules (conftest, tracking_support, flows_support,
+   search_ops/support) — routed to the corpus-synthesis task.
+
 ## Migration Plan
 
 Migration 0028: two additive nullable/int-default columns on
