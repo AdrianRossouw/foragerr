@@ -9,6 +9,15 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.12.2] — 2026-07-28
+
+Patch, live-dogfood fixes: Library Import match posters render again
+(they hotlinked ComicVine directly and the same-origin CSP blocked
+them; they now ride the v0.9.23 cover proxy like the Add screen —
+`FRG-META-021`), and the Tasks screen shows one-shot sentinel
+schedules (creators backfill) as "One-time" instead of
+"Every 100 years" (`FRG-UI-016`).
+
 ## [v0.12.1] — 2026-07-28
 
 Patch: the review row's ComicVine search now seeds with the server's
