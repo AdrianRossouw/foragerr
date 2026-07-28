@@ -61,6 +61,7 @@ When live tooling becomes available, anomaly review is introduced in its own cha
 |---|---|---|
 | pytest | `>=8.2` | Test runner for the backend test suite (`backend/tests/`), including the `req(id)` marker used for requirement traceability (FRG-PROC-004) |
 | pytest-asyncio | `>=0.23` | Enables `async def` tests and fixtures for the FastAPI/SQLAlchemy-async codebase (`asyncio_mode = "auto"` in `pyproject.toml`) |
+| pytest-xdist | `>=3.8.0` | Parallel test execution (`-n auto` default via `addopts`); cuts the full backend suite from ~7:40 to ~1:15, keeping the always-run-the-full-suite merge-gate discipline (FRG-PROC-004/007) cheap |
 
 ## Runtime SOUP items (frontend)
 
