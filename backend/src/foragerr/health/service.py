@@ -94,6 +94,11 @@ class ComponentHealth:
     last_success: dt.datetime | None = None
     last_failure: dt.datetime | None = None
     disabled_until: dt.datetime | None = None
+    #: Optional structured payload for components that have numbers worth
+    #: rendering (FRG-API-025): today only ComicVine, carrying the budget
+    #: meter's per-bucket counts. Additive — a component without one is
+    #: unchanged, and no consumer is required to read it.
+    detail: dict[str, Any] | None = None
 
     @property
     def ok(self) -> bool:
@@ -247,16 +252,49 @@ class HealthService:
     # -- components ----------------------------------------------------------
 
     def _comicvine_component(self) -> ComponentHealth:
+        """ComicVine health across four INDEPENDENT dimensions (FRG-META-019).
+
+        Precedence, highest first — each dimension means something different
+        and the most consequential one wins the single state/message slot:
+
+        1. **auth** (error) — a rejected key means NOTHING succeeds.
+        2. **degraded** (429/ban back-off) — ComicVine itself is pushing back.
+        3. **budget exhausted** — a local refusal is already happening.
+        4. **approaching the ceiling** (FRG-META-016, m11-cv-budget) — nothing
+           is refused yet, but the batch lane is about to pause; a warning
+           BEFORE the wall, derived from the same >=80% data the payload has
+           always computed and, until now, only rendered at 100%.
+        5. ok.
+
+        Every variant carries the structured budget ``detail`` (FRG-API-025)
+        when there is anything to render, so the meter shows real numbers even
+        while auth or back-off owns the message. The whole thing is stateless —
+        it renders ``comicvine_health()`` — so the approaching warning clears by
+        itself as soon as the rolling window drops the bucket back under the
+        fraction; there is nothing to reset.
+        """
         health = comicvine_health()
-        # Auth failure outranks the politeness dimensions (FRG-META-019): a
-        # rejected key means NO request succeeds, worker context included —
-        # Health must not report OK while refreshes fail 401 (M9 finding F1).
-        if health.get("auth_failed"):
+        detail = _budget_detail(health)
+
+        def component(
+            state: str, message: str | None = None, remediation: str | None = None
+        ) -> ComponentHealth:
             return ComponentHealth(
                 component="comicvine",
                 kind="comicvine",
                 label="ComicVine",
-                state=_STATE_ERROR,
+                state=state,
+                message=message,
+                remediation=remediation,
+                detail=detail,
+            )
+
+        # Auth failure outranks the politeness dimensions (FRG-META-019): a
+        # rejected key means NO request succeeds, worker context included —
+        # Health must not report OK while refreshes fail 401 (M9 finding F1).
+        if health.get("auth_failed"):
+            return component(
+                _STATE_ERROR,
                 message=(
                     "ComicVine rejected the configured API key "
                     "(authentication failed)"
@@ -269,11 +307,8 @@ class HealthService:
             )
         if health.get("degraded"):
             remaining = float(health.get("cooldown_remaining_seconds", 0.0) or 0.0)
-            return ComponentHealth(
-                component="comicvine",
-                kind="comicvine",
-                label="ComicVine",
-                state=_STATE_DEGRADED,
+            return component(
+                _STATE_DEGRADED,
                 message=(
                     f"ComicVine is rate-limited/backed off "
                     f"(~{remaining:.0f}s cool-down remaining)"
@@ -299,11 +334,8 @@ class HealthService:
                 (float(info.get("resumes_in_seconds", 0.0)) for info in exhausted.values()),
                 default=0.0,
             )
-            return ComponentHealth(
-                component="comicvine",
-                kind="comicvine",
-                label="ComicVine",
-                state=_STATE_DEGRADED,
+            return component(
+                _STATE_DEGRADED,
                 message=(
                     f"ComicVine hourly request budget exhausted for "
                     f"path(s): {names} (~{resume:.0f}s until requests resume)"
@@ -314,9 +346,32 @@ class HealthService:
                     "ComicVine's documented 200/hour/path limit."
                 ),
             )
-        return ComponentHealth(
-            component="comicvine", kind="comicvine", label="ComicVine", state=_STATE_OK
-        )
+        # Approaching the ceiling (MODIFIED FRG-META-016): the gate publishes a
+        # bucket once it crosses the warning fraction, so a non-empty payload
+        # here — with nothing exhausted, per the branch above — IS the
+        # approaching state. Name the hottest bucket and the lane that pauses
+        # first, so the operator knows what will stop and what is protected
+        # (FRG-META-022's reserve) before anything is refused.
+        approaching = _hottest_bucket(health.get("path_budgets") or {})
+        if approaching is not None:
+            bucket, info = approaching
+            used = int(info.get("used", 0))
+            ceiling = int(info.get("ceiling", 0))
+            return component(
+                _STATE_DEGRADED,
+                message=(
+                    f"ComicVine hourly request budget is approaching its "
+                    f"ceiling on path '{bucket}': {used}/{ceiling} — "
+                    f"{_lane_note(info)}"
+                ),
+                remediation=(
+                    "Nothing is refused yet. Background (batch) ComicVine work "
+                    "pauses first so interactive searches keep working; usage "
+                    "falls automatically as the rolling hour clears. Settings → "
+                    "General shows the full meter."
+                ),
+            )
+        return component(_STATE_OK)
 
     async def _provider_components(self) -> list[ComponentHealth]:
         # One read of the back-off table for the tracked (failed) providers, then
@@ -840,6 +895,102 @@ class HealthService:
             return shutil.disk_usage(path).free
         except OSError:
             return None
+
+
+def _int(value: Any) -> int:
+    """A count from the gate's ``dict[str, object]`` payload, 0 when absent."""
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0
+
+
+def _optional_int(value: Any) -> int | None:
+    """A count that may legitimately be absent (a lane figure the gate did not
+    publish for this bucket) — ``None`` rather than a misleading 0."""
+    if value is None:
+        return None
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
+def _hottest_bucket(
+    budgets: dict[str, dict[str, Any]],
+) -> tuple[str, dict[str, Any]] | None:
+    """The bucket closest to its ceiling — the one a warning should name.
+
+    ``budgets`` already contains only buckets at or above the warning fraction
+    (the gate omits the quiet ones), so this is a pick, not a filter. Ties break
+    on the bucket name for a stable message.
+    """
+    if not budgets:
+        return None
+    return min(
+        budgets.items(),
+        key=lambda item: (-_int(item[1].get("used")), item[0]),
+    )
+
+
+def _lane_note(info: dict[str, Any]) -> str:
+    """Which lane (FRG-META-022) is paused, or pauses first, for one bucket.
+
+    The operator's real question at 80% is "what stops, and what still works?".
+    Both answers are one lane apart: batch (background) spend stops at its
+    share, interactive spend keeps the remainder. A gate that published no lane
+    figures still gets the qualitative half of that answer.
+    """
+    batch_used = _optional_int(info.get("batch_used"))
+    batch_ceiling = _optional_int(info.get("batch_ceiling"))
+    if batch_ceiling is None or batch_used is None:
+        return "background (batch) requests pause before interactive ones"
+    if batch_used >= batch_ceiling:
+        return (
+            f"background (batch) requests are paused "
+            f"({batch_used}/{batch_ceiling} of their share); the interactive "
+            f"reserve remains"
+        )
+    return (
+        f"background (batch) requests pause first, at {batch_ceiling} of "
+        f"{_int(info.get('ceiling'))} (now {batch_used})"
+    )
+
+
+def _budget_detail(health: dict[str, Any]) -> dict[str, Any] | None:
+    """The structured ComicVine budget payload for the health surface
+    (FRG-API-025) — the numbers the gate ALREADY computes, shaped for the UI
+    meter (FRG-UI-040) and nothing more.
+
+    ``{"buckets": [{bucket, used, ceiling, batch_used, batch_ceiling,
+    resume_seconds}], "degraded": bool, "exhausted": bool}``, hottest bucket
+    first. ``None`` in the quiet case (no bucket has crossed the warning
+    fraction) so the common payload is byte-identical to before this change and
+    the UI has one unambiguous "nothing to say" signal. Lane figures are
+    optional per bucket: a gate that did not publish them yields ``null``, never
+    a fabricated zero.
+    """
+    budgets = health.get("path_budgets") or {}
+    if not budgets:
+        return None
+    buckets = [
+        {
+            "bucket": bucket,
+            "used": _int(info.get("used")),
+            "ceiling": _int(info.get("ceiling")),
+            "batch_used": _optional_int(info.get("batch_used")),
+            "batch_ceiling": _optional_int(info.get("batch_ceiling")),
+            "resume_seconds": float(info.get("resumes_in_seconds") or 0.0),
+        }
+        for bucket, info in sorted(
+            budgets.items(), key=lambda item: (-_int(item[1].get("used")), item[0])
+        )
+    ]
+    return {
+        "buckets": buckets,
+        "degraded": bool(health.get("degraded")),
+        "exhausted": bool(health.get("budget_exhausted")),
+    }
 
 
 def _gib(nbytes: int) -> str:

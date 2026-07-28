@@ -370,7 +370,8 @@ async def _propose_matches(
     floor = settings.library_import_similarity_floor
     factory = factory or comicvine_factory(settings)
     auth_failed = False
-    async with ComicVineClient(settings, factory) as cv:
+    # Library-import grouping is operator-driven (FRG-META-022: interactive).
+    async with ComicVineClient(settings, factory, lane="interactive") as cv:
         for draft in drafts:
             if auth_failed:
                 draft.message = _AUTH_FAILED_MESSAGE

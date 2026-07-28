@@ -14,7 +14,11 @@ import {
   pageOf,
 } from '../../test/mockData';
 import { useUiStore } from '../../store/uiStore';
-import { ApiRequestError, isComicVineAuthError } from '../../api/fetcher';
+import {
+  ApiRequestError,
+  comicVineBudgetMessage,
+  isComicVineAuthError,
+} from '../../api/fetcher';
 import { SUGGEST_DEBOUNCE_MS } from '../../api/hooks';
 import type {
   LookupCandidate,
@@ -699,6 +703,52 @@ describe('FRG-UI-005: lookup outcome states', () => {
       ).toBeInTheDocument(),
     );
     expect(screen.queryByText(/check Settings/)).not.toBeInTheDocument();
+  });
+
+  it('FRG-UI-040 — a budget-refused lookup shows the backend resume time, not the generic string', async () => {
+    // The backend never sent the request and already knows when capacity
+    // returns; flattening that into "try again in a moment" would throw away
+    // the only actionable fact and invite a blind retry against the same wall.
+    const budgetError = new ApiRequestError(
+      503,
+      {
+        message:
+          'ComicVine hourly request budget exhausted for this lookup; retries in about 12 minute(s).',
+        errors: [
+          {
+            field: 'comicvine_budget',
+            message:
+              'ComicVine hourly request budget exhausted for this lookup; retries in about 12 minute(s).',
+          },
+        ],
+      },
+      '/api/v1/series/lookup?term=saga',
+    );
+    renderAdd({
+      lookup: () => {
+        throw budgetError;
+      },
+    });
+    await searchFor('saga');
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('retries in about 12 minute(s)');
+    expect(
+      screen.queryByText('ComicVine lookup failed. Try again in a moment.'),
+    ).not.toBeInTheDocument();
+    // Classification is structural: the same prose WITHOUT the field
+    // discriminator is just a generic failure.
+    expect(
+      comicVineBudgetMessage(
+        new ApiRequestError(
+          503,
+          { message: budgetError.message, errors: [] },
+          '/api/v1/series/lookup?term=saga',
+        ),
+      ),
+    ).toBeNull();
+    expect(comicVineBudgetMessage(cvAuthError())).toBeNull();
+    expect(comicVineBudgetMessage(new Error(budgetError.message))).toBeNull();
   });
 
   it('FRG-UI-005 — a degraded walk with zero records renders as a lookup failure, not a footnote', async () => {

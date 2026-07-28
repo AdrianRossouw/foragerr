@@ -6,6 +6,7 @@ import type {
   SchemaField,
 } from '../../components/schemaForm/schemaTypes';
 import { mapApiError } from '../../components/settings/apiErrors';
+import { ComicVineBudgetMeter } from '../../components/ComicVineBudget';
 import type { ComicVineTestResult } from '../../api/types';
 import {
   useComicVineConfig,
@@ -237,6 +238,13 @@ export function General() {
                 {testResult.message}
               </div>
             )}
+
+            {/* The budget meter belongs beside the credential it describes
+                (FRG-UI-040): this is the one screen an operator opens to ask
+                "what is my ComicVine key doing?", and a key's hourly ceiling is
+                as much a property of it as its validity. It reads the polled
+                system-health query (FRG-API-025) — no extra request. */}
+            <ComicVineBudgetMeter />
           </section>
         )}
 

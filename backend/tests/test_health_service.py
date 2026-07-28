@@ -3,9 +3,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import os
 import time
+from collections import deque
 from types import SimpleNamespace
 
 import pytest
@@ -108,6 +110,215 @@ async def test_comicvine_budget_exhaustion_surfaces_as_degraded(db):
     assert "budget" in message and "issue" in message
     # And it shows up in the actionable warnings list.
     assert "comicvine" in {w.source for w in await service.warnings()}
+
+
+# --- ComicVine budget: approaching the ceiling + the meter's numbers ---------
+# (MODIFIED FRG-META-016 / FRG-API-025, m11-cv-budget)
+
+
+def _cv_health(**overrides):
+    """A ``comicvine_health()``-shaped payload with everything quiet by default."""
+    payload = {
+        "degraded": False,
+        "cooldown_remaining_seconds": 0.0,
+        "path_budgets": {},
+        "budget_exhausted": False,
+        "auth_failed": False,
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _bucket(used: int, ceiling: int = 10, **overrides):
+    info = {
+        "used": used,
+        "ceiling": ceiling,
+        "batch_used": min(used, 7),
+        "batch_ceiling": 7,
+        "resumes_in_seconds": 0.0,
+    }
+    info.update(overrides)
+    return info
+
+
+@pytest.mark.req("FRG-META-016")
+async def test_comicvine_approaching_ceiling_warns_before_the_wall_and_clears(db):
+    """Crossing the warning fraction surfaces a DISTINCT approaching-limit state
+    — naming the bucket, its usage against the ceiling, and the lane that pauses
+    first — while requests are still being admitted, and it clears itself when
+    the window rolls (the component is a pure render of the gate: no state to
+    reset, no operator action)."""
+    gate = ratelimit.gate()
+    budget = 10
+    # Interactive admissions climb past the batch share (0.7 -> 7) without being
+    # refused, so the bucket reaches 80% with NOTHING exhausted (FRG-META-022).
+    for _ in range(8):
+        await gate.acquire(
+            0.0, bucket="issue", budget=budget, lane="interactive", batch_share=0.7
+        )
+
+    service = _service(db)
+    comp = _by_component(await service.component_view())["comicvine"]
+    assert comp.state == "degraded"
+    message = comp.message or ""
+    assert "approaching" in message.lower()
+    assert "issue" in message and "8/10" in message  # bucket + usage/ceiling
+    assert "batch" in message.lower()  # the lane that pauses first is named
+    assert "exhausted" not in message.lower()  # nothing has been refused
+    assert "comicvine" in {w.source for w in await service.warnings()}
+
+    # The window rolls: every admission ages out and the warning goes away.
+    old = asyncio.get_running_loop().time() - ratelimit.BUDGET_WINDOW_SECONDS - 1.0
+    gate._ledgers["issue"] = deque([old] * 8)
+    comp = _by_component(await service.component_view())["comicvine"]
+    assert comp.state == "ok"
+    assert comp.detail is None
+    assert "comicvine" not in {w.source for w in await service.warnings()}
+
+
+@pytest.mark.req("FRG-META-016")
+@pytest.mark.req("FRG-META-022")
+async def test_approaching_warning_names_the_paused_batch_lane(db):
+    """When the batch share is spent but the interactive reserve remains, the
+    warning says exactly that — the operator learns what stopped (background
+    work) and what still works (their own searches), not just a number."""
+    gate = ratelimit.gate()
+    budget = 10
+    for _ in range(7):  # the whole batch share (floor(10 * 0.7))
+        await gate.acquire(
+            0.0, bucket="issue", budget=budget, lane="batch", batch_share=0.7
+        )
+    await gate.acquire(  # ... and one admission from the reserve
+        0.0, bucket="issue", budget=budget, lane="interactive", batch_share=0.7
+    )
+
+    comp = _by_component(await _service(db).component_view())["comicvine"]
+    message = (comp.message or "").lower()
+    assert comp.state == "degraded"
+    assert "paused" in message and "batch" in message
+    assert "reserve" in message
+
+
+@pytest.mark.req("FRG-META-016")
+@pytest.mark.req("FRG-META-019")
+async def test_comicvine_state_precedence_is_pinned(db, monkeypatch):
+    """The four ComicVine dimensions are independent, so their PRECEDENCE into
+    the single state/message slot is a decision worth pinning: auth (nothing
+    works) > 429 back-off (ComicVine is pushing back) > budget exhausted
+    (refusals are happening) > approaching (they are about to) > ok. Each case
+    below carries the signals of every LOWER-priority one too, so a regression
+    that reorders them fails here."""
+    approaching = {"issue": _bucket(8)}
+    exhausted = {"issue": _bucket(10, resumes_in_seconds=120.0)}
+    cases = [
+        (
+            _cv_health(
+                auth_failed=True,
+                degraded=True,
+                cooldown_remaining_seconds=30.0,
+                budget_exhausted=True,
+                path_budgets=exhausted,
+            ),
+            "error",
+            "key",
+        ),
+        (
+            _cv_health(
+                degraded=True,
+                cooldown_remaining_seconds=30.0,
+                budget_exhausted=True,
+                path_budgets=exhausted,
+            ),
+            "degraded",
+            "rate-limited",
+        ),
+        (
+            _cv_health(budget_exhausted=True, path_budgets=exhausted),
+            "degraded",
+            "exhausted",
+        ),
+        (_cv_health(path_budgets=approaching), "degraded", "approaching"),
+        (_cv_health(), "ok", None),
+    ]
+    service = _service(db)
+    for payload, expected_state, expected_word in cases:
+        monkeypatch.setattr(
+            health_service, "comicvine_health", lambda payload=payload: payload
+        )
+        comp = _by_component(await service.component_view())["comicvine"]
+        assert comp.state == expected_state, payload
+        if expected_word is None:
+            assert comp.message is None
+        else:
+            assert expected_word in (comp.message or "").lower(), payload
+
+
+@pytest.mark.req("FRG-API-025")
+async def test_comicvine_detail_carries_the_meter_numbers_hottest_first(
+    db, monkeypatch
+):
+    """The component carries the structured budget numbers the meter renders
+    (FRG-UI-040) — every reported bucket, hottest first, with the lane split and
+    resume time — and the flags, whatever state won the message slot."""
+    monkeypatch.setattr(
+        health_service,
+        "comicvine_health",
+        lambda: _cv_health(
+            budget_exhausted=True,
+            path_budgets={
+                "volumes": _bucket(9, resumes_in_seconds=0.0),
+                "issue": _bucket(10, resumes_in_seconds=240.5),
+            },
+        ),
+    )
+    comp = _by_component(await _service(db).component_view())["comicvine"]
+
+    detail = comp.detail
+    assert detail is not None
+    assert detail["exhausted"] is True and detail["degraded"] is False
+    assert [b["bucket"] for b in detail["buckets"]] == ["issue", "volumes"]
+    assert detail["buckets"][0] == {
+        "bucket": "issue",
+        "used": 10,
+        "ceiling": 10,
+        "batch_used": 7,
+        "batch_ceiling": 7,
+        "resume_seconds": 240.5,
+    }
+
+
+@pytest.mark.req("FRG-API-025")
+async def test_comicvine_detail_is_absent_while_the_budget_is_quiet(db, monkeypatch):
+    """Below the warning fraction the gate reports no buckets, so the detail is
+    omitted entirely: the common payload is unchanged by this feature and the UI
+    has ONE unambiguous "nothing to say" signal rather than an empty meter."""
+    monkeypatch.setattr(health_service, "comicvine_health", lambda: _cv_health())
+    comp = _by_component(await _service(db).component_view())["comicvine"]
+    assert comp.state == "ok"
+    assert comp.detail is None
+
+
+@pytest.mark.req("FRG-API-025")
+async def test_comicvine_detail_never_fabricates_missing_lane_figures(
+    db, monkeypatch
+):
+    """A bucket published without lane figures yields nulls, not zeros: a meter
+    that invents "0 of 0 batch used" would be worse than one that says nothing.
+    The approaching message degrades to its qualitative form for the same
+    reason."""
+    monkeypatch.setattr(
+        health_service,
+        "comicvine_health",
+        lambda: _cv_health(
+            path_budgets={
+                "issue": {"used": 8, "ceiling": 10, "resumes_in_seconds": 0.0}
+            }
+        ),
+    )
+    comp = _by_component(await _service(db).component_view())["comicvine"]
+    bucket = (comp.detail or {})["buckets"][0]
+    assert bucket["batch_used"] is None and bucket["batch_ceiling"] is None
+    assert "batch" in (comp.message or "").lower()
 
 
 @pytest.mark.req("FRG-NFR-011")

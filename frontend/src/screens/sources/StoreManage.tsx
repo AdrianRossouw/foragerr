@@ -4,6 +4,7 @@ import { observeElementRect, useVirtualizer } from '@tanstack/react-virtual';
 import { Menu } from '../../components/Menu';
 import { SegmentedControl } from '../../components/SegmentedControl';
 import { Toggle } from '../../components/Toggle';
+import { ComicVineBudgetChip } from '../../components/ComicVineBudget';
 import { EntitlementRow } from './EntitlementRow';
 import { EntitlementGroupHeader } from './EntitlementGroupHeader';
 import { PublisherRules } from './PublisherRules';
@@ -352,6 +353,12 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
           </span>
         </div>
         <div className={styles.accountActions}>
+          {/* Quiet by default (FRG-UI-040): this appears only once a ComicVine
+              path bucket is at/above its warning fraction. The review queue is
+              where an operator spends the budget without thinking about it —
+              accepting rows, searching, restoring — so this is where the
+              "about to run out" fact has to land, and nowhere else. */}
+          <ComicVineBudgetChip />
           <span className={styles.autoLabel}>
             Auto-sync new purchases
             <Toggle

@@ -379,7 +379,10 @@ async def comicvine_test(request: Request) -> ComicVineTestResponse:
     settings = request.app.state.settings
     factory = comicvine_factory(settings)
     try:
-        async with ComicVineClient(settings, factory) as cv:
+        # Interactive lane (FRG-META-022): the operator pressed Test and is
+        # watching for the answer; a paused batch lane must not make the key
+        # look broken.
+        async with ComicVineClient(settings, factory, lane="interactive") as cv:
             result = await cv.suggest_series(_COMICVINE_TEST_TERM)
     except ComicVineAuthError as exc:
         # Static message + static log line — never interpolate the key or the

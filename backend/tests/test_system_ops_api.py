@@ -180,7 +180,11 @@ async def test_system_health_every_component_represented_with_frontend_shape(
             "last_success",
             "last_failure",
             "disabled_until",
+            "detail",
         }
+        # `detail` (FRG-API-025) is additive and OPTIONAL: on a quiet system
+        # every component omits it, so the payload is unchanged in practice.
+        assert c["detail"] is None
         # label is the human-readable name; component stays the stable
         # machine id — the two must not collapse into the same string, or
         # the UI would still be showing the raw id to the user.
@@ -193,6 +197,50 @@ async def test_system_health_every_component_represented_with_frontend_shape(
 
     database_comp = next(c for c in components if c["component"] == "database")
     assert database_comp["label"] == "Database"
+
+
+@pytest.mark.req("FRG-API-025")
+async def test_system_health_carries_budget_detail_but_root_probe_never_does(
+    tmp_path,
+):
+    """The meter's numbers (FRG-UI-040) ride the EXISTING authenticated health
+    surface as an additive component detail — no new endpoint — while the
+    unauthenticated root probe stays exactly as slim as FRG-SEC-008 left it: a
+    passer-by learns nothing about how the operator spends their key."""
+    from foragerr.metadata import ratelimit
+
+    settings = _settings(tmp_path)
+    async with running_app(settings) as (_app, client):
+        # Spend a path bucket past its warning fraction on the process-global
+        # gate the health surface reads (interactive, so nothing is refused).
+        gate = ratelimit.gate()
+        for _ in range(8):
+            await gate.acquire(
+                0.0, bucket="issue", budget=10, lane="interactive", batch_share=0.7
+            )
+
+        response = await client.get("/api/v1/system/health")
+        root = await client.get("/health")
+
+    assert response.status_code == 200
+    comicvine = next(
+        c for c in response.json() if c["component"] == "comicvine"
+    )
+    detail = comicvine["detail"]
+    assert detail["exhausted"] is False
+    bucket = detail["buckets"][0]
+    assert bucket["bucket"] == "issue"
+    assert bucket["used"] == 8 and bucket["ceiling"] == 10
+    assert bucket["batch_ceiling"] == 7  # the lane split the meter renders
+    assert "resume_seconds" in bucket
+    # The existing fields are untouched beside it (additive, FRG-API-025).
+    assert comicvine["state"] == "degraded" and comicvine["message"]
+
+    # The unauthenticated probe: no counts, no bucket names, no ceilings.
+    assert root.status_code == 200
+    assert root.json() == {"status": "up"}
+    for leak in ("issue", "ceiling", "used", "budget", "detail"):
+        assert leak not in root.text
 
 
 # --- GET /api/v1/system/task + POST force-run (FRG-API-014 / FRG-DB-009) ---

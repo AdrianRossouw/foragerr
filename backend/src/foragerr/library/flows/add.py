@@ -109,8 +109,9 @@ async def add_series(
     factory = factory or comicvine_factory(settings)
 
     # --- ComicVine existence check (network; outside any write lock) --------
+    # The operator is waiting on this add (FRG-META-022: interactive lane).
     try:
-        async with ComicVineClient(settings, factory) as cv:
+        async with ComicVineClient(settings, factory, lane="interactive") as cv:
             record: SeriesRecord = await cv.get_volume(cv_volume_id)
     except ComicVineAuthError as exc:
         # Credential failure gets the ONE shared actionable wording every
