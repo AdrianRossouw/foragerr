@@ -35,7 +35,9 @@ too — they need credentials, so they are never seeded automatically.
 
 ## Configuring a download client
 
-Each client is a provider row: implementation, JSON settings, enabled flag, priority,
+Each client is a provider row: implementation, JSON settings, enabled flag, priority
+(a numeric field on the form, 1 highest – 50 lowest, default 25 — lower wins when
+several clients could take a grab),
 and a "remove completed downloads" flag. `GET /api/v1/downloadclient/schema` and
 `POST /api/v1/downloadclient/test` mirror the indexer provider shape (settings form
 metadata, live connectivity test). When a release is grabbed, foragerr routes it to
