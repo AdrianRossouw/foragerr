@@ -582,8 +582,15 @@ async def test_credit_phase_defers_on_budget_then_resumes_next_run(
     ]
     fake = FakeCV().volume(1).issues(1, issues_list)  # no stamp -> always a walk
     # The 'issue' credit-detail path clamps to the floor of 10; the 15 credit
-    # fetches this run wants exceed it, so the phase defers after 10.
-    budgeted = flows_settings(config_dir, comicvine_hourly_path_budget=10)
+    # fetches this run wants exceed it, so the phase defers at the batch-lane
+    # ceiling (share pinned to the 0.95 max -> floor(10*0.95)=9). This test is
+    # about the defer-and-resume shape, not the lane split (test_lanes.py owns
+    # that); the refresh is a batch-lane consumer (FRG-META-022).
+    budgeted = flows_settings(
+        config_dir,
+        comicvine_hourly_path_budget=10,
+        comicvine_batch_budget_share=0.95,
+    )
 
     ratelimit.reset_gate()
     summary = await refresh_series(
@@ -592,7 +599,8 @@ async def test_credit_phase_defers_on_budget_then_resumes_next_run(
     )
     # Refresh succeeded (a complete walk) despite the credit deferral.
     assert "partial=False" in summary
-    assert len(await _stamped_cv_ids(db, series_id)) == 10  # exactly the budget
+    # Exactly the batch-lane ceiling: floor(10 * 0.95) = 9.
+    assert len(await _stamped_cv_ids(db, series_id)) == 9
 
     # A later run, once the rolling hour has cleared, backfills the remainder.
     ratelimit.reset_gate()

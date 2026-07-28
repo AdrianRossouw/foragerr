@@ -50,7 +50,14 @@ from foragerr.metadata.models import (
     SuggestResult,
     VolumeStub,
 )
-from foragerr.metadata.ratelimit import effective_budget, effective_interval, gate
+from foragerr.metadata.ratelimit import (
+    LANE_BATCH,
+    effective_batch_share,
+    effective_budget,
+    effective_interval,
+    gate,
+    normalize_lane,
+)
 from foragerr.metadata.search import plausibility
 
 logger = logging.getLogger("foragerr.metadata.comicvine")
@@ -178,6 +185,16 @@ class ComicVineClient:
 
     Construct with the loaded settings and the shared HTTP factory. Usable as
     an async context manager; otherwise call :meth:`aclose`.
+
+    ``lane`` (FRG-META-022) declares which priority lane EVERY request from
+    this client spends from: ``"batch"`` for scheduled/background work
+    (refreshes, credit backfills, enrichment, bulk recompute) or
+    ``"interactive"`` when an operator is waiting (lookup/suggest, add, review
+    row search, library-import grouping, connection tests). It is set once,
+    where the client is built, rather than threaded through the business logic
+    call by call — the construction site is the place that actually knows
+    whether anyone is waiting. The default is ``"batch"``: an unclassified new
+    caller degrades itself, never the operator's interactive reserve.
     """
 
     def __init__(
@@ -186,6 +203,7 @@ class ComicVineClient:
         factory: HttpClientFactory,
         *,
         base: str | None = None,
+        lane: str = LANE_BATCH,
     ) -> None:
         self._api_key = settings.comicvine_api_key.get_secret_value()
         self._client = factory.external()
@@ -196,6 +214,8 @@ class ComicVineClient:
         self._base = resolved_base.rstrip("/")
         self._interval = effective_interval(settings)
         self._budget = effective_budget(settings)
+        self._batch_share = effective_batch_share(settings)
+        self._lane = normalize_lane(lane)
         self._page_size = settings.comicvine_page_size
         self._max_pages = settings.comicvine_max_pages
         self._search_cap = settings.comicvine_search_result_cap
@@ -536,13 +556,18 @@ class ComicVineClient:
         return data
 
     async def _fetch(self, path: str, params: Mapping[str, Any]):
-        # The path's budget bucket rides the SAME acquire that enforces velocity
-        # spacing (FRG-META-003/016): one gate, one admission, both dimensions —
-        # so covers and every other call site are budgeted through the one funnel.
-        # A refused admission raises ComicVineBudgetExhausted here, before any
-        # wire request, and propagates to the call site as a typed ComicVineError.
+        # The path's budget bucket AND this client's lane ride the SAME acquire
+        # that enforces velocity spacing (FRG-META-003/016/022): one gate, one
+        # admission, all three dimensions — so covers and every other call site
+        # are budgeted through the one funnel. A refused admission raises
+        # ComicVineBudgetExhausted here, before any wire request, and propagates
+        # to the call site as a typed ComicVineError.
         await gate().acquire(
-            self._interval, bucket=_budget_bucket(path), budget=self._budget
+            self._interval,
+            bucket=_budget_bucket(path),
+            budget=self._budget,
+            lane=self._lane,
+            batch_share=self._batch_share,
         )
         url = f"{self._base}/{path}"
         try:

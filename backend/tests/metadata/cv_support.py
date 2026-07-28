@@ -19,6 +19,7 @@ import pytest
 from foragerr.http import HttpClientFactory
 from foragerr.metadata import ratelimit
 from foragerr.metadata.comicvine import DEFAULT_BASE, ComicVineClient
+from foragerr.metadata.ratelimit import LANE_BATCH
 from http_support import PUBLIC_V4, RecordingTransport, StubResolver, make_settings
 
 CV_HOST = "comicvine.gamespot.com"
@@ -40,13 +41,16 @@ def json_response(payload: object, *, status: int = 200) -> httpx.Response:
 def make_client(
     tmp_path: Path,
     handler: Callable[[httpx.Request], httpx.Response],
+    *,
+    lane: str = LANE_BATCH,
     **overrides: object,
 ) -> tuple[ComicVineClient, RecordingTransport]:
     """Build a ComicVineClient wired to a recording transport + stub DNS.
 
     ``overrides`` are Settings overrides (e.g. ``comicvine_min_interval_seconds``).
     A sensible fast default interval keeps timing tests snappy unless the test
-    is specifically exercising the interval.
+    is specifically exercising the interval. ``lane`` is the client's priority
+    lane (FRG-META-022), defaulting to batch exactly as the client does.
     """
     overrides.setdefault("comicvine_api_key", "CV-SECRET-KEY-abc123")
     overrides.setdefault("comicvine_min_interval_seconds", 0.4)
@@ -54,4 +58,5 @@ def make_client(
     resolver = StubResolver({CV_HOST: [PUBLIC_V4]})
     transport = RecordingTransport(handler)
     factory = HttpClientFactory(settings, resolver=resolver, transport=transport)
-    return ComicVineClient(settings, factory, base=DEFAULT_BASE), transport
+    client = ComicVineClient(settings, factory, base=DEFAULT_BASE, lane=lane)
+    return client, transport

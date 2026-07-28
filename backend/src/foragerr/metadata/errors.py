@@ -57,15 +57,38 @@ class ComicVineBudgetExhausted(ComicVineError):
     ``retry_after_seconds`` (a duration until the oldest admission ages out of
     the window), so a call site can defer cleanly and surface an honest resume
     time. Every raise is logged by the caller — a deferral is never silent.
+
+    ``lane`` (FRG-META-022) is set ONLY when the refusal was lane-scoped: the
+    batch lane spent its configured share of the path budget while the
+    interactive reserve is still open. The message then says so, because
+    "budget exhausted" would be a lie an operator could see straight through —
+    their own interactive search still works. A refusal at the full path
+    ceiling refuses every lane and leaves ``lane`` as ``None`` with the
+    original wording.
     """
 
-    def __init__(self, bucket: str, *, retry_after_seconds: float) -> None:
-        super().__init__(
-            f"comicvine hourly budget exhausted for path {bucket!r}; "
-            f"resumes in ~{retry_after_seconds:.0f}s"
-        )
+    def __init__(
+        self,
+        bucket: str,
+        *,
+        retry_after_seconds: float,
+        lane: str | None = None,
+    ) -> None:
+        if lane is None:
+            message = (
+                f"comicvine hourly budget exhausted for path {bucket!r}; "
+                f"resumes in ~{retry_after_seconds:.0f}s"
+            )
+        else:
+            message = (
+                f"comicvine {lane} share of path {bucket!r} exhausted; "
+                f"interactive reserve remains; "
+                f"resumes in ~{retry_after_seconds:.0f}s"
+            )
+        super().__init__(message)
         self.bucket = bucket
         self.retry_after_seconds = retry_after_seconds
+        self.lane = lane
 
 
 class ComicVineMalformedResponse(ComicVineError):
