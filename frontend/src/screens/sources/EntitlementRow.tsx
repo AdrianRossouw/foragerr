@@ -445,7 +445,7 @@ export function EntitlementRow({
       {searchOpen && (
         <EntitlementSearch
           entitlementId={entitlement.id}
-          seedTerm={searchSeedTerm(entitlement.human_name)}
+          seedTerm={searchSeedTerm(entitlement.human_name, entitlement.group_key)}
           busy={busy}
           noteText={searchNote}
           onPick={pickCandidate}

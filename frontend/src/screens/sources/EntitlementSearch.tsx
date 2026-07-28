@@ -21,12 +21,17 @@ export type PickedCandidate = Pick<
 >;
 
 /**
- * Seed term for a row's search (FRG-UI-039): the store's own human name, minus
- * a trailing issue ordinal ("Vane #12" -> "Vane") which never helps a volume
- * search. Deliberately NOT a second copy of the backend's title parser — the
- * operator edits the seed, so a raw-ish seed is honest and safe.
+ * Seed term for a row's search (FRG-UI-039): the SERVER's stripped
+ * series-shaped fold (`group_key`) when present — the same term the proposal
+ * ranker searches with, so edition boilerplate ("Vol. 243", "Book One") never
+ * rides into the seed and empties the suggest. Live-rig finding 2026-07-28: a
+ * raw-title seed returned nothing until the operator hand-deleted the volume
+ * ordinal on every single row. The client never re-implements the fold; the
+ * raw-title trim is only the fallback for rows without a usable group_key.
  */
-export function searchSeedTerm(humanName: string): string {
+export function searchSeedTerm(humanName: string, groupKey?: string | null): string {
+  const key = (groupKey ?? '').trim();
+  if (key) return key;
   const stripped = humanName.replace(/\s*#\s*\d+[a-z]?\s*$/i, '').trim();
   return stripped || humanName.trim();
 }
