@@ -63,6 +63,11 @@ services:
       FORAGERR_COMICVINE_API_KEY: ${E2E_CV_API_KEY-e2e-example-key}
       FORAGERR_COMICVINE_IMAGE_HOSTS: mockhub
       FORAGERR_COMICVINE_MIN_INTERVAL_SECONDS: "0.1"
+      # Mock indexers answer in milliseconds; a small interactive budget keeps
+      # API-driven searches comfortably inside playwright timeouts even when a
+      # background sweep (the default add sweep is real behavior now) contends
+      # on the politeness gates — and exercises the budget path end-to-end.
+      FORAGERR_INDEXER_SEARCH_TIME_BUDGET_SECONDS: "8"
       # A retention window so the deliberately-old Newznab release is rejected
       # with a verbatim reason for the interactive-search scenario.
       FORAGERR_USENET_RETENTION_DAYS: "30"

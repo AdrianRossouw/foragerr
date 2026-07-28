@@ -83,3 +83,8 @@ The system SHALL provide an interactive search endpoint that runs a live search 
 - **THEN** the cached decision set is the partial set, the response's
   per-indexer outcomes mark the timeout, and grabbing a returned row
   works identically to a complete search
+
+#### Scenario: Interactive requests take precedence at the politeness gate
+
+- **WHEN** a background search (an add sweep, the backlog walk) is occupying an indexer's politeness gate and an interactive search arrives for the same indexer
+- **THEN** the interactive request is admitted at the gate's next politeness slot ahead of waiting background requests — per-indexer spacing is never violated, background work resumes when the interactive demand drains, and an interactive search during a background sweep returns real results within its budget rather than starved-empty partials

@@ -174,7 +174,11 @@ test('FRG-PROC-010 FRG-UI-007 FRG-SRCH-001: interactive search renders verbatim 
   });
 
   // The API backing the overlay is the source of truth for verbatim reasons.
-  const searchResult = await (await api.get(`/api/v1/release?issueId=${issueId}`)).json();
+  const searchResult = await (
+    // A live search may spend up to its indexer budget when a background sweep
+    // holds the politeness gates; give the direct call explicit headroom.
+    await api.get(`/api/v1/release?issueId=${issueId}`, { timeout: 30_000 })
+  ).json();
   const decisions = searchResult.releases; // envelope shape (FRG-API-008, m11)
   // Target the Newznab release specifically: it is deterministically rejected
   // for retention, and its guid has no URL characters (a stable testid).
