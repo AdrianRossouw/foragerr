@@ -70,6 +70,49 @@ class SourceSyncCommand(BaseCommand):
     source_id: int | None = None
 
 
+#: Command name for the operator-triggered bulk proposal recompute
+#: (FRG-SRC-013). 1:1 with its handler, like ``source-sync``; NOT a scheduled
+#: task — nothing recomputes unless the operator asks.
+SOURCE_RECOMPUTE_TASK = "source-recompute-proposals"
+
+
+@register_command
+class SourceRecomputeProposalsCommand(BaseCommand):
+    """Refresh one source's stale stored proposals (FRG-SRC-013).
+
+    Shares the ``source-sync`` exclusivity group: a recompute and a sync both
+    spend the ComicVine batch budget over the same rows, and running them
+    concurrently would double the spend to reach the same place. Enqueue dedup
+    (FRG-SCHED-003, keyed on name + payload) makes a second identical request
+    while one is queued/running return the SAME command rather than stacking
+    backfills."""
+
+    name: Literal["source-recompute-proposals"] = "source-recompute-proposals"
+    exclusivity_group: ClassVar[str | None] = "source-sync"
+    source_id: int
+    #: Also recompute no-plausible-match markers (operator opt-in).
+    include_markers: bool = False
+
+
+@register_handler("source-recompute-proposals")
+async def _handle_source_recompute(
+    command: SourceRecomputeProposalsCommand, ctx: HandlerContext
+) -> str:
+    from foragerr.sources.enrich import recompute_proposals
+
+    settings = ctx.settings
+    if settings is None:  # pragma: no cover - always wired by CommandService
+        raise RuntimeError("source-recompute-proposals requires settings")
+    source = await repo.get_source(ctx.db, command.source_id)
+    if source is None:
+        return f"recompute: source {command.source_id} not found"
+    summary = await recompute_proposals(
+        ctx.db, settings, source, include_markers=command.include_markers
+    )
+    logger.info("source %s %s", source.id, summary)
+    return summary
+
+
 @register_handler("source-sync")
 async def _handle_source_sync(command: SourceSyncCommand, ctx: HandlerContext) -> str:
     settings = ctx.settings
@@ -225,8 +268,10 @@ async def register_source_sync_task(scheduler: Any, settings: Any) -> None:
 
 
 __all__ = [
+    "SOURCE_RECOMPUTE_TASK",
     "SOURCE_SYNC_MIN_INTERVAL_SECONDS",
     "SOURCE_SYNC_TASK",
+    "SourceRecomputeProposalsCommand",
     "SourceSyncCommand",
     "make_humble_factory",
     "register_source_sync_task",

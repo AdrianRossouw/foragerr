@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -32,6 +33,7 @@ from foragerr.sources.registry import validate_settings
 logger = logging.getLogger("foragerr.sources.repo")
 
 __all__ = [
+    "ProposalAttempt",
     "SourceSettingsUnavailable",
     "create_source",
     "delete_source",
@@ -41,6 +43,7 @@ __all__ = [
     "list_sources",
     "load_source_settings",
     "public_settings",
+    "record_proposal_attempts",
     "serialize_settings",
     "set_auto_sync",
     "set_connection_state",
@@ -74,9 +77,19 @@ async def list_entitlements(
     *,
     classification: str | None = None,
     review_status: str | None = None,
+    order_by_attempt: bool = False,
 ) -> list[SourceEntitlementRow]:
     """Entitlements of one source (detached), optionally filtered by the
-    classification and/or review-status axes (FRG-SRC-004), oldest-first."""
+    classification and/or review-status axes (FRG-SRC-004), oldest-first.
+
+    ``order_by_attempt`` switches the ordering to the proposal-work order
+    (FRG-SRC-013): never-attempted rows first (``proposal_attempted_at`` NULL),
+    then oldest attempt first, with the row id as a stable tiebreak. That is the
+    ordering that makes a proposal pass CONVERGE — a row that fails or defers
+    stamps itself and therefore moves to the back, so it can only ever delay its
+    own retry, never the first attempt of the rows behind it. The NULLs-first
+    half is expressed explicitly rather than relying on the dialect's default
+    NULL collation."""
     stmt = select(SourceEntitlementRow).where(
         SourceEntitlementRow.source_id == source_id
     )
@@ -84,12 +97,82 @@ async def list_entitlements(
         stmt = stmt.where(SourceEntitlementRow.classification == classification)
     if review_status is not None:
         stmt = stmt.where(SourceEntitlementRow.review_status == review_status)
-    stmt = stmt.order_by(SourceEntitlementRow.id)
+    if order_by_attempt:
+        stmt = stmt.order_by(
+            SourceEntitlementRow.proposal_attempted_at.is_(None).desc(),
+            SourceEntitlementRow.proposal_attempted_at.asc(),
+            SourceEntitlementRow.id,
+        )
+    else:
+        stmt = stmt.order_by(SourceEntitlementRow.id)
     async with db.read_session() as session:
         rows = (await session.execute(stmt)).scalars().all()
         for row in rows:
             session.expunge(row)
         return list(rows)
+
+
+@dataclass(frozen=True, slots=True)
+class ProposalAttempt:
+    """One row's outcome from a proposal-computing pass (FRG-SRC-013).
+
+    Every attempt — whatever its outcome — stamps ``proposal_attempted_at``.
+    Only the outcomes that produced a verdict carry ``store=True`` and write a
+    proposal; a budget deferral and a ComicVine error stamp and nothing else, so
+    the row keeps its NULL ``proposed_match_json`` and stays retryable exactly as
+    FRG-SRC-010 requires.
+
+    ``expect_json`` makes the write a compare-and-swap against the proposal the
+    pass READ: it is applied only while the stored value is still that one. For
+    ordinary enrichment ``expect_json`` is ``None`` (propose into an empty slot,
+    the historical guard); for a revisit — a library-fallback marker re-run once
+    a ComicVine key exists, a stale pre-universe proposal the bulk recompute is
+    refreshing — it is the exact stale value being replaced. Either way a
+    proposal that landed between the read and the write (a restore, the sibling
+    sweep) is never clobbered by a value computed before it existed.
+    """
+
+    proposed_series_id: int | None = None
+    proposed_match_json: str | None = None
+    store: bool = False
+    expect_json: str | None = None
+    errored: bool = False
+
+
+async def record_proposal_attempts(db, attempts: dict[int, ProposalAttempt]) -> int:
+    """Stamp attempts (and write the proposals among them). Returns rows written.
+
+    ONE write transaction for the whole pass (FRG-SRC-013). The review status is
+    re-read per row inside it, so a row the operator matched or ignored while the
+    pass was working keeps its decision — the pass only ever writes a proposal
+    onto a row that is still ``new`` (FRG-SRC-008/012 stickiness).
+
+    The attempt STAMP is applied to any row that still exists, decided or not: it
+    is bookkeeping about the pass, not about the row's review state, and a
+    decided row is out of the pending set anyway.
+    """
+    if not attempts:
+        return 0
+    now = utcnow()
+    written = 0
+    async with db.write_session() as session:
+        for eid, attempt in attempts.items():
+            row = await session.get(SourceEntitlementRow, eid)
+            if row is None:
+                continue
+            row.proposal_attempted_at = now
+            row.proposal_attempt_error = attempt.errored
+            if not attempt.store:
+                continue
+            if row.review_status != "new":
+                continue  # an operator decision landed mid-pass — leave it alone
+            if row.proposed_match_json != attempt.expect_json:
+                continue  # the proposal changed under this pass — its value wins
+            row.proposed_series_id = attempt.proposed_series_id
+            row.proposed_match_json = attempt.proposed_match_json
+            row.updated_at = now
+            written += 1
+    return written
 
 
 def load_source_settings(source_type: str, settings_json: str) -> BaseModel:

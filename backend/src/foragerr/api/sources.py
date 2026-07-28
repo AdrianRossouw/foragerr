@@ -12,6 +12,8 @@ resource conventions:
 - ``POST /sources/{id}/reconnect`` — re-paste a cookie on an ``expired`` source.
 - ``POST /sources/{id}/disconnect`` — delete the credential, keep entitlements.
 - ``POST /sources/{id}/sync`` — enqueue a manual "Sync now" for one source.
+- ``POST /sources/{id}/recompute-proposals`` — enqueue a resumable, budget-aware
+  refresh of that source's stale stored proposals (FRG-SRC-013).
 - ``DELETE /sources/{id}`` — remove a source entirely (and its entitlements).
 
 The outbound factory is an ``app.state.http_factory`` test override when present,
@@ -30,7 +32,11 @@ from foragerr.api.errors import ApiError
 from foragerr.http import HttpClientFactory
 from foragerr.indexers.schema import schema_for
 from foragerr.keystore import ENC_PREFIX, top_level_secret_field_names
-from foragerr.sources.commands import SOURCE_SYNC_TASK, make_humble_factory
+from foragerr.sources.commands import (
+    SOURCE_RECOMPUTE_TASK,
+    SOURCE_SYNC_TASK,
+    make_humble_factory,
+)
 from foragerr.sources.models import MATCHED_VIA_OPERATOR, SourceRow
 from foragerr.sources.registry import (
     UnknownSourceTypeError,
@@ -358,6 +364,47 @@ async def sync_source_endpoint(source_id: int, request: Request) -> dict[str, An
     return {"command_id": record.id, "status": record.status}
 
 
+class RecomputeProposalsBody(BaseModel):
+    """Options for the bulk proposal recompute (FRG-SRC-013)."""
+
+    #: Also recompute no-plausible-match markers. OFF by default: re-asking
+    #: ComicVine about every "we looked, there is nothing" row is real spend, so
+    #: it happens only when the operator says to.
+    include_markers: bool = False
+
+
+@router.post("/{source_id}/recompute-proposals", status_code=202)
+async def recompute_proposals_endpoint(
+    source_id: int, request: Request, body: RecomputeProposalsBody | None = None
+) -> dict[str, Any]:
+    """Enqueue a bulk refresh of one source's stale stored proposals (FRG-SRC-013).
+
+    Closes the v0.11.0 upgrade gap: proposals stored before the ComicVine-first
+    universe were ranked against the local library alone and, being non-NULL,
+    could never re-enter the enrichment pass. The command walks them in
+    least-recently-attempted order through the BATCH lane, stops cleanly at the
+    budget wall having refreshed a prefix, and resumes from the same ordering
+    when re-run — so this endpoint is safely re-triggerable and its dedup
+    (name + payload) collapses an impatient double-click onto one run.
+
+    Deliberately NOT gated on the connection state: recomputing talks to
+    ComicVine and the local rows only, so a source whose cookie has expired can
+    still have its review queue improved. Only ``new`` rows are touched; matched
+    and ignored rows keep their decisions.
+    """
+    db = request.app.state.db
+    row = await get_source(db, source_id)
+    if row is None:
+        raise ApiError(404, f"source {source_id} not found")
+    include_markers = bool(body.include_markers) if body is not None else False
+    record = await request.app.state.commands.enqueue(
+        SOURCE_RECOMPUTE_TASK,
+        {"source_id": source_id, "include_markers": include_markers},
+        triggered_by="manual",
+    )
+    return {"command_id": record.id, "status": record.status}
+
+
 @router.delete("/{source_id}", status_code=204)
 async def delete_source_endpoint(source_id: int, request: Request) -> None:
     """Remove a source entirely (and its entitlements). Unknown id -> 404."""
@@ -680,10 +727,15 @@ async def _operator_cv_client(request: Request):
     same fact today, but the restore path needs the DISTINCTION to refuse
     persisting a library-fallback proposal on a keyed deployment (FRG-SRC-010),
     so it is passed rather than re-derived. One client is shared across a bulk
-    restore so the batch honours a single budget/politeness envelope."""
+    restore so the batch honours a single budget/politeness envelope.
+
+    The client runs in the INTERACTIVE lane (FRG-META-022): every caller here is
+    an operator action taken while looking at the review screen, so it draws on
+    the full path budget instead of the batch share the nightly enrichment is
+    capped at — the whole point of the reserve."""
     from foragerr.sources.enrich import build_cv_client
 
-    client = build_cv_client(request.app.state.settings)
+    client = build_cv_client(request.app.state.settings, lane="interactive")
     try:
         yield client, client is not None
     finally:
