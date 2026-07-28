@@ -115,6 +115,24 @@ cover proxy is media-CDN, documented as outside the API budget
   config, the row search and restore bypass it (operator paths), and
   the meter shows why nothing is happening.
 
+## Deferred follow-ups (recorded at the simplify pass, 2026-07-28)
+
+1. Publish `batch_paused` per bucket from the gate (three consumers
+   currently re-derive `batch_used >= batch_ceiling`, one across the
+   wire) — wire-shape + spec-delta + TS-type touch, cleanest altitude
+   fix available.
+2. Consolidate sources test fixtures (`_source`/`_comic` copies in
+   test_enrich_budget/test_enrich_frugality) into sources_support.
+3. Drop the `_declared_default` introspection in ratelimit for the
+   honest mirrored-constant fallback.
+4. Teach the lane census to resolve the LANE_* constants so production
+   sites can use them instead of string literals.
+5. Rename the two lane test files runtime-vs-census and co-locate under
+   tests/metadata; smaller notes: shared _batch_stamps helper, budget
+   11/0.95 restoring the refresh test's round number, sentinel default
+   in the add_series stub, trim the _Stamp comment, prune test-only
+   names from enrich.__all__.
+
 ## Migration Plan
 
 Migration 0027: nullable `proposal_attempted_at` timestamp on
