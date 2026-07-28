@@ -17,6 +17,16 @@ item when the per-source toggle is ON.
 Every action is idempotent and preserves prior operator decisions: re-matching
 is a no-op-with-update, and A1's sync diff already carries ``review_status`` /
 ``matched_series_id`` across re-syncs untouched.
+
+**Match provenance is fail-closed (design D7).** ``matched_via`` is a REQUIRED
+keyword on every function here that establishes a match. It used to default to
+:data:`MATCHED_VIA_OPERATOR`, which meant a new caller that simply forgot the
+argument would silently mint operator provenance — and operator provenance is
+what unlocks the import pipeline's ordinal fallback (FRG-PP-022 guard 3). With
+no default, the omission is a ``TypeError`` at call time instead. Nothing about
+the recorded values changed: every API endpoint passes
+:data:`MATCHED_VIA_OPERATOR` explicitly and ``enrich._auto_accept`` remains the
+only writer of :data:`MATCHED_VIA_AUTO`.
 """
 
 from __future__ import annotations
@@ -26,7 +36,7 @@ from dataclasses import dataclass
 
 from foragerr.db.base import utcnow
 from foragerr.sources.matching import LibrarySeriesLite, compute_proposed_match
-from foragerr.sources.models import MATCHED_VIA_OPERATOR, SourceEntitlementRow
+from foragerr.sources.models import SourceEntitlementRow
 
 logger = logging.getLogger("foragerr.sources.review")
 
@@ -108,7 +118,7 @@ async def match_entitlement(
     *,
     series_id: int,
     commands=None,
-    matched_via: str = MATCHED_VIA_OPERATOR,
+    matched_via: str,
 ) -> SourceEntitlementRow:
     """Link an entitlement to an existing library series and accept it.
 
@@ -116,10 +126,11 @@ async def match_entitlement(
     (FRG-SRC-004). Sets ``matched_series_id`` + ``review_status = "matched"`` and,
     for a grabbable comic, queues the download. Idempotent.
 
-    ``matched_via`` records WHO chose the series (FRG-PP-022 guard 3): the
-    default is :data:`MATCHED_VIA_OPERATOR` because every caller of this
-    function is a human review action EXCEPT auto-sync's ``_auto_accept``,
-    which passes :data:`MATCHED_VIA_AUTO` explicitly. The import pipeline's
+    ``matched_via`` records WHO chose the series (FRG-PP-022 guard 3) and is
+    REQUIRED (design D7): a human review action passes
+    :data:`MATCHED_VIA_OPERATOR`, auto-sync's ``_auto_accept`` passes
+    :data:`MATCHED_VIA_AUTO`, and a caller that passes neither is a
+    ``TypeError`` rather than a silent operator stamp. The import pipeline's
     ordinal fallback ("Vol. N" → issue N) fires only for an operator match.
 
     The target ``series_id`` must name a real library series (a stale/garbage id
@@ -167,7 +178,7 @@ async def add_entitlement(
     factory=None,
     root_folder_id: int | None = None,
     cv_volume_id: int | None = None,
-    matched_via: str = MATCHED_VIA_OPERATOR,
+    matched_via: str,
 ) -> SourceEntitlementRow:
     """Add a brand-new series for an entitlement via the normal add flow.
 
@@ -188,9 +199,10 @@ async def add_entitlement(
     (:func:`_reresolve_sibling_proposals`) so their next single action succeeds on
     the first click.
 
-    ``matched_via`` is carried onto every terminal link this function performs
-    (add-then-match, degrade-to-match, and the TOCTOU repair) so an auto-sync
-    add is never recorded as an operator match (FRG-PP-022 guard 3).
+    ``matched_via`` is REQUIRED (design D7) and carried onto every terminal link
+    this function performs (add-then-match, degrade-to-match, and the TOCTOU
+    repair) so an auto-sync add is never recorded as an operator match
+    (FRG-PP-022 guard 3).
 
     The presence pre-check runs in its own read session, so two near-simultaneous
     adds of the same volume can both pass it; the loser's ``add_series`` rejects
@@ -296,7 +308,7 @@ async def _resolve_as_match(
     series_id: int,
     series_title: str | None,
     commands=None,
-    matched_via: str = MATCHED_VIA_OPERATOR,
+    matched_via: str,
 ) -> SourceEntitlementRow:
     """Sweep sibling proposals for ``cv_volume_id`` then match the acting row.
 
@@ -334,7 +346,7 @@ async def _degrade_to_match(
     cv_volume_id: int,
     series_id: int,
     commands=None,
-    matched_via: str = MATCHED_VIA_OPERATOR,
+    matched_via: str,
 ) -> SourceEntitlementRow:
     """Resolve an add whose volume is already in the library as a match.
 
@@ -525,7 +537,12 @@ async def restore_entitlement(
     async with db.read_session() as session:
         series = await library_repo.list_series(session)
     library = [
-        LibrarySeriesLite(id=s.id, title=s.title, start_year=s.start_year)
+        LibrarySeriesLite(
+            id=s.id,
+            title=s.title,
+            start_year=s.start_year,
+            cv_volume_id=s.cv_volume_id,
+        )
         for s in series
     ]
     proposal = await compute_proposed_match(
@@ -575,7 +592,7 @@ async def bulk_match(
     *,
     series_id: int,
     commands=None,
-    matched_via: str = MATCHED_VIA_OPERATOR,
+    matched_via: str,
 ) -> BulkResult:
     return await _bulk(
         db,
@@ -585,6 +602,103 @@ async def bulk_match(
             eid,
             series_id=series_id,
             commands=commands,
+            matched_via=matched_via,
+        ),
+    )
+
+
+async def accept_entitlement(
+    db,
+    settings,
+    entitlement_id: int,
+    *,
+    commands=None,
+    factory=None,
+    root_folder_id: int | None = None,
+    matched_via: str,
+) -> SourceEntitlementRow:
+    """Apply an entitlement's OWN stored proposal (FRG-SRC-011).
+
+    The server-side form of what the review screen used to do client-side: read
+    the row's proposal and route it to the action it describes —
+
+    * a ``library``-kind proposal (or a bare ``proposed_series_id``) →
+      :func:`match_entitlement` against that series;
+    * a ``comicvine``-kind proposal → :func:`add_entitlement` with that volume
+      id, which itself degrades to a match when the volume is already in the
+      library and sweeps the siblings (FRG-SRC-008).
+
+    A row with no usable proposal is a 422 :class:`EntitlementActionError` — in
+    a bulk run that lands as THAT row's per-row error, never a failure of the
+    whole request (there is nothing to fall back to: forcing another row's
+    target is precisely what accept-each-own-proposal exists to prevent).
+
+    **The proposal is read here, at the row's turn**, not from a caller-held
+    snapshot. That is load-bearing for the same-title group case: accepting the
+    first row of a group whose rows all propose the same not-yet-in-library
+    volume runs the add, whose FRG-SRC-008 sweep rewrites the siblings'
+    proposals into library matches — so the siblings, re-read at their own turn,
+    match into the new series instead of re-adding it.
+    """
+    row = await _reload(db, entitlement_id)
+    if row is None:
+        raise EntitlementActionError(
+            f"entitlement {entitlement_id} not found", status=404
+        )
+    series_id = _proposed_series_id(row)
+    if series_id is not None:
+        return await match_entitlement(
+            db,
+            entitlement_id,
+            series_id=series_id,
+            commands=commands,
+            matched_via=matched_via,
+        )
+    cvid = _proposed_cv_id(row)
+    if cvid is not None:
+        return await add_entitlement(
+            db,
+            settings,
+            entitlement_id,
+            commands=commands,
+            factory=factory,
+            root_folder_id=root_folder_id,
+            cv_volume_id=cvid,
+            matched_via=matched_via,
+        )
+    raise EntitlementActionError(
+        f"entitlement {entitlement_id} has no proposed match to accept — "
+        "search for a series on the row instead",
+        status=422,
+    )
+
+
+async def bulk_accept(
+    db,
+    settings,
+    entitlement_ids: list[int],
+    *,
+    commands=None,
+    factory=None,
+    root_folder_id: int | None = None,
+    matched_via: str,
+) -> BulkResult:
+    """Accept each row's OWN proposal, one per-row transaction (FRG-SRC-011).
+
+    Heterogeneous by construction: some rows match, some add, and a row that
+    cannot be accepted contributes an error entry while every other row still
+    runs (the shared :func:`_bulk` idiom).
+    """
+    return await _bulk(
+        db,
+        entitlement_ids,
+        lambda eid: accept_entitlement(
+            db,
+            settings,
+            eid,
+            commands=commands,
+            factory=factory,
+            root_folder_id=root_folder_id,
             matched_via=matched_via,
         ),
     )
@@ -726,6 +840,25 @@ def _proposed_cv_id(row: SourceEntitlementRow) -> int | None:
     return cvid if isinstance(cvid, int) else None
 
 
+def _proposed_series_id(row: SourceEntitlementRow) -> int | None:
+    """The library series a stored proposal points at, if it is a match proposal.
+
+    The JSON is authoritative (the FRG-SRC-008 sweep rewrites ``kind`` and
+    ``series_id`` together); the denormalized ``proposed_series_id`` column is
+    the fallback for a row whose JSON is absent or unparseable. ``None`` for a
+    ComicVine-kind proposal — that one is an add, not a match."""
+    data = _loads_proposal(row.proposed_match_json)
+    if data is not None and data.get("kind") == "library":
+        series_id = data.get("series_id")
+        if isinstance(series_id, int):
+            return series_id
+        return None
+    if data is not None and data.get("kind") == "comicvine":
+        return None
+    column = row.proposed_series_id
+    return column if isinstance(column, int) else None
+
+
 async def _reload(db, entitlement_id: int) -> SourceEntitlementRow | None:
     from foragerr.sources.repo import get_entitlement
 
@@ -735,7 +868,9 @@ async def _reload(db, entitlement_id: int) -> SourceEntitlementRow | None:
 __all__ = [
     "BulkResult",
     "EntitlementActionError",
+    "accept_entitlement",
     "add_entitlement",
+    "bulk_accept",
     "bulk_ignore",
     "bulk_match",
     "bulk_restore",

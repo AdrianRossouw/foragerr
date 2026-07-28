@@ -358,3 +358,109 @@ async def test_patch_unknown_source_is_404(app_client):
     app_client.app  # noqa: B018 — ensure the app/db fixtures are live
     resp = app_client.patch("/api/v1/sources/9999", json={"auto_sync": True})
     assert resp.status_code == 404
+
+
+# --- explicit operator provenance at the API boundary (design D7) ------------
+
+
+@pytest.mark.req("FRG-SRC-004")
+async def test_match_endpoint_stamps_operator_provenance_explicitly(app_client):
+    """The endpoints pass ``MATCHED_VIA_OPERATOR`` themselves rather than
+    inheriting a default (FRG-PP-022 guard 3 / D7): a human hit this route, so
+    the stamp is asserted here, at the boundary that knows it."""
+    app = app_client.app
+    source_id = await _populate(app)
+    eid = await _first_comic_id(app, source_id)
+    series_id = await _series_with_cv(app, cv_volume_id=9300, title="Synthetic Hero")
+    app.state.commands = _FakeCommands(app.state.commands)
+
+    resp = app_client.post(
+        f"/api/v1/sources/entitlements/{eid}/match", json={"series_id": series_id}
+    )
+    assert resp.status_code == 200
+    assert (await repo.get_entitlement(app.state.db, eid)).matched_via == "operator"
+
+
+@pytest.mark.req("FRG-SRC-004")
+async def test_add_endpoint_stamps_operator_provenance_explicitly(app_client):
+    app = app_client.app
+    source_id = await _populate(app)
+    eid = await _first_comic_id(app, source_id)
+    await _series_with_cv(app, cv_volume_id=9301, title="Synthetic Hero")
+    app.state.commands = _FakeCommands(app.state.commands)
+
+    resp = app_client.post(
+        f"/api/v1/sources/entitlements/{eid}/add", json={"cv_volume_id": 9301}
+    )
+    assert resp.status_code == 200
+    assert (await repo.get_entitlement(app.state.db, eid)).matched_via == "operator"
+
+
+# --- bulk accept (FRG-SRC-011) ----------------------------------------------
+
+
+async def _set_library_proposal(app, entitlement_id: int, series_id: int) -> None:
+    import json
+
+    async with app.state.db.write_session() as session:
+        row = await session.get(SourceEntitlementRow, entitlement_id)
+        row.proposed_series_id = series_id
+        row.proposed_match_json = json.dumps(
+            {
+                "kind": "library",
+                "series_id": series_id,
+                "cv_volume_id": None,
+                "title": "Synthetic Hero",
+                "year": 2019,
+                "confidence": 0.9,
+                "auto": False,
+                "candidates": [],
+            },
+            sort_keys=True,
+        )
+
+
+@pytest.mark.req("FRG-SRC-011")
+async def test_bulk_accept_endpoint_applies_each_rows_own_proposal(app_client):
+    """``accept`` carries NO series_id — every row resolves to its own stored
+    proposal, and an un-proposed row is reported under its id while the rest
+    still apply (the request itself is a 200)."""
+    app = app_client.app
+    source_id = await _populate(app)
+    comics = await repo.list_entitlements(
+        app.state.db, source_id, classification="comic"
+    )
+    series_id = await _series_with_cv(app, cv_volume_id=9302, title="Synthetic Hero")
+    proposed, bare = comics[0], comics[1]
+    await _set_library_proposal(app, proposed.id, series_id)
+    app.state.commands = _FakeCommands(app.state.commands)
+
+    resp = app_client.post(
+        "/api/v1/sources/entitlements/bulk",
+        json={"action": "accept", "entitlement_ids": [proposed.id, bare.id]},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["applied"] == 1
+    assert body["skipped"] == 1
+    assert str(bare.id) in {str(k) for k in body["errors"]}
+
+    after = await repo.get_entitlement(app.state.db, proposed.id)
+    assert (after.review_status, after.matched_series_id) == ("matched", series_id)
+    assert after.matched_via == "operator"
+    assert (await repo.get_entitlement(app.state.db, bare.id)).review_status == "new"
+
+
+@pytest.mark.req("FRG-SRC-011")
+async def test_bulk_rejects_an_unknown_action_by_name(app_client):
+    app = app_client.app
+    source_id = await _populate(app)
+    comics = await repo.list_entitlements(
+        app.state.db, source_id, classification="comic"
+    )
+    resp = app_client.post(
+        "/api/v1/sources/entitlements/bulk",
+        json={"action": "obliterate", "entitlement_ids": [comics[0].id]},
+    )
+    assert resp.status_code == 400
+    assert "accept" in resp.json()["errors"][0]["message"]

@@ -17,6 +17,11 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
+#: Bounds on the operator's publisher rule list (FRG-SRC-012) — a settings blob
+#: is stored as one JSON column, so the list is capped rather than unbounded.
+MAX_PUBLISHER_RULES = 200
+MAX_PUBLISHER_RULE_LENGTH = 200
+
 
 class HumbleSettings(BaseModel):
     """Settings contract for the ``humble`` store type (FRG-SRC-002)."""
@@ -36,9 +41,56 @@ class HumbleSettings(BaseModel):
         },
     )
 
+    publisher_rules: list[str] = Field(
+        default_factory=list,
+        json_schema_extra={
+            "label": "Non-comic publishers",
+            "help": (
+                "Publishers whose items are always classified as Other, "
+                "whatever their file formats — the RPG-sourcebook escape "
+                "hatch. Ships empty; a suggested starter list is offered in "
+                "the review screen and only applied when you accept it. "
+                "Changing this reclassifies unreviewed items on the next "
+                "sync; items you have already matched or ignored never move."
+            ),
+            "advanced": True,
+        },
+    )
+
     @field_validator("session_cookie")
     @classmethod
     def _non_empty_cookie(cls, value: SecretStr) -> SecretStr:
         if not value.get_secret_value().strip():
             raise ValueError("the session cookie must not be empty")
         return value
+
+    @field_validator("publisher_rules")
+    @classmethod
+    def _clean_publisher_rules(cls, value: list[str]) -> list[str]:
+        """Trim, drop blanks, de-duplicate (case-insensitively), and bound the
+        list — the rule list is operator-typed free text (FRG-SRC-012).
+
+        Order is preserved so the settings screen renders what was entered;
+        de-duplication keeps the first spelling of a repeated publisher.
+        """
+        cleaned: list[str] = []
+        seen: set[str] = set()
+        for raw in value:
+            rule = raw.strip()
+            if not rule:
+                continue
+            if len(rule) > MAX_PUBLISHER_RULE_LENGTH:
+                raise ValueError(
+                    "a publisher rule must be at most "
+                    f"{MAX_PUBLISHER_RULE_LENGTH} characters"
+                )
+            key = rule.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            cleaned.append(rule)
+        if len(cleaned) > MAX_PUBLISHER_RULES:
+            raise ValueError(
+                f"at most {MAX_PUBLISHER_RULES} publisher rules are supported"
+            )
+        return cleaned

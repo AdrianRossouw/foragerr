@@ -38,8 +38,16 @@ async def _load_library(db) -> list[LibrarySeriesLite]:
 
     async with db.read_session() as session:
         series = await library_repo.list_series(session)
+    # ``cv_volume_id`` is what makes the library an OVERLAY on the ComicVine
+    # matching universe (FRG-SRC-010): a CV candidate already in the library is
+    # proposed as a match, not an add. It is NOT NULL on every series row.
     return [
-        LibrarySeriesLite(id=s.id, title=s.title, start_year=s.start_year)
+        LibrarySeriesLite(
+            id=s.id,
+            title=s.title,
+            start_year=s.start_year,
+            cv_volume_id=s.cv_volume_id,
+        )
         for s in series
     ]
 

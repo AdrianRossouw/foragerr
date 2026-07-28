@@ -142,6 +142,12 @@ class ParsedEntitlement:
     classification: str  # 'comic' | 'other'
     options: tuple[DownloadOption, ...]
     preferred: DownloadOption | None
+    #: The ORDER's bundle display name (``product.human_name``), denormalized
+    #: onto every item of that order (FRG-SRC-011 / design D4) so the review
+    #: screen can name and select a whole bundle. ``None`` when the order names
+    #: no bundle (or the name sanitizes away). Sanitized like every other
+    #: store-supplied string (FRG-META-014).
+    bundle_human_name: str | None = None
 
 
 # --- helpers ----------------------------------------------------------------
@@ -220,7 +226,21 @@ def _clean_size(value: Any) -> int | None:
     return value
 
 
-def _parse_subproduct(gamekey: str, raw: Any) -> ParsedEntitlement | None:
+def _bundle_name(data: dict) -> str | None:
+    """The order's bundle display name from ``product.human_name`` (FRG-SRC-011).
+
+    Untrusted store input like every other display string: sanitized and length-
+    capped through :func:`_clean`. ``None`` when the order carries no product
+    object, no name, or nothing printable survives sanitizing. Never raises."""
+    product = data.get("product")
+    if not isinstance(product, dict):
+        return None
+    return _clean(product.get("human_name"))
+
+
+def _parse_subproduct(
+    gamekey: str, raw: Any, *, bundle_human_name: str | None = None
+) -> ParsedEntitlement | None:
     """Map one raw subproduct to a :class:`ParsedEntitlement`, or ``None`` to
     skip it (skip-and-log-never-abort, FRG-SRC-003). Never raises."""
     try:
@@ -255,6 +275,7 @@ def _parse_subproduct(gamekey: str, raw: Any) -> ParsedEntitlement | None:
         classification=classification,
         options=tuple(options),
         preferred=preferred,
+        bundle_human_name=bundle_human_name,
     )
 
 
@@ -265,6 +286,12 @@ def parse_order(gamekey: str, content: bytes) -> list[ParsedEntitlement]:
     raises :class:`HumbleMalformedError`. A single malformed subproduct inside a
     valid order is skipped with a bounded log; at most :data:`MAX_SUBPRODUCTS`
     are parsed (extras dropped with one warning). Never partially aborts a sync.
+
+    The order's bundle display name (``product.human_name``) is read once and
+    denormalized onto every entitlement of the order (FRG-SRC-011): a bundle's
+    name is immutable order metadata, so the review screen can name and select a
+    whole bundle without a second table. A missing/unusable ``product`` simply
+    yields ``None`` — never a skipped order.
     """
     try:
         data = json.loads(content)
@@ -280,10 +307,11 @@ def parse_order(gamekey: str, content: bytes) -> list[ParsedEntitlement]:
     if not isinstance(raw_subs, list):
         raise HumbleMalformedError("Humble order 'subproducts' was not a list")
 
+    bundle_human_name = _bundle_name(data)
     entitlements: list[ParsedEntitlement] = []
     skipped = 0
     for raw in raw_subs[:MAX_SUBPRODUCTS]:
-        parsed = _parse_subproduct(gamekey, raw)
+        parsed = _parse_subproduct(gamekey, raw, bundle_human_name=bundle_human_name)
         if parsed is None:
             skipped += 1
             continue
