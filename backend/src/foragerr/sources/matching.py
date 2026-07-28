@@ -24,12 +24,12 @@ present as a library series is re-stamped ``kind="library"`` with that
 library stays ``kind="comicvine"`` and accepting it ADDS-and-matches in one
 action (the FRG-SRC-008 seam handles both). This is the inversion of the old
 library-first two-pool strategy, whose small-library ranking is what let
-"Absolute Green Arrow" propose itself for "Something is Killing the Children
+"Distant Amber Signal" propose itself for "Nobody is Guarding the Lighthouse
 Vol. 8".
 
 **The overlay is applied strictly AFTER gating and ranking.** It carries a
 *display* title (the operator's local series title, which may legitimately
-diverge from the catalog's — ``"Saga (2012)"`` locally for CV's ``"Saga"``), and
+diverge from the catalog's — ``"Vane (2012)"`` locally for CV's ``"Vane"``), and
 a display title is not evidence about catalog identity. Feeding it into the
 token gate or the similarity score would let a local rename discard a correct
 in-library candidate, and would leak shelf-local metadata into a gate that is
@@ -46,40 +46,40 @@ and the shared collected-edition cue vocabulary). Boilerplate is what almost
 every store title has in common, so scoring on the raw fold made it identity
 evidence in both directions:
 
-* it ADMITTED strangers — ``"Saga Vol. 1"`` and ``"Batman Vol. 1"`` share the
+* it ADMITTED strangers — ``"Vane Vol. 1"`` and ``"Argent Vol. 1"`` share the
   ``vol``/``1`` tokens, so the gate passed a candidate with nothing in common,
-  and ``"The Boys Vol. 1"`` vs ``"The Bots Vol. 1"`` scored 0.90 (over the
+  and ``"The Vants Vol. 1"`` vs ``"The Vints Vol. 1"`` scored 0.91 (over the
   auto-accept bar) off two shared boilerplate tokens and a one-letter difference;
-* it DISCARDED the right answer — ``"Saga Volume 1"`` scored ComicVine's exact
-  ``"Saga"`` at 0.4706 (floored out) while the unrelated ``"Saga of the Swamp
-  Thing"`` survived at 0.50, purely because the decorated query is long and the
+* it DISCARDED the right answer — ``"Vane Volume 1"`` scored ComicVine's exact
+  ``"Vane"`` at 0.4706 (floored out) while the unrelated ``"Vane of the Sunken
+  Reef"`` survived at 0.5625, purely because the decorated query is long and the
   correct title is short.
 
-Stripped, those become ``saga`` vs ``saga`` (1.0), ``saga`` vs ``batman`` (no
-shared token — gated), and ``boys`` vs ``bots`` (no shared token either).
+Stripped, those become ``vane`` vs ``vane`` (1.0), ``vane`` vs ``argent`` (no
+shared token — gated), and ``vants`` vs ``vints`` (no shared token either).
 
 **Containment guard.** Length-asymmetric similarity still buries a short exact
-title under a long decorated one (``"Hellboy"`` scores 0.4375 against
-``"Hellboy Omnibus Volume 1: Seed of Destruction"`` stripped to ``hellboy seed
-of destruction``). So a candidate whose stripped title occurs as a contiguous
+title under a long decorated one (``"Ashclaw"`` scores 0.4118 against
+``"Ashclaw Omnibus Volume 1: Fang of Devastation"`` stripped to ``ashclaw fang
+of devastation``). So a candidate whose stripped title occurs as a contiguous
 token run inside the stripped query is never floored out: it scores at least
 :data:`MAX_CONTAINMENT_CONFIDENCE` — deliberately BELOW
 :data:`AUTO_MATCH_THRESHOLD`, because containment proves plausibility (this
-purchase is decorated) and not identity (``"Batman"`` is contained in
-``"Batman and Robin"`` too). An exact stripped-title equality still scores 1.0,
+purchase is decorated) and not identity (``"Argent"`` is contained in
+``"Argent and Shale"`` too). An exact stripped-title equality still scores 1.0,
 so a real exact match always outranks a containment rescue.
 
 **Token-overlap gate.** A candidate is discarded BEFORE similarity ranking
 unless its STRIPPED fold shares at least one substantive token with the
 stripped query term (articles are already dropped by the fold; boilerplate is
 dropped by the strip). Character-level similarity alone is not evidence of
-identity — the repro pair above scores 0.3273 with zero shared tokens — so the
+identity — the repro pair above scores 0.3673 with zero shared tokens — so the
 gate, not the floor, is what makes that class impossible.
 :data:`PROPOSE_MIN_SIMILARITY` then applies to the gated survivors.
 
 **Trade re-rank (soft).** When the store title is trade-SHAPED — it carries a
-collected-edition cue OR a volume/book-ordinal shape (``"Saga Vol. 1"``,
-``"Monstress Book One"``, ``"Hellboy Omnibus Volume 1"``) — candidates carrying
+collected-edition cue OR a volume/book-ordinal shape (``"Vane Vol. 1"``,
+``"Glasswing Book One"``, ``"Ashclaw Omnibus Volume 1"``) — candidates carrying
 a collected cue are boosted and bare ones demoted, so a trade-shaped purchase
 proposes the collected-edition volume rather than the singles line. ComicVine
 carries no book-type field, so name cues are the only signal available and the
@@ -162,8 +162,8 @@ MAX_CANDIDATES = 3
 #: Ceiling on the confidence a CONTAINMENT rescue may award (FRG-SRC-010).
 #: A candidate saved by the containment guard — its stripped title occurs whole
 #: inside the stripped query — has proved that the store title *decorates* it,
-#: which is evidence of plausibility, not of identity ("Batman" is contained in
-#: "Batman and Robin"). Deliberately below :data:`AUTO_MATCH_THRESHOLD` so a
+#: which is evidence of plausibility, not of identity ("Argent" is contained in
+#: "Argent and Shale"). Deliberately below :data:`AUTO_MATCH_THRESHOLD` so a
 #: rescue always proposes-for-review and never accept-and-downloads, and below
 #: the 1.0 an exact stripped-title equality earns so a real exact match always
 #: outranks a rescue.
@@ -227,7 +227,7 @@ STRIP_DESIGNATORS: frozenset[str] = frozenset(
 )
 
 #: Ordinal/cardinal words that spell out an edition's slice number
-#: ("Monstress Book One"). Bare digits are stripped by shape, not by list.
+#: ("Glasswing Book One"). Bare digits are stripped by shape, not by list.
 STRIP_ORDINAL_WORDS: frozenset[str] = frozenset(
     {
         "one",
@@ -274,8 +274,8 @@ VOLUME_SHAPE_DESIGNATORS: frozenset[str] = frozenset(
     {"vol", "vols", "volume", "volumes", "book", "books", "part", "parts"}
 )
 
-#: A volume/book-ordinal SHAPE in the raw store title ("Saga Vol. 1",
-#: "Monstress Book One", "Hellboy Omnibus Vol. 1") — trade-shaped even without
+#: A volume/book-ordinal SHAPE in the raw store title ("Vane Vol. 1",
+#: "Glasswing Book One", "Ashclaw Omnibus Vol. 1") — trade-shaped even without
 #: an explicit collected-edition cue (FRG-SRC-010, amended). BUILT from the sets
 #: above rather than re-spelled, so the shape and the strip can never drift:
 #: anything this detects is, by construction, boilerplate the strip removes.
@@ -293,8 +293,8 @@ _VOLUME_SHAPE = re.compile(
 TRADE_SHAPE_VOLUME_ORDINAL = "volume-ordinal"
 
 #: Stripped designators that IMPLY a collected edition by themselves. "Omnibus"
-#: is boilerplate to the similarity fold (both "Hellboy" and "Hellboy Omnibus"
-#: strip to "hellboy") but it is not in the parser's cue vocabulary — so
+#: is boilerplate to the similarity fold (both "Ashclaw" and "Ashclaw Omnibus"
+#: strip to "ashclaw") but it is not in the parser's cue vocabulary — so
 #: without this set neither side of the trade re-rank would see it, the two
 #: volumes would tie on stripped similarity, and the wrong shape could win on
 #: ordering. Whether "omnibus" belongs in the parser's BOOKTYPE_CUES proper is
@@ -321,10 +321,10 @@ def query_term(human_name: str) -> str:
     per-copy noise.
 
     The two trims are applied ALTERNATELY until the term stops shrinking,
-    because either can uncover the other: ``"Spawn (1992) #1"`` has a
+    because either can uncover the other: ``"Ember (1992) #1"`` has a
     parenthetical that is not trailing until the ``#1`` is gone, and a single
-    pass left it as ``"spawn 1992"`` — a group key of its own, splitting the
-    145-row Spawn collapse group by print year (FRG-SRC-011).
+    pass left it as ``"ember 1992"`` — a group key of its own, splitting a
+    long single-title run's collapse group by print year (FRG-SRC-011).
     """
     term = human_name.strip()
     for _ in range(4):  # bounded: each round strictly shortens or stops
@@ -424,10 +424,10 @@ def shares_token(term: str, name: str | None) -> bool:
 
     ``True`` when the STRIPPED query term and the STRIPPED candidate name share
     at least one substantive token. A candidate that fails this is never
-    proposed at any character-level similarity — the "Absolute Green Arrow for
-    Something is Killing the Children" class (0.3273, zero shared tokens) is
-    unreachable, and so is the boilerplate-only overlap of "Saga Vol. 1" vs
-    "Batman Vol. 1" (which shared ``vol`` and ``1`` before the strip).
+    proposed at any character-level similarity — the "Distant Amber Signal for
+    Nobody is Guarding the Lighthouse" class (0.3673, zero shared tokens) is
+    unreachable, and so is the boilerplate-only overlap of "Vane Vol. 1" vs
+    "Argent Vol. 1" (which shared ``vol`` and ``1`` before the strip).
     """
     return bool(frozenset(stripped_tokens(term)) & frozenset(stripped_tokens(name)))
 
@@ -438,8 +438,8 @@ def trade_shape(human_name: str) -> str | None:
     Two shapes count, and the widening is the point: an explicit
     collected-edition cue (``detect_series_booktype`` over the shared
     ``BOOKTYPE_CUES``), OR a bare volume/book-ordinal shape. Real store titles
-    for collected editions overwhelmingly carry only the second — "Saga Vol. 1",
-    "Monstress Book One" and "Hellboy Omnibus Vol. 1" all detected as ``None``
+    for collected editions overwhelmingly carry only the second — "Vane Vol. 1",
+    "Glasswing Book One" and "Ashclaw Omnibus Vol. 1" all detected as ``None``
     under cue-only detection, so the trade re-rank never fired on the purchases
     it exists for.
 

@@ -93,7 +93,7 @@ interface FetcherState {
    */
   bulkResult?: (body: { action: string; entitlement_ids: number[] }) => unknown;
   /** Library series the match-picker / booktype lookups resolve against;
-   * defaults to a single "Descender" series (booktype null) when omitted. */
+   * defaults to a single "Driftwood" series (booktype null) when omitted. */
   librarySeries?: SeriesResource[];
   /** The command GET /api/v1/command/{id} resolves to for the sync watcher;
    * defaults to a `started` (still-running) command. */
@@ -260,7 +260,7 @@ function makeFetcher(state: FetcherState): Fetcher {
     if (path === '/api/v1/sources') return state.sources;
     if (path.startsWith('/api/v1/series?')) {
       const records = state.librarySeries ?? [
-        makeSeriesResource({ id: 1, title: 'Descender' }),
+        makeSeriesResource({ id: 1, title: 'Driftwood' }),
       ];
       return {
         page: 1,
@@ -383,25 +383,25 @@ describe('FRG-UI-029: manage view review', () => {
   const entitlements = [
     ent({
       id: 10,
-      human_name: 'Descender, Vol. 1: Tin Stars',
+      human_name: 'Driftwood, Vol. 1: Ash Stars',
       review_status: 'matched',
       matched_series_id: 1,
     }),
     ent({
       id: 11,
-      human_name: 'Saga, Vol. 1',
+      human_name: 'Vane, Vol. 1',
       review_status: 'new',
       proposed_series_id: 1,
       proposed_match: {
         kind: 'library',
         series_id: 1,
         cv_volume_id: null,
-        title: 'Saga',
+        title: 'Vane',
         year: 2012,
         confidence: 0.93,
       },
     }),
-    ent({ id: 12, human_name: 'Saga, Vol. 1 (Humble Choice copy)', review_status: 'ignored' }),
+    ent({ id: 12, human_name: 'Vane, Vol. 1 (Humble Choice copy)', review_status: 'ignored' }),
     ent({ id: 13, human_name: 'A Prose Novel', classification: 'other', review_status: 'new' }),
   ];
 
@@ -450,7 +450,7 @@ describe('FRG-UI-029: manage view review', () => {
     expect(screen.getByTestId('restore-12')).toBeInTheDocument();
     expect(screen.getByTestId('entitlement-row-12').className).toMatch(/rowIgnored/);
     // The new row offers Match-to-suggestion + Ignore.
-    expect(screen.getByTestId('match-11')).toHaveTextContent('Match to Saga');
+    expect(screen.getByTestId('match-11')).toHaveTextContent('Match to Vane');
     expect(screen.getByTestId('ignore-11')).toBeInTheDocument();
   });
 
@@ -523,7 +523,7 @@ describe('FRG-UI-029: reconcile chip edge rules', () => {
   it('FRG-UI-029 — an owned single is chipped amber and kept; fillable issues are green', async () => {
     const user = userEvent.setup();
     const entitlements = [
-      ent({ id: 20, human_name: 'Descender, Vol. 1', review_status: 'matched', matched_series_id: 1 }),
+      ent({ id: 20, human_name: 'Driftwood, Vol. 1', review_status: 'matched', matched_series_id: 1 }),
     ];
     const details = {
       20: detail(20, [
@@ -578,7 +578,7 @@ describe('FRG-UI-029: reconcile chip edge rules', () => {
 
   it('FRG-UI-029 — a standalone OGN/artbook fabricates no singles', async () => {
     const user = userEvent.setup();
-    const entitlements = [ent({ id: 22, human_name: 'The Art of Saga', review_status: 'matched', matched_series_id: 1 })];
+    const entitlements = [ent({ id: 22, human_name: 'The Art of Vane', review_status: 'matched', matched_series_id: 1 })];
     const details = {
       22: detail(22, [{ trade_issue_id: 902, standalone: true, ranges: [] }]),
     };
@@ -679,7 +679,7 @@ describe('FRG-UI-029: a matched row prefers the linked series booktype over the 
     const entitlements = [
       ent({
         id: 30,
-        human_name: 'Descender, Vol. 1: Tin Stars',
+        human_name: 'Driftwood, Vol. 1: Ash Stars',
         review_status: 'matched',
         matched_series_id: 1,
         preferred_format: 'CBZ',
@@ -689,7 +689,7 @@ describe('FRG-UI-029: a matched row prefers the linked series booktype over the 
       sources: [source],
       entitlements,
       calls: [],
-      librarySeries: [makeSeriesResource({ id: 1, title: 'Descender', booktype: 'tpb' })],
+      librarySeries: [makeSeriesResource({ id: 1, title: 'Driftwood', booktype: 'tpb' })],
     });
 
     const row = await screen.findByTestId('entitlement-row-30');
@@ -706,7 +706,7 @@ describe('FRG-UI-029: a matched row prefers the linked series booktype over the 
     const entitlements = [
       ent({
         id: 31,
-        human_name: 'Saga, Vol. 1',
+        human_name: 'Vane, Vol. 1',
         review_status: 'new',
         preferred_format: 'CBZ',
       }),
@@ -715,7 +715,7 @@ describe('FRG-UI-029: a matched row prefers the linked series booktype over the 
       sources: [source],
       entitlements,
       calls: [],
-      librarySeries: [makeSeriesResource({ id: 1, title: 'Descender', booktype: 'tpb' })],
+      librarySeries: [makeSeriesResource({ id: 1, title: 'Driftwood', booktype: 'tpb' })],
     });
 
     const row = await screen.findByTestId('entitlement-row-31');
@@ -739,7 +739,7 @@ describe('FRG-UI-029: a matched row prefers the linked series booktype over the 
       sources: [source],
       entitlements,
       calls: [],
-      librarySeries: [makeSeriesResource({ id: 1, title: 'Descender', booktype: null })],
+      librarySeries: [makeSeriesResource({ id: 1, title: 'Driftwood', booktype: null })],
     });
 
     const row = await screen.findByTestId('entitlement-row-32');
@@ -855,7 +855,7 @@ describe('FRG-UI-039: per-row ComicVine search', () => {
    */
   const orphan = ent({
     id: 50,
-    human_name: 'Something is Killing the Children Vol. 8 #3',
+    human_name: 'Nobody is Guarding the Lighthouse Vol. 8 #3',
     review_status: 'new',
     proposed_match: {
       verdict: 'no-plausible-match',
@@ -866,7 +866,7 @@ describe('FRG-UI-039: per-row ComicVine search', () => {
     proposed_series_id: null,
   });
   const library = [
-    makeSeriesResource({ id: 1, title: 'Descender' }), // cv_volume_id 40500001
+    makeSeriesResource({ id: 1, title: 'Driftwood' }), // cv_volume_id 40500001
   ];
 
   it('FRG-UI-039 — a row with no plausible match still offers a search, and typing fires the debounced suggest', async () => {
@@ -896,16 +896,16 @@ describe('FRG-UI-039: per-row ComicVine search', () => {
     );
     // The seed drops the trailing issue ordinal — a volume search, not an issue.
     const input = within(panel).getByTestId('row-search-input-50');
-    expect(input).toHaveValue('Something is Killing the Children Vol. 8');
+    expect(input).toHaveValue('Nobody is Guarding the Lighthouse Vol. 8');
 
     await user.clear(input);
-    await user.type(input, 'killing children');
+    await user.type(input, 'guarding lighthouse');
     await afterSuggestDebounce();
 
     await waitFor(() =>
       expect(
         state.reads!.some((p) =>
-          p.startsWith('/api/v1/series/lookup/suggest?term=killing%20children'),
+          p.startsWith('/api/v1/series/lookup/suggest?term=guarding%20lighthouse'),
         ),
       ).toBe(true),
     );
@@ -924,7 +924,7 @@ describe('FRG-UI-039: per-row ComicVine search', () => {
         records: [
           candidate({
             cv_volume_id: 4050_0001,
-            name: 'Descender',
+            name: 'Driftwood',
             have_it: true,
           }),
           candidate({ cv_volume_id: 4050_9999, name: 'Some Other Volume' }),
@@ -993,7 +993,7 @@ describe('FRG-UI-039: per-row ComicVine search', () => {
       entitlements: [
         ent({
           id: 51,
-          human_name: 'Descender, Vol. 1',
+          human_name: 'Driftwood, Vol. 1',
           review_status: 'matched',
           matched_series_id: 1,
         }),
@@ -1001,7 +1001,7 @@ describe('FRG-UI-039: per-row ComicVine search', () => {
       calls: [],
       librarySeries: library,
       lookup: () => ({
-        records: [candidate({ cv_volume_id: 4050_8888, name: 'Descender' })],
+        records: [candidate({ cv_volume_id: 4050_8888, name: 'Driftwood' })],
         complete: true,
         truncated: false,
       }),
@@ -1087,15 +1087,15 @@ describe('FRG-UI-039: per-row ComicVine search', () => {
 
 /*
  * FRG-UI-029 (MODIFIED) — thousand-row rendering: the review list virtualizes,
- * so the real dogfood corpus (1,318 entitlements) puts only a window of rows in
- * the DOM, and the M4 shift-range selection still spans rows the window has
+ * so a first-sync-scale corpus (a few thousand entitlements) puts only a window
+ * of rows in the DOM, and the M4 shift-range selection still spans rows the window has
  * scrolled past (selection is id/index based over the filtered list, never
  * DOM-based).
  */
 describe('FRG-UI-029: virtualized review list at corpus scale', () => {
   const source = makeSource({ id: 5, connection_state: 'connected' });
-  /** The live rig's first-sync corpus size (test-rig finding #7). */
-  const CORPUS = 1318;
+  /** A first-sync-scale corpus: far more rows than any window can hold. */
+  const CORPUS = 1200;
   const corpus = Array.from({ length: CORPUS }, (_, i) =>
     ent({ id: 1000 + i, human_name: `Corpus Item ${i}` }),
   );
@@ -1110,7 +1110,7 @@ describe('FRG-UI-029: virtualized review list at corpus scale', () => {
     fireEvent.scroll(scroller);
   }
 
-  it('FRG-UI-029 — a 1,318-row queue renders only a window of rows', async () => {
+  it('FRG-UI-029 — a 1,200-row queue renders only a window of rows', async () => {
     renderScreen({ sources: [source], entitlements: corpus, calls: [] });
 
     const list = await screen.findByTestId('entitlement-list');
@@ -1206,26 +1206,26 @@ describe('FRG-UI-029: virtualized review list at corpus scale', () => {
 describe('FRG-UI-029: same-title collapse groups', () => {
   const source = makeSource({ id: 5, connection_state: 'connected' });
 
-  /** Four Spawn rows the server folded to one key, plus an unrelated row. */
-  function spawnCorpus(): EntitlementResource[] {
+  /** Four Ember rows the server folded to one key, plus an unrelated row. */
+  function emberCorpus(): EntitlementResource[] {
     return [
-      ent({ id: 60, human_name: 'Spawn, Vol. 1', group_key: 'spawn' }),
-      ent({ id: 61, human_name: 'Spawn, Vol. 2', group_key: 'spawn' }),
+      ent({ id: 60, human_name: 'Ember, Vol. 1', group_key: 'ember' }),
+      ent({ id: 61, human_name: 'Ember, Vol. 2', group_key: 'ember' }),
       ent({
         id: 62,
-        human_name: 'Spawn, Vol. 3',
-        group_key: 'spawn',
+        human_name: 'Ember, Vol. 3',
+        group_key: 'ember',
         review_status: 'matched',
         matched_series_id: 1,
       }),
       ent({
         id: 63,
-        human_name: 'Spawn, Vol. 4',
-        group_key: 'spawn',
+        human_name: 'Ember, Vol. 4',
+        group_key: 'ember',
         download_state: 'failed',
         download_error: 'md5 mismatch',
       }),
-      ent({ id: 70, human_name: 'Descender, Vol. 1' }),
+      ent({ id: 70, human_name: 'Driftwood, Vol. 1' }),
     ];
   }
 
@@ -1233,20 +1233,20 @@ describe('FRG-UI-029: same-title collapse groups', () => {
     renderScreen({
       sources: [source],
       entitlements: [
-        ...spawnCorpus(),
+        ...emberCorpus(),
         // A two-row run stays below the collapse threshold — no header, and
         // both rows render plainly.
-        ent({ id: 80, human_name: 'Saga, Vol. 1', group_key: 'saga' }),
-        ent({ id: 81, human_name: 'Saga, Vol. 2', group_key: 'saga' }),
+        ent({ id: 80, human_name: 'Vane, Vol. 1', group_key: 'vane' }),
+        ent({ id: 81, human_name: 'Vane, Vol. 2', group_key: 'vane' }),
       ],
       calls: [],
     });
 
-    const header = await screen.findByTestId('group-header-spawn');
+    const header = await screen.findByTestId('group-header-ember');
     expect(header).toHaveAttribute('data-collapsed', 'true');
-    expect(screen.getByTestId('group-count-spawn')).toHaveTextContent('4 items');
+    expect(screen.getByTestId('group-count-ember')).toHaveTextContent('4 items');
     // The group's title is the members' shared prefix.
-    expect(within(header).getByText('Spawn')).toBeInTheDocument();
+    expect(within(header).getByText('Ember')).toBeInTheDocument();
 
     // Collapsed: the member rows are not rendered…
     expect(screen.queryByTestId('entitlement-row-60')).toBeNull();
@@ -1256,14 +1256,14 @@ describe('FRG-UI-029: same-title collapse groups', () => {
     expect(screen.getByTestId('entitlement-row-70')).toBeInTheDocument();
     expect(screen.getByTestId('entitlement-row-80')).toBeInTheDocument();
     expect(screen.getByTestId('entitlement-row-81')).toBeInTheDocument();
-    expect(screen.queryByTestId('group-header-saga')).toBeNull();
+    expect(screen.queryByTestId('group-header-vane')).toBeNull();
     expect(screen.getByTestId('count-line')).toHaveTextContent('7 items');
   });
 
   it('FRG-UI-029 — a mixed-status group surfaces its counts (incl. a failed download) on the header', async () => {
-    renderScreen({ sources: [source], entitlements: spawnCorpus(), calls: [] });
+    renderScreen({ sources: [source], entitlements: emberCorpus(), calls: [] });
 
-    const statuses = await screen.findByTestId('group-statuses-spawn');
+    const statuses = await screen.findByTestId('group-statuses-ember');
     // Three new + one matched, and the failed download is called out — the
     // collapse hides no actionable state.
     expect(statuses).toHaveTextContent('3 new');
@@ -1273,11 +1273,11 @@ describe('FRG-UI-029: same-title collapse groups', () => {
 
   it('FRG-UI-029 — expanding a group reaches every member row and its full actions', async () => {
     const user = userEvent.setup();
-    renderScreen({ sources: [source], entitlements: spawnCorpus(), calls: [] });
+    renderScreen({ sources: [source], entitlements: emberCorpus(), calls: [] });
 
-    await user.click(await screen.findByTestId('group-toggle-spawn'));
+    await user.click(await screen.findByTestId('group-toggle-ember'));
 
-    expect(screen.getByTestId('group-header-spawn')).toHaveAttribute(
+    expect(screen.getByTestId('group-header-ember')).toHaveAttribute(
       'data-collapsed',
       'false',
     );
@@ -1298,18 +1298,18 @@ describe('FRG-UI-029: same-title collapse groups', () => {
     const user = userEvent.setup();
     const state: FetcherState = {
       sources: [source],
-      entitlements: spawnCorpus(),
+      entitlements: emberCorpus(),
       calls: [],
     };
     renderScreen(state);
 
-    await user.click(await screen.findByTestId('group-select-spawn'));
+    await user.click(await screen.findByTestId('group-select-ember'));
     expect(await screen.findByTestId('bulk-bar')).toHaveTextContent('4 selected');
 
     // It toggles as a unit: a second click clears the whole group…
-    await user.click(screen.getByTestId('group-select-spawn'));
+    await user.click(screen.getByTestId('group-select-ember'));
     expect(screen.getByTestId('bulk-bar')).toHaveTextContent('0 selected');
-    await user.click(screen.getByTestId('group-select-spawn'));
+    await user.click(screen.getByTestId('group-select-ember'));
     expect(screen.getByTestId('bulk-bar')).toHaveTextContent('4 selected');
 
     // …and the whole group is what the bulk action then receives.
@@ -1331,8 +1331,8 @@ describe('FRG-UI-029: same-title collapse groups', () => {
       sources: [source],
       entitlements: [
         ent({ id: 59, human_name: 'Before The Group' }),
-        ...spawnCorpus().slice(0, 4),
-        ent({ id: 70, human_name: 'Descender, Vol. 1' }),
+        ...emberCorpus().slice(0, 4),
+        ent({ id: 70, human_name: 'Driftwood, Vol. 1' }),
       ],
       calls: [],
     };
@@ -1363,16 +1363,16 @@ describe('FRG-UI-029: same-title collapse groups', () => {
     const user = userEvent.setup();
     const state: FetcherState = {
       sources: [source],
-      entitlements: [...spawnCorpus().slice(0, 4), ent({ id: 70, human_name: 'Descender, Vol. 1' })],
+      entitlements: [...emberCorpus().slice(0, 4), ent({ id: 70, human_name: 'Driftwood, Vol. 1' })],
       calls: [],
     };
     renderScreen(state);
 
     // Expand the group and anchor on a row INSIDE it…
-    await user.click(await screen.findByTestId('group-toggle-spawn'));
+    await user.click(await screen.findByTestId('group-toggle-ember'));
     await user.click(screen.getByTestId('select-61'));
     // …then collapse it, folding the anchor row out of the list.
-    await user.click(screen.getByTestId('group-toggle-spawn'));
+    await user.click(screen.getByTestId('group-toggle-ember'));
     expect(screen.queryByTestId('select-61')).toBeNull();
 
     // The shift-range still draws: the anchor moved to the header, which stands
@@ -1451,10 +1451,10 @@ describe('FRG-UI-029: same-title collapse groups', () => {
  */
 describe('FRG-SRC-011: bundle display, bundle selection, and bulk accept', () => {
   const source = makeSource({ id: 5, connection_state: 'connected' });
-  const BUNDLE = 'Humble Comics Bundle: Image Firsts';
+  const BUNDLE = 'Humble Comics Bundle: Synthetic Firsts';
 
   const bundled = [
-    ent({ id: 90, human_name: 'Saga, Vol. 1', bundle_human_name: BUNDLE }),
+    ent({ id: 90, human_name: 'Vane, Vol. 1', bundle_human_name: BUNDLE }),
     ent({ id: 91, human_name: 'Deadly Class, Vol. 1', bundle_human_name: BUNDLE }),
     // Same bundle, but ignored — invisible under the "New" filter, so a
     // bundle selection made there must not reach it.
@@ -1466,8 +1466,8 @@ describe('FRG-SRC-011: bundle display, bundle selection, and bulk accept', () =>
     }),
     ent({
       id: 93,
-      human_name: 'Descender, Vol. 1',
-      bundle_human_name: 'Humble Comics Bundle: Descender',
+      human_name: 'Driftwood, Vol. 1',
+      bundle_human_name: 'Humble Comics Bundle: Driftwood',
     }),
   ];
 
@@ -1476,15 +1476,15 @@ describe('FRG-SRC-011: bundle display, bundle selection, and bulk accept', () =>
       sources: [source],
       entitlements: [
         ...bundled,
-        ent({ id: 94, human_name: 'Spawn, Vol. 1', group_key: 'spawn', bundle_human_name: BUNDLE }),
-        ent({ id: 95, human_name: 'Spawn, Vol. 2', group_key: 'spawn', bundle_human_name: BUNDLE }),
-        ent({ id: 96, human_name: 'Spawn, Vol. 3', group_key: 'spawn', bundle_human_name: BUNDLE }),
+        ent({ id: 94, human_name: 'Ember, Vol. 1', group_key: 'ember', bundle_human_name: BUNDLE }),
+        ent({ id: 95, human_name: 'Ember, Vol. 2', group_key: 'ember', bundle_human_name: BUNDLE }),
+        ent({ id: 96, human_name: 'Ember, Vol. 3', group_key: 'ember', bundle_human_name: BUNDLE }),
       ],
       calls: [],
     });
 
     expect(await screen.findByTestId('bundle-90')).toHaveTextContent(BUNDLE);
-    expect(screen.getByTestId('group-header-spawn')).toHaveTextContent(BUNDLE);
+    expect(screen.getByTestId('group-header-ember')).toHaveTextContent(BUNDLE);
   });
 
   it('FRG-SRC-011 — "Select bundle" selects exactly that bundle\'s VISIBLE rows', async () => {
@@ -1521,25 +1521,25 @@ describe('FRG-SRC-011: bundle display, bundle selection, and bulk accept', () =>
       entitlements: [
         ent({
           id: 100,
-          human_name: 'Saga, Vol. 1',
+          human_name: 'Vane, Vol. 1',
           proposed_series_id: 1,
           proposed_match: {
             kind: 'library',
             series_id: 1,
             cv_volume_id: null,
-            title: 'Saga',
+            title: 'Vane',
             year: 2012,
             confidence: 0.93,
           },
         }),
         ent({
           id: 101,
-          human_name: 'Monstress, Vol. 1',
+          human_name: 'Glasswing, Vol. 1',
           proposed_match: {
             kind: 'comicvine',
             series_id: null,
             cv_volume_id: 4050_1111,
-            title: 'Monstress',
+            title: 'Glasswing',
             year: 2015,
             confidence: 0.88,
           },
@@ -1580,13 +1580,13 @@ describe('FRG-SRC-011: bundle display, bundle selection, and bulk accept', () =>
       entitlements: [
         ent({
           id: 110,
-          human_name: 'Saga, Vol. 1',
+          human_name: 'Vane, Vol. 1',
           proposed_series_id: 1,
           proposed_match: {
             kind: 'library',
             series_id: 1,
             cv_volume_id: null,
-            title: 'Saga',
+            title: 'Vane',
             year: 2012,
             confidence: 0.93,
           },
@@ -1654,7 +1654,7 @@ describe('FRG-SRC-011: bundle display, bundle selection, and bulk accept', () =>
     const state: FetcherState = {
       sources: [source],
       entitlements: [
-        ent({ id: 130, human_name: 'Saga, Vol. 1' }),
+        ent({ id: 130, human_name: 'Vane, Vol. 1' }),
         ent({ id: 131, human_name: 'Vanished Item' }),
       ],
       calls: [],

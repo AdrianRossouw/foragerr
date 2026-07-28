@@ -198,8 +198,8 @@ def test_group_key_is_the_stripped_fold_of_the_series_shaped_term():
     """``group_key`` must be ``stripped_key(query_term(...))`` and nothing else
     — a second, drifting fold on the client is exactly what computing it
     server-side prevents. STRIPPED, not plain: store idioms like
-    "SPAWN Vol. 243" keep their ordinal through the plain fold, splintering
-    one title's 145 rows into per-ordinal groups."""
+    "EMBER Vol. 243" keep their ordinal through the plain fold, splintering
+    a large same-title run into one group per ordinal."""
     from foragerr.sources.matching import stripped_key
 
     title = "Synthetic Hero #1"
@@ -207,22 +207,22 @@ def test_group_key_is_the_stripped_fold_of_the_series_shaped_term():
     assert _group_key(title) == "synthetic hero"
     # Edition slices of one title share the group.
     assert (
-        _group_key("SPAWN Vol. 243")
-        == _group_key("Spawn Issues #8")
-        == _group_key("Spawn #211")
-        == "spawn"
+        _group_key("EMBER Vol. 243")
+        == _group_key("Ember Issues #8")
+        == _group_key("Ember #211")
+        == "ember"
     )
 
 
 @pytest.mark.req("FRG-SRC-011")
 def test_same_series_rows_share_a_group_key_across_issue_and_copy_noise():
-    """The 145-Spawn case: per-copy suffixes fold away, so the whole run
-    collapses into ONE group."""
+    """A large same-title run with per-ordinal idioms: per-copy suffixes fold
+    away, so the whole run collapses into ONE group."""
     keys = {
-        _group_key("Spawn #1"),
-        _group_key("Spawn #145"),
-        _group_key("spawn"),
-        _group_key("The Spawn (digital edition)"),
+        _group_key("Ember #1"),
+        _group_key("Ember #211"),
+        _group_key("ember"),
+        _group_key("The Ember (digital edition)"),
     }
     assert len(keys) == 1
 

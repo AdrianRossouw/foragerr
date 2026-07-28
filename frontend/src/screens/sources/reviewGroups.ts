@@ -5,16 +5,19 @@ import type { EntitlementResource } from '../../api/types';
  *
  * Rows are grouped by the SERVER's `group_key` — `matching_key(query_term())`,
  * the one shared title fold (FRG-IMP-005). Nothing here re-derives that fold:
- * a second, subtly different client fold is exactly how 145 Spawn rows would
- * stop being one group. The client's only job is bucketing, ordering, and
- * summarising.
+ * a second, subtly different client fold is exactly how a large same-title
+ * run would stop being one group. The client's only job is bucketing,
+ * ordering, and summarising.
  *
  * Collapse is PRESENTATION, never a state filter: a group header carries the
  * mixed-status counts of its members and expanding always reaches every row's
  * full actions.
  */
 
-/** Groups at or above this size render collapsed by default (the 145-Spawn case). */
+/**
+ * Groups at or above this size render collapsed by default (the large
+ * same-title run a store's per-ordinal idioms produce).
+ */
 export const COLLAPSE_MIN_ROWS = 3;
 
 export interface GroupCounts {
@@ -68,8 +71,8 @@ function sharedTitle(rows: EntitlementResource[]): string {
     if (!prefix) break;
   }
   // Drop the punctuation/whitespace the cut lands on, then the dangling
-  // volume-ordinal word the cut exposes: "Spawn, Vol. " -> "Spawn, Vol" ->
-  // "Spawn". The point is a label that reads like the series, not like the
+  // volume-ordinal word the cut exposes: "Ember, Vol. " -> "Ember, Vol" ->
+  // "Ember". The point is a label that reads like the series, not like the
   // longest string the members happen to share.
   const trimEdge = (value: string) =>
     value.replace(/[\s,:;(#.\-–—]+$/u, '').trim();

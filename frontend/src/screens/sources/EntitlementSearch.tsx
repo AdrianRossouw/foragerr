@@ -22,7 +22,7 @@ export type PickedCandidate = Pick<
 
 /**
  * Seed term for a row's search (FRG-UI-039): the store's own human name, minus
- * a trailing issue ordinal ("Saga #12" -> "Saga") which never helps a volume
+ * a trailing issue ordinal ("Vane #12" -> "Vane") which never helps a volume
  * search. Deliberately NOT a second copy of the backend's title parser — the
  * operator edits the seed, so a raw-ish seed is honest and safe.
  */

@@ -287,13 +287,13 @@ async def test_genuine_no_match_persists_the_explicit_verdict_marker(
     """ComicVine answered and nothing cleared the gate/floor: the row records
     the verdict, so the UI can tell it apart from a never-computed NULL."""
     source = await _source(db)
-    eid = await _new_comic(db, source.id, "Something is Killing the Children Vol. 8")
+    eid = await _new_comic(db, source.id, "Nobody is Guarding the Lighthouse Vol. 8")
 
     await enrich_source(
         db,
         make_settings(config_dir),
         source,
-        cv_client=_FakeCV(candidates=[_cand(1, "Absolute Green Arrow", 2024)]),
+        cv_client=_FakeCV(candidates=[_cand(1, "Distant Amber Signal", 2024)]),
     )
     row = await repo.get_entitlement(db, eid)
     assert row.proposed_match_json is not None
@@ -312,7 +312,7 @@ async def test_the_marker_is_never_auto_accepted(
     db, config_dir, root_folder_id, format_profile_id
 ):
     source = await _source(db, auto_sync=True)
-    eid = await _new_comic(db, source.id, "Something is Killing the Children Vol. 8")
+    eid = await _new_comic(db, source.id, "Nobody is Guarding the Lighthouse Vol. 8")
     commands = FakeCommands()
 
     summary = await enrich_source(
@@ -320,7 +320,7 @@ async def test_the_marker_is_never_auto_accepted(
         make_settings(config_dir),
         source,
         commands=commands,
-        cv_client=_FakeCV(candidates=[_cand(1, "Absolute Green Arrow", 2024)]),
+        cv_client=_FakeCV(candidates=[_cand(1, "Distant Amber Signal", 2024)]),
     )
     assert "0 auto-accepted" in summary
     assert commands.enqueued == []
@@ -478,7 +478,7 @@ async def test_the_marker_is_not_written_on_a_budget_hit(
     """The two states stay distinct end to end: the SAME entitlement gets NULL
     under a budget hit and the marker once ComicVine answers."""
     source = await _source(db)
-    eid = await _new_comic(db, source.id, "Something is Killing the Children Vol. 8")
+    eid = await _new_comic(db, source.id, "Nobody is Guarding the Lighthouse Vol. 8")
     settings = make_settings(config_dir)
 
     await enrich_source(db, settings, source, cv_client=_budget_exhausted())
@@ -488,7 +488,7 @@ async def test_the_marker_is_not_written_on_a_budget_hit(
         db,
         settings,
         source,
-        cv_client=_FakeCV(candidates=[_cand(1, "Absolute Green Arrow", 2024)]),
+        cv_client=_FakeCV(candidates=[_cand(1, "Distant Amber Signal", 2024)]),
     )
     stamped = json.loads((await repo.get_entitlement(db, eid)).proposed_match_json)
     assert stamped["verdict"] == VERDICT_NO_PLAUSIBLE_MATCH

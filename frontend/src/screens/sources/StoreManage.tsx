@@ -88,7 +88,7 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
   const [filter, setFilter] = useState<Filter>('all');
   const [showOther, setShowOther] = useState(false);
   const [selected, setSelected] = useState<ReadonlySet<number>>(new Set());
-  // The shift-range anchor is a review-ITEM key ("r:12" / "g:spawn"), not a row
+  // The shift-range anchor is a review-ITEM key ("r:12" / "g:ember"), not a row
   // id: headers and rows share one index space, so the anchor must too.
   const [anchorKey, setAnchorKey] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set());

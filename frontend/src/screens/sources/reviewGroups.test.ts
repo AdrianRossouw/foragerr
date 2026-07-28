@@ -45,20 +45,20 @@ function titleOf(names: string[]): string {
 
 describe('FRG-UI-029: sharedTitle', () => {
   it('FRG-UI-029 — trims the punctuation and the dangling volume word the prefix cut exposes', () => {
-    // "Spawn, Vol. " -> "Spawn, Vol" -> "Spawn": the label reads like the
+    // "Ember, Vol. " -> "Ember, Vol" -> "Ember": the label reads like the
     // series, not like the longest string the members happen to share.
-    expect(titleOf(['Spawn, Vol. 1', 'Spawn, Vol. 2', 'Spawn, Vol. 3'])).toBe(
-      'Spawn',
+    expect(titleOf(['Ember, Vol. 1', 'Ember, Vol. 2', 'Ember, Vol. 3'])).toBe(
+      'Ember',
     );
-    expect(titleOf(['Saga Book One', 'Saga Book Two', 'Saga Book Three'])).toBe(
-      'Saga',
+    expect(titleOf(['Vane Book One', 'Vane Book Two', 'Vane Book Three'])).toBe(
+      'Vane',
     );
     expect(
-      titleOf(['Descender #1', 'Descender #2', 'Descender #3']),
-    ).toBe('Descender');
+      titleOf(['Driftwood #1', 'Driftwood #2', 'Driftwood #3']),
+    ).toBe('Driftwood');
     expect(
-      titleOf(['Monstress - Part 1', 'Monstress - Part 2', 'Monstress - Part 3']),
-    ).toBe('Monstress');
+      titleOf(['Glasswing - Part 1', 'Glasswing - Part 2', 'Glasswing - Part 3']),
+    ).toBe('Glasswing');
   });
 
   it('FRG-UI-029 — a dangling word is trimmed only as a WHOLE token (the "Casino" case)', () => {
@@ -84,9 +84,9 @@ describe('FRG-UI-029: sharedTitle', () => {
   it('FRG-UI-029 — a sub-3-character sliver falls back to the first member name', () => {
     // The shared prefix is "A" — noise, not a title. The group is named after
     // its first member instead (the count still says how many follow).
-    expect(titleOf(['Akira', 'Alpha Flight', 'Astro City'])).toBe('Akira');
+    expect(titleOf(['Aster', 'Amber Vault', 'Alcove Nine'])).toBe('Aster');
     // Same rule when the members share nothing at all (empty prefix).
-    expect(titleOf(['Bone', 'Chew', 'Descender'])).toBe('Bone');
+    expect(titleOf(['Rook', 'Vane', 'Driftwood'])).toBe('Rook');
   });
 });
 
@@ -108,8 +108,8 @@ describe('FRG-UI-029: buildReviewItems', () => {
 
   it('FRG-UI-029 — fewer than COLLAPSE_MIN_ROWS rows render plainly, with no header', () => {
     const pair = [
-      ent({ id: 10, group_key: 'saga' }),
-      ent({ id: 11, group_key: 'saga' }),
+      ent({ id: 10, group_key: 'vane' }),
+      ent({ id: 11, group_key: 'vane' }),
     ];
     const { items, groups } = buildReviewItems(pair, new Set());
 
@@ -121,16 +121,16 @@ describe('FRG-UI-029: buildReviewItems', () => {
 
   it('FRG-UI-029 — a group collapses unless its key is in expandedGroups', () => {
     const rows = [
-      ent({ id: 20, human_name: 'Spawn, Vol. 1', group_key: 'spawn' }),
-      ent({ id: 21, human_name: 'Spawn, Vol. 2', group_key: 'spawn' }),
-      ent({ id: 22, human_name: 'Spawn, Vol. 3', group_key: 'spawn' }),
-      ent({ id: 30, human_name: 'Descender' }),
+      ent({ id: 20, human_name: 'Ember, Vol. 1', group_key: 'ember' }),
+      ent({ id: 21, human_name: 'Ember, Vol. 2', group_key: 'ember' }),
+      ent({ id: 22, human_name: 'Ember, Vol. 3', group_key: 'ember' }),
+      ent({ id: 30, human_name: 'Driftwood' }),
     ];
 
     // Collapsed: the header stands alone where its FIRST member appeared, and
     // the unrelated row keeps its place after it.
     const collapsed = buildReviewItems(rows, new Set());
-    expect(collapsed.items.map((i) => i.key)).toEqual(['g:spawn', 'r:30']);
+    expect(collapsed.items.map((i) => i.key)).toEqual(['g:ember', 'r:30']);
     expect(collapsed.items[0]).toMatchObject({
       kind: 'group-header',
       collapsed: true,
@@ -140,9 +140,9 @@ describe('FRG-UI-029: buildReviewItems', () => {
     expect(itemIds(collapsed.items[0])).toEqual([20, 21, 22]);
 
     // Expanded: the members follow their header, contiguously and in order.
-    const expanded = buildReviewItems(rows, new Set(['spawn']));
+    const expanded = buildReviewItems(rows, new Set(['ember']));
     expect(expanded.items.map((i) => i.key)).toEqual([
-      'g:spawn',
+      'g:ember',
       'r:20',
       'r:21',
       'r:22',
@@ -153,37 +153,37 @@ describe('FRG-UI-029: buildReviewItems', () => {
     expect(expanded.items[1]).toMatchObject({ kind: 'row' });
     expect(
       expanded.items[1].kind === 'row' ? expanded.items[1].group?.key : null,
-    ).toBe('spawn');
+    ).toBe('ember');
     // …and an unrelated expandedGroups entry changes nothing.
     expect(
       buildReviewItems(rows, new Set(['nope'])).items.map((i) => i.key),
-    ).toEqual(['g:spawn', 'r:30']);
+    ).toEqual(['g:ember', 'r:30']);
   });
 
   it('FRG-UI-029 — a group appears where its first member did, and its counts/bundle summarise the members', () => {
     const rows = [
       ent({ id: 40, human_name: 'Before' }),
-      ent({ id: 41, human_name: 'Spawn, Vol. 1', group_key: 'spawn', bundle_human_name: 'Image Firsts' }),
+      ent({ id: 41, human_name: 'Ember, Vol. 1', group_key: 'ember', bundle_human_name: 'Synthetic Firsts' }),
       ent({ id: 42, human_name: 'Interleaved' }),
       ent({
         id: 43,
-        human_name: 'Spawn, Vol. 2',
-        group_key: 'spawn',
+        human_name: 'Ember, Vol. 2',
+        group_key: 'ember',
         review_status: 'matched',
-        bundle_human_name: 'Image Firsts',
+        bundle_human_name: 'Synthetic Firsts',
       }),
       ent({
         id: 44,
-        human_name: 'Spawn, Vol. 3',
-        group_key: 'spawn',
+        human_name: 'Ember, Vol. 3',
+        group_key: 'ember',
         download_state: 'failed',
-        bundle_human_name: 'Image Firsts',
+        bundle_human_name: 'Synthetic Firsts',
       }),
     ];
     const { items, groups } = buildReviewItems(rows, new Set());
 
     // The group takes the slot of row 41 — the later members move up to it.
-    expect(items.map((i) => i.key)).toEqual(['r:40', 'g:spawn', 'r:42']);
+    expect(items.map((i) => i.key)).toEqual(['r:40', 'g:ember', 'r:42']);
     expect(groups[0].rows.map((r) => r.id)).toEqual([41, 43, 44]);
     expect(groups[0].counts).toEqual({
       new: 2,
@@ -192,7 +192,7 @@ describe('FRG-UI-029: buildReviewItems', () => {
       failed: 1,
     });
     // One shared bundle names itself; a mixed group names none.
-    expect(groups[0].bundle).toBe('Image Firsts');
+    expect(groups[0].bundle).toBe('Synthetic Firsts');
     const mixed = buildReviewItems(
       rows.map((r) =>
         r.id === 44 ? { ...r, bundle_human_name: 'Other Bundle' } : r,
@@ -204,11 +204,11 @@ describe('FRG-UI-029: buildReviewItems', () => {
 
   it('FRG-UI-029 — the collapse threshold is a parameter, so a caller can prove the boundary', () => {
     const pair = [
-      ent({ id: 50, group_key: 'saga' }),
-      ent({ id: 51, group_key: 'saga' }),
+      ent({ id: 50, group_key: 'vane' }),
+      ent({ id: 51, group_key: 'vane' }),
     ];
     expect(buildReviewItems(pair, new Set(), 2).items.map((i) => i.key)).toEqual(
-      ['g:saga'],
+      ['g:vane'],
     );
   });
 });
@@ -216,14 +216,14 @@ describe('FRG-UI-029: buildReviewItems', () => {
 describe('FRG-SRC-011: bundlesInView', () => {
   it('FRG-SRC-011 — counts each bundle in first-appearance order, skipping unnamed rows', () => {
     const rows = [
-      ent({ id: 60, bundle_human_name: 'Descender Bundle' }),
+      ent({ id: 60, bundle_human_name: 'Driftwood Bundle' }),
       ent({ id: 61, bundle_human_name: null }),
-      ent({ id: 62, bundle_human_name: 'Image Firsts' }),
-      ent({ id: 63, bundle_human_name: 'Descender Bundle' }),
+      ent({ id: 62, bundle_human_name: 'Synthetic Firsts' }),
+      ent({ id: 63, bundle_human_name: 'Driftwood Bundle' }),
     ];
     expect(bundlesInView(rows)).toEqual([
-      { name: 'Descender Bundle', count: 2 },
-      { name: 'Image Firsts', count: 1 },
+      { name: 'Driftwood Bundle', count: 2 },
+      { name: 'Synthetic Firsts', count: 1 },
     ]);
   });
 });

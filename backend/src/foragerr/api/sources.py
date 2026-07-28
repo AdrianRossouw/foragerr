@@ -377,11 +377,13 @@ def _group_key(human_name: str) -> str:
     series-shaped term (the same trim the proposal ranker uses) and then run
     through the ranker's boilerplate-STRIPPED fold, which itself bottoms out
     in the ONE shared title fold (FRG-IMP-005). The strip is what makes the
-    collapse real: the live corpus's "SPAWN Vol. 243" idiom keeps its ordinal
-    through the plain fold ("spawn vol 243" — 145 Spawn rows made 125 groups
-    on the rig), and the stripped fold is precisely the "same title, different
-    edition slice" equivalence the group means. Computed server-side so the
-    client cannot grow a second, subtly different fold.
+    collapse real: store fronts name the edition slices of ONE title with
+    per-ordinal idioms ("TITLE Vol. 243", "Title Issues #8", "Title #211"),
+    and every one of those keeps its ordinal through the plain fold
+    ("title vol 243"), so a long single-title run splinters into as many
+    groups as it has ordinals. The stripped fold is precisely the "same
+    title, different edition slice" equivalence the group means. Computed
+    server-side so the client cannot grow a second, subtly different fold.
     """
     from foragerr.sources.matching import query_term, stripped_key
 

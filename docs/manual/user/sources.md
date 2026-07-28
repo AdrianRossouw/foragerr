@@ -99,8 +99,9 @@ at that scale — it renders only what's on screen). Three tools keep the work
 proportional (`FRG-SRC-011`):
 
 - **Groups**: three or more rows that are really the same title collapse
-  into one expandable group with a count — 145 mislabeled "SPAWN Vol. NNN"
-  singles read as one line, not 145. A group header shows mixed statuses
+  into one expandable group with a count — a long run of mislabeled
+  `"TITLE Vol. NNN"` singles reads as one line, not hundreds. A group
+  header shows mixed statuses
   when its rows differ (including a failed-download callout), its checkbox
   selects the whole group, a shift-range across a collapsed group includes
   the rows folded inside it, and expanding always reaches every row's full
