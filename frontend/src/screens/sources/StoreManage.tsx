@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { observeElementRect, useVirtualizer } from '@tanstack/react-virtual';
 import { SegmentedControl } from '../../components/SegmentedControl';
 import { Toggle } from '../../components/Toggle';
 import { EntitlementRow } from './EntitlementRow';
@@ -19,10 +20,31 @@ import styles from './sources.module.css';
 type Filter = 'all' | 'new' | 'matched' | 'ignored';
 
 /**
+ * Starting height guess for one collapsed review row (FRG-UI-029). Every
+ * mounted row is measured for real (`measureElement`), so this only shapes the
+ * scrollbar before a row has been seen — and doubles as the fallback when the
+ * environment reports no layout at all (jsdom), keeping the windowing math
+ * coherent under test.
+ */
+const ROW_ESTIMATE_PX = 78;
+
+/**
+ * Viewport height assumed when the scroll container reports none. A
+ * zero-height measurement means "this environment did no layout" (jsdom) — the
+ * virtualizer's own answer to a zero viewport is to render NOTHING, which
+ * would turn a layout-less environment into a silently empty list. Falling
+ * back to a nominal viewport keeps the list windowing coherently instead.
+ */
+const VIEWPORT_FALLBACK_PX = 720;
+
+/**
  * Connected-store manage view (FRG-UI-029): account bar (auto-sync toggle, Sync
  * now, Disconnect), the count line + All/New/Matched/Ignored filter segments and
- * a non-comic reveal, and the reviewable entitlement list with bulk select
- * (including shift-range, the FRG-UI-025 pattern).
+ * a non-comic reveal, and the reviewable entitlement list — virtualized, so a
+ * first sync at corpus scale (1,318 rows in the dogfood account) stays
+ * responsive — with bulk select (including shift-range, the FRG-UI-025
+ * pattern; selection is id/index based over the filtered list, so it spans
+ * rows the window has scrolled past).
  */
 export function StoreManage({ source }: { source: StoreSourceResource }) {
   const entitlementsQuery = useEntitlements(source.id);
@@ -67,6 +89,27 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
   };
   const visible =
     filter === 'all' ? scoped : scoped.filter((e) => e.review_status === filter);
+
+  // Virtualized review list (FRG-UI-029): the dogfood corpus is 1,318 rows, so
+  // the list renders only the window around the scroll offset plus overscan.
+  // Rows are dynamically measured because a row can expand (reconcile detail,
+  // the FRG-UI-039 search panel) — its height is not a constant.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: visible.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => ROW_ESTIMATE_PX,
+    // Keyed by entitlement id, not position: filtering/refetching reorders the
+    // window without recycling one row's measured height onto another row.
+    getItemKey: (index) => visible[index].id,
+    overscan: 8,
+    measureElement: (el) => el.getBoundingClientRect().height || ROW_ESTIMATE_PX,
+    observeElementRect: (instance, cb) =>
+      observeElementRect(instance, (rect) =>
+        cb({ width: rect.width, height: rect.height || VIEWPORT_FALLBACK_PX }),
+      ),
+  });
+  const virtualRows = virtualizer.getVirtualItems();
 
   const clearSelection = () => {
     setSelected(new Set());
@@ -300,18 +343,41 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
       )}
       {visible.length > 0 && (
         <div className={styles.list}>
-          {visible.map((e, index) => (
-            <EntitlementRow
-              key={e.id}
-              entitlement={e}
-              index={index}
-              selected={selected.has(e.id)}
-              onSelectRow={selectRow}
-              expanded={expanded.has(e.id)}
-              onToggleExpand={() => toggleExpand(e.id)}
-              librarySeries={librarySeries}
-            />
-          ))}
+          <div
+            ref={scrollRef}
+            className={styles.listScroll}
+            data-testid="entitlement-scroller"
+          >
+            <div
+              style={{ height: virtualizer.getTotalSize(), position: 'relative' }}
+              data-testid="entitlement-list"
+              data-total-rows={visible.length}
+            >
+              {virtualRows.map((virtualRow) => {
+                const e = visible[virtualRow.index];
+                return (
+                  <div
+                    key={virtualRow.key}
+                    className={styles.virtualRow}
+                    // measureElement reads data-index off the element itself.
+                    data-index={virtualRow.index}
+                    ref={virtualizer.measureElement}
+                    style={{ transform: `translateY(${virtualRow.start}px)` }}
+                  >
+                    <EntitlementRow
+                      entitlement={e}
+                      index={virtualRow.index}
+                      selected={selected.has(e.id)}
+                      onSelectRow={selectRow}
+                      expanded={expanded.has(e.id)}
+                      onToggleExpand={() => toggleExpand(e.id)}
+                      librarySeries={librarySeries}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
     </div>

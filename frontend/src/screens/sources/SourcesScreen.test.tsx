@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../../test/renderWithProviders';
 import { createQueryClient } from '../../queryClient';
 import { makeCommand, makeSeriesResource } from '../../test/mockData';
+import { SUGGEST_DEBOUNCE_MS } from '../../api/hooks';
 import { ApiRequestError, type Fetcher, type FetcherInit } from '../../api/fetcher';
 import type {
   EntitlementResource,
@@ -16,8 +17,16 @@ import { SourcesScreen } from './SourcesScreen';
 /*
  * FRG-UI-029 — the Sources screen: connect flow (masked input, live-validated
  * Connect, honest error), the manage view (count line, filter segments, review
- * actions incl. bulk + shift-range), and the reconcile chip edge rules.
+ * actions incl. bulk + shift-range, virtualized at corpus scale), the per-row
+ * ComicVine search picker (FRG-UI-039), and the reconcile chip edge rules.
  */
+
+/** Real-time wait past the row search's autosuggest debounce (FRG-UI-039). */
+function afterSuggestDebounce() {
+  return act(
+    () => new Promise((resolve) => setTimeout(resolve, SUGGEST_DEBOUNCE_MS + 100)),
+  );
+}
 
 function makeSource(
   o: Partial<StoreSourceResource> & Pick<StoreSourceResource, 'id'>,
@@ -74,6 +83,41 @@ interface FetcherState {
   /** The command GET /api/v1/command/{id} resolves to for the sync watcher;
    * defaults to a `started` (still-running) command. */
   commandStatus?: ReturnType<typeof makeCommand>;
+  /** Row-search full-lookup resolver (FRG-UI-039); may throw an
+   * `ApiRequestError` to exercise the credential/upstream outcome notes.
+   * Defaults to a clean-empty envelope. */
+  lookup?: (path: string) => unknown;
+  /** Row-search autosuggest resolver; defaults to a quiet empty dropdown so
+   * the debounced accelerator never surfaces an unexpected-path throw. */
+  suggest?: (path: string) => unknown;
+  /** When present, every READ path is recorded here (writes go to `calls`). */
+  reads?: string[];
+}
+
+/** A ComicVine candidate as the lookup/suggest endpoints shape it. */
+function candidate(
+  o: Partial<{
+    cv_volume_id: number;
+    name: string;
+    publisher: string | null;
+    start_year: number | null;
+    count_of_issues: number | null;
+    have_it: boolean;
+  }> & { cv_volume_id: number },
+) {
+  return {
+    name: `Volume ${o.cv_volume_id}`,
+    publisher: 'Image',
+    start_year: 2012,
+    image_url: null,
+    count_of_issues: 54,
+    description: null,
+    name_similarity: 0.9,
+    year_proximity: null,
+    target_issue_plausible: null,
+    have_it: false,
+    ...o,
+  };
 }
 
 function makeFetcher(state: FetcherState): Fetcher {
@@ -159,6 +203,15 @@ function makeFetcher(state: FetcherState): Fetcher {
     }
 
     // --- Reads ---
+    state.reads?.push(path);
+    if (path.startsWith('/api/v1/series/lookup/suggest?term=')) {
+      return state.suggest?.(path) ?? { records: [], complete: true };
+    }
+    if (path.startsWith('/api/v1/series/lookup?term=')) {
+      return (
+        state.lookup?.(path) ?? { records: [], complete: true, truncated: false }
+      );
+    }
     if (path === '/api/v1/sources') return state.sources;
     if (path.startsWith('/api/v1/series?')) {
       const records = state.librarySeries ?? [
@@ -738,5 +791,323 @@ describe('FRG-SRC-009: failed-download retry affordance', () => {
     await screen.findByTestId('entitlement-row-41');
     expect(screen.queryByTestId('retry-41')).toBeNull();
     expect(screen.queryByTestId('retry-42')).toBeNull();
+  });
+});
+
+/*
+ * FRG-UI-039 — the per-row ComicVine search picker: the add-screen lookup
+ * surface (debounced suggest, full search, in-library marking, outcome notes)
+ * mounted on EVERY reviewable row, so "no plausible automatic match" is a
+ * verdict beside a live search rather than a dead end. Picking an in-library
+ * volume matches; picking one that is not adds and matches in one action.
+ */
+describe('FRG-UI-039: per-row ComicVine search', () => {
+  const source = makeSource({ id: 5, connection_state: 'connected' });
+  /** A row the proposal pass could not place — the dead-end case. */
+  const orphan = ent({
+    id: 50,
+    human_name: 'Something is Killing the Children Vol. 8 #3',
+    review_status: 'new',
+    proposed_match: null,
+    proposed_series_id: null,
+  });
+  const library = [
+    makeSeriesResource({ id: 1, title: 'Descender' }), // cv_volume_id 40500001
+  ];
+
+  it('FRG-UI-039 — a row with no plausible match still offers a search, and typing fires the debounced suggest', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [orphan],
+      calls: [],
+      reads: [],
+      librarySeries: library,
+      suggest: () => ({
+        records: [candidate({ cv_volume_id: 4050_1234, name: 'SIKTC' })],
+        complete: true,
+      }),
+    };
+    renderScreen(state);
+
+    // The automatic verdict is informational — and sits beside the search.
+    expect(await screen.findByTestId('no-match-50')).toHaveTextContent(
+      'No plausible match',
+    );
+    await user.click(screen.getByTestId('search-50'));
+
+    const panel = await screen.findByTestId('row-search-50');
+    expect(within(panel).getByTestId('row-search-note-50')).toHaveTextContent(
+      'No plausible automatic match',
+    );
+    // The seed drops the trailing issue ordinal — a volume search, not an issue.
+    const input = within(panel).getByTestId('row-search-input-50');
+    expect(input).toHaveValue('Something is Killing the Children Vol. 8');
+
+    await user.clear(input);
+    await user.type(input, 'killing children');
+    await afterSuggestDebounce();
+
+    await waitFor(() =>
+      expect(
+        state.reads!.some((p) =>
+          p.startsWith('/api/v1/series/lookup/suggest?term=killing%20children'),
+        ),
+      ).toBe(true),
+    );
+    // …and the accelerator's candidates are pickable straight from the dropdown.
+    expect(await screen.findByTestId('cand-50-40501234')).toBeInTheDocument();
+  });
+
+  it('FRG-UI-039 — an in-library result is marked and picking it matches the row, creating nothing', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [orphan],
+      calls: [],
+      librarySeries: library,
+      lookup: () => ({
+        records: [
+          candidate({
+            cv_volume_id: 4050_0001,
+            name: 'Descender',
+            have_it: true,
+          }),
+          candidate({ cv_volume_id: 4050_9999, name: 'Some Other Volume' }),
+        ],
+        complete: true,
+        truncated: false,
+      }),
+    };
+    renderScreen(state);
+
+    await user.click(await screen.findByTestId('search-50'));
+    await user.click(within(screen.getByTestId('row-search-50')).getByRole('button', { name: 'Search' }));
+
+    const owned = await screen.findByTestId('cand-50-40500001');
+    // Visibly marked as already in the library.
+    expect(within(owned).getByTestId('cand-50-40500001-have')).toHaveTextContent(
+      'In library',
+    );
+
+    await user.click(owned);
+    await waitFor(() =>
+      expect(
+        state.calls.find((c) => c.path === '/api/v1/sources/entitlements/50/match'),
+      ).toBeTruthy(),
+    );
+    const call = state.calls.find((c) => c.path.endsWith('/50/match'))!;
+    // Linked to the LOCAL series id the owned CV volume maps to — no add.
+    expect((call.init!.body as { series_id: number }).series_id).toBe(1);
+    expect(state.calls.find((c) => c.path.endsWith('/50/add'))).toBeUndefined();
+  });
+
+  it('FRG-UI-039 — picking a result that is not in the library adds and matches it with the explicit cv_volume_id', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [orphan],
+      calls: [],
+      librarySeries: library,
+      lookup: () => ({
+        records: [candidate({ cv_volume_id: 4050_7777, name: 'SIKTC' })],
+        complete: true,
+        truncated: false,
+      }),
+    };
+    renderScreen(state);
+
+    await user.click(await screen.findByTestId('search-50'));
+    await user.click(within(screen.getByTestId('row-search-50')).getByRole('button', { name: 'Search' }));
+    await user.click(await screen.findByTestId('cand-50-40507777'));
+
+    await waitFor(() =>
+      expect(
+        state.calls.find((c) => c.path === '/api/v1/sources/entitlements/50/add'),
+      ).toBeTruthy(),
+    );
+    const call = state.calls.find((c) => c.path.endsWith('/50/add'))!;
+    expect((call.init!.body as { cv_volume_id: number }).cv_volume_id).toBe(
+      4050_7777,
+    );
+  });
+
+  it('FRG-UI-039 — a matched row can Change its match through the same search surface', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [
+        ent({
+          id: 51,
+          human_name: 'Descender, Vol. 1',
+          review_status: 'matched',
+          matched_series_id: 1,
+        }),
+      ],
+      calls: [],
+      librarySeries: library,
+      lookup: () => ({
+        records: [candidate({ cv_volume_id: 4050_8888, name: 'Descender' })],
+        complete: true,
+        truncated: false,
+      }),
+    };
+    renderScreen(state);
+
+    await user.click(await screen.findByTestId('search-51'));
+    const panel = await screen.findByTestId('row-search-51');
+    expect(within(panel).getByTestId('row-search-note-51')).toHaveTextContent(
+      'Change this match',
+    );
+    await user.click(within(panel).getByRole('button', { name: 'Search' }));
+    await user.click(await screen.findByTestId('cand-51-40508888'));
+
+    await waitFor(() =>
+      expect(state.calls.find((c) => c.path.endsWith('/51/add'))).toBeTruthy(),
+    );
+  });
+
+  it('FRG-UI-039 — a degraded ComicVine walk (the budget-ceiling shape) shows the add screen’s honest note, and the row stays actionable', async () => {
+    const user = userEvent.setup();
+    // A budget/upstream cut-off comes back as a part-way walk that returned
+    // nothing (FRG-API-003 envelope) — classified by the SAME
+    // `lookupOutcomeNote` the add screen uses, so the prose is identical.
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [orphan],
+      calls: [],
+      librarySeries: library,
+      lookup: () => ({ records: [], complete: false, truncated: false }),
+    };
+    renderScreen(state);
+
+    await user.click(await screen.findByTestId('search-50'));
+    await user.click(within(screen.getByTestId('row-search-50')).getByRole('button', { name: 'Search' }));
+
+    expect(
+      await screen.findByText(
+        'ComicVine lookup failed part-way and returned nothing — try again in a moment.',
+      ),
+    ).toBeInTheDocument();
+    // Still actionable later: the search, and the row, are both still there.
+    expect(screen.getByTestId('row-search-input-50')).toBeEnabled();
+    expect(screen.getByTestId('ignore-50')).toBeInTheDocument();
+  });
+
+  it('FRG-UI-039 — a ComicVine credential failure renders the same Settings guidance as the add screen', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [orphan],
+      calls: [],
+      librarySeries: library,
+      lookup: () => {
+        throw new ApiRequestError(
+          503,
+          {
+            message: 'comicvine lookup failed: ComicVine rejected the API key',
+            errors: [
+              {
+                field: 'comicvine_api_key',
+                message: 'ComicVine rejected the API key (missing or invalid)',
+              },
+            ],
+          },
+          '/api/v1/series/lookup?term=x',
+        );
+      },
+    };
+    renderScreen(state);
+
+    await user.click(await screen.findByTestId('search-50'));
+    await user.click(within(screen.getByTestId('row-search-50')).getByRole('button', { name: 'Search' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('ComicVine API key missing or invalid');
+    expect(within(alert).getByRole('link', { name: 'check Settings' })).toHaveAttribute(
+      'href',
+      '/settings/general',
+    );
+  });
+});
+
+/*
+ * FRG-UI-029 (MODIFIED) — thousand-row rendering: the review list virtualizes,
+ * so the real dogfood corpus (1,318 entitlements) puts only a window of rows in
+ * the DOM, and the M4 shift-range selection still spans rows the window has
+ * scrolled past (selection is id/index based over the filtered list, never
+ * DOM-based).
+ */
+describe('FRG-UI-029: virtualized review list at corpus scale', () => {
+  const source = makeSource({ id: 5, connection_state: 'connected' });
+  /** The live rig's first-sync corpus size (test-rig finding #7). */
+  const CORPUS = 1318;
+  const corpus = Array.from({ length: CORPUS }, (_, i) =>
+    ent({ id: 1000 + i, human_name: `Corpus Item ${i}` }),
+  );
+
+  /** Scroll the virtualized viewport to `offset` px and let it re-window. */
+  function scrollTo(offset: number) {
+    const scroller = screen.getByTestId('entitlement-scroller');
+    Object.defineProperty(scroller, 'scrollTop', {
+      value: offset,
+      configurable: true,
+    });
+    fireEvent.scroll(scroller);
+  }
+
+  it('FRG-UI-029 — a 1,318-row queue renders only a window of rows', async () => {
+    renderScreen({ sources: [source], entitlements: corpus, calls: [] });
+
+    const list = await screen.findByTestId('entitlement-list');
+    // Every row is counted (the count line and the scroll height are honest)…
+    expect(list).toHaveAttribute('data-total-rows', String(CORPUS));
+    expect(screen.getByTestId('count-line')).toHaveTextContent(
+      `${CORPUS} items`,
+    );
+    // …but only a window of them is mounted.
+    const rendered = screen.getAllByTestId(/^entitlement-row-/);
+    expect(rendered.length).toBeGreaterThan(0);
+    expect(rendered.length).toBeLessThan(80);
+    // The window is the TOP of the list before any scrolling.
+    expect(screen.getByTestId('entitlement-row-1000')).toBeInTheDocument();
+    expect(screen.queryByTestId('entitlement-row-1300')).toBeNull();
+  });
+
+  it('FRG-UI-029 — shift-range selection spans rows across a scroll of the virtualized list', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: corpus,
+      calls: [],
+    };
+    renderScreen(state);
+
+    // Anchor on the first row, then scroll far enough that it unmounts.
+    await user.click(await screen.findByTestId('select-1000'));
+    scrollTo(3900);
+    await waitFor(() => expect(screen.queryByTestId('select-1000')).toBeNull());
+
+    const target = await screen.findByTestId('select-1050');
+    await user.keyboard('{Shift>}');
+    await user.click(target);
+    await user.keyboard('{/Shift}');
+
+    // Rows 1000..1050 inclusive — the span, not just the two mounted ends.
+    const bar = await screen.findByTestId('bulk-bar');
+    expect(bar).toHaveTextContent('51 selected');
+
+    await user.click(screen.getByTestId('bulk-ignore'));
+    await waitFor(() =>
+      expect(
+        state.calls.find((c) => c.path === '/api/v1/sources/entitlements/bulk'),
+      ).toBeTruthy(),
+    );
+    const body = state.calls.find((c) => c.path.endsWith('/bulk'))!.init!.body as {
+      entitlement_ids: number[];
+    };
+    expect(body.entitlement_ids).toHaveLength(51);
+    expect(body.entitlement_ids).toContain(1000);
+    expect(body.entitlement_ids).toContain(1050);
   });
 });

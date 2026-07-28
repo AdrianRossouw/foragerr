@@ -215,19 +215,37 @@ export function useMatchEntitlement(): UseMutationResult<
   });
 }
 
+export interface AddEntitlementInput {
+  entitlementId: number;
+  /**
+   * An explicit ComicVine volume to add instead of the row's own stored
+   * proposal (FRG-UI-039): what the per-row search picker sends when the
+   * operator chooses a candidate the automatic proposal never found. Omitted
+   * (the proposal-accept path) the backend uses the stored proposal. The
+   * endpoint degrades an already-in-library volume to a plain match
+   * (FRG-SRC-008), so this is safe even when the pick turns out to be owned.
+   */
+  cvVolumeId?: number;
+}
+
 /** POST /sources/entitlements/{id}/add — add a new series, then link it. */
 export function useAddEntitlement(): UseMutationResult<
   EntitlementResource,
   Error,
-  number
+  AddEntitlementInput
 > {
   const fetcher = useFetcher();
   const invalidate = useInvalidateSources();
   return useMutation({
-    mutationFn: (entitlementId) =>
+    mutationFn: ({ entitlementId, cvVolumeId }) =>
       fetcher<EntitlementResource>(
         `/api/v1/sources/entitlements/${entitlementId}/add`,
-        { method: 'POST', body: {} },
+        {
+          method: 'POST',
+          // The historical proposal-accept request body stays byte-identical
+          // ({}); only an explicit pick carries cv_volume_id.
+          body: cvVolumeId != null ? { cv_volume_id: cvVolumeId } : {},
+        },
       ),
     onSuccess: invalidate,
   });

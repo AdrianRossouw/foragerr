@@ -419,6 +419,23 @@
   overflow: hidden;
 }
 
+/* The virtualized scroll viewport (FRG-UI-029): the list owns its own bounded
+ * scroll region so a thousand-row queue windows against a real, measurable
+ * height instead of the page frame. */
+.listScroll {
+  max-height: min(72vh, 900px);
+  overflow-y: auto;
+}
+
+/* Absolute-positioned virtual item wrapper — one measured element per row
+ * (row + its expandable panels), so dynamic heights re-measure. */
+.virtualRow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+}
+
 .row {
   display: flex;
   align-items: center;
@@ -427,7 +444,9 @@
   border-top: 1px solid var(--surface-menu);
 }
 
-.row:first-child {
+/* Each row lives in its own virtual wrapper, so the separator suppression has
+ * to key off the virtual index rather than DOM sibling position. */
+.virtualRow[data-index='0'] .row {
   border-top: none;
 }
 
@@ -549,14 +568,110 @@
   font-size: var(--font-size-base);
 }
 
-.picker {
+.noMatchNote {
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+}
+
+/* --- Per-row ComicVine search picker (FRG-UI-039) --- */
+.rowSearch {
+  padding: var(--spacing-md);
+  background: #1d1d1d;
+  border-top: 1px solid #313131;
+  font-size: var(--font-size-sm);
+}
+
+.rowSearchHead {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-sm);
+}
+
+.rowSearchNote {
+  flex: 1;
+  color: var(--text-secondary);
+}
+
+.rowSearchForm {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.rowSearchInput {
+  flex: 1;
+  max-width: 480px;
   border: 1px solid var(--surface-border);
   border-radius: var(--radius-md);
   background: var(--surface-input);
   color: var(--text-primary);
-  padding: 4px 6px;
+  padding: 6px 10px;
   font-size: var(--font-size-sm);
-  max-width: 220px;
+}
+
+.searchState {
+  margin-top: var(--spacing-sm);
+  color: var(--text-muted);
+}
+
+.searchError {
+  margin-top: var(--spacing-sm);
+  color: var(--color-danger-text);
+}
+
+.searchResults {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: var(--spacing-sm);
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.searchCandidate {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: var(--surface-menu);
+  color: var(--text-primary);
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.searchCandidate:hover:not(:disabled) {
+  border-color: var(--color-accent);
+}
+
+.searchCandidate:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.searchCandidateMain {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.searchCandidateTitle {
+  font-weight: var(--font-weight-medium);
+}
+
+.searchCandidateYear {
+  color: var(--text-muted);
+  font-weight: var(--font-weight-regular, normal);
+}
+
+.searchCandidateMeta {
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
 }
 
 /* --- Expandable reconcile detail --- */

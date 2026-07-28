@@ -2,6 +2,11 @@ import { useState } from 'react';
 import { BookTypeBadge } from '../../components/BookTypeBadge';
 import { Chip, type ChipTone } from '../../components/Chip';
 import {
+  EntitlementSearch,
+  searchSeedTerm,
+  type PickedCandidate,
+} from './EntitlementSearch';
+import {
   useAddEntitlement,
   useEntitlementDetail,
   useIgnoreEntitlement,
@@ -129,10 +134,12 @@ function FillSetView({ fillSet }: { fillSet: FillSet }) {
 /**
  * One reviewable entitlement row (FRG-UI-029): cover spine, title + a chip
  * (a matched row's linked library series booktype when it has one, else the
- * source file's format), status tag, per-status actions (New →
- * Match/Add/Ignore, Matched → Change/Ignore, Ignored → Restore), a selection
- * checkbox for bulk review, and an expandable reconcile detail with issue
- * chips.
+ * source file's format), status tag, per-status actions (New → accept the
+ * proposal / Search ComicVine / Ignore, Matched → Change (the same search) /
+ * Ignore, Ignored → Restore), a selection checkbox for bulk review, an
+ * expandable ComicVine search panel (FRG-UI-039 — present on every reviewable
+ * row, so a row with no proposal is still resolvable), and an expandable
+ * reconcile detail with issue chips.
  */
 export function EntitlementRow({
   entitlement,
@@ -151,7 +158,7 @@ export function EntitlementRow({
   onToggleExpand: () => void;
   librarySeries: SeriesResource[];
 }) {
-  const [picking, setPicking] = useState(false);
+  const [searching, setSearching] = useState(false);
   const match = useMatchEntitlement();
   const add = useAddEntitlement();
   const ignore = useIgnoreEntitlement();
@@ -180,47 +187,50 @@ export function EntitlementRow({
   const matchedBooktype = matchedSeries?.booktype ?? null;
 
   const doMatch = (seriesId: number) => {
-    setPicking(false);
+    setSearching(false);
     match.mutate({ entitlementId: entitlement.id, seriesId });
   };
 
-  const picker = (
-    <select
-      className={styles.picker}
-      defaultValue=""
-      aria-label="Match to a library series"
-      data-testid={`match-picker-${entitlement.id}`}
-      onChange={(e) => {
-        const id = Number(e.target.value);
-        if (id) doMatch(id);
-      }}
-    >
-      <option value="" disabled>
-        Match to…
-      </option>
-      {librarySeries.map((s) => (
-        <option key={s.id} value={s.id}>
-          {s.title}
-        </option>
-      ))}
-    </select>
-  );
+  /**
+   * A picked ComicVine candidate resolves one of two ways (FRG-UI-039 / the
+   * FRG-SRC-008 seam): a volume already in the library links straight to that
+   * series (nothing is created), and one that is not adds it and matches in a
+   * single action. `have_it` is ComicVine-side truth; the library series id it
+   * maps to is resolved locally by cv_volume_id against the full series index.
+   * If the overlay cannot name the local series (it went stale — the volume
+   * was added since the index was fetched), the add path still carries the
+   * explicit cv_volume_id and the backend degrades it to a match
+   * (FRG-SRC-008) — so a pick is never a dead end either.
+   */
+  const pickCandidate = (candidate: PickedCandidate) => {
+    setSearching(false);
+    if (candidate.have_it) {
+      const owned = librarySeries.find(
+        (s) => s.cv_volume_id === candidate.cv_volume_id,
+      );
+      if (owned) {
+        match.mutate({ entitlementId: entitlement.id, seriesId: owned.id });
+        return;
+      }
+    }
+    add.mutate({
+      entitlementId: entitlement.id,
+      cvVolumeId: candidate.cv_volume_id,
+    });
+  };
+
+  // The automatic verdict, rendered BESIDE the search rather than as a wall:
+  // "no plausible match" describes what the proposal pass concluded, never
+  // what the operator can still do (FRG-UI-039).
+  const searchNote =
+    status === 'matched'
+      ? 'Change this match — search ComicVine for the right volume.'
+      : proposal
+        ? `Automatic proposal: ${proposal.title ?? 'a candidate'} (${pct(proposal.confidence)}). Search ComicVine if it is wrong.`
+        : 'No plausible automatic match — search ComicVine for the right volume.';
 
   let actions;
-  if (picking) {
-    actions = (
-      <>
-        {picker}
-        <button
-          type="button"
-          className={styles.mutedBtn}
-          onClick={() => setPicking(false)}
-        >
-          Cancel
-        </button>
-      </>
-    );
-  } else if (status === 'ignored') {
+  if (status === 'ignored') {
     actions = (
       <button
         type="button"
@@ -239,7 +249,9 @@ export function EntitlementRow({
           type="button"
           className={styles.linkBtn}
           disabled={busy}
-          onClick={() => setPicking(true)}
+          aria-expanded={searching}
+          onClick={() => setSearching(!searching)}
+          data-testid={`search-${entitlement.id}`}
         >
           Change…
         </button>
@@ -272,19 +284,30 @@ export function EntitlementRow({
             type="button"
             className={styles.linkBtn}
             disabled={busy}
-            onClick={() => add.mutate(entitlement.id)}
+            onClick={() => add.mutate({ entitlementId: entitlement.id })}
             data-testid={`add-${entitlement.id}`}
           >
             Add {proposal.title ?? 'as new'}
           </button>
-        ) : null}
+        ) : (
+          // No proposal is not a dead end — the verdict sits beside the search
+          // affordance, which is always there (FRG-UI-039).
+          <span
+            className={styles.noMatchNote}
+            data-testid={`no-match-${entitlement.id}`}
+          >
+            No plausible match
+          </span>
+        )}
         <button
           type="button"
           className={styles.mutedBtn}
           disabled={busy}
-          onClick={() => setPicking(true)}
+          aria-expanded={searching}
+          onClick={() => setSearching(!searching)}
+          data-testid={`search-${entitlement.id}`}
         >
-          Match…
+          Search ComicVine…
         </button>
         <button
           type="button"
@@ -384,6 +407,16 @@ export function EntitlementRow({
           <i className={`fa-solid ${expanded ? 'fa-chevron-up' : 'fa-chevron-down'}`} />
         </button>
       </div>
+      {searching && (
+        <EntitlementSearch
+          entitlementId={entitlement.id}
+          seedTerm={searchSeedTerm(entitlement.human_name)}
+          busy={busy}
+          noteText={searchNote}
+          onPick={pickCandidate}
+          onCancel={() => setSearching(false)}
+        />
+      )}
       {expanded && <ReconcileDetail entitlement={entitlement} />}
     </>
   );
