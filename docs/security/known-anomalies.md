@@ -87,3 +87,57 @@ Rules:
 - **Risk register**: RISK-042 carries the corresponding threat treatment
   (`docs/security/risk-register.md`).
 - **Status**: Accepted.
+
+---
+
+## KA-002 — Series titles ending in "Issue"/"Issues" do not survive a rename round-trip
+
+- **Description**: The FRG-IMP-026 issue-word filler strip removes a bare
+  `Issue`/`Issues` token immediately preceding a file's issue evidence. A
+  series whose title *ends* in that word (e.g. a hypothetical "The Death
+  Issue") produces renamed files of the shape `The Death Issue 004 (2019).cbz`
+  (default template, and equally with a `#` anchor), which re-parse with the
+  final title word stripped — `matching_key` drifts from `death issue` to
+  `death`, so a rescan of the renamed file no longer subset-matches its own
+  series. The ambiguity is structural: `<Title ending in "Issue"> <number>`
+  and `<Title> Issue <number>` are identical token streams, so no parser-side
+  rule can distinguish them. A same-rooted, one-time consequence: persisted
+  Library Import staging groups keyed by a pre-upgrade `matching_key`
+  containing the filler word (e.g. `foo issues`) lose their carried
+  confirm/skip decision on the first re-scan after upgrading, because the key
+  the new parser computes no longer matches the stored one.
+- **Location/scope**: `backend/src/foragerr/parser/__init__.py`
+  (`_consume_issue_filler`); carry-forward keying in
+  `backend/src/foragerr/library/flows/library_import.py` (`scan_library_root`).
+- **Discovered**: 2026-07-28, during the m11-source-import-trust merge gate
+  (implementer-flagged in commit 91330b4; blast radius verified by the
+  API/regression review angle, including the `#`-anchor non-mitigation).
+- **Impact evaluation**: Low. No known real ComicVine series title ends in a
+  bare "Issue"/"Issues"; the strip fires only with the filler directly before
+  the issue evidence, and mid-title uses are unaffected (corpus row 87). The
+  library-import consequence costs at most a re-answered review decision for
+  staged-but-unexecuted groups whose folder names carry the idiom across this
+  one upgrade — no comic files or library records are touched. The
+  countervailing benefit is large: the idiom is pervasive in real store
+  filenames (verified on the live 1,318-item collection) and previously
+  defeated import matching outright.
+- **Owner decision**: Accepted under the M11 standing grant (2026-07-27);
+  queued for explicit owner review at the M11-close hard stop. Fixing would
+  require either forking the cue vocabulary (rejected: FRG-IMP-016 keeps one
+  vocabulary) or suppressing the strip when a library series' own key retains
+  the filler word — a context-dependent parse the parser's pure-function
+  contract forbids (parse results must not depend on library state).
+- **Mitigations**:
+  - Corpus rows 82–87 pin both the strip and the mid-title preservation, so
+    the boundary cannot drift silently.
+  - The importer's series-scoped paths (provenance, rescan) match issues
+    within a known series and do not depend on the parsed title, which
+    removes the main consumer of the drifted key for affected files.
+  - Release notes for the shipping version reference this entry
+    (FRG-PROC-016), covering the one-time library-import staging note.
+- **Review trigger**: A real series title ending in bare "Issue"/"Issues"
+  appearing in ComicVine data used by an operator, or any rescan mis-match
+  traced to the stripped key. If encountered, revisit the
+  series-key-aware suppression option as its own change and mark this entry
+  resolved with a reference to it.
+- **Status**: Accepted.

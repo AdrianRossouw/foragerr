@@ -158,7 +158,11 @@ export function EntitlementRow({
   const restore = useRestoreEntitlement();
   const retry = useRetryDownload();
   const busy =
-    match.isPending || add.isPending || ignore.isPending || restore.isPending;
+    match.isPending ||
+    add.isPending ||
+    ignore.isPending ||
+    restore.isPending ||
+    retry.isPending;
 
   const status = entitlement.review_status;
   const proposal = entitlement.proposed_match;
@@ -358,7 +362,7 @@ export function EntitlementRow({
               <button
                 type="button"
                 className={styles.retryBtn}
-                disabled={retry.isPending}
+                disabled={busy}
                 onClick={() => retry.mutate(entitlement.id)}
                 data-testid={`retry-${entitlement.id}`}
               >
