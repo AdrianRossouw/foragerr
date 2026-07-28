@@ -217,6 +217,57 @@ export function useSyncSource(): UseMutationResult<
   });
 }
 
+export interface RecomputeProposalsInput {
+  sourceId: number;
+  /**
+   * Also refresh the source's no-plausible-match markers (FRG-SRC-013). OFF by
+   * default — re-asking ComicVine about every "we looked, there is nothing" row
+   * is real budget spend, so it happens only on an explicit request.
+   */
+  includeMarkers?: boolean;
+}
+
+/**
+ * POST /api/v1/sources/{id}/recompute-proposals — enqueue the resumable bulk
+ * refresh of one source's stale stored proposals (FRG-SRC-013), answering 202
+ * with the queued command.
+ *
+ * The work happens in the background through the batch lane: it walks rows in
+ * least-recently-attempted order, stops cleanly at the ComicVine budget wall
+ * having refreshed a prefix, and resumes from the same ordering when re-run —
+ * so triggering it is cheap and safely repeatable (the command dedup collapses
+ * an impatient double-click onto one run). Only rows still in review move;
+ * matched and ignored decisions are never recomputed.
+ *
+ * A source with no ComicVine key configured rejects with a 409
+ * `ApiRequestError` whose message the caller surfaces verbatim. On success we
+ * sweep the sources family: nothing has changed YET (the command is only
+ * queued), but the source's own command/sync state is part of that family and
+ * the sweep is what keeps the enqueue from being the one action that leaves the
+ * screen reading stale.
+ */
+export function useRecomputeProposals(): UseMutationResult<
+  SourceSyncResponse,
+  Error,
+  RecomputeProposalsInput
+> {
+  const fetcher = useFetcher();
+  const invalidate = useInvalidateSources();
+  return useMutation({
+    mutationFn: ({ sourceId, includeMarkers }) =>
+      fetcher<SourceSyncResponse>(
+        `/api/v1/sources/${sourceId}/recompute-proposals`,
+        {
+          method: 'POST',
+          // The default request body stays empty: `include_markers` defaults to
+          // false server-side, and only an explicit opt-in states it.
+          body: includeMarkers ? { include_markers: true } : {},
+        },
+      ),
+    onSuccess: invalidate,
+  });
+}
+
 /** POST /sources/entitlements/{id}/match — link to a series and accept. */
 export function useMatchEntitlement(): UseMutationResult<
   EntitlementResource,

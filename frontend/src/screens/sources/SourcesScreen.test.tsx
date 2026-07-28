@@ -86,6 +86,13 @@ interface FetcherState {
   retryError?: ApiRequestError;
   /** Error PATCH /sources/{id} rejects with (e.g. the 409 unloadable envelope). */
   patchError?: ApiRequestError;
+  /** Error the bulk recompute rejects with (e.g. the 409 no-ComicVine-key). */
+  recomputeError?: ApiRequestError;
+  /**
+   * Gate on the recompute's 202 (FRG-SRC-013): an unresolved promise here keeps
+   * the mutation in flight, so a test can observe the pending/disabled state.
+   */
+  recomputeGate?: Promise<void>;
   /**
    * Bulk-endpoint result (FRG-SRC-011). Receives the request body so a test can
    * assert on it and mutate `state.entitlements` to model the rows the server
@@ -174,6 +181,13 @@ function makeFetcher(state: FetcherState): Fetcher {
       }
       if (/\/api\/v1\/sources\/\d+\/sync$/.test(path)) {
         return { command_id: 1, status: 'queued' };
+      }
+      // Bulk proposal recompute (FRG-SRC-013): 202 with the queued command, or
+      // the backend's 409 when no ComicVine key is configured.
+      if (/^\/api\/v1\/sources\/\d+\/recompute-proposals$/.test(path)) {
+        if (state.recomputeError) throw state.recomputeError;
+        if (state.recomputeGate) await state.recomputeGate;
+        return { command_id: 7, status: 'queued' };
       }
       // PATCH /sources/{id} — flip a mutable control (auto_sync) or replace the
       // publisher rules (FRG-SRC-012). Mutate the in-memory source so the
@@ -1875,5 +1889,108 @@ describe('FRG-SRC-012: publisher rules editor', () => {
     expect(note).toHaveTextContent('reconnect it before editing its publisher rules');
     // The draft survives the failure — nothing the operator typed is lost.
     expect(screen.getByTestId('rule-Chaosium')).toBeInTheDocument();
+  });
+});
+
+/*
+ * FRG-SRC-013 — the operator trigger for the bulk proposal recompute. The work
+ * itself is background + budget-polite (backend-side); what the screen owes is
+ * one honest button, a pending state that cannot be double-fired, and the
+ * server's own words on both outcomes.
+ */
+describe('FRG-SRC-013: bulk proposal recompute trigger', () => {
+  const source = makeSource({ id: 5, connection_state: 'connected' });
+
+  it('FRG-SRC-013 — a connected source offers Recompute proposals and posts an empty body (markers stay off)', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [ent({ id: 30 })],
+      calls: [],
+    };
+    renderScreen(state);
+
+    const button = await screen.findByTestId('recompute-proposals');
+    expect(button).toHaveTextContent('Recompute proposals');
+
+    await user.click(button);
+
+    await waitFor(() =>
+      expect(
+        state.calls.find(
+          (c) => c.path === '/api/v1/sources/5/recompute-proposals',
+        ),
+      ).toBeTruthy(),
+    );
+    const call = state.calls.find(
+      (c) => c.path === '/api/v1/sources/5/recompute-proposals',
+    )!;
+    expect(call.init?.method).toBe('POST');
+    // No `include_markers`: re-asking about every no-plausible-match row is
+    // real ComicVine spend, and the default trigger never opts into it.
+    expect(call.init?.body).toEqual({});
+  });
+
+  it('FRG-SRC-013 — a queued (202) recompute shows the background note', async () => {
+    const user = userEvent.setup();
+    renderScreen({ sources: [source], entitlements: [], calls: [] });
+
+    await user.click(await screen.findByTestId('recompute-proposals'));
+
+    const note = await screen.findByTestId('recompute-note');
+    expect(note).toHaveTextContent('Recompute queued — running in the background.');
+  });
+
+  it('FRG-SRC-013 — the trigger is disabled while the enqueue is in flight', async () => {
+    const user = userEvent.setup();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    renderScreen({
+      sources: [source],
+      entitlements: [],
+      calls: [],
+      recomputeGate: gate,
+    });
+
+    const button = await screen.findByTestId('recompute-proposals');
+    await user.click(button);
+
+    await waitFor(() => expect(button).toBeDisabled());
+    expect(button).toHaveTextContent('Queueing…');
+
+    await act(async () => {
+      release();
+      await gate;
+    });
+    await waitFor(() => expect(button).toBeEnabled());
+  });
+
+  it('FRG-SRC-013 — a 409 (no ComicVine key) surfaces the server message', async () => {
+    const user = userEvent.setup();
+    renderScreen({
+      sources: [source],
+      entitlements: [],
+      calls: [],
+      recomputeError: new ApiRequestError(
+        409,
+        {
+          message:
+            'no ComicVine API key is configured — set one before recomputing proposals',
+          errors: [{ field: 'comicvine_api_key', message: 'not configured' }],
+        },
+        '/api/v1/sources/5/recompute-proposals',
+      ),
+    });
+
+    await user.click(await screen.findByTestId('recompute-proposals'));
+
+    const note = await screen.findByTestId('recompute-note');
+    expect(note).toHaveTextContent(
+      'no ComicVine API key is configured — set one before recomputing proposals',
+    );
+    // The refusal is an alert, not a quiet info line.
+    expect(note).toHaveAttribute('role', 'alert');
   });
 });
