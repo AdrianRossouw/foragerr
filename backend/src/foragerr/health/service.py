@@ -41,12 +41,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from foragerr.config import Settings
 from foragerr.db import Database, utcnow
 from foragerr.db.backup import latest_scheduled_backup
-from foragerr.downloads.models import DownloadClientRow
+from foragerr.downloads.models import DownloadClientRow, TrackedDownloadRow
 from foragerr.health.state import current_integrity
 from foragerr.indexers.models import IndexerRow
 from foragerr.keystore import current_keystore, secret_state
@@ -638,8 +638,6 @@ class HealthService:
         lines. The component disappears the moment no failed rows remain (a
         retry that re-queues clears the state), so it needs no explicit reset.
         """
-        from sqlalchemy import func
-
         from foragerr.sources.models import SourceEntitlementRow, SourceRow
 
         async with self._db.read_session() as session:
@@ -707,10 +705,6 @@ class HealthService:
         shows the per-cycle truth, and health must not shout about one unlucky
         cycle.
         """
-        from sqlalchemy import func
-
-        from foragerr.downloads.models import TrackedDownloadRow
-
         # Floor of 2 defensively re-applied here as well as on the config field:
         # a threshold of 1 (or 0) would turn every first blocked cycle — the
         # normal, self-healing case — into a health warning.

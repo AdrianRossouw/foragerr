@@ -31,16 +31,12 @@ from foragerr.importer.sources import SOURCE_DOWNLOAD
 from foragerr.downloads.tracking import ClientObservation, decode_messages, reconcile_downloads
 from foragerr.health import HealthService
 
+from health_support import health_service as _health
 from importer._archives import make_corrupt  # tests/importer is a package
 from test_process_imports import make_large_cbz  # tests/downloads is on the path
 from tracking_support import insert_grab_history, make_item, seed_library, tracked_by_download_id
 
 _START = dt.datetime(2026, 7, 28, 9, 0, 0)
-
-
-class _StubScheduler:
-    async def status(self):  # pragma: no cover - health needs it to be quiet
-        return []
 
 
 def _obs(item, *, client_id: int | None = None):
@@ -60,14 +56,6 @@ async def _cycle(db, *, download_id: str, output_path: Path, now: dt.datetime) -
     )
     await reconcile_downloads(db, [_obs(item)], polled_client_ids={None}, now=now)
     await process_imports(db, None, now=now)
-
-
-def _health(db, tmp_path, **settings_kw) -> HealthService:
-    return HealthService(
-        db,
-        Settings(config_dir=db.db_path.parent, **settings_kw),
-        scheduler=_StubScheduler(),
-    )
 
 
 async def _stall_component(service: HealthService):
@@ -153,7 +141,7 @@ async def test_health_degrades_only_past_the_threshold_then_clears(db, tmp_path)
     await insert_grab_history(
         db, download_id="stall3", series_id=series_id, issue_id=issue_id, client_id=None
     )
-    service = _health(db, tmp_path)  # default threshold 5
+    service = _health(db)  # default threshold 5
 
     for n in range(1, 5):
         await _cycle(
@@ -196,7 +184,7 @@ async def test_threshold_is_configurable_and_floored_at_two(db, tmp_path):
     await insert_grab_history(
         db, download_id="stall4", series_id=series_id, issue_id=issue_id, client_id=None
     )
-    service = _health(db, tmp_path, import_stall_threshold_cycles=2)
+    service = _health(db, import_stall_threshold_cycles=2)
 
     await _cycle(db, download_id="stall4", output_path=invisible, now=_START)
     assert await _stall_component(service) is None  # one cycle is never an alarm
@@ -223,7 +211,7 @@ async def test_the_component_aggregates_rather_than_one_line_per_row(db, tmp_pat
         await insert_grab_history(
             db, download_id=dl, series_id=series_id, issue_id=issue_id, client_id=None
         )
-    service = _health(db, tmp_path, import_stall_threshold_cycles=2)
+    service = _health(db, import_stall_threshold_cycles=2)
 
     for n in range(2):
         now = _START + dt.timedelta(minutes=n)
@@ -303,7 +291,7 @@ async def test_a_visible_path_of_non_comic_files_never_stalls(db, tmp_path):
     await insert_grab_history(
         db, download_id="rar1", series_id=series_id, issue_id=issue_id, client_id=None
     )
-    service = _health(db, tmp_path, import_stall_threshold_cycles=2)
+    service = _health(db, import_stall_threshold_cycles=2)
 
     for n in range(6):
         await _cycle(
@@ -340,14 +328,14 @@ async def test_a_visible_path_of_non_comic_files_never_stalls(db, tmp_path):
 @pytest.mark.req("FRG-DL-015")
 async def test_an_unmapped_client_path_accrues_and_degrades(db, tmp_path):
     """The case the health remediation names OUT LOUD — a misconfigured remote
-    path mapping — used to be the one that could never reach the threshold: it
-    produces a single blocked candidate, so the old "no outcomes" test read it
-    as a release problem forever."""
+    path mapping — reaches the threshold even though it produces exactly ONE
+    blocked candidate per cycle: the mapping-warning shape counts as a
+    visibility stall regardless of the (non-empty) outcomes list."""
     series_id, issue_id = await seed_library(db, tmp_path)
     await insert_grab_history(
         db, download_id="map1", series_id=series_id, issue_id=issue_id, client_id=None
     )
-    service = _health(db, tmp_path, import_stall_threshold_cycles=2)
+    service = _health(db, import_stall_threshold_cycles=2)
 
     # A client reporting its completed folder in a foreign namespace with no
     # mapping to translate it (FRG-DL-005 scenario 2) — the path is never even
@@ -376,9 +364,9 @@ async def test_an_unmapped_client_path_accrues_and_degrades(db, tmp_path):
 
 
 @pytest.mark.req("FRG-DL-015")
-async def test_a_bad_but_VISIBLE_file_resets_the_memory(db, tmp_path):
+async def test_a_bad_but_visible_file_resets_the_memory(db, tmp_path):
     """A corrupt archive is a RELEASE problem, not a path problem: the drain
-    demonstrably saw the file, so the visibility streak ends even though the
+    demonstrably SAW the file, so the visibility streak ends even though the
     import did not succeed."""
     series_id, issue_id = await seed_library(db, tmp_path)
     folder = tmp_path / "downloads" / "Spawn.001"

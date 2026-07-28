@@ -462,6 +462,21 @@ async def wanted_issue_ids(session: AsyncSession, as_of: dt.date | None = None) 
     return [row.id for row in result.scalars().all()]
 
 
+async def has_wanted(
+    session: AsyncSession, series_id: int, as_of: dt.date | None = None
+) -> bool:
+    """Whether `wanted_issues()` has ANY row for this series — EXISTS semantics.
+
+    A ``LIMIT 1`` probe over the same selectable rather than a count, for
+    callers that only need the yes/no (e.g. the mini-sweep's fire/quiet
+    decision) and would otherwise pay for aggregating a number nobody reads.
+    """
+    result = await session.execute(
+        wanted_issues(as_of).where(IssueRow.series_id == series_id).limit(1)
+    )
+    return result.first() is not None
+
+
 def missing_issues(as_of: dt.date | None = None) -> Select:
     """Every released issue with no file, monitored flags aside (FRG-SER-005).
 

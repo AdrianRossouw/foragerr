@@ -591,11 +591,11 @@ async def test_a_cancelled_indexer_never_penalises_the_backoff_ladder(
     db, monkeypatch
 ):
     """A timeout must never look like a failure (that is the whole design).
-    ``CancelledError`` passes through the isolation untouched — but an ORDINARY
+    ``CancelledError`` passes through the isolation untouched, so an ORDINARY
     exception raised while the cancelled task unwinds (a client's cleanup
-    tripping over a half-closed socket) lands in the same handler looking
-    exactly like a crash, and used to escalate a merely SLOW indexer on the
-    ladder."""
+    tripping over a half-closed socket) — which lands in the same handler and
+    looks exactly like a crash — must not escalate a merely SLOW indexer on
+    the ladder."""
 
     async def unwinds_badly(*args, **kwargs):
         try:
@@ -663,12 +663,12 @@ async def test_an_unmapped_task_error_isolates_instead_of_aborting_the_fan(
 async def test_a_task_that_finished_at_the_deadline_keeps_its_results(
     _clean_stragglers, monkeypatch
 ):
-    """DELIBERATE, and pinned so it is not "fixed" by accident: a task that
-    completes in the sliver between ``asyncio.wait`` returning and its cancel
-    being delivered is done-but-not-cancelled, so its FULL results are kept and
-    it is reported as searched — despite technically missing the deadline by
-    microseconds. Real results in hand beat discarding them over a stopwatch;
-    the wait the budget exists to bound has already happened.
+    """DELIBERATE: a task that completes in the sliver between ``asyncio.wait``
+    returning and its cancel being delivered is done-but-not-cancelled, so its
+    FULL results are kept and it is reported as searched — despite technically
+    missing the deadline by microseconds. Real results in hand beat discarding
+    them over a stopwatch; the wait the budget exists to bound has already
+    happened.
 
     The stub reproduces exactly that interleaving: ``wait`` reports a task as
     pending which has, by the time the caller resumes, already finished."""

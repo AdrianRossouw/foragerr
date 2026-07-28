@@ -26,6 +26,8 @@ from foragerr.library.models import RootFolderRow
 from foragerr.metadata import ratelimit
 from foragerr.providers.backoff import PROVIDER_INDEXER, ProviderBackoff
 
+from health_support import health_service as _service
+
 
 @pytest.fixture(autouse=True)
 def _isolate_health():
@@ -38,15 +40,6 @@ def _isolate_health():
 
 def _settings(db) -> Settings:
     return Settings(config_dir=db.db_path.parent)
-
-
-class _StubScheduler:
-    async def status(self):
-        return []
-
-
-def _service(db, **kw) -> HealthService:
-    return HealthService(db, _settings(db), scheduler=_StubScheduler(), **kw)
 
 
 async def _add_indexer(db, name: str = "DogNZB") -> int:

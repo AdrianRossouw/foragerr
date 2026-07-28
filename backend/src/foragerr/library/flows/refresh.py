@@ -273,8 +273,8 @@ async def refresh_series(
         # run wrote — never a stale pre-strategy view. Only an add is asked:
         # ``applied`` is non-None exactly once per series (the add-options are
         # cleared above), so a routine refresh never enqueues a sweep.
-        add_wanted_count = (
-            await _wanted_count(session, series_id) if applied is not None else 0
+        add_wants_something = (
+            await repo.has_wanted(session, series_id) if applied is not None else False
         )
 
         queue_event(session, SeriesRefreshed(series_id, partial=not walk_complete))
@@ -301,7 +301,7 @@ async def refresh_series(
     sweep = bool(
         applied is not None
         and sweep_on_add
-        and (applied.search_on_add or add_wanted_count > 0)
+        and (applied.search_on_add or add_wants_something)
     )
     # ORDERING: the decision rides ON the scan command rather than becoming a
     # second enqueue here. Scan and search run on different worker pools, so two
@@ -538,23 +538,6 @@ def _strategy_monitored(
         release = issue.store_date or issue.cover_date
         return release is not None and release > today
     return True  # pragma: no cover - validated upstream
-
-
-async def _wanted_count(session, series_id: int) -> int:
-    """How many issues this series currently WANTS (FRG-SER-005 mini-sweep).
-
-    Reuses FRG-SER-004's ONE ``wanted_issues()`` selectable rather than
-    re-deriving "wanted" here, so the sweep's fire/quiet decision can never
-    drift from what the Wanted screen and the search commands themselves
-    count. Called right after the add-time strategy is applied, inside the
-    same transaction — an unmonitored series or a ``none`` strategy yields 0.
-    """
-    count = await session.scalar(
-        select(func.count()).select_from(
-            repo.wanted_issues().where(IssueRow.series_id == series_id).subquery()
-        )
-    )
-    return int(count or 0)
 
 
 # --- cover cache (FRG-META-013) ---------------------------------------------

@@ -237,10 +237,9 @@ class CompletedDownloadSource:
         from foragerr.downloads.pathmap import apply_mappings
 
         mapped = apply_mappings(self.output_path, list(self.mappings))
-        if mapped.warning is not None:
-            # An unmapped/foreign path was never looked at — the machine cannot
-            # see it by construction, which IS the visibility failure.
-            return False
+        # INVARIANT: ``gather`` always returns a (blocked) candidate when the
+        # path carries a mapping warning, so this probe — only ever called when
+        # ``gather`` came back empty — never observes one here.
         return _holds_any_file(mapped.path, max_depth=ctx.max_walk_depth)
 
 

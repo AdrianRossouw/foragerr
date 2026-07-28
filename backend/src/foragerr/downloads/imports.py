@@ -121,19 +121,6 @@ NO_IMPORTABLE_FILES_MESSAGE = (
 )
 
 
-def _no_importable_files(
-    outcomes: list[ImportOutcome], *, no_output: bool = False
-) -> bool:
-    """Whether the drain produced no importable candidate at all.
-
-    The STATE verdict (``import_blocked`` + :data:`NO_IMPORTABLE_FILES_MESSAGE`),
-    which is honest either way: whether the path was invisible or merely held
-    nothing comic-shaped, there was nothing to import. Distinct from
-    :func:`is_visibility_stall`, which is the narrower DIAGNOSIS.
-    """
-    return bool(no_output or not outcomes)
-
-
 def is_visibility_stall(
     outcomes: list[ImportOutcome],
     *,
@@ -377,7 +364,7 @@ async def _process_one(
     #     so only the former accrues a stall and health never diagnoses a mount
     #     fault for a deployment whose mounts are fine. Costs one short-circuited
     #     walk, and only on the already-unhappy path.
-    saw_files = source.saw_any_files(ctx) if not candidates else True
+    saw_files = bool(candidates) or source.saw_any_files(ctx)
 
     # 3. Import every candidate in ONE write session so each issue_files row and
     #    its history event land atomically with the final state transition.
@@ -572,7 +559,11 @@ def resolve_terminal_state(
     fold through here, so identical per-file outcomes always yield an identical
     tracked state — there is no second, drifting manual policy.
     """
-    if _no_importable_files(outcomes, no_output=no_output):
+    if no_output or not outcomes:
+        # The STATE verdict (``import_blocked`` + NO_IMPORTABLE_FILES_MESSAGE)
+        # is honest either way: whether the path was invisible or merely held
+        # nothing comic-shaped, there was nothing to import. Distinct from
+        # ``is_visibility_stall`` below, which is the narrower DIAGNOSIS.
         return (
             TrackedDownloadState.IMPORT_BLOCKED,
             TRACKED_STATUS_WARNING,

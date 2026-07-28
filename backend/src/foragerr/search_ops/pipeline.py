@@ -477,7 +477,7 @@ async def _budgeted_fan(
             # missed the deadline by microseconds. Real results in hand beat
             # discarding them to honour a stopwatch — the budget exists to bound
             # the operator's WAIT, and that wait already happened. Not a bug;
-            # please do not "fix" it into a timed-out outcome.
+            #
             #
             # ``result()`` is wrapped because a task can still carry a stored
             # exception the in-task isolation could not map (an error raised

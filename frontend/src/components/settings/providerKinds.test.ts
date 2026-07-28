@@ -8,8 +8,8 @@ import type { ProviderKindConfig } from './providerTypes';
  * The renderer-reuse audit (rendererReuse.audit.test.ts) is structural: it
  * proves both settings screens draw their forms with the one shared renderer.
  * It says nothing about WHAT is in the kind config — which is how the
- * download-client form went years without the priority field FRG-UI-009's
- * scenario asserts, with a green suite (m11 finding #5). This test pins the
+ * download-client form could go without the priority field FRG-UI-009's
+ * scenario asserts and still keep a green suite. This test pins the
  * content: EVERY provider kind exposes the row-level priority field, with the
  * same 1..50 semantics and default, so neither audit can pass vacuously.
  */
@@ -27,7 +27,7 @@ describe('FRG-UI-009: every provider kind exposes its priority row field', () =>
 
       expect(priority, `${kind.key} rowFields must include priority`).toBeDefined();
       expect(priority!.type).toBe('number');
-      // Advanced, exactly like the indexer field has been since 2026-07-05.
+      // Advanced, exactly like the indexer field.
       expect(priority!.advanced).toBe(true);
       expect(priority!.required).toBe(false);
       expect(priority!.secret).toBe(false);

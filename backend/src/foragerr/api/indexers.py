@@ -378,9 +378,10 @@ async def _claim_first_indexer_sweep(db) -> bool:
     """Atomically claim the ONE first-indexer sweep this database ever owes.
 
     A persisted marker row in ``app_state`` — the same one-shot idiom as
-    ``first_run_ddl_seed`` and ``creators_backfill_done`` — rather than
-    inference from live row counts, which cannot distinguish "the first indexer
-    ever" from "the first indexer again after the last one was deleted".
+    ``first_run_ddl_seed`` and ``creators_backfill_done`` — is exact where a
+    live row count cannot be: it distinguishes "the first indexer ever" from
+    "the first indexer again after the last one was deleted" regardless of how
+    the rows have churned.
 
     ``INSERT ... WHERE NOT EXISTS`` inside a single ``write_session`` makes the
     claim transactional: every write goes through the one writer lock under
@@ -414,13 +415,11 @@ async def _maybe_first_indexer_sweep(
        transition, read before the write so concurrent first creates agree;
     3. the persisted one-shot marker is still unclaimed, and this call wins it.
 
-    (3) is what makes the trigger correct rather than merely plausible. The old
-    "enabled count is exactly 1 afterwards" test was an INFERENCE, and it was
-    wrong twice over: deleting the only indexer and adding another re-fired the
-    sweep (as did disabling and re-enabling it) because the count genuinely
-    returned to one, while two simultaneous creates each observed a count of two
-    and neither fired, so a fresh install could silently get no sweep at all.
-    The marker gives one sweep per database, ever, no matter how the rows churn.
+    (3) is what makes the trigger correct rather than merely plausible: an
+    inference from the live enabled-count could be reopened by later deletes,
+    disables, or re-enables, and could miss two concurrent first creates
+    entirely. The marker gives one sweep per database, ever, no matter how the
+    rows churn.
 
     Everything downstream is unchanged — the same ``backlog-search`` command the
     scheduler runs, bounded by its own wanted walk with the usual politeness

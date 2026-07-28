@@ -128,7 +128,7 @@ __all__ = [
     "refresh_series",
     "rename_series",
     "rescan_series",
-    "scan_library_root",
     "scan_and_chain",
+    "scan_library_root",
     "scan_series",
 ]

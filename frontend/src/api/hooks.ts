@@ -27,6 +27,7 @@ import type {
   HealthWarningItem,
   HistoryRecord,
   IndexerOutcome,
+  IndexerOutcomeState,
   IssueFileDeleteResult,
   IssueResource,
   LogLevel,
@@ -794,18 +795,24 @@ export function useQueuePage(page: number): UseQueryResult<QueueItem[]> {
   });
 }
 
+/** The outcome vocabulary, verbatim from the release resource. */
+const OUTCOME_STATES: readonly IndexerOutcomeState[] = [
+  'searched',
+  'timed_out',
+  'failed',
+  'backing_off',
+];
+
 /**
  * Normalize the interactive-search response (FRG-API-008 / FRG-UI-041).
  *
  * The endpoint's decision rows are the long-standing contract; the per-indexer
- * outcomes are ADDITIVE (m11-acquisition-responsiveness). This tolerates both
- * wire shapes so nothing breaks at the seam: the current
- * `{releases, indexers}` resource (backend/src/foragerr/api/release.py) yields
- * both, and a BARE decision array — any response predating the outcomes,
- * including one already sitting in a client cache — yields the rows with NO
- * outcomes, so the strip simply does not render. An unrecognized outcome token
- * (a state added server-side later) degrades to `failed` rather than putting a
- * raw token in front of the operator.
+ * outcomes are ADDITIVE (m11-acquisition-responsiveness). Tolerating a BARE
+ * decision array here is defensive: the endpoint always envelopes today
+ * (`{releases, indexers}`, backend/src/foragerr/api/release.py), so this arm
+ * simply yields the rows with NO outcomes and the strip does not render. An
+ * unrecognized outcome token (a state added server-side later) degrades to
+ * `failed` rather than putting a raw token in front of the operator.
  */
 export function normalizeReleaseResponse(body: unknown): ReleaseSearchResult {
   if (Array.isArray(body)) {
@@ -822,7 +829,7 @@ export function normalizeReleaseResponse(body: unknown): ReleaseSearchResult {
       return {
         indexer_id: Number(row.indexer_id ?? 0),
         name: String(row.name ?? `Indexer ${row.indexer_id}`),
-        outcome: (OUTCOME_STATES.includes(state)
+        outcome: ((OUTCOME_STATES as readonly string[]).includes(state)
           ? state
           : 'failed') as IndexerOutcome['outcome'],
         budget_seconds:
@@ -831,9 +838,6 @@ export function normalizeReleaseResponse(body: unknown): ReleaseSearchResult {
     }),
   };
 }
-
-/** The outcome vocabulary, verbatim from the release resource. */
-const OUTCOME_STATES = ['searched', 'timed_out', 'failed', 'backing_off'];
 
 export function useReleases(issueId: number): UseQueryResult<ReleaseSearchResult> {
   const fetcher = useFetcher();

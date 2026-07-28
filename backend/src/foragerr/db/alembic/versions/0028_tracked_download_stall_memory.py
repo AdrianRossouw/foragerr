@@ -8,14 +8,14 @@ Adds two columns to ``tracked_downloads`` (design D5):
 
 ``import_stall_count``
     How many CONSECUTIVE import attempts have found no importable files under
-    this download's completed output path. The Die-Loaded stall (rig finding
-    #1) is a designed retry loop — the client keeps reporting the item as
-    completed, tracking re-queues it as ``import_pending``, the drain blocks it
-    again — and the row's instantaneous state therefore says nothing about how
-    long the loop has been running. This counter is the memory that loop never
-    had. NOT NULL with a server default of 0 so every pre-0028 row reads as
-    "no stalls recorded", which is the honest starting point: the counter
-    measures consecutive outcomes observed since the column existed.
+    this download's completed output path. This kind of stall is a designed
+    retry loop — the client keeps reporting the item as completed, tracking
+    re-queues it as ``import_pending``, the drain blocks it again — and the
+    row's instantaneous state therefore says nothing about how long the loop
+    has been running. This counter is the memory that loop never had. NOT NULL
+    with a server default of 0 so every pre-0028 row reads as "no stalls
+    recorded", which is the honest starting point: the counter measures
+    consecutive outcomes observed since the column existed.
 
 ``first_stalled_at``
     When the CURRENT stall streak began — stamped once at the first no-files
