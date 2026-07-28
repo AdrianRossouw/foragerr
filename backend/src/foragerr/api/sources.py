@@ -373,17 +373,19 @@ async def delete_source_endpoint(source_id: int, request: Request) -> None:
 def _group_key(human_name: str) -> str:
     """The review screen's collapse key for a store title (FRG-SRC-011).
 
-    ``matching_key(query_term(human_name))`` — the store title trimmed to its
+    ``stripped_key(query_term(human_name))`` — the store title trimmed to its
     series-shaped term (the same trim the proposal ranker uses) and then run
-    through the ONE shared title fold (FRG-IMP-005), the same fold
-    ``franchise_key`` bottoms out in. Computed server-side precisely so the
-    client cannot grow a second, subtly different fold: 145 Spawn rows collapse
-    into one group only if every consumer agrees on the key.
+    through the ranker's boilerplate-STRIPPED fold, which itself bottoms out
+    in the ONE shared title fold (FRG-IMP-005). The strip is what makes the
+    collapse real: the live corpus's "SPAWN Vol. 243" idiom keeps its ordinal
+    through the plain fold ("spawn vol 243" — 145 Spawn rows made 125 groups
+    on the rig), and the stripped fold is precisely the "same title, different
+    edition slice" equivalence the group means. Computed server-side so the
+    client cannot grow a second, subtly different fold.
     """
-    from foragerr.parser.normalize import matching_key
-    from foragerr.sources.matching import query_term
+    from foragerr.sources.matching import query_term, stripped_key
 
-    return matching_key(query_term(human_name))
+    return stripped_key(query_term(human_name))
 
 
 class EntitlementResource(BaseModel):

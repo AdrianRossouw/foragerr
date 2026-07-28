@@ -404,9 +404,9 @@ async def test_auto_accept_write_transaction_recheck_wins_the_toctou(
     db, config_dir, root_folder_id, format_profile_id, monkeypatch
 ):
     """The loop's pre-check re-read is itself a TOCTOU: a decision landing
-    BETWEEN that read and the match write must still win (delta Codex
-    finding — auto-sync now passes ``require_new=True`` so the authoritative
-    refusal happens inside the write transaction). Simulated by blinding the
+    BETWEEN that read and the match write must still win: auto-sync passes
+    ``require_new=True`` so the authoritative refusal happens inside the
+    write transaction, not at the racy pre-check. Simulated by blinding the
     pre-check (it reports the stale ``new`` snapshot) while the row is in
     fact ignored: the write-side re-read refuses, the batch survives, and the
     operator's decision stands."""

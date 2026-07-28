@@ -441,8 +441,7 @@ async def test_trade_shaped_title_prefers_the_collected_edition():
     """The shared collected-edition cue vocabulary decides the order. The
     singles line is still listed — a re-rank, never a filter.
 
-    UPDATED for the stripped-scoring gate finding (spec amendment b2dbffc):
-    both candidates now score 1.0, not 0.9091/0.8571, because the edition
+    Both candidates now score 1.0, not 0.9091/0.8571, because the edition
     boilerplate they differ by (``vol 1`` / ``tpb``) is stripped before scoring
     — it was never identity evidence. The re-rank is what separates them, which
     is exactly the division of labour the design intended: similarity answers
@@ -469,7 +468,8 @@ async def test_trade_shaped_title_prefers_the_collected_edition():
 
 @pytest.mark.req("FRG-SRC-010")
 async def test_volume_ordinal_store_title_is_trade_shaped():
-    """A bare "Vol 1" is a trade shape too (spec amendment b2dbffc).
+    """A bare "Vol 1" is a trade shape too — real collected editions
+    overwhelmingly carry only the ordinal, never an explicit cue.
 
     REPLACES the old "singles-shaped control" reading of this title. Cue-only
     detection returned ``None`` for "Saga Vol. 1" / "Monstress Book One" /
@@ -526,9 +526,9 @@ async def test_singles_shaped_title_keeps_plain_similarity_order():
 async def test_omnibus_counts_as_collected_on_both_sides_of_the_rerank():
     """"Omnibus" is stripped as boilerplate (both titles fold to the same key)
     but it is not in the parser cue vocabulary — without COLLECTED_STRIP_WORDS
-    neither side of the re-rank saw it, the parent and the omnibus tied on
-    stripped similarity, and the wrong shape could win on ordering (delta
-    Codex finding). The omnibus store title must prefer the omnibus volume,
+    neither side of the re-rank sees it, the parent and the omnibus tie on
+    stripped similarity, and the wrong shape can win on ordering. The
+    omnibus store title must prefer the omnibus volume,
     with the bare parent still listed."""
     cv = _FakeCV(
         candidates=[
@@ -709,7 +709,7 @@ async def test_comicvine_answering_with_no_candidates_is_a_no_match_verdict():
 
 # --- the realistic 12-title corpus ------------------------------------------
 
-#: Real-shape store titles from the adversarial gate review, each with the
+#: Real-shape store titles observed in the live dogfood corpus, each with the
 #: ComicVine candidate pool the query would plausibly return, and the volume
 #: that MUST be proposed. Every one of these is a shape the raw-fold scoring got
 #: wrong in at least one direction (decorated query floors the exact volume;
@@ -819,7 +819,7 @@ async def test_realistic_corpus_proposes_the_correct_volume(
 
 @pytest.mark.req("FRG-SRC-010")
 def test_realistic_corpus_covers_the_shapes_the_gate_flagged():
-    """A tripwire on the corpus itself: the six store shapes the adversarial
+    """A tripwire on the corpus itself: the six store shapes the length-asymmetry
     review sampled must all stay represented if this list is ever edited."""
     titles = " | ".join(row[0] for row in REALISTIC_CORPUS)
     for shape in ("Sandman", "Saga", "Monstress", "Hellboy", "Fables", "Spawn"):

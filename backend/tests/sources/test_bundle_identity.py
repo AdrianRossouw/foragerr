@@ -194,13 +194,24 @@ async def test_a_payload_without_a_bundle_name_never_nulls_a_captured_one(
 
 
 @pytest.mark.req("FRG-SRC-011")
-def test_group_key_is_the_one_shared_fold_of_the_series_shaped_term():
-    """``group_key`` must be ``matching_key(query_term(...))`` and nothing else
+def test_group_key_is_the_stripped_fold_of_the_series_shaped_term():
+    """``group_key`` must be ``stripped_key(query_term(...))`` and nothing else
     — a second, drifting fold on the client is exactly what computing it
-    server-side prevents."""
+    server-side prevents. STRIPPED, not plain: store idioms like
+    "SPAWN Vol. 243" keep their ordinal through the plain fold, splintering
+    one title's 145 rows into per-ordinal groups."""
+    from foragerr.sources.matching import stripped_key
+
     title = "Synthetic Hero #1"
-    assert _group_key(title) == matching_key(query_term(title))
+    assert _group_key(title) == stripped_key(query_term(title))
     assert _group_key(title) == "synthetic hero"
+    # Edition slices of one title share the group.
+    assert (
+        _group_key("SPAWN Vol. 243")
+        == _group_key("Spawn Issues #8")
+        == _group_key("Spawn #211")
+        == "spawn"
+    )
 
 
 @pytest.mark.req("FRG-SRC-011")
@@ -226,7 +237,8 @@ async def test_the_wire_group_key_is_always_a_string_never_null(
     db, config_dir, tmp_path: Path
 ):
     """The ungroupable signal is ``""``, on the wire, deliberately — DECIDED
-    rather than left implicit (gate finding F4).
+    rather than left implicit: absence and emptiness must not diverge on
+    the wire when the client's rule is "'' never groups".
 
     Emitting ``null``/omitting the field for an unfoldable title would re-key
     the client's rule off ABSENCE; the client already implements exactly the
