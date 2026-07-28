@@ -73,10 +73,10 @@
       (FRG-PROC-011)
 - [x] 6.2 Traceability matrix regeneration; soup_check green (no dep
       changes expected) (FRG-PROC-005, FRG-PROC-012)
-- [ ] 6.3 Medium-tier gate + Codex full-diff review, adversarial
+- [x] 6.3 Medium-tier gate + Codex full-diff review, adversarial
       mis-match angle on FRG-PP-021/022; e2e via bash e2e/run.sh
       (FRG-PROC-004)
-- [ ] 6.4 Live rig verification against findings #10/#15 reproductions
+- [x] 6.4 Live rig verification against findings #10/#15 reproductions
       (Strangelands + SPAWN entitlements on foragerr-test:8793)
 - [ ] 6.5 Sync/archive spec deltas, flip registry rows to implemented,
       release v0.10.0 per /release (FRG-PROC-013)
