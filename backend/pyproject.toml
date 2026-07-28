@@ -28,6 +28,7 @@ foragerr = "foragerr.app:main"
 dev = [
     "pytest>=8.2",
     "pytest-asyncio>=0.23",
+    "pytest-xdist>=3.8.0",
 ]
 
 [build-system]
@@ -40,6 +41,10 @@ packages = ["src/foragerr"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# Parallel by default (pytest-xdist): the full suite drops ~7:40 -> ~1:15 on a
+# 14-core box, which is what makes "always run the full suite" a viable gate
+# discipline. Disable for a single-test debug run with `-p no:xdist` (or -n 0).
+addopts = ["-n", "auto"]
 markers = [
     "req(id): maps test to requirement",
     "docker: integration test that requires a docker daemon (skipped by default)",
