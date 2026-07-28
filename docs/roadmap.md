@@ -12,21 +12,23 @@ own approved OpenSpec change, and sequencing or scope may shift. Where
 requirement IDs are already allocated they are cited; many future items have no
 IDs yet, because IDs are allocated at proposal time.
 
-**The 1.0 cut** (owner decision 2026-07-11; amended 2026-07-22): version 1.0
-is reached at the end of M10, after the sources (M6), authentication (M8),
-UI refinement (M9), torrents (M7), and go-live (M10) milestones. The bar is
+**The 1.0 cut** (owner decision 2026-07-11; amended 2026-07-22 and
+2026-07-27): version 1.0 is reached at the end of M10, after the sources
+(M6), authentication (M8), UI refinement (M9), import & acquisition
+intelligence (M11), torrents (M7), and go-live (M10) milestones. The bar is
 "safe for strangers to deploy" — authentication is the hard gate — **and,
 per the 2026-07-22 amendment, acquisition-complete**: live dogfood showed
 current-title completion from usenet + DDL alone falls short of the
 product's core promise, so torrents move inside 1.0. M7 keeps its label
-because registry rows cite it, and labels are never renumbered. It is
-sequenced *inside* M10: after the release-pipeline change, before
-qualification and the pentest, so 1.0's qualification and penetration test
-cover the torrent surface rather than certifying a smaller product than
-ships. Before 1.0, releases may still make breaking changes with migration
-notes; at 1.0 the public surfaces (REST API, OPDS, configuration,
-environment variables) start a clean slate under strict semantic
-versioning.
+because registry rows cite it, and labels are never renumbered. **Per the
+2026-07-27 amendment, M11 runs now, before M10 resumes**: the remaining 1.0
+sequence is M11 → the release-pipeline change → M7 torrents →
+V&V/qualification → audit durability → pentest → v1.0.0, so the
+qualification freeze covers the intelligence layer rather than certifying
+around known import defects. Before 1.0, releases may still make breaking
+changes with migration notes; at 1.0 the public surfaces (REST API, OPDS,
+configuration, environment variables) start a clean slate under strict
+semantic versioning.
 
 ## M6 — Sources
 
@@ -67,16 +69,54 @@ ergonomics, the accessibility scan in the e2e gate, credential-runtime and
 health-truthfulness fixes surfaced by structured dogfood, OPDS per-issue
 covers, and the public project site.
 
+## M11 — Import & acquisition intelligence
+
+**In progress** (declared a milestone 2026-07-27; design authority: the
+m11-import-intelligence pre-design, owner-approved 2026-07-27 with a
+standing grant through milestone close). A week of live dogfood against a
+real 1,318-item collection produced 21 recorded findings that cluster into
+one capability: the intelligence layer between "bytes acquired" and
+"correctly filed, discoverable, readable". Five changes, in dependency
+order, each independently gated and released:
+
+- **Source-import trust** — imports trust entitlement provenance (a
+  source-matched file only needs its issue number parsed), a `Vol. N`
+  ordinal fallback when the target series is explicitly known, stale
+  review-state cleanup, and a retry action + health warning for failed
+  source downloads.
+- **Review experience** — ComicVine as the matching universe with the
+  library as a shortcut overlay, free-text CV search on every review row,
+  honest never-terminal proposals, bulk actions and franchise/volume
+  collapse at thousand-row scale, classification rules, and
+  collected-edition routing.
+- **ComicVine budget** — calibration against CV's own usage counters,
+  batch-vs-interactive priority lanes within a single key (multi-key is a
+  recorded non-goal), sync frugality, and an approaching-limit warning
+  with a visible budget meter.
+- **Acquisition responsiveness** — a bounded search sweep on series-add,
+  per-indexer time budgets with partial interactive-search results,
+  health degradation for completed downloads the importer cannot see,
+  and the indexer/client priority field in the UI.
+- **Discovery surface** — the add affordance on every unmatched Calendar
+  entry, pull covers and metadata enrichment from the pull-source
+  payload (security-touching: the cover-proxy host allowlist grows).
+
+Out of scope, recorded in the pre-design: read-only sources, trade-file
+handling beyond the ordinal fallback, custom-format scoring, pack
+handling (M7 owns it), and any multi-key ComicVine mechanism.
+
 ## M10 — Go-live and 1.0
 
 **In progress** (kicked off 2026-07-17; design authority: the m10-go-live
 pre-design). The release milestone: what it takes for strangers to deploy
 foragerr safely, and the capstone of the regulated-development
 demonstration. Sequenced as: deployment-posture hardening (shipped,
-v0.9.17), then the release pipeline (GHCR publishing, dev/rc/release
-channels, change control, credential scoping), then **torrents (M7,
-resequenced into 1.0 — see its section)**, then V&V/qualification
-(IQ/OQ/PQ), audit durability, and the pentest over the full surface.
+v0.9.17), then **M11 import & acquisition intelligence (interposed
+2026-07-27 — see its section)**, then the release pipeline (GHCR
+publishing, dev/rc/release channels, change control, credential scoping),
+then **torrents (M7, resequenced into 1.0 — see its section)**, then
+V&V/qualification (IQ/OQ/PQ), audit durability, and the pentest over the
+full surface.
 
 - Deployment security posture: HTTP security headers, opt-in trusted-proxy
   handling, unauthenticated-disclosure hygiene, and the committed posture

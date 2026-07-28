@@ -22,7 +22,8 @@ proposal time; closed 2026-07-11, shipped v0.5.0–v0.5.5) · `M6` sources
 companion extension) · `M7` torrents (post-1.0; label kept — ids are never
 renumbered) · `M8` authentication (**implementation requires fresh owner
 approval**) · `M9` UI refinement · `M10` go-live, ends in the 1.0 release ·
-`B` backlog · `—` process (not milestone-bound).
+`M11` import & acquisition intelligence (declared 2026-07-27, runs before
+M10 resumes) · `B` backlog · `—` process (not milestone-bound).
 
 Reshaped 2026-07-05 with owner approval (previously: `M2` torrents + streaming,
 `M3` authentication). Torrents (FRG-TOR-*, FRG-IDX-012) and notifications
@@ -48,6 +49,19 @@ no id is renumbered. The archive.org importer leaves M6 — when picked up
 post-1.0 it is shaped as an indexer + direct-download capability, not a store
 source. Compatibility: pre-1.0 releases may break with migration notes; from
 1.0, strict SemVer on public surfaces (REST, OPDS, config, env vars).
+
+Amended 2026-07-27 with owner approval (m11-import-intelligence pre-design):
+**M11 import & acquisition intelligence** declared a milestone from 21 live
+dogfood findings and sequenced NOW, before M10 resumes. Remaining 1.0 order:
+M11 → m10-release-pipeline → M7 torrents → m10-vnv-qualification →
+m10-audit-durability → m10-pentest → v1.0.0. Five M11 changes
+(source-import-trust → review-experience → cv-budget →
+acquisition-responsiveness → discovery-surface), ids allocated at each
+change's proposal in the existing IMP/PP/SRC/META/SRCH/DL/UI/IDX/PULL areas.
+M11 releases resume pre-1.0 semver discipline (owner, 2026-07-28):
+feature-bearing changes bump the minor, starting a fresh v0.10 sequence;
+fixes bump the patch — applied with judgment, not a rigid
+milestone-to-minor mapping. No id renumbered.
 
 | ID | Title | Spec | Status | Milestone |
 |----|-------|------|--------|-----------|
