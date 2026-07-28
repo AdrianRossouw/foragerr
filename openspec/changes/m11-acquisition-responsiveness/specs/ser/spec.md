@@ -39,3 +39,13 @@ When a series is added, the system SHALL execute a chained sequence: fetch and p
 
 - **WHEN** the Library Import flow creates series for groups of files already on disk (each about to be imported)
 - **THEN** no default search sweeps are enqueued for those series — the sweep exists for the operator's add intent, and a thousand-group import must not race a thousand searches against its own imports
+
+#### Scenario: Search-on-add fires even when nothing is wanted yet
+
+- **WHEN** a series is added with search-on-add checked and a monitoring strategy that yields no wanted issues yet
+- **THEN** the explicit request is honoured: a `SeriesSearchCommand` is enqueued exactly as before the default sweep existed
+
+#### Scenario: The checkbox and the default sweep never double-enqueue
+
+- **WHEN** a series is added with search-on-add checked and a monitoring strategy that also yields wanted issues
+- **THEN** exactly one `SeriesSearchCommand` is enqueued — the two conditions share a single enqueue and command dedup collapses any repeat
