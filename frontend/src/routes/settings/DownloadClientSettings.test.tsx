@@ -182,6 +182,50 @@ describe('FRG-UI-009: download-client settings reuse the generic renderer', () =
     expect('api_key' in body.settings).toBe(false);
   });
 
+  it('FRG-UI-009 — the client-row priority field renders from the stored value and round-trips on save', async () => {
+    const user = userEvent.setup();
+    const { spy, fetcher } = fakeFetcher(dlResolver());
+    renderWithProviders(<DownloadClientSettings />, { fetcher });
+
+    // Priority is an advanced row field, like the indexer form's.
+    await user.click(
+      await screen.findByRole('button', { name: 'Show Advanced' }),
+    );
+    await user.click(screen.getByTestId('provider-card-1'));
+    const dialog = screen.getByRole('dialog', {
+      name: 'Edit Download Client — SABnzbd',
+    });
+
+    const priority = within(dialog).getByLabelText('Download Client Priority');
+    expect(priority).toHaveAttribute('type', 'number');
+    // Seeded from the stored ROW priority (25) — distinct from SABnzbd's own
+    // queue-priority setting (-100), which keeps its own control.
+    expect(priority).toHaveValue(25);
+    expect(within(dialog).getByLabelText('Priority')).toHaveValue('-100');
+
+    await user.clear(priority);
+    await user.type(priority, '10');
+    await user.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith(
+        '/api/v1/downloadclient/1',
+        expect.objectContaining({ method: 'PUT' }),
+      ),
+    );
+    const putCall = spy.mock.calls.find(
+      ([p, i]) => p === '/api/v1/downloadclient/1' && i?.method === 'PUT',
+    );
+    const body = putCall?.[1]?.body as {
+      priority: number;
+      settings: Record<string, unknown>;
+    };
+    // Row-level field: top level of the payload, numeric, not in settings.
+    expect(body.priority).toBe(10);
+    expect('priority' in body.settings).toBe(true); // SABnzbd's own, untouched
+    expect(body.settings.priority).toBe(-100);
+  });
+
   it('FRG-UI-009 — the add picker lists every implementation from the schema (DDL appears with zero new UI code)', async () => {
     const user = userEvent.setup();
     const { fetcher } = fakeFetcher(dlResolver());

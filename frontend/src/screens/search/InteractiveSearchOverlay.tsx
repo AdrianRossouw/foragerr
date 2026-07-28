@@ -5,7 +5,7 @@ import { ReasonsPopover } from '../../components/ReasonsPopover';
 import { useGrabRelease, useReleases } from '../../api/hooks';
 import { ApiRequestError } from '../../api/fetcher';
 import { queryKeys } from '../../api/queryKeys';
-import type { ReleaseDecision } from '../../api/types';
+import type { IndexerOutcome, ReleaseDecision } from '../../api/types';
 import { formatAge, formatBytes } from '../../lib/format';
 import styles from './InteractiveSearchOverlay.module.css';
 
@@ -34,6 +34,70 @@ const OUTCOME_CHIP: Record<ReleaseDecision['outcome'], string> = {
 };
 
 /**
+ * Per-indexer outcome strip (FRG-UI-041) — a partial result is visibly partial.
+ *
+ * Renders NOTHING when the response carries no outcomes (an older or cached
+ * response predating the additive field): silence beats an empty strip. The
+ * all-searched case is deliberately quiet — plain muted text, no warning
+ * chrome — so the strip only raises its voice when an indexer actually did not
+ * contribute.
+ */
+export function IndexerOutcomeStrip({ outcomes }: { outcomes: IndexerOutcome[] }) {
+  if (outcomes.length === 0) return null;
+
+  const incomplete = outcomes.filter((o) => o.outcome !== 'searched');
+  const quiet = incomplete.length === 0;
+
+  return (
+    <p
+      className={quiet ? styles.outcomeStrip : styles.outcomeStripWarn}
+      data-testid="indexer-outcomes"
+      data-state={quiet ? 'all-searched' : 'partial'}
+    >
+      {quiet ? (
+        <span>
+          Searched {outcomes.length}{' '}
+          {outcomes.length === 1 ? 'indexer' : 'indexers'}:{' '}
+          {outcomes.map((o) => o.name).join(', ')}
+        </span>
+      ) : (
+        <>
+          <span>Partial results — {incomplete.length} of {outcomes.length} indexers did not contribute:</span>{' '}
+          {outcomes.map((outcome) => (
+            <span
+              key={outcome.indexer_id}
+              className={
+                outcome.outcome === 'searched' ? styles.outcomeOk : styles.outcomeBad
+              }
+              data-testid={`indexer-outcome-${outcome.indexer_id}`}
+            >
+              {outcome.name} — {outcomeText(outcome)}
+            </span>
+          ))}
+        </>
+      )}
+    </p>
+  );
+}
+
+/** The per-indexer phrase; a timeout NAMES its budget so the bound is legible. */
+function outcomeText(outcome: IndexerOutcome): string {
+  switch (outcome.outcome) {
+    case 'searched':
+      return 'searched';
+    case 'timed_out':
+      return outcome.budget_seconds != null
+        ? `timed out after ${outcome.budget_seconds}s`
+        : 'timed out';
+    case 'backing_off':
+      return 'backing off';
+    case 'failed':
+    default:
+      return 'failed';
+  }
+}
+
+/**
  * Interactive search overlay (FRG-UI-007) — the decision engine's
  * explainability surface. Every decision from GET /release renders as a row IN
  * THE ORDER THE ENDPOINT RETURNED IT (the comparator's order is the contract;
@@ -53,6 +117,7 @@ export function InteractiveSearchOverlay({
   const [grabbedKeys, setGrabbedKeys] = useState<ReadonlySet<string>>(new Set());
   const [pendingKey, setPendingKey] = useState<string | null>(null);
 
+  const decisions = data?.decisions ?? [];
   const keyOf = (d: ReleaseDecision) => `${d.indexer_id}:${d.guid}`;
   const expired = grabError?.status === 404;
 
@@ -111,11 +176,17 @@ export function InteractiveSearchOverlay({
           Search failed: {error.message}
         </p>
       )}
-      {data && data.length === 0 && (
+
+      {/* Per-indexer outcomes (FRG-UI-041), above the rows they explain — shown
+          for an empty result set too: "nothing found" and "nobody answered in
+          time" are different truths. */}
+      {data && <IndexerOutcomeStrip outcomes={data.indexers} />}
+
+      {decisions.length === 0 && data && (
         <p className={styles.state}>No results from any enabled indexer.</p>
       )}
 
-      {data && data.length > 0 && (
+      {decisions.length > 0 && (
         <table className={styles.table}>
           <thead>
             <tr>
@@ -131,7 +202,7 @@ export function InteractiveSearchOverlay({
           </thead>
           <tbody>
             {/* Row order = response order = comparator order. Never re-sort. */}
-            {data.map((decision) => (
+            {decisions.map((decision) => (
               <DecisionRow
                 key={keyOf(decision)}
                 decision={decision}

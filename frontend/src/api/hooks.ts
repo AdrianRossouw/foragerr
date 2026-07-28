@@ -26,6 +26,7 @@ import type {
   FormatProfileResource,
   HealthWarningItem,
   HistoryRecord,
+  IndexerOutcome,
   IssueFileDeleteResult,
   IssueResource,
   LogLevel,
@@ -35,6 +36,7 @@ import type {
   QueueItem,
   QueuePageResponse,
   ReleaseDecision,
+  ReleaseSearchResult,
   RootFolderResource,
   ScheduledTaskResource,
   Series,
@@ -792,11 +794,53 @@ export function useQueuePage(page: number): UseQueryResult<QueueItem[]> {
   });
 }
 
-export function useReleases(issueId: number): UseQueryResult<ReleaseDecision[]> {
+/**
+ * Normalize the interactive-search response (FRG-API-008 / FRG-UI-041).
+ *
+ * The endpoint's decision rows are the long-standing contract; the per-indexer
+ * outcomes are ADDITIVE (m11-acquisition-responsiveness). This tolerates both
+ * wire shapes so nothing breaks at the seam: the current
+ * `{releases, indexers}` resource (backend/src/foragerr/api/release.py) yields
+ * both, and a BARE decision array — any response predating the outcomes,
+ * including one already sitting in a client cache — yields the rows with NO
+ * outcomes, so the strip simply does not render. An unrecognized outcome token
+ * (a state added server-side later) degrades to `failed` rather than putting a
+ * raw token in front of the operator.
+ */
+export function normalizeReleaseResponse(body: unknown): ReleaseSearchResult {
+  if (Array.isArray(body)) {
+    return { decisions: body as ReleaseDecision[], indexers: [] };
+  }
+  const envelope = (body ?? {}) as Record<string, unknown>;
+  const rows = envelope.releases;
+  const raw = Array.isArray(envelope.indexers) ? envelope.indexers : [];
+  return {
+    decisions: Array.isArray(rows) ? (rows as ReleaseDecision[]) : [],
+    indexers: raw.map((entry) => {
+      const row = (entry ?? {}) as Record<string, unknown>;
+      const state = String(row.outcome ?? '');
+      return {
+        indexer_id: Number(row.indexer_id ?? 0),
+        name: String(row.name ?? `Indexer ${row.indexer_id}`),
+        outcome: (OUTCOME_STATES.includes(state)
+          ? state
+          : 'failed') as IndexerOutcome['outcome'],
+        budget_seconds:
+          typeof row.budget_seconds === 'number' ? row.budget_seconds : null,
+      };
+    }),
+  };
+}
+
+/** The outcome vocabulary, verbatim from the release resource. */
+const OUTCOME_STATES = ['searched', 'timed_out', 'failed', 'backing_off'];
+
+export function useReleases(issueId: number): UseQueryResult<ReleaseSearchResult> {
   const fetcher = useFetcher();
   return useQuery({
     queryKey: queryKeys.release.forIssue(issueId),
-    queryFn: () => fetcher<ReleaseDecision[]>(`/api/v1/release?issueId=${issueId}`),
+    queryFn: async () =>
+      normalizeReleaseResponse(await fetcher<unknown>(`/api/v1/release?issueId=${issueId}`)),
     // A live multi-indexer search is expensive server-side; never refire it on
     // focus/remount while an overlay session is open.
     staleTime: Infinity,
