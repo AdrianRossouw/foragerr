@@ -88,7 +88,15 @@ function TaskRow({ task }: { task: ScheduledTaskResource }) {
   return (
     <tr data-testid={`task-row-${task.name}`}>
       <td>{task.label}</td>
-      <td className={styles.muted}>Every {formatAge(task.interval_seconds)}</td>
+      <td className={styles.muted}>
+        {/* A century-scale interval is the scheduler's one-shot sentinel
+            (e.g. creators-backfill): rendering it literally reads as
+            "every 100 years", which is technically true and practically
+            noise. */}
+        {task.interval_seconds >= 10 * 365 * 86400
+          ? 'One-time'
+          : `Every ${formatAge(task.interval_seconds)}`}
+      </td>
       <td className={styles.muted}>{formatDate(task.last_run)}</td>
       <td className={styles.muted}>{formatEta(task.next_run)}</td>
       <td>

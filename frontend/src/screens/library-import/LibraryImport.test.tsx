@@ -819,3 +819,13 @@ describe('FRG-UI-032: library-import picker — publisher-ignore reveal parity',
     );
   });
 });
+
+describe('FRG-META-021: proposal covers ride the same-origin proxy', () => {
+  it('renders the poster through candidateCoverUrl, never the raw CV hotlink', async () => {
+    // The CSP allows img-src self only: a raw comicvine URL renders nothing
+    // (the AddSeries lesson, applied here after the live-rig finding).
+    const { candidateCoverUrl } = await import('../../api/urls');
+    const proxied = candidateCoverUrl('https://comicvine.gamespot.com/a/cover.jpg');
+    expect(proxied).toContain('/api/v1/metadata/cover');
+  });
+});
