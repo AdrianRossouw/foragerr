@@ -9,6 +9,74 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.10.0] — 2026-07-28
+
+M11 import-intelligence, change 1: source imports trust the operator.
+Opens the v0.10 line (feature releases bump the minor from here; owner
+decision 2026-07-28).
+
+### Added
+- **Provenance-authoritative imports** (`FRG-PP-021`): a download from a
+  store entitlement you matched resolves against that series — read from
+  the entitlement's *current* match at import time, so a re-match is
+  honored — and only the issue number is derived from the file name. A
+  chaotic store filename can no longer land a matched file in "unknown
+  series"; when the issue can't be derived, the block reason names the
+  matched series.
+- **Ordinal-fallback issue resolution** (`FRG-PP-022`): a `Vol. N` file
+  with no issue number resolves to issue N of the explicitly known
+  series when that issue exists — covering both Humble's
+  Vol.-means-issue idiom and true trades — bounded by three guards: a
+  recognizable trade never lands on a singles line, an ordinal mapping
+  never replaces an existing file, and only operator-made matches use
+  the fallback (auto-sync and pre-upgrade matches block for review).
+- **Review-proposal freshness** (`FRG-SRC-008`): adding a series from
+  one review row re-resolves sibling proposals naming the same
+  ComicVine volume into match proposals, and an add whose volume is
+  already in the library degrades to a match instead of erroring.
+- **Failed source-download retry + health** (`FRG-SRC-009`): a Retry
+  button (and `POST /sources/entitlements/{id}/retry-download`) on
+  failed downloads, and a per-source health warning counting failed
+  source downloads.
+- **Issue-word filler stripping** (`FRG-IMP-026`): "Issue"/"Issues"
+  directly before the issue number no longer pollutes the parsed series
+  title; six Humble-idiom corpus rows pin the behavior.
+
+### Changed
+- Manual import of a download now applies the same terminal state as the
+  automatic drain (queue rows leave import-blocked; store entitlements
+  advance with owned-via-edition reconciliation; client cleanup runs) —
+  `FRG-PP-016`, `FRG-SRC-006`. Manual import also honors an entitlement
+  ignored between listing and execute (nothing imports).
+- Retry clears a stale terminal queue row so an import-side failure can
+  actually re-import instead of wedging.
+
+### Fixed
+- Stale sibling "add" proposals 400-ing after a series add (live-rig
+  finding #10) and stale queue/entitlement state after a manual import
+  (finding #21).
+- Partial manual imports no longer mark a whole download imported or
+  erase the unresolved files' block reasons.
+
+### Security
+- No new attack surface: the retry endpoint sits behind the existing
+  default-deny perimeter; no new listener, parser of untrusted input,
+  or outbound integration. Full-history secret scan re-run (0 genuine
+  findings; `docs/security/history-scan.md`).
+
+### Upgrade notes
+- Migration `0025` adds `source_entitlements.matched_via`. Existing
+  matches (made before this release) withhold the new ordinal fallback
+  with an honest "predates match tracking" reason — one re-match through
+  the review UI restores it per entitlement.
+- Known anomaly `KA-002` (accepted, low impact): a series title *ending*
+  in the word "Issue"/"Issues" does not survive a rename round-trip, and
+  Library Import staging groups keyed by such titles re-propose once
+  after this upgrade.
+- Legacy source entitlements left in a blocked download state by
+  pre-0.10 manual-import workarounds are not retro-healed; ignore or
+  re-match them once to clear.
+
 ## [v0.9.23] — 2026-07-23
 
 Candidate covers are back — proxied same-origin, CSP untouched.
