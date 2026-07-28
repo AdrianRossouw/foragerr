@@ -81,8 +81,9 @@ None — extensions of existing areas.
 
 - Backend: metadata/ratelimit.py (lane dimension on the one gate),
   metadata/comicvine.py + covers.py (lane threading at the client
-  seam), sources/enrich.py + repo.py (+ migration 0027
-  proposal_attempted_at), sources/review.py (recompute action),
+  seam), sources/enrich.py + repo.py + commands.py (+ migration 0027
+  proposal_attempted_at; the recompute action lives beside the
+  enrichment machinery it reuses),
   health/service.py, api/system.py + api/sources.py.
 - Frontend: Settings General meter, Sources compact meter, AddSeries
   lookup outcome-note fix.
