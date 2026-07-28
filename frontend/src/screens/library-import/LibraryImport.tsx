@@ -34,6 +34,7 @@ import {
   type LibraryImportGroupPatch,
 } from './libraryImportHooks';
 import styles from './LibraryImport.module.css';
+import { candidateCoverUrl } from '../../api/urls';
 
 /**
  * Library import (FRG-UI-015): scan a configured root folder for unmapped
@@ -436,7 +437,7 @@ function GroupCard({
         <div className={styles.proposal}>
           <Poster
             initial={(group.name ?? '?').charAt(0)}
-            src={group.imageUrl}
+            src={candidateCoverUrl(group.imageUrl)}
             alt={`${group.name ?? 'volume'} cover`}
             frameClassName={styles.posterFrame}
             fallbackClassName={styles.posterFallback}

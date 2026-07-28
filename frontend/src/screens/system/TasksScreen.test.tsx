@@ -32,12 +32,23 @@ describe('FRG-UI-016: system tasks screen', () => {
         label: 'Refresh Metadata',
         interval_seconds: 3_600,
       }),
+      makeScheduledTask({
+        name: 'creators-backfill',
+        command_name: 'creators-backfill',
+        label: 'Creators Backfill',
+        interval_seconds: 3_153_600_000, // the scheduler's one-shot sentinel
+      }),
     ];
     const { spy, fetcher } = fakeFetcher(() => tasks);
     renderWithProviders(<TasksScreen />, { fetcher });
 
     const row = await screen.findByTestId('task-row-backup-database');
     expect(spy).toHaveBeenCalledWith('/api/v1/system/task');
+    // A century-scale sentinel renders as one-time, never "Every 100 years"
+    // (live-rig confusion, 2026-07-28).
+    const oneShot = await screen.findByTestId('task-row-creators-backfill');
+    expect(oneShot).toHaveTextContent('One-time');
+    expect(oneShot).not.toHaveTextContent(/Every.*y/);
     expect(within(row).getByText('Database Backup')).toBeInTheDocument();
     expect(within(row).getByText('Every 1d')).toBeInTheDocument();
 
