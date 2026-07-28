@@ -72,13 +72,55 @@ something is ever misclassified you can still match or add it from there
 ## Review first — nothing downloads on its own
 
 A newly discovered comic entitlement lands as **New**, with a proposed match
-against your existing library computed for you. By default nothing downloads
-and nothing in your library changes until you act on it: **match** it to a
-series, **add** it as something new, or **ignore** it — each action works on a
+computed against **ComicVine's catalog** (`FRG-SRC-010`) — your library acts
+as a shortcut overlay: a proposal already in your library is offered as a
+one-click match, one that isn't is offered as a one-click add. Proposals are
+honest: a candidate is only proposed when its title genuinely shares words
+with the item's (no more coincidental lookalikes), and "no plausible match"
+only describes the *automatic* verdict — every row also carries a live
+**ComicVine search** (`FRG-UI-039`), the same search the Add Series screen
+uses, so no row is ever a dead end. Pick a search result and it matches (if
+you have it) or adds-and-matches (if you don't) in that single action.
+Trade-shaped items ("… Vol. 4", collected editions) prefer the matching
+collected-edition volume in their proposals rather than the single-issue
+line.
+
+By default nothing downloads and nothing in your library changes until you
+act: **match**, **add**, **search-and-pick**, or **ignore** — each on a
 single item or a bulk selection. An ignored item drops out of the pending
 count and the default view but stays visible under the Ignored filter, and
 **restore** returns it to New with its proposed match recomputed
 (`FRG-SRC-004`).
+
+### Working a big collection
+
+Large accounts land thousands of items at once (the review list stays fast
+at that scale — it renders only what's on screen). Three tools keep the work
+proportional (`FRG-SRC-011`):
+
+- **Groups**: rows that are really the same title collapse into one
+  expandable group with a count — 145 mislabeled "SPAWN Vol. NNN" singles
+  read as one line, not 145. A group header shows mixed statuses when its
+  rows differ, and expanding always reaches every row's full actions.
+- **Bundles**: every row remembers which Humble bundle it came from, and
+  the bulk bar can select a whole bundle at once — the natural unit for
+  "this was an RPG bundle, ignore all of it".
+- **Accept in bulk**: accepting a selection applies *each row's own
+  proposal* server-side — mixed selections of matches and adds work in one
+  action, failures are reported per row without stopping the rest, and a
+  group of same-title adds converges cleanly (the first add turns its
+  siblings into matches automatically, per `FRG-SRC-008`).
+
+### Publisher rules
+
+Humble bundles mix RPG rulebooks in with comics, and format detection alone
+can't always tell them apart. Each source has an operator-managed
+**publisher rules** list (`FRG-SRC-012`): items from a listed publisher are
+classified as Other at sync time. The list ships **empty** — a suggested
+starter list of common RPG publishers is one click away, but it only fills
+the editor; nothing applies until you save. Rule changes reclassify only
+items still awaiting review; anything you've already matched or ignored
+never moves, and Other items remain visible on demand as always.
 
 Proposals stay honest as your library changes underneath them (`FRG-SRC-008`).
 Humble bundles routinely contain many items from the same series, all
