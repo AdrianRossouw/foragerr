@@ -115,6 +115,18 @@ proportional (`FRG-SRC-011`):
   group of same-title adds converges cleanly (the first add turns its
   siblings into matches automatically, per `FRG-SRC-008`).
 
+### Refreshing older proposals
+
+Proposals computed by earlier versions (or while no ComicVine key was
+configured) can be refreshed in bulk: **Recompute proposals** on the
+source re-runs matching for items still awaiting review, in batches that
+respect the ComicVine budget's background share — it stops cleanly if
+the budget runs out and continues where it left off when run again.
+Items you have already matched or ignored are never touched. When a path
+budget is running hot, a compact meter appears above the review list;
+the full per-path meter lives in Settings → General (`FRG-SRC-013`,
+`FRG-UI-040`).
+
 ### Publisher rules
 
 Humble bundles mix RPG rulebooks in with comics, and format detection alone
