@@ -87,6 +87,11 @@ _FIX_MARKER_RE = re.compile(r"f(\d{1,2})")
 #: Trade formats whose trailing number reads as a volume (FRG-IMP-016).
 _TRADE_BOOKTYPES = (Booktype.TPB, Booktype.GN, Booktype.HC)
 
+#: Bare filler words that introduce the issue number and are never series
+#: title content when they sit directly on the issue evidence (FRG-IMP-026):
+#: `Strangelands Issues #8`, `SPAWN Issue # 279`.
+_ISSUE_FILLER_WORDS = frozenset({"issue", "issues"})
+
 
 def parse(
     name: str,
@@ -484,6 +489,7 @@ class _State:
             if t.kind is TokenKind.HASH and not self.consumed[t.index]:
                 hash_pending = True
                 self.consume(t.index, "issue-anchor")
+                self._consume_issue_filler(t.index)
                 continue
             if t.kind is not TokenKind.WORD or self.consumed[t.index]:
                 continue
@@ -526,6 +532,25 @@ class _State:
             self.issue_pos = self.selected.index
             self.roles[self.issue_pos] = "issue"
             self._consume_part_cue()
+            self._consume_issue_filler(self.issue_pos)
+
+    def _consume_issue_filler(self, before: int) -> None:
+        """A bare `Issue`/`Issues` directly left of the issue evidence is
+        filler, never title (FRG-IMP-026). Anchored and narrow: it fires only
+        immediately before an issue-anchor `#` or the selected issue token, so
+        a mid-title `Issue` (`The Death Issue Files 004`) survives. Index 0
+        is never consumed — a title must remain — mirroring the `Part N` cue.
+        """
+        i = before - 1
+        if i < 1:
+            return
+        prev = self.tokens[i]
+        if (
+            prev.kind is TokenKind.WORD
+            and not self.consumed[i]
+            and prev.folded in _ISSUE_FILLER_WORDS
+        ):
+            self.consume(i, "issue-cue")
 
     def _consume_part_cue(self) -> None:
         """`Part N` is an issue/chapter cue, never a volume (FRG-IMP-012):
