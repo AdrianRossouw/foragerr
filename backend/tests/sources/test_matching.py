@@ -523,6 +523,30 @@ async def test_singles_shaped_title_keeps_plain_similarity_order():
 
 
 @pytest.mark.req("FRG-SRC-010")
+async def test_omnibus_counts_as_collected_on_both_sides_of_the_rerank():
+    """"Omnibus" is stripped as boilerplate (both titles fold to the same key)
+    but it is not in the parser cue vocabulary — without COLLECTED_STRIP_WORDS
+    neither side of the re-rank saw it, the parent and the omnibus tied on
+    stripped similarity, and the wrong shape could win on ordering (delta
+    Codex finding). The omnibus store title must prefer the omnibus volume,
+    with the bare parent still listed."""
+    cv = _FakeCV(
+        candidates=[
+            _cand(31, "Hellboy", 1994),  # bare parent line
+            _cand(32, "Hellboy Omnibus", 2018),  # collected edition
+        ]
+    )
+    proposal = await compute_proposed_match(
+        human_name="Hellboy Omnibus Volume 1",
+        library=[],
+        cv_client=cv,
+    )
+    assert proposal is not None
+    assert proposal.best.cv_volume_id == 32
+    assert [c.cv_volume_id for c in proposal.candidates] == [32, 31]
+
+
+@pytest.mark.req("FRG-SRC-010")
 async def test_trade_rerank_cannot_resurrect_a_wrong_collected_edition():
     """The "Bone Hardcover" probe: the re-rank must not prefer a merely
     similar-but-different collected edition over the exact-titled series.

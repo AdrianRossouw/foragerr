@@ -399,6 +399,78 @@ async def test_auto_accept_skips_a_row_decided_while_the_run_was_working(
     assert {c[1]["entitlement_id"] for c in commands.grabs()} == {keep}
 
 
+@pytest.mark.req("FRG-SRC-011")
+async def test_auto_accept_write_transaction_recheck_wins_the_toctou(
+    db, config_dir, root_folder_id, format_profile_id, monkeypatch
+):
+    """The loop's pre-check re-read is itself a TOCTOU: a decision landing
+    BETWEEN that read and the match write must still win (delta Codex
+    finding — auto-sync now passes ``require_new=True`` so the authoritative
+    refusal happens inside the write transaction). Simulated by blinding the
+    pre-check (it reports the stale ``new`` snapshot) while the row is in
+    fact ignored: the write-side re-read refuses, the batch survives, and the
+    operator's decision stands."""
+    from foragerr.sources import enrich, review
+    from foragerr.sources.enrich import _auto_accept
+    from foragerr.sources.matching import MatchCandidate, ProposedMatch
+
+    source = await _source(db, auto_sync=True)
+    await _series(
+        db,
+        root_folder_id,
+        format_profile_id,
+        cvid=911,
+        title="Synthetic Hero",
+        path="/tmp/comics/sh911",
+    )
+    async with db.read_session() as session:
+        from sqlalchemy import select
+
+        from foragerr.library.models import SeriesRow
+
+        series_id = (
+            await session.execute(
+                select(SeriesRow.id).where(SeriesRow.cv_volume_id == 911)
+            )
+        ).scalar_one()
+    eid = await _new_comic(db, source.id, "Synthetic Hero #3", machine_name="raced")
+    stale = await repo.get_entitlement(db, eid)  # pre-decision snapshot
+
+    await review.ignore_entitlement(db, eid)
+
+    async def _stale_read(_db, _eid):
+        return stale  # the pre-check sees the world as it was before the ignore
+
+    monkeypatch.setattr(enrich.repo, "get_entitlement", _stale_read)
+
+    commands = FakeCommands()
+    accepted = await _auto_accept(
+        db,
+        make_settings(config_dir),
+        {
+            eid: ProposedMatch(
+                best=MatchCandidate(
+                    kind="library",
+                    series_id=series_id,
+                    cv_volume_id=911,
+                    title="Synthetic Hero",
+                    year=2018,
+                    confidence=1.0,
+                )
+            )
+        },
+        commands=commands,
+        cv_configured=True,
+    )
+
+    monkeypatch.undo()
+    assert accepted == 0
+    after = await repo.get_entitlement(db, eid)
+    assert after.review_status == "ignored"
+    assert after.matched_series_id is None
+    assert commands.grabs() == []
+
+
 @pytest.mark.req("FRG-SRC-010")
 async def test_the_marker_is_not_written_on_a_budget_hit(
     db, config_dir, root_folder_id, format_profile_id

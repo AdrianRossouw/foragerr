@@ -292,6 +292,24 @@ _VOLUME_SHAPE = re.compile(
 #: (no explicit collected-edition cue). Only its truthiness is consumed.
 TRADE_SHAPE_VOLUME_ORDINAL = "volume-ordinal"
 
+#: Stripped designators that IMPLY a collected edition by themselves. "Omnibus"
+#: is boilerplate to the similarity fold (both "Hellboy" and "Hellboy Omnibus"
+#: strip to "hellboy") but it is not in the parser's cue vocabulary — so
+#: without this set neither side of the trade re-rank would see it, the two
+#: volumes would tie on stripped similarity, and the wrong shape could win on
+#: ordering. Whether "omnibus" belongs in the parser's BOOKTYPE_CUES proper is
+#: banked as a parser-corpus question (it would change filename booktype
+#: detection, FRG-IMP-016); this local set only informs the re-rank.
+COLLECTED_STRIP_WORDS: frozenset[str] = frozenset({"omnibus"})
+
+
+def _collected_shaped(title: str) -> bool:
+    """Whether a title signals a collected edition for re-rank purposes:
+    an explicit shared-vocabulary cue, or a stripped-but-collected word."""
+    if detect_series_booktype(title) is not None:
+        return True
+    return any(tok in COLLECTED_STRIP_WORDS for tok in matching_key(title).split())
+
 
 def query_term(human_name: str) -> str:
     """The store title reduced to a series-shaped query term.
@@ -432,6 +450,8 @@ def trade_shape(human_name: str) -> str | None:
     cue = detect_series_booktype(human_name)
     if cue is not None:
         return cue
+    if _collected_shaped(human_name):
+        return TRADE_SHAPE_VOLUME_ORDINAL
     if _VOLUME_SHAPE.search(human_name):
         return TRADE_SHAPE_VOLUME_ORDINAL
     return None
@@ -694,7 +714,7 @@ def _rank_score(trade_cue: str | None, candidate: MatchCandidate) -> float:
     """
     if trade_cue is None:
         return candidate.confidence
-    if detect_series_booktype(candidate.title or "") is not None:
+    if _collected_shaped(candidate.title or ""):
         return candidate.confidence * TRADE_RERANK_BOOST
     return candidate.confidence / TRADE_RERANK_BOOST
 

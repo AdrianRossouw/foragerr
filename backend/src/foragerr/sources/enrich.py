@@ -239,6 +239,10 @@ async def _auto_accept(
                     series_id=proposal.best.series_id,
                     commands=commands,
                     matched_via=MATCHED_VIA_AUTO,
+                    # The mid-run status pre-check above is a TOCTOU on its
+                    # own: only the write-transaction re-read can make an
+                    # operator decision landed between read and write win.
+                    require_new=True,
                 )
             elif proposal.best.kind == "comicvine" and proposal.best.cv_volume_id:
                 await review.add_entitlement(
@@ -248,6 +252,7 @@ async def _auto_accept(
                     commands=commands,
                     cv_volume_id=proposal.best.cv_volume_id,
                     matched_via=MATCHED_VIA_AUTO,
+                    require_new=True,
                 )
             else:
                 continue
