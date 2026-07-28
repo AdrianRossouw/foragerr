@@ -42,9 +42,14 @@ from foragerr.commands.registry import BaseCommand, register_command, register_h
 from foragerr.commands.service import HandlerContext
 from foragerr.config import Settings
 from foragerr.db import Database, utcnow
-from foragerr.downloads.imports import build_import_context, finalize_download_import
+from foragerr.downloads.imports import (
+    build_import_context,
+    finalize_download_import,
+    run_post_import_side_effects,
+)
 from foragerr.downloads.models import TrackedDownloadRow
 from foragerr.downloads.repo import load_mappings
+from foragerr.downloads.state import TrackedDownloadState
 from foragerr.importer import (
     IMPORT_FILE_MUTATION_GROUP,
     CompletedDownloadSource,
@@ -321,6 +326,40 @@ def _override_for(spec: ManualFileSpec) -> ManualOverride:
     )
 
 
+#: The reason carried by a file the operator simply left out of this pick — it
+#: would evaluate clean, so nothing is wrong with it beyond still being unresolved.
+UNPICKED_REASON = "not selected in this manual import"
+
+
+async def _unpicked_outcome(session, candidate: ImportCandidate, ctx) -> ImportOutcome:
+    """A gathered-but-unpicked file's contribution to its download's verdict.
+
+    A download-scoped pick resolves a SUBSET of a blocked download's files, but
+    the tracked row's verdict is folded over the whole download: importing one of
+    two files must not fold to ``imported`` and wipe the other file's reasons off
+    the queue (FRG-PP-016). So every file this plan gathered but did not import
+    contributes a synthesized BLOCKED outcome.
+
+    The reason is re-derived through the SAME ``aggregate → evaluate → decide``
+    read path the listing uses, so what the tracked row reports is what the
+    operator sees in the manual-import UI — never invented text.
+
+    Files imported on an EARLIER pass were moved out of the download's staging
+    path, so they are no longer gathered at all; the fold therefore converges to
+    ``imported`` once every file is genuinely resolved. BLOCKED (never FAILED) so
+    an untouched file can never route the whole download into the failure loop.
+    """
+    evidence = aggregate_candidate(candidate, ctx)
+    ev = await build_evaluation(session, candidate, evidence, ctx)
+    decision = decide(ev)
+    reasons = tuple(decision.reasons or ())
+    if decision.approved or not reasons:
+        reasons = (UNPICKED_REASON,)
+    return ImportOutcome(
+        status=ImportStatus.BLOCKED, candidate=candidate, reasons=reasons
+    )
+
+
 async def execute_manual_import(
     db: Database,
     settings: Settings | None,
@@ -349,13 +388,23 @@ async def execute_manual_import(
     a file outside every root is dropped rather than imported from an arbitrary
     location.
 
-    A download-scoped group also ENDS like the automatic drain: its executed
-    outcomes are folded through the drain's own
+    A download-scoped group also ENDS like the automatic drain: its outcomes —
+    the imported ones plus a synthesized BLOCKED outcome per gathered-but-unpicked
+    file (:func:`_unpicked_outcome`) so a partial pick can never fold to
+    ``imported`` — go through the drain's own
     :func:`~foragerr.downloads.imports.finalize_download_import`, so the tracked
     queue row leaves ``import_blocked`` (emitting the same queue event) and a
     store download's entitlement mirrors the verdict with FRG-SRC-007
     owned-via-edition reconciliation — in this same write transaction
-    (FRG-PP-016, FRG-SRC-006). Arbitrary-folder picks touch no tracked row.
+    (FRG-PP-016, FRG-SRC-006). Once that transaction commits, the drain's
+    post-commit half runs too
+    (:func:`~foragerr.downloads.imports.run_post_import_side_effects`), so a
+    client-backed download is removed/marked exactly as a drained one
+    (FRG-DL-010). Arbitrary-folder picks touch no tracked row.
+
+    Each plan (one download, or the whole arbitrary-folder pick) owns its OWN
+    write session, as the drain gives each download: file moves are irreversible,
+    so one plan's failure must never roll back another's committed rows.
     """
     now = now or utcnow()
     ctx = await build_import_context(db, settings, now=now, offload=offload)
@@ -373,9 +422,11 @@ async def execute_manual_import(
 
     # A plan is a source, the set of local paths to keep (``None`` = keep all, for
     # the files-only source which gathers exactly its inputs), and the tracked
-    # download to finalize afterwards as ``(download_id, row_id)`` (``None`` for
-    # arbitrary-folder picks, which own no queue row).
-    plans: list[tuple[ManualImportSource, set[str] | None, tuple[str, int] | None]] = []
+    # download to finalize afterwards as ``(download_id, row_id, client_id)``
+    # (``None`` for arbitrary-folder picks, which own no queue row).
+    plans: list[
+        tuple[ManualImportSource, set[str] | None, tuple[str, int, int | None] | None]
+    ] = []
     dropped = 0
 
     if plain:
@@ -418,17 +469,29 @@ async def execute_manual_import(
             (
                 ManualImportSource(download=completed, overrides=overrides),
                 picked,
-                (download_id, row_id),
+                (download_id, row_id, completed.client_id),
             )
         )
 
-    imported = blocked = failed = 0
-    async with db.write_session() as session:
-        for source, picked, tracked in plans:
+    imported = blocked = failed = unresolved = 0
+    for source, picked, tracked in plans:
+        # ONE write session PER PLAN, matching the drain's per-download isolation
+        # (FRG-DL-009): ``import_candidate`` moves files on disk inside the
+        # transaction, so a later plan raising must never roll back an earlier
+        # plan's rows whose files have already moved — that would orphan them.
+        final_state: TrackedDownloadState | None = None
+        acted = False
+        async with db.write_session() as session:
             outcomes: list[ImportOutcome] = []
             for candidate in await gather(source, session, ctx):
                 if picked is not None and candidate.local_path not in picked:
-                    continue  # a download file the operator did not pick
+                    # A download file the operator did not pick: not imported,
+                    # but still part of this download's verdict — see
+                    # :func:`_unpicked_outcome`.
+                    outcomes.append(await _unpicked_outcome(session, candidate, ctx))
+                    unresolved += 1
+                    continue
+                acted = True
                 outcome = await import_candidate(session, candidate, ctx)
                 outcomes.append(outcome)
                 if outcome.status is ImportStatus.IMPORTED:
@@ -437,23 +500,40 @@ async def execute_manual_import(
                     failed += 1
                 else:
                     blocked += 1
-            if tracked is not None and outcomes:
+            if tracked is not None and acted:
                 # The drain's ending, on the drain's own aggregation policy: the
                 # queue row leaves import_blocked with the same event, and a
                 # store entitlement mirrors + reconciles (FRG-PP-016,
-                # FRG-SRC-006/007). Skipped when nothing ran for this download
-                # (every picked path unmatched) — an attempt that imported
-                # nothing must not rewrite the row's state from thin air.
-                dl_id, row_id = tracked
-                await finalize_download_import(
+                # FRG-SRC-006/007). Skipped when nothing the operator picked
+                # actually ran for this download (every picked path unmatched) —
+                # an attempt that imported nothing must not rewrite the row's
+                # state from thin air.
+                dl_id, row_id, _client_id = tracked
+                final_state = await finalize_download_import(
                     session,
                     row_id=row_id,
                     download_id=dl_id,
                     outcomes=outcomes,
                     now=ctx.now,
                 )
+        if tracked is not None and final_state is not None:
+            # ...and the drain's post-COMMIT half too, so a client-backed download
+            # resolved by hand still gets its remove / mark-imported and a failed
+            # one still enters the failure loop (FRG-DL-010, FRG-PP-016). Outside
+            # the write session: the writer lock is not re-entrant.
+            dl_id, _row_id, client_id = tracked
+            await run_post_import_side_effects(
+                db,
+                settings,
+                final_state=final_state,
+                client_id=client_id,
+                download_id=dl_id,
+                now=ctx.now,
+            )
 
     summary = f"imported={imported} blocked={blocked} failed={failed}"
+    if unresolved:
+        summary += f" unresolved={unresolved}"
     if dropped:
         summary += f" dropped={dropped}"
     logger.info("manual-import: %s", summary)

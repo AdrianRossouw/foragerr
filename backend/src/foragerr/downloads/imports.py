@@ -317,16 +317,46 @@ async def _process_one(
         )
 
     # 4. Post-commit side-effects — OUTSIDE the write lock so they can open their
-    #    own sessions (the writer lock is not re-entrant): change-5 failure loop
-    #    on a corrupt archive, or FRG-DL-010 client cleanup on success.
+    #    own sessions (the writer lock is not re-entrant).
+    await run_post_import_side_effects(
+        db,
+        settings,
+        final_state=final_state,
+        client_id=client_id,
+        download_id=download_id,
+        commands=commands,
+        now=ctx.now,
+    )
+
+    return final_state
+
+
+async def run_post_import_side_effects(
+    db: Database,
+    settings: Settings | None,
+    *,
+    final_state: TrackedDownloadState | None,
+    client_id: int | None,
+    download_id: str,
+    commands=None,
+    now: dt.datetime,
+) -> None:
+    """The post-commit half of one download's import (FRG-DL-010, FRG-DL-013).
+
+    Runs AFTER the import transaction commits and outside its write session (the
+    writer lock is not re-entrant, and client data must never be removed before
+    the ``issue_files`` row is durable): change-5's failure loop on a corrupt
+    archive, or the FRG-DL-010 client remove/mark-imported on success.
+
+    Shared by the drain and manual import (FRG-PP-016) so a download an operator
+    resolves by hand ends exactly like a drained one — client cleanup included.
+    """
     if final_state is TrackedDownloadState.IMPORTED:
         await _post_import_cleanup(
             db, settings, client_id=client_id, download_id=download_id
         )
     elif final_state is TrackedDownloadState.FAILED_PENDING:
-        await process_failures(db, commands=commands, settings=settings, now=ctx.now)
-
-    return final_state
+        await process_failures(db, commands=commands, settings=settings, now=now)
 
 
 async def _reconcile_recovered_import(
@@ -630,4 +660,5 @@ __all__ = [
     "finalize_download_import",
     "process_imports",
     "resolve_terminal_state",
+    "run_post_import_side_effects",
 ]

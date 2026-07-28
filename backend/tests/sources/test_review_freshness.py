@@ -18,12 +18,17 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from sqlalchemy import select
 
 from foragerr.db.base import utcnow
+from foragerr.downloads.models import TrackedDownloadRow
+from foragerr.downloads.state import TrackedDownloadState
 from foragerr.health.service import HealthService
 from foragerr.library import repo as library_repo
+from foragerr.library.flows._common import SeriesValidationError
 from foragerr.library.models import SeriesRow
 from foragerr.sources import ratelimit, repo, review
+from foragerr.sources.grab import _handoff_to_import
 from foragerr.sources.models import SourceEntitlementRow
 from foragerr.sources.registry import TYPE_HUMBLE
 from foragerr.sources.service import run_sync
@@ -154,6 +159,46 @@ async def _mark_failed(db, entitlement_id: int, *, error: str = "checksum mismat
         row.updated_at = utcnow()
 
 
+async def _handoff(db, entitlement_id: int, path) -> None:
+    """Run the grab's REAL import handoff (dedup included) for an entitlement."""
+    ent = await repo.get_entitlement(db, entitlement_id)
+    await _handoff_to_import(db, ent, path)
+
+
+async def _tracked(db, entitlement_id: int) -> TrackedDownloadRow | None:
+    async with db.read_session() as session:
+        row = (
+            (
+                await session.execute(
+                    select(TrackedDownloadRow).where(
+                        TrackedDownloadRow.download_id == f"humble:{entitlement_id}"
+                    )
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if row is not None:
+            session.expunge(row)
+        return row
+
+
+async def _set_tracked_state(db, entitlement_id: int, state: TrackedDownloadState):
+    async with db.write_session() as session:
+        row = (
+            (
+                await session.execute(
+                    select(TrackedDownloadRow).where(
+                        TrackedDownloadRow.download_id == f"humble:{entitlement_id}"
+                    )
+                )
+            )
+            .scalars()
+            .one()
+        )
+        row.state = state.value
+
+
 # --- FRG-SRC-008: add degrades to match -------------------------------------
 
 
@@ -228,7 +273,70 @@ async def test_genuine_add_failure_still_surfaces_as_400(
     assert after.matched_series_id is None
 
 
+@pytest.mark.req("FRG-SRC-008")
+async def test_add_losing_a_concurrent_race_degrades_instead_of_400(
+    db, config_dir, root_folder_id, format_profile_id, monkeypatch
+):
+    """The presence pre-check and the add are separate transactions, so two
+    near-simultaneous adds of the same volume both pass the pre-check and the
+    loser's ``add_series`` rejects it as already in the library. That rejection
+    must land on the degrade path, not on the generic 400 FRG-SRC-008 removes."""
+    source = await _synced_source(db, config_dir)
+    ent = await _comic(db, source.id, "synth_singleissue_01")
+    await _set_proposal(db, ent.id, _cv_proposal(884))
+    created: dict[str, int] = {}
+
+    async def _racing_add(*args, **kwargs):
+        # The "other" add commits the volume, then ours rejects — the loser.
+        created["id"] = await _mk_series(
+            db, root_folder_id, format_profile_id, cvid=884, title="Synthetic Hero"
+        )
+        raise SeriesValidationError("volume 884 is already in the library")
+
+    monkeypatch.setattr("foragerr.library.flows.add.add_series", _racing_add)
+    commands = FakeCommands()
+
+    row = await review.add_entitlement(
+        db, make_settings(config_dir), ent.id, commands=commands
+    )
+
+    assert row.review_status == "matched"
+    assert row.matched_series_id == created["id"]
+    assert row.download_state == "queued"
+    assert commands.grabs() == [("source-grab", {"entitlement_id": ent.id}, "accept")]
+
+
 # --- FRG-SRC-008: sibling re-resolution -------------------------------------
+
+
+@pytest.mark.req("FRG-SRC-008")
+async def test_degrade_to_match_also_reresolves_siblings(
+    db, config_dir, root_folder_id, format_profile_id
+):
+    """The sweep's intent is first-click-correct SIBLINGS, so it must run on the
+    degrade path too — not only after a real add. Without it each sibling would
+    degrade individually, i.e. only after another click apiece."""
+    source = await _synced_source(db, config_dir)
+    series_id = await _mk_series(
+        db, root_folder_id, format_profile_id, cvid=885, title="Synthetic Hero"
+    )
+    acting = await _comic(db, source.id, "synth_singleissue_01")
+    sibling = await _comic(db, source.id, "synth_collected_edition_vol1")
+    for eid in (acting.id, sibling.id):
+        await _set_proposal(db, eid, _cv_proposal(885))
+
+    await review.add_entitlement(
+        db, make_settings(config_dir), acting.id, commands=FakeCommands()
+    )
+
+    after = await repo.get_entitlement(db, sibling.id)
+    assert after.review_status == "new"  # still the operator's to decide
+    assert after.proposed_series_id == series_id
+    proposal = json.loads(after.proposed_match_json)
+    assert proposal["kind"] == "library"
+    assert proposal["series_id"] == series_id
+    assert proposal["auto"] is False
+    assert len(proposal["candidates"]) == 2  # ranked alternatives preserved
 
 
 @pytest.mark.req("FRG-SRC-008")
@@ -372,6 +480,79 @@ async def test_retry_on_a_non_failed_download_is_a_conflict(
     after = await repo.get_entitlement(db, ent.id)
     assert after.download_state == "queued"  # untouched
     assert after.review_status == "matched"
+
+
+@pytest.mark.req("FRG-SRC-009")
+async def test_retry_after_an_import_failure_clears_the_wedging_tracked_row(
+    db, config_dir, root_folder_id, format_profile_id, tmp_path
+):
+    """``download_state = "failed"`` also covers an IMPORT-level failure, where the
+    ``humble:{id}`` tracked row SURVIVES as ``failed_pending``. The handoff dedups
+    on download id regardless of state, so retrying without clearing that row
+    would re-download into a no-op handoff and wedge the entitlement at
+    ``import_pending`` forever. The stale row is deleted, so the re-grab's handoff
+    lands a fresh, claimable one."""
+    source = await _synced_source(db, config_dir)
+    series_id = await _mk_series(
+        db, root_folder_id, format_profile_id, cvid=886, title="Synthetic Hero"
+    )
+    ent = await _comic(db, source.id, "synth_singleissue_01")
+    await review.match_entitlement(
+        db, ent.id, series_id=series_id, commands=FakeCommands()
+    )
+    # The grab handed off; the drain then FAILED the import — apply_source_import
+    # mirrors "failed" onto the entitlement while the tracked row lives on.
+    await _handoff(db, ent.id, tmp_path / "attempt-1.cbz")
+    await _set_tracked_state(db, ent.id, TrackedDownloadState.FAILED_PENDING)
+    await _mark_failed(db, ent.id, error="import failed — archive rejected")
+
+    commands = FakeCommands()
+    row = await review.retry_download(db, ent.id, commands=commands)
+
+    assert row.download_state == "queued"
+    assert row.download_error is None
+    assert await _tracked(db, ent.id) is None  # the wedging row is gone
+    assert commands.grabs() == [("source-grab", {"entitlement_id": ent.id}, "accept")]
+
+    # ...so the re-grab's handoff writes a FRESH import_pending row rather than
+    # silently deduping into nothing. (SQLite reuses rowids, so the NEW attempt's
+    # output path — not the row id — is what proves the row was rewritten.)
+    second = tmp_path / "attempt-2.cbz"
+    await _handoff(db, ent.id, second)
+    fresh = await _tracked(db, ent.id)
+    assert fresh.state == TrackedDownloadState.IMPORT_PENDING.value
+    assert fresh.output_path == str(second)
+
+
+@pytest.mark.req("FRG-SRC-009")
+async def test_retry_while_the_import_is_claimed_is_a_conflict(
+    db, config_dir, root_folder_id, format_profile_id, tmp_path
+):
+    """The drain-claimed ``importing`` row is the one carve-out: deleting it would
+    strand an in-flight move, so the retry is refused (409) and the row stands."""
+    source = await _synced_source(db, config_dir)
+    series_id = await _mk_series(
+        db, root_folder_id, format_profile_id, cvid=887, title="Synthetic Hero"
+    )
+    ent = await _comic(db, source.id, "synth_singleissue_01")
+    await review.match_entitlement(
+        db, ent.id, series_id=series_id, commands=FakeCommands()
+    )
+    await _handoff(db, ent.id, tmp_path / "attempt-1.cbz")
+    await _set_tracked_state(db, ent.id, TrackedDownloadState.IMPORTING)
+    await _mark_failed(db, ent.id)
+    commands = FakeCommands()
+
+    with pytest.raises(review.EntitlementActionError) as exc:
+        await review.retry_download(db, ent.id, commands=commands)
+
+    assert exc.value.status == 409
+    assert commands.enqueued == []
+    still = await _tracked(db, ent.id)
+    assert still is not None
+    assert still.state == TrackedDownloadState.IMPORTING.value
+    after = await repo.get_entitlement(db, ent.id)
+    assert after.download_state == "failed"  # untouched
 
 
 @pytest.mark.req("FRG-SRC-009")

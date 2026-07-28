@@ -17,6 +17,7 @@ import pytest
 from sqlalchemy import select
 
 from foragerr.db import utcnow
+from foragerr.downloads import manual_import as manual_import_mod
 from foragerr.downloads.manual_import import (
     ManualFileSpec,
     execute_manual_import,
@@ -681,6 +682,120 @@ async def test_download_scoped_execute_reflects_a_mixed_result(db, seed, tmp_pat
     messages = decode_messages(row.status_messages)
     assert messages and all(stuck.name in m for m in messages)
     assert not any("stale" in m for m in messages)  # rewritten, never left stale
+
+
+@pytest.mark.req("FRG-PP-016")
+async def test_one_plan_failing_never_rolls_back_another_plans_import(
+    db, seed, tmp_path, monkeypatch
+):
+    """Each download gets its OWN write session, as the drain gives each row.
+    ``import_candidate`` moves files inside the transaction, so a later download
+    raising must not roll back an earlier one's rows — the moved file would be
+    orphaned: gone from staging, unknown to the library."""
+    s = await seed(title="Batman", issue_number="404", cv_issue_id=9001)
+    id_405 = await _add_issue(db, s.series_id, cv_issue_id=9002, issue_number="405")
+    staging_a = tmp_path / "a"
+    good = _make_big_cbz(staging_a / "unknown-release-one.cbz")
+    staging_b = tmp_path / "b"
+    boom = _make_big_cbz(staging_b / "unknown-release-two.cbz")
+    await _insert_tracked(db, download_id="dl-a", output_path=staging_a)
+    await _insert_tracked(db, download_id="dl-b", output_path=staging_b)
+
+    real_import = manual_import_mod.import_candidate
+
+    async def _explode(session, candidate, ctx):
+        if candidate.file_name == boom.name:
+            raise RuntimeError("the second plan blew up mid-transaction")
+        return await real_import(session, candidate, ctx)
+
+    monkeypatch.setattr(manual_import_mod, "import_candidate", _explode)
+
+    with pytest.raises(RuntimeError):
+        await execute_manual_import(
+            db,
+            None,
+            [
+                ManualFileSpec(
+                    path=str(good),
+                    series_id=s.series_id,
+                    issue_id=s.issue_id,
+                    download_id="dl-a",
+                ),
+                ManualFileSpec(
+                    path=str(boom),
+                    series_id=s.series_id,
+                    issue_id=id_405,
+                    download_id="dl-b",
+                ),
+            ],
+        )
+
+    # The first download's import stands: file moved AND its rows durable.
+    assert not good.exists()
+    files = await _issue_files(db)
+    assert len(files) == 1 and files[0].issue_id == s.issue_id
+    row = await _tracked_row(db, "dl-a")
+    assert row.state == TrackedDownloadState.IMPORTED.value
+
+
+@pytest.mark.req("FRG-PP-016")
+async def test_partial_pick_keeps_the_download_blocked_until_all_files_resolve(
+    db, seed, tmp_path
+):
+    """Resolving ONE file of a two-file blocked download must not mark the whole
+    download imported: the verdict is folded over the download, so the unpicked
+    file contributes its own blocked outcome and its reason stays on the queue.
+    Picking the second file then converges the row to ``imported`` (the first is
+    no longer gathered — it was MOVED into the library)."""
+    s = await seed(title="Batman", issue_number="404", cv_issue_id=9001)
+    id_405 = await _add_issue(db, s.series_id, cv_issue_id=9002, issue_number="405")
+    staging = tmp_path / "staging"
+    first = _make_big_cbz(staging / "unknown-release-one.cbz")
+    second = _make_big_cbz(staging / "totally-unknown-thing-99.cbz")
+    await _insert_tracked(
+        db, download_id="dl-1", output_path=staging, messages='["stale: no match"]'
+    )
+
+    summary = await execute_manual_import(
+        db,
+        None,
+        [
+            ManualFileSpec(
+                path=str(first),
+                series_id=s.series_id,
+                issue_id=s.issue_id,
+                download_id="dl-1",
+            )
+        ],
+    )
+
+    assert "imported=1" in summary
+    row = await _tracked_row(db, "dl-1")
+    assert row.state == TrackedDownloadState.IMPORT_BLOCKED.value
+    assert row.status == TRACKED_STATUS_WARNING
+    messages = decode_messages(row.status_messages)
+    # The still-unresolved file is named, and the pre-existing reason is rewritten.
+    assert messages and all(second.name in m for m in messages)
+    assert not any("stale" in m for m in messages)
+
+    summary2 = await execute_manual_import(
+        db,
+        None,
+        [
+            ManualFileSpec(
+                path=str(second),
+                series_id=s.series_id,
+                issue_id=id_405,
+                download_id="dl-1",
+            )
+        ],
+    )
+
+    assert "imported=1" in summary2
+    row2 = await _tracked_row(db, "dl-1")
+    assert row2.state == TrackedDownloadState.IMPORTED.value
+    assert row2.status == TRACKED_STATUS_OK
+    assert decode_messages(row2.status_messages) == []
 
 
 @pytest.mark.req("FRG-PP-016")

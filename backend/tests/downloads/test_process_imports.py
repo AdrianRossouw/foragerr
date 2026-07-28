@@ -495,6 +495,62 @@ async def test_blocked_download_is_never_cleaned(db, tmp_path, monkeypatch):
 
 
 @pytest.mark.req("FRG-DL-010")
+@pytest.mark.req("FRG-PP-016")
+async def test_manual_import_runs_the_post_import_client_cleanup(
+    db, tmp_path, monkeypatch
+):
+    """A client-backed download resolved BY HAND ends exactly like a drained one:
+    manual import runs the drain's post-COMMIT half too, so the client item is
+    removed/marked instead of lingering for reprocessing (FRG-DL-010)."""
+    from foragerr.downloads.manual_import import ManualFileSpec, execute_manual_import
+
+    client_id = await _insert_client(db, remove_completed=True)
+    series_id, issue_id = await seed_library(db, tmp_path)
+    dl_dir = tmp_path / "downloads" / "manual"
+    cbz = dl_dir / "Spawn 001 (2024).cbz"
+    make_large_cbz(cbz)
+    await insert_tracked(
+        db,
+        download_id="d-man",
+        state=TrackedDownloadState.IMPORT_BLOCKED,
+        client_id=client_id,
+        series_id=series_id,
+        issue_id=issue_id,
+    )
+    async with db.write_session() as session:
+        (await tracked_by_download_id_session(session, "d-man")).output_path = str(
+            dl_dir
+        )
+
+    fake = FakeClient([make_item("d-man", output_path=str(dl_dir))])
+    import foragerr.downloads.imports as imports_mod
+
+    async def _fake_build(db_, cid, *, settings=None):
+        return fake
+
+    monkeypatch.setattr(imports_mod, "build_client_for_id", _fake_build)
+
+    summary = await execute_manual_import(
+        db,
+        None,
+        [
+            ManualFileSpec(
+                path=str(cbz),
+                series_id=series_id,
+                issue_id=issue_id,
+                download_id="d-man",
+            )
+        ],
+    )
+
+    assert "imported=1" in summary
+    row = await tracked_by_download_id(db, "d-man")
+    assert row.state == TrackedDownloadState.IMPORTED.value
+    assert fake.removed == [("d-man", True)]  # the cleanup the drain would do
+    assert fake.imported == []
+
+
+@pytest.mark.req("FRG-DL-010")
 async def test_post_import_cleanup_marks_when_disabled(db, tmp_path, monkeypatch):
     client_id = await _insert_client(db, remove_completed=False)
     fake = FakeClient([make_item("dz", output_path="/x")])

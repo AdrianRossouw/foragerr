@@ -157,10 +157,17 @@ async def add_entitlement(
     earlier add on a sibling entitlement, or a manual add). Adding it again is
     not an error the operator can act on, so the add DEGRADES to a match against
     the existing series — the identical outcome to the match action, grab
-    queueing included. Only a genuine ``add_series`` failure still surfaces as a
-    400. After a successful add the sibling entitlements whose proposals named
-    the same volume are re-resolved (:func:`_reresolve_sibling_proposals`) so
-    their next single action succeeds on the first click.
+    queueing included, sibling sweep included. Only a genuine ``add_series``
+    failure still surfaces as a 400. Whether the add succeeded or degraded, the
+    sibling entitlements whose proposals named the same volume are re-resolved
+    (:func:`_reresolve_sibling_proposals`) so their next single action succeeds on
+    the first click.
+
+    The presence pre-check runs in its own read session, so two near-simultaneous
+    adds of the same volume can both pass it; the loser's ``add_series`` rejects
+    with "already in the library". That rejection is re-checked rather than
+    surfaced (see the except clause) — the race lands on the same degrade path,
+    never on the 400 FRG-SRC-008 exists to remove.
     """
     from foragerr.library import repo as library_repo
     from foragerr.library.flows.add import add_series
@@ -182,8 +189,12 @@ async def add_entitlement(
     # rootless install would otherwise 409 on what is really a match.
     existing_series_id = await _series_id_for_volume(db, cvid)
     if existing_series_id is not None:
-        return await match_entitlement(
-            db, entitlement_id, series_id=existing_series_id, commands=commands
+        return await _degrade_to_match(
+            db,
+            entitlement_id,
+            cv_volume_id=cvid,
+            series_id=existing_series_id,
+            commands=commands,
         )
 
     root_id = root_folder_id
@@ -207,6 +218,28 @@ async def add_entitlement(
             factory=factory,
         )
     except Exception as exc:  # noqa: BLE001 — surface the add failure to the API
+        # TOCTOU repair (FRG-SRC-008): the pre-check and the add are separate
+        # transactions, so a concurrent add of the SAME volume (a second operator,
+        # or a sibling accepted at the same moment) can land in between and make
+        # ``add_series`` reject with "already in the library" — the very error the
+        # degrade exists to remove. Re-read: if the volume is present now, this is
+        # a match, not a failure. A volume still absent means a genuine failure,
+        # which still surfaces as a 400.
+        raced_series_id = await _series_id_for_volume(db, cvid)
+        if raced_series_id is not None:
+            logger.info(
+                "sources.review: add of cv volume %d raced a concurrent add; "
+                "degrading to a match on series %d",
+                cvid,
+                raced_series_id,
+            )
+            return await _degrade_to_match(
+                db,
+                entitlement_id,
+                cv_volume_id=cvid,
+                series_id=raced_series_id,
+                commands=commands,
+            )
         raise EntitlementActionError(
             f"add-series failed for volume {cvid}: {exc}", status=400
         ) from exc
@@ -225,6 +258,44 @@ async def add_entitlement(
     )
 
 
+async def _degrade_to_match(
+    db,
+    entitlement_id: int,
+    *,
+    cv_volume_id: int,
+    series_id: int,
+    commands=None,
+) -> SourceEntitlementRow:
+    """Resolve an add whose volume is already in the library as a match.
+
+    The FRG-SRC-008 degrade, with the SAME sibling sweep a real add performs: the
+    other still-in-review entitlements proposing this volume are rewritten into
+    library-kind match proposals before the acting row is linked, so their next
+    single action succeeds on the first click too. (Without the sweep they would
+    each degrade individually — correct, but only after another click apiece.)
+
+    Sweep and match are separate transactions, exactly as on the successful-add
+    path; the sweep only rewrites proposals, so a crash between the two leaves
+    resolved proposals and an unlinked acting row — the same benign shape a
+    crash mid-add already produces.
+    """
+    from foragerr.library.models import SeriesRow
+
+    async with db.read_session() as session:
+        series = await session.get(SeriesRow, series_id)
+        series_title = series.title if series is not None else None
+    await _reresolve_sibling_proposals(
+        db,
+        cv_volume_id=cv_volume_id,
+        series_id=series_id,
+        series_title=series_title,
+        exclude_entitlement_id=entitlement_id,
+    )
+    return await match_entitlement(
+        db, entitlement_id, series_id=series_id, commands=commands
+    )
+
+
 async def retry_download(
     db, entitlement_id: int, *, commands=None
 ) -> SourceEntitlementRow:
@@ -236,6 +307,10 @@ async def retry_download(
     would duplicate work), clears the recorded ``download_error``, and re-queues
     through the standard :func:`_queue_grab` seam so the grab path, its
     idempotency, and its tracked-download handoff are unchanged.
+
+    A stale ``humble:{id}`` tracked row is dropped first
+    (:func:`_drop_stale_tracked_row`) — without that, a retry after an
+    IMPORT-level failure would re-download into a no-op handoff and wedge.
     """
     async with db.read_session() as session:
         row = await session.get(SourceEntitlementRow, entitlement_id)
@@ -255,8 +330,55 @@ async def retry_download(
                 f"entitlement {entitlement_id} has no downloadable copy to retry",
                 status=409,
             )
+    await _drop_stale_tracked_row(db, entitlement_id)
     await _queue_grab(db, entitlement_id, commands)
     return await _reload(db, entitlement_id)
+
+
+async def _drop_stale_tracked_row(db, entitlement_id: int) -> None:
+    """Clear a retry's leftover ``humble:{id}`` tracked row (FRG-SRC-009).
+
+    ``download_state = "failed"`` covers TWO failures: the grab failed (no tracked
+    row was ever written), or the IMPORT failed — ``apply_source_import`` mirrors
+    ``failed_pending`` onto the entitlement while the tracked row survives. In the
+    second case a retry would re-download successfully and then hit the handoff's
+    dedup (which keys on ``download_id`` regardless of state), so nothing new
+    would be claimable: the entitlement would sit at ``import_pending`` forever,
+    the file orphaned in staging, and a further retry would 409. So the surviving
+    row is DELETED, exactly as :func:`ignore_entitlement` deletes it — and with
+    the same drain-claimed carve-out, inverted: an ``importing`` row is mid-move,
+    so the retry is refused rather than the row yanked out from under it.
+    """
+    from sqlalchemy import delete, select
+
+    from foragerr.downloads.models import TrackedDownloadRow
+    from foragerr.downloads.state import TrackedDownloadState
+    from foragerr.sources.import_hook import HUMBLE_DOWNLOAD_PREFIX
+
+    download_id = f"{HUMBLE_DOWNLOAD_PREFIX}{entitlement_id}"
+    async with db.write_session() as session:
+        state = await session.scalar(
+            select(TrackedDownloadRow.state).where(
+                TrackedDownloadRow.download_id == download_id
+            )
+        )
+        if state is None:
+            return
+        if state == TrackedDownloadState.IMPORTING.value:
+            raise EntitlementActionError(
+                f"entitlement {entitlement_id} is being imported right now — "
+                "retry once that import has finished",
+                status=409,
+            )
+        await session.execute(
+            delete(TrackedDownloadRow).where(
+                TrackedDownloadRow.download_id == download_id
+            )
+        )
+    logger.info(
+        "sources.review: dropped stale tracked download %s before retry",
+        download_id,
+    )
 
 
 async def ignore_entitlement(db, entitlement_id: int) -> SourceEntitlementRow:
