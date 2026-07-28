@@ -13,6 +13,7 @@ import type {
   StoreSourceResource,
 } from '../../api/types';
 import { SourcesScreen } from './SourcesScreen';
+import { STARTER_PUBLISHERS } from './PublisherRules';
 
 /*
  * FRG-UI-029 — the Sources screen: connect flow (masked input, live-validated
@@ -1163,6 +1164,36 @@ describe('FRG-UI-029: virtualized review list at corpus scale', () => {
     expect(body.entitlement_ids).toContain(1000);
     expect(body.entitlement_ids).toContain(1050);
   });
+
+  it('FRG-UI-039 — an open row search survives the row scrolling out of the window and back', async () => {
+    const user = userEvent.setup();
+    renderScreen({
+      sources: [source],
+      entitlements: corpus,
+      calls: [],
+      reads: [],
+    });
+
+    // Open the search on a row near the top of the list.
+    await user.click(await screen.findByTestId('search-1000'));
+    expect(await screen.findByTestId('row-search-1000')).toBeInTheDocument();
+
+    // Scroll far enough that the row unmounts — the panel goes with it, since
+    // only the WINDOW is in the DOM…
+    scrollTo(3900);
+    await waitFor(() => expect(screen.queryByTestId('search-1000')).toBeNull());
+    expect(screen.queryByTestId('row-search-1000')).toBeNull();
+
+    // …and scrolling back re-mounts the row with its search STILL OPEN: the
+    // disclosure is list-owned, so scrolling past a row never cancels the task
+    // the operator started on it.
+    scrollTo(0);
+    expect(await screen.findByTestId('row-search-1000')).toBeInTheDocument();
+    expect(screen.getByTestId('search-1000')).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+  });
 });
 
 /*
@@ -1325,6 +1356,89 @@ describe('FRG-UI-029: same-title collapse groups', () => {
     };
     expect([...body.entitlement_ids].sort((a, b) => a - b)).toEqual([
       59, 60, 61, 62, 63, 70,
+    ]);
+  });
+
+  it('FRG-UI-025 — collapsing a group re-points an anchor folded inside it at the group header', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [...spawnCorpus().slice(0, 4), ent({ id: 70, human_name: 'Descender, Vol. 1' })],
+      calls: [],
+    };
+    renderScreen(state);
+
+    // Expand the group and anchor on a row INSIDE it…
+    await user.click(await screen.findByTestId('group-toggle-spawn'));
+    await user.click(screen.getByTestId('select-61'));
+    // …then collapse it, folding the anchor row out of the list.
+    await user.click(screen.getByTestId('group-toggle-spawn'));
+    expect(screen.queryByTestId('select-61')).toBeNull();
+
+    // The shift-range still draws: the anchor moved to the header, which stands
+    // for the whole group, so the span is header-through-target.
+    await user.keyboard('{Shift>}');
+    await user.click(screen.getByTestId('select-70'));
+    await user.keyboard('{/Shift}');
+
+    expect(await screen.findByTestId('bulk-bar')).toHaveTextContent('5 selected');
+    await user.click(screen.getByTestId('bulk-ignore'));
+    await waitFor(() =>
+      expect(state.calls.find((c) => c.path.endsWith('/bulk'))).toBeTruthy(),
+    );
+    const body = state.calls.find((c) => c.path.endsWith('/bulk'))!.init!.body as {
+      entitlement_ids: number[];
+    };
+    expect([...body.entitlement_ids].sort((a, b) => a - b)).toEqual([
+      60, 61, 62, 63, 70,
+    ]);
+  });
+
+  it('FRG-UI-025 — a shift-click with a vanished anchor selects and re-anchors, never deselects', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [
+        ent({ id: 200, human_name: 'Still New' }),
+        ent({ id: 201, human_name: 'Ignored One', review_status: 'ignored' }),
+        ent({ id: 202, human_name: 'Ignored Two', review_status: 'ignored' }),
+      ],
+      calls: [],
+    };
+    renderScreen(state);
+
+    // Select an ignored row, then a new row — the ANCHOR ends up on the new one.
+    await user.click(await screen.findByTestId('select-202'));
+    await user.click(screen.getByTestId('select-200'));
+    expect(screen.getByTestId('bulk-bar')).toHaveTextContent('2 selected');
+
+    // Filtering to Ignored takes the anchor row out of the list entirely.
+    await user.click(screen.getByTestId('filter-ignored'));
+    expect(screen.queryByTestId('select-200')).toBeNull();
+
+    // A shift-click with no anchor to span from SELECTS the clicked row and
+    // re-anchors there — it must never degrade into a toggle that deselects the
+    // row the operator was reaching towards.
+    await user.keyboard('{Shift>}');
+    await user.click(screen.getByTestId('select-202'));
+    await user.keyboard('{/Shift}');
+    expect(screen.getByTestId('bulk-bar')).toHaveTextContent('2 selected');
+
+    // …and the re-anchor is real: the NEXT shift-click draws a span from it.
+    await user.keyboard('{Shift>}');
+    await user.click(screen.getByTestId('select-201'));
+    await user.keyboard('{/Shift}');
+    expect(screen.getByTestId('bulk-bar')).toHaveTextContent('3 selected');
+
+    await user.click(screen.getByTestId('bulk-restore'));
+    await waitFor(() =>
+      expect(state.calls.find((c) => c.path.endsWith('/bulk'))).toBeTruthy(),
+    );
+    const body = state.calls.find((c) => c.path.endsWith('/bulk'))!.init!.body as {
+      entitlement_ids: number[];
+    };
+    expect([...body.entitlement_ids].sort((a, b) => a - b)).toEqual([
+      200, 201, 202,
     ]);
   });
 });
@@ -1534,6 +1648,55 @@ describe('FRG-SRC-011: bundle display, bundle selection, and bulk accept', () =>
     // …and the failure stays selected, so it is the operator's to-do list.
     expect(screen.getByTestId('bulk-bar')).toHaveTextContent('1 selected');
   });
+
+  it('FRG-SRC-011 — a partial bulk IGNORE reports its per-row failure instead of reading as complete', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [
+        ent({ id: 130, human_name: 'Saga, Vol. 1' }),
+        ent({ id: 131, human_name: 'Vanished Item' }),
+      ],
+      calls: [],
+      bulkResult: (body) => {
+        // The server ignored 130 and could not touch 131 — every action can
+        // half-succeed, not just accept.
+        state.entitlements = state.entitlements.map((e) =>
+          e.id === 130 ? { ...e, review_status: 'ignored' as const } : e,
+        );
+        expect(body.action).toBe('ignore');
+        return {
+          applied: 1,
+          skipped: 1,
+          errors: { '131': 'entitlement 131 no longer exists' },
+        };
+      },
+    };
+    renderScreen(state);
+
+    await user.click(await screen.findByTestId('select-130'));
+    await user.click(screen.getByTestId('select-131'));
+    await user.click(screen.getByTestId('bulk-ignore'));
+
+    // The panel names the row and the reason, in the action's own words.
+    const toggle = await screen.findByTestId('bulk-errors-toggle');
+    expect(toggle).toHaveTextContent('1 item could not be ignored');
+    await user.click(toggle);
+    const failure = await screen.findByTestId('bulk-error-131');
+    expect(failure).toHaveTextContent('Vanished Item');
+    expect(failure).toHaveTextContent('no longer exists');
+    expect(screen.getByTestId('bulk-bar')).toHaveTextContent('Ignored 1 of 2.');
+
+    // The selection is NOT cleared out from under a partial result: the failed
+    // row stays selected as the to-do list, while the succeeded row refreshes.
+    expect(screen.getByTestId('bulk-bar')).toHaveTextContent('1 selected');
+    await waitFor(() =>
+      expect(screen.getByTestId('entitlement-row-130')).toHaveAttribute(
+        'data-status',
+        'ignored',
+      ),
+    );
+  });
 });
 
 /*
@@ -1610,7 +1773,7 @@ describe('FRG-SRC-012: publisher rules editor', () => {
     expect(screen.queryByTestId('rules-list')).toBeNull();
   });
 
-  it('FRG-SRC-012 — the suggested starter list FILLS the editor and saves nothing', async () => {
+  it('FRG-SRC-012 — the suggested starter list MERGES into the editor and saves nothing', async () => {
     const user = userEvent.setup();
     const state: FetcherState = {
       sources: [source],
@@ -1620,11 +1783,27 @@ describe('FRG-SRC-012: publisher rules editor', () => {
     renderScreen(state);
     await openRules(user);
 
+    // Something the operator typed FIRST — the starter list is an offer, so it
+    // must never discard work already in the draft.
+    await user.type(screen.getByTestId('rule-input'), 'Onyx Path');
+    await user.click(screen.getByTestId('rule-add'));
+    // …including one the starter list also carries, which must not double up.
+    await user.type(screen.getByTestId('rule-input'), 'paizo');
+    await user.click(screen.getByTestId('rule-add'));
+
     await user.click(screen.getByTestId('rules-starter'));
 
     // The RPG publishers are in the editor, ready to be pruned…
     expect(screen.getByTestId('rule-Chaosium')).toBeInTheDocument();
-    expect(screen.getByTestId('rule-Paizo')).toBeInTheDocument();
+    // …the operator's own entries survived, in their own order first…
+    const items = within(screen.getByTestId('rules-list')).getAllByRole(
+      'listitem',
+    );
+    expect(items[0]).toHaveTextContent('Onyx Path');
+    expect(items[1]).toHaveTextContent('paizo');
+    // …the case-insensitive duplicate was NOT added a second time…
+    expect(screen.queryByTestId('rule-Paizo')).toBeNull();
+    expect(items).toHaveLength(STARTER_PUBLISHERS.length + 1);
     // …and nothing was written: no PATCH left the screen.
     expect(
       state.calls.filter((c) => c.init?.method === 'PATCH'),

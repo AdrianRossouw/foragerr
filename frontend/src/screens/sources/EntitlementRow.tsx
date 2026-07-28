@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { BookTypeBadge } from '../../components/BookTypeBadge';
 import { Chip, type ChipTone } from '../../components/Chip';
 import {
@@ -145,6 +144,11 @@ function FillSetView({ fillSet }: { fillSet: FillSet }) {
  * expandable ComicVine search panel (FRG-UI-039 — present on every reviewable
  * row, so a row with no proposal is still resolvable), and an expandable
  * reconcile detail with issue chips.
+ *
+ * Both disclosure states (the reconcile detail and the search panel) are OWNED
+ * BY THE LIST, not by this component: the list virtualizes, so a row scrolled
+ * out of the overscan unmounts and any state held here would be destroyed
+ * mid-task.
  */
 export function EntitlementRow({
   entitlement,
@@ -153,6 +157,8 @@ export function EntitlementRow({
   onSelectRow,
   expanded,
   onToggleExpand,
+  searchOpen,
+  onSetSearchOpen,
   librarySeries,
 }: {
   entitlement: EntitlementResource;
@@ -161,9 +167,11 @@ export function EntitlementRow({
   onSelectRow: (index: number, shiftKey: boolean) => void;
   expanded: boolean;
   onToggleExpand: () => void;
+  /** Whether this row's ComicVine search panel is open (list-owned state). */
+  searchOpen: boolean;
+  onSetSearchOpen: (open: boolean) => void;
   librarySeries: SeriesResource[];
 }) {
-  const [searching, setSearching] = useState(false);
   const match = useMatchEntitlement();
   const add = useAddEntitlement();
   const ignore = useIgnoreEntitlement();
@@ -196,7 +204,7 @@ export function EntitlementRow({
   const matchedBooktype = matchedSeries?.booktype ?? null;
 
   const doMatch = (seriesId: number) => {
-    setSearching(false);
+    onSetSearchOpen(false);
     match.mutate({ entitlementId: entitlement.id, seriesId });
   };
 
@@ -212,7 +220,7 @@ export function EntitlementRow({
    * (FRG-SRC-008) — so a pick is never a dead end either.
    */
   const pickCandidate = (candidate: PickedCandidate) => {
-    setSearching(false);
+    onSetSearchOpen(false);
     if (candidate.have_it) {
       const owned = librarySeries.find(
         (s) => s.cv_volume_id === candidate.cv_volume_id,
@@ -260,8 +268,8 @@ export function EntitlementRow({
           type="button"
           className={styles.linkBtn}
           disabled={busy}
-          aria-expanded={searching}
-          onClick={() => setSearching(!searching)}
+          aria-expanded={searchOpen}
+          onClick={() => onSetSearchOpen(!searchOpen)}
           data-testid={`search-${entitlement.id}`}
         >
           Change…
@@ -318,8 +326,8 @@ export function EntitlementRow({
           type="button"
           className={styles.mutedBtn}
           disabled={busy}
-          aria-expanded={searching}
-          onClick={() => setSearching(!searching)}
+          aria-expanded={searchOpen}
+          onClick={() => onSetSearchOpen(!searchOpen)}
           data-testid={`search-${entitlement.id}`}
         >
           Search ComicVine…
@@ -434,14 +442,14 @@ export function EntitlementRow({
           <i className={`fa-solid ${expanded ? 'fa-chevron-up' : 'fa-chevron-down'}`} />
         </button>
       </div>
-      {searching && (
+      {searchOpen && (
         <EntitlementSearch
           entitlementId={entitlement.id}
           seedTerm={searchSeedTerm(entitlement.human_name)}
           busy={busy}
           noteText={searchNote}
           onPick={pickCandidate}
-          onCancel={() => setSearching(false)}
+          onCancel={() => onSetSearchOpen(false)}
         />
       )}
       {expanded && <ReconcileDetail entitlement={entitlement} />}

@@ -7,10 +7,11 @@ import styles from './sources.module.css';
  * A STARTER list, offered and never applied (owner rule 2026-07-11: no
  * intent-presuming defaults). These are the RPG/sourcebook publishers whose
  * PDF-shaped items dominated the dogfood corpus's false "comic" classifications
- * — pressing the button FILLS THE EDITOR so the operator can prune it and then
- * deliberately Save. Nothing here is written until they do.
+ * — pressing the button ADDS THEM TO THE EDITOR (merged with whatever is
+ * already drafted, never replacing it) so the operator can prune the list and
+ * then deliberately Save. Nothing here is written until they do.
  */
-const STARTER_PUBLISHERS = [
+export const STARTER_PUBLISHERS = [
   'Chaosium',
   'Paizo',
   'Pelgrane Press',
@@ -24,6 +25,25 @@ const STARTER_PUBLISHERS = [
   'Evil Hat',
   'Green Ronin',
 ];
+
+/**
+ * Append `additions` to `existing`, case-insensitively de-duped (the server's
+ * own list cleaning) and order-preserving: the operator's own rules stay put and
+ * in their order, the new ones follow. The starter list ADDS to a draft — it is
+ * an offer, and an offer that silently discarded the rules already typed would
+ * be a trap.
+ */
+function mergeRules(existing: string[], additions: string[]): string[] {
+  const seen = new Set(existing.map((r) => r.toLowerCase()));
+  const merged = [...existing];
+  for (const addition of additions) {
+    const key = addition.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(addition);
+  }
+  return merged;
+}
 
 /** The source's currently-persisted rules out of its PUBLIC settings view. */
 function storedRules(source: StoreSourceResource): string[] {
@@ -174,8 +194,8 @@ export function PublisherRules({ source }: { source: StoreSourceResource }) {
             <button
               type="button"
               className={styles.mutedBtn}
-              onClick={() => edit(STARTER_PUBLISHERS)}
-              title="Fills the editor — nothing is saved until you press Save"
+              onClick={() => edit(mergeRules(rules, STARTER_PUBLISHERS))}
+              title="Adds these to the editor — nothing is saved until you press Save"
               data-testid="rules-starter"
             >
               Suggested starter list

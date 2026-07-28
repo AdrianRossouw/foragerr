@@ -39,16 +39,32 @@ interface BulkFailure {
 const ROW_ESTIMATE_PX = 78;
 
 /**
- * Viewport height assumed when the scroll container reports none. A
- * zero-height measurement means "this environment did no layout" (jsdom) — the
- * virtualizer's own answer to a zero viewport is to render NOTHING, which
- * would turn a layout-less environment into a silently empty list. Falling
- * back to a nominal viewport keeps the list windowing coherently instead.
+ * Viewport height assumed when the scroll container reports none, IN TESTS ONLY.
+ * A zero-height measurement means "this environment did no layout" (jsdom) — the
+ * virtualizer's own answer to a zero viewport is to render NOTHING, which would
+ * turn a layout-less environment into a silently empty list. Falling back to a
+ * nominal viewport keeps the list windowing coherently under test.
+ *
+ * In a real browser a zero-height scroll container is a LAYOUT BUG (a collapsed
+ * flex parent, a hidden ancestor), and absorbing it here would hide that bug
+ * behind a list that renders 720px of rows into a container nobody can see. So
+ * the fallback is scoped to the test environment and a real zero height is
+ * passed through, where it surfaces as a visibly empty list.
  */
 const VIEWPORT_FALLBACK_PX = 720;
 
+/** True only under vitest, where jsdom reports no layout at all. */
+const LAYOUTLESS_ENV = import.meta.env.MODE === 'test';
+
 /** Starting height guess for a collapse-group header (measured for real after). */
 const GROUP_HEADER_ESTIMATE_PX = 62;
+
+/** How each bulk action names itself in its result note and failure panel. */
+const BULK_VERBS = {
+  accept: { note: 'Accepted', past: 'accepted' },
+  ignore: { note: 'Ignored', past: 'ignored' },
+  restore: { note: 'Restored', past: 'restored' },
+} as const;
 
 /**
  * Connected-store manage view (FRG-UI-029): account bar (auto-sync toggle, Sync
@@ -76,11 +92,19 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
   // id: headers and rows share one index space, so the anchor must too.
   const [anchorKey, setAnchorKey] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set());
+  // Which rows have their ComicVine search panel open (FRG-UI-039). Held HERE,
+  // beside `expanded`, and not inside the row: the list is virtualized, so a row
+  // scrolled out of the overscan unmounts — component-local panel state would be
+  // destroyed by scrolling past it. Owned by the list, it survives and the row
+  // re-mounts with its panel still open.
+  const [searchOpen, setSearchOpen] = useState<ReadonlySet<number>>(new Set());
   const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<string>>(
     new Set(),
   );
   const [bulkNote, setBulkNote] = useState<string | null>(null);
   const [failures, setFailures] = useState<BulkFailure[]>([]);
+  /** Past-tense verb of the action the current failures came from. */
+  const [failureVerb, setFailureVerb] = useState<string>('accepted');
   const [showFailures, setShowFailures] = useState(false);
   const [bundleMenuOpen, setBundleMenuOpen] = useState(false);
 
@@ -118,7 +142,7 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
   // group_key and the list becomes ONE flat array of headers and rows. Every
   // index below — the virtual window, the selection anchor, the shift-range —
   // addresses this array, which is what keeps them coherent with each other.
-  const { items } = useMemo(
+  const { items, groups } = useMemo(
     () => buildReviewItems(visible, expandedGroups),
     [visible, expandedGroups],
   );
@@ -144,7 +168,11 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
     measureElement: (el) => el.getBoundingClientRect().height || ROW_ESTIMATE_PX,
     observeElementRect: (instance, cb) =>
       observeElementRect(instance, (rect) =>
-        cb({ width: rect.width, height: rect.height || VIEWPORT_FALLBACK_PX }),
+        cb({
+          width: rect.width,
+          height:
+            rect.height || (LAYOUTLESS_ENV ? VIEWPORT_FALLBACK_PX : rect.height),
+        }),
       ),
   });
   const virtualRows = virtualizer.getVirtualItems();
@@ -163,21 +191,30 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
   const selectRow = (index: number, shiftKey: boolean) => {
     const item = items[index];
     if (!item) return;
+    const ids = itemIds(item);
+    const next = new Set(selected);
     if (shiftKey && anchorKey !== null) {
       const anchorIndex = items.findIndex((i) => i.key === anchorKey);
       if (anchorIndex !== -1) {
         const [lo, hi] =
           anchorIndex <= index ? [anchorIndex, index] : [index, anchorIndex];
-        const next = new Set(selected);
         for (let k = lo; k <= hi; k += 1) {
           for (const id of itemIds(items[k])) next.add(id);
         }
         setSelected(next);
         return;
       }
+      // The anchor is no longer in the list at all (its rows were filtered
+      // away, or a refetch dropped them): there is no span to draw. A
+      // shift-click then RE-ANCHORS on the clicked item and selects it —
+      // degrading to a plain toggle here would silently DESELECT a row the
+      // operator was reaching towards, which is the one outcome a range
+      // gesture must never produce.
+      for (const id of ids) next.add(id);
+      setSelected(next);
+      setAnchorKey(item.key);
+      return;
     }
-    const ids = itemIds(item);
-    const next = new Set(selected);
     // A group toggles as a unit: fully selected -> clear it, otherwise fill it.
     const allSelected = ids.every((id) => next.has(id));
     for (const id of ids) {
@@ -190,8 +227,22 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
 
   const toggleGroup = (key: string) => {
     const next = new Set(expandedGroups);
-    if (next.has(key)) next.delete(key);
-    else next.add(key);
+    if (next.has(key)) {
+      next.delete(key);
+      // Collapsing folds this group's rows out of the item array. An anchor
+      // sitting on one of them would dangle (findIndex -> -1) and quietly
+      // demote the NEXT shift-click, so it moves to the group's header — the
+      // header is the group's stand-in in the shared index space (itemIds
+      // already treats it as all of its rows), which is exactly where the
+      // folded-away anchor now lives.
+      if (anchorKey !== null && anchorKey.startsWith('r:')) {
+        const anchorId = Number(anchorKey.slice(2));
+        const group = groups.find((g) => g.key === key);
+        if (group?.rows.some((r) => r.id === anchorId)) {
+          setAnchorKey(`g:${key}`);
+        }
+      }
+    } else next.add(key);
     setExpandedGroups(next);
   };
 
@@ -214,6 +265,15 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
     setExpanded(next);
   };
 
+  const setRowSearch = (id: number, open: boolean) => {
+    setSearchOpen((prev) => {
+      const next = new Set(prev);
+      if (open) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+
   const selectedIds = [...selected];
   const bulkBusy = bulk.isPending;
 
@@ -223,32 +283,26 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
     setShowFailures(false);
   };
 
-  const runBulk = (action: 'ignore' | 'restore') => {
-    if (selectedIds.length === 0 || bulkBusy) return;
-    resetBulkFeedback();
-    bulk.mutate(
-      { action, entitlementIds: selectedIds },
-      { onSuccess: clearSelection },
-    );
-  };
-
   /**
-   * Bulk "Accept matches" (FRG-SRC-011): ONE request in which the server
-   * applies EACH row's own stored proposal in its own transaction — the
-   * apply-to-a-whole-group/bundle move. Replaces the old client-side loop,
-   * which needed one round trip per row and could half-finish invisibly.
+   * Bulk action over the selection (FRG-SRC-011): ONE request in which the
+   * server applies EACH row in its own transaction — for `accept`, each row's
+   * own stored proposal, which is the apply-to-a-whole-group/bundle move.
+   * Replaces the old client-side loop, which needed one round trip per row and
+   * could half-finish invisibly.
    *
-   * A row that cannot be accepted (no proposal, already gone) comes back in the
-   * per-row `errors` map and the rest still apply — so the failures are
-   * reported by name WITHOUT costing the operator the batch, and the succeeded
-   * rows still refresh (the hook's own sources-family invalidation).
+   * EVERY action reports the same way, because every action can half-succeed: a
+   * row that cannot be applied (no proposal, already gone) comes back in the
+   * per-row `errors` map while the rest still apply. Reporting only accept's
+   * failures would let a partial ignore/restore read as complete — the selection
+   * clearing away the rows that did NOT move. So the failures are always named,
+   * and only they stay selected.
    */
-  const acceptSelected = () => {
+  const applyBulk = (action: 'accept' | 'ignore' | 'restore') => {
     if (selectedIds.length === 0 || bulkBusy) return;
     const attempted = selectedIds.length;
     resetBulkFeedback();
     bulk.mutate(
-      { action: 'accept', entitlementIds: selectedIds },
+      { action, entitlementIds: selectedIds },
       {
         onSuccess: (result) => {
           const entries = Object.entries(result.errors ?? {});
@@ -272,7 +326,10 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
           setSelected(new Set(failed.map((f) => f.id)));
           setAnchorKey(null);
           setFailures(failed);
-          setBulkNote(`Accepted ${result.applied} of ${attempted}.`);
+          setFailureVerb(BULK_VERBS[action].past);
+          setBulkNote(
+            `${BULK_VERBS[action].note} ${result.applied} of ${attempted}.`,
+          );
         },
         onError: (err) => setBulkNote(err.message),
       },
@@ -422,7 +479,7 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
                 type="button"
                 className={styles.linkBtn}
                 disabled={bulkBusy}
-                onClick={acceptSelected}
+                onClick={() => applyBulk('accept')}
                 data-testid="bulk-accept"
               >
                 {bulkBusy ? 'Accepting…' : 'Accept matches'}
@@ -431,7 +488,7 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
                 type="button"
                 className={styles.linkBtn}
                 disabled={bulkBusy}
-                onClick={() => runBulk('ignore')}
+                onClick={() => applyBulk('ignore')}
                 data-testid="bulk-ignore"
               >
                 Ignore
@@ -440,7 +497,7 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
                 type="button"
                 className={styles.mutedBtn}
                 disabled={bulkBusy}
-                onClick={() => runBulk('restore')}
+                onClick={() => applyBulk('restore')}
                 data-testid="bulk-restore"
               >
                 Restore
@@ -463,8 +520,8 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
       )}
 
       {/* Per-row bulk failures (FRG-SRC-011): a count, expandable to the rows
-          that could not be accepted and why — the batch is never silently
-          partial. */}
+          the action could not be applied to and why — no bulk action is ever
+          silently partial. */}
       {failures.length > 0 && (
         <div className={styles.bulkErrors} data-testid="bulk-errors">
           <button
@@ -474,8 +531,8 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
             onClick={() => setShowFailures(!showFailures)}
             data-testid="bulk-errors-toggle"
           >
-            {failures.length} item{failures.length === 1 ? '' : 's'} could not be
-            accepted
+            {failures.length} item{failures.length === 1 ? '' : 's'} could not be{' '}
+            {failureVerb}
           </button>
           {showFailures && (
             <ul className={styles.bulkErrorList} data-testid="bulk-errors-detail">
@@ -550,6 +607,10 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
                         onSelectRow={selectRow}
                         expanded={expanded.has(item.entitlement.id)}
                         onToggleExpand={() => toggleExpand(item.entitlement.id)}
+                        searchOpen={searchOpen.has(item.entitlement.id)}
+                        onSetSearchOpen={(open) =>
+                          setRowSearch(item.entitlement.id, open)
+                        }
                         librarySeries={librarySeries}
                       />
                     )}
