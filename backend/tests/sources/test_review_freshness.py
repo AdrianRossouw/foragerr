@@ -14,9 +14,8 @@ cover the two trust repairs from the live-rig findings:
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
+from functools import partial
 
-import httpx
 import pytest
 from sqlalchemy import select
 
@@ -24,26 +23,25 @@ from foragerr.db.base import utcnow
 from foragerr.downloads.models import TrackedDownloadRow
 from foragerr.downloads.state import TrackedDownloadState
 from foragerr.health.service import HealthService
-from foragerr.library import repo as library_repo
 from foragerr.library.flows._common import SeriesValidationError
 from foragerr.library.models import SeriesRow
 from foragerr.sources import ratelimit, repo, review
 from foragerr.sources.grab import _handoff_to_import
 from foragerr.sources.models import SourceEntitlementRow
-from foragerr.sources.registry import TYPE_HUMBLE
-from foragerr.sources.service import run_sync
-from foragerr.sources.settings import HumbleSettings
 from flows_support import FakeCV, build_factory, flows_settings, reset_gate
 from http_support import make_settings
 from sources_support import (  # noqa: F401 — imported fixtures
-    fixture_bytes,
+    FakeCommands,
+    _comic,
+    _mk_series,
     format_profile_id,
-    make_factory,
-    order_handler,
     root_folder_id,
 )
+from sources_support import _synced_source as _synced_source_base
 
-GAMEKEY = "aBcD1234synthetic"
+#: This suite's sources are always "connected" (unlike test_review.py's bare
+#: default) — freshness/retry scenarios exercise an already-linked source.
+_synced_source = partial(_synced_source_base, connection_state="connected")
 
 
 @pytest.fixture(autouse=True)
@@ -53,58 +51,6 @@ def _reset_gates():
     yield
     ratelimit.reset_gates()
     reset_gate()
-
-
-class FakeCommands:
-    """Records enqueued commands (the grab / refresh hand-offs)."""
-
-    def __init__(self):
-        self.enqueued: list[tuple] = []
-
-    async def enqueue(self, name, payload=None, *, triggered_by="manual"):
-        self.enqueued.append((name, payload, triggered_by))
-        return SimpleNamespace(id=len(self.enqueued), status="queued")
-
-    def grabs(self) -> list[tuple]:
-        return [c for c in self.enqueued if c[0] == "source-grab"]
-
-
-async def _synced_source(db, config_dir, *, auto_sync=False):
-    source = await repo.create_source(
-        db,
-        source_type=TYPE_HUMBLE,
-        name="Humble Bundle",
-        settings=HumbleSettings(session_cookie="SYNTH-COOKIE"),
-        auto_sync=auto_sync,
-        connection_state="connected",
-    )
-    handler = order_handler(
-        list_body=b'[{"gamekey":"%s"}]' % GAMEKEY.encode(),
-        order_bodies={GAMEKEY: fixture_bytes("order_comics.json")},
-    )
-    factory = make_factory(config_dir, httpx.MockTransport(handler))
-    await run_sync(db, factory, source, min_interval=0.0)
-    return source
-
-
-async def _comic(db, source_id, machine_name) -> SourceEntitlementRow:
-    for e in await repo.list_entitlements(db, source_id, classification="comic"):
-        if e.machine_name == machine_name:
-            return e
-    raise AssertionError(f"no entitlement {machine_name}")
-
-
-async def _mk_series(db, root_folder_id, format_profile_id, *, cvid, title):
-    async with db.write_session() as session:
-        series = await library_repo.create_series(
-            session,
-            cv_volume_id=cvid,
-            title=title,
-            format_profile_id=format_profile_id,
-            root_folder_id=root_folder_id,
-            path=f"/tmp/comics/{title} ({cvid})",
-        )
-        return series.id
 
 
 def _cv_proposal(cvid: int, *, title: str = "Synthetic Hero") -> str:

@@ -26,6 +26,7 @@ from foragerr.library import repo
 from foragerr.library.models import IssueFileRow
 
 from importer._archives import comicinfo_xml, make_cbz, make_cbz_with_comicinfo
+from importer.conftest import _add_issue
 
 
 async def _run(db, source, ctx):
@@ -42,17 +43,6 @@ async def _issue_files(db):
         for r in rows:
             session.expunge(r)
         return rows
-
-
-async def _add_issue(db, series_id, *, cv_issue_id, issue_number):
-    async with db.write_session() as session:
-        issue = await repo.create_issue(
-            session,
-            series_id=series_id,
-            cv_issue_id=cv_issue_id,
-            issue_number=issue_number,
-        )
-        return issue.id
 
 
 # --- gather: a partial re-run only re-candidates unregistered files ----------

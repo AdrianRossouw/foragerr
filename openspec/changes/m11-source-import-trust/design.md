@@ -190,6 +190,39 @@ are import-time and review-time only; existing library rows are
 untouched. Rollback = revert the release tag (the column is inert to
 older code).
 
+## Deferred follow-ups (recorded at the simplify pass, 2026-07-28)
+
+The pre-merge simplify review judged these real but not worth churning a
+thrice-reviewed green branch; change 2 (or a dedicated cleanup) should
+pick them up, in this order:
+
+1. **Pipeline resolution contract**: `reconcile()` returns a result
+   object (series, issue, ordinal refusal, comicinfo conflict) instead
+   of a 2-tuple plus `evidence.provenance` side-channel — removes the
+   `PROV_ORDINAL_REFUSED` retraction `pop` that falsifies the decision
+   trace; `_reconcile_base` returns a `BaseResolution` with an explicit
+   `series_is_authoritative` flag instead of the `_BASE_GRAB_SERIES`
+   magic string; the series-only manual override joins
+   `_derive_issue_in_series` (gaining the ordinal fallback + honest
+   reason). Contained to pipeline.py; no test calls `reconcile` directly.
+2. **`matched_via` fail-closed threading** (safety-ranked first): make it
+   a required keyword on the internal chain and assert
+   `MATCHED_VIA_OPERATOR` explicitly at each API endpoint — today the
+   privileged value is the default, so a forgotten forwarding hop would
+   silently unlock the FRG-PP-022 guard-3 gate.
+3. **Sibling sweep source-scoping**: add the acting entitlement's
+   `source_id` predicate so the sweep rides the
+   (`source_id`, `review_status`) index instead of scanning all sources'
+   review rows per add (cross-source siblings self-heal via the degrade
+   path regardless).
+4. **Name the withdrawal gate** (`withdraw_if_no_longer_accepted`
+   collapsing its three call sites), promote `_withdraw_import` to a
+   public name, and add an `evaluate_candidate` helper for the
+   thrice-repeated `aggregate → build_evaluation → decide` triple.
+5. **`SeriesWithoutIssueSpec`**: split the series-named mapping failure
+   out of `MappedToIssueSpec` so one spec name means one reason (no spec
+   delta required — requirements describe reason content, not classes).
+
 ## Open Questions
 
 None blocking — the rig reproduces findings #10/#15 verbatim for

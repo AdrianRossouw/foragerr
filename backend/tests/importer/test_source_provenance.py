@@ -27,7 +27,6 @@ from foragerr.downloads.models import GrabHistoryRow
 from foragerr.importer import history
 from foragerr.importer.pipeline import ImportStatus, gather, import_candidate
 from foragerr.importer.sources import CompletedDownloadSource, RescanSource
-from foragerr.library import repo
 from foragerr.library.models import IssueFileRow, SeriesRow
 from foragerr.sources.models import (
     MATCHED_VIA_AUTO,
@@ -37,6 +36,7 @@ from foragerr.sources.models import (
 )
 
 from importer._archives import comicinfo_xml, make_cbz, make_cbz_with_comicinfo
+from importer.conftest import _add_issue
 
 _NOW = dt.datetime(2026, 7, 5)
 
@@ -168,17 +168,6 @@ async def _existing_file(db, issue_id: int, path: Path, *, size: int) -> int:
         session.add(row)
         await session.flush()
         return row.id
-
-
-async def _add_issue(db, series_id, *, cv_issue_id, issue_number):
-    async with db.write_session() as session:
-        issue = await repo.create_issue(
-            session,
-            series_id=series_id,
-            cv_issue_id=cv_issue_id,
-            issue_number=issue_number,
-        )
-        return issue.id
 
 
 async def _run(db, source, ctx):

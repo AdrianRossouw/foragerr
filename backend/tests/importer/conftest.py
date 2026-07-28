@@ -15,6 +15,17 @@ from foragerr.library.paths import series_folder_name
 from foragerr.quality.models import DEFAULT_PROFILE_NAME, FormatProfileRow
 
 
+async def _add_issue(db, series_id, *, cv_issue_id, issue_number):
+    async with db.write_session() as session:
+        issue = await repo.create_issue(
+            session,
+            series_id=series_id,
+            cv_issue_id=cv_issue_id,
+            issue_number=issue_number,
+        )
+        return issue.id
+
+
 @pytest.fixture
 async def format_profile_id(db) -> int:
     async with db.read_session() as session:

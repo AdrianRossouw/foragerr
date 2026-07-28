@@ -46,8 +46,8 @@ PROV_MANUAL_OVERRIDE = "manual_override"
 PROV_COMICINFO_CONFLICT = "comicinfo_conflict"
 
 #: Provenance key recorded when the FRG-PP-022 ordinal fallback was REFUSED by
-#: one of its three guards; its value is the refusal code
-#: (:data:`~foragerr.importer.decisions.ORDINAL_REFUSAL_REASONS` keys). The
+#: one of its three guards; its value is the refusal code (one of the
+#: ``foragerr.importer.decisions.ORDINAL_REFUSED_*`` constants). The
 #: pipeline turns it into a blocked candidate with the guard's own reason so a
 #: refusal is never mistaken for "the name carried no issue evidence".
 PROV_ORDINAL_REFUSED = "ordinal_refused"

@@ -277,17 +277,51 @@ async def add_entitlement(
 
     # The series now exists: re-resolve every OTHER still-in-review proposal that
     # named this volume before linking the acting row (FRG-SRC-008).
-    await _reresolve_sibling_proposals(
+    return await _resolve_as_match(
         db,
+        entitlement_id,
         cv_volume_id=cvid,
         series_id=result.series.id,
         series_title=result.series.title,
+        commands=commands,
+        matched_via=matched_via,
+    )
+
+
+async def _resolve_as_match(
+    db,
+    entitlement_id: int,
+    *,
+    cv_volume_id: int,
+    series_id: int,
+    series_title: str | None,
+    commands=None,
+    matched_via: str = MATCHED_VIA_OPERATOR,
+) -> SourceEntitlementRow:
+    """Sweep sibling proposals for ``cv_volume_id`` then match the acting row.
+
+    Shared tail of the add-series success path and the FRG-SRC-008 degrade: the
+    other still-in-review entitlements proposing this volume are rewritten into
+    library-kind match proposals before the acting row is linked, so their next
+    single action succeeds on the first click too. (Without the sweep they would
+    each degrade individually — correct, but only after another click apiece.)
+
+    Sweep and match are separate transactions; the sweep only rewrites
+    proposals, so a crash between the two leaves resolved proposals and an
+    unlinked acting row — the same benign shape a crash mid-add already
+    produces.
+    """
+    await _reresolve_sibling_proposals(
+        db,
+        cv_volume_id=cv_volume_id,
+        series_id=series_id,
+        series_title=series_title,
         exclude_entitlement_id=entitlement_id,
     )
     return await match_entitlement(
         db,
         entitlement_id,
-        series_id=result.series.id,
+        series_id=series_id,
         commands=commands,
         matched_via=matched_via,
     )
@@ -304,33 +338,20 @@ async def _degrade_to_match(
 ) -> SourceEntitlementRow:
     """Resolve an add whose volume is already in the library as a match.
 
-    The FRG-SRC-008 degrade, with the SAME sibling sweep a real add performs: the
-    other still-in-review entitlements proposing this volume are rewritten into
-    library-kind match proposals before the acting row is linked, so their next
-    single action succeeds on the first click too. (Without the sweep they would
-    each degrade individually — correct, but only after another click apiece.)
-
-    Sweep and match are separate transactions, exactly as on the successful-add
-    path; the sweep only rewrites proposals, so a crash between the two leaves
-    resolved proposals and an unlinked acting row — the same benign shape a
-    crash mid-add already produces.
+    The FRG-SRC-008 degrade: reads the series title, then delegates to
+    :func:`_resolve_as_match` for the shared sibling sweep + match tail.
     """
     from foragerr.library.models import SeriesRow
 
     async with db.read_session() as session:
         series = await session.get(SeriesRow, series_id)
         series_title = series.title if series is not None else None
-    await _reresolve_sibling_proposals(
+    return await _resolve_as_match(
         db,
+        entitlement_id,
         cv_volume_id=cv_volume_id,
         series_id=series_id,
         series_title=series_title,
-        exclude_entitlement_id=entitlement_id,
-    )
-    return await match_entitlement(
-        db,
-        entitlement_id,
-        series_id=series_id,
         commands=commands,
         matched_via=matched_via,
     )
@@ -560,7 +581,10 @@ async def bulk_match(
         db,
         entitlement_ids,
         lambda eid: match_entitlement(
-            db, eid, series_id=series_id, commands=commands,
+            db,
+            eid,
+            series_id=series_id,
+            commands=commands,
             matched_via=matched_via,
         ),
     )

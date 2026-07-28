@@ -41,7 +41,6 @@ from foragerr.importer import (
     import_candidate,
 )
 from foragerr.importer.pipeline import gather
-from foragerr.library import repo
 from foragerr.library.models import IssueFileRow
 from foragerr.naming import RenameFields, render_filename
 from foragerr.sources.models import SourceEntitlementRow
@@ -55,6 +54,7 @@ from importer._archives import (
     make_cbz_with_comicinfo,
     make_corrupt,
 )
+from importer.conftest import _add_issue
 
 
 async def _run(db, source, ctx):
@@ -141,17 +141,6 @@ async def _tracked_row(db, download_id):
         )
         session.expunge(row)
         return row
-
-
-async def _add_issue(db, series_id, *, cv_issue_id, issue_number):
-    async with db.write_session() as session:
-        issue = await repo.create_issue(
-            session,
-            series_id=series_id,
-            cv_issue_id=cv_issue_id,
-            issue_number=issue_number,
-        )
-        return issue.id
 
 
 # --- FRG-IMP-024: embedded read reconciliation ------------------------------

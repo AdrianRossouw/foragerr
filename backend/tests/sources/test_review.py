@@ -5,21 +5,20 @@ the auto-sync toggle (default OFF; opt-in accepts only confident matches).
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import httpx
 import pytest
 from sqlalchemy import select
 
-from foragerr.library import repo as library_repo
 from foragerr.sources import ratelimit, repo, review
 from foragerr.sources.enrich import enrich_source
-from foragerr.sources.models import SourceEntitlementRow
-from foragerr.sources.registry import TYPE_HUMBLE
 from foragerr.sources.service import run_sync
-from foragerr.sources.settings import HumbleSettings
 from http_support import make_settings
 from sources_support import (  # noqa: F401 — imported fixtures
+    FakeCommands,
+    GAMEKEY,
+    _comic,
+    _mk_series,
+    _synced_source,
     fixture_bytes,
     format_profile_id,
     make_factory,
@@ -27,66 +26,12 @@ from sources_support import (  # noqa: F401 — imported fixtures
     root_folder_id,
 )
 
-GAMEKEY = "aBcD1234synthetic"
-
 
 @pytest.fixture(autouse=True)
 def _reset_gates():
     ratelimit.reset_gates()
     yield
     ratelimit.reset_gates()
-
-
-class FakeCommands:
-    """Records enqueued commands (the grab hand-off) without a real queue."""
-
-    def __init__(self):
-        self.enqueued: list[tuple] = []
-
-    async def enqueue(self, name, payload=None, *, triggered_by="manual"):
-        self.enqueued.append((name, payload, triggered_by))
-        return SimpleNamespace(id=len(self.enqueued), status="queued")
-
-
-async def _source(db, *, auto_sync=False):
-    return await repo.create_source(
-        db,
-        source_type=TYPE_HUMBLE,
-        name="Humble Bundle",
-        settings=HumbleSettings(session_cookie="SYNTH-COOKIE"),
-        auto_sync=auto_sync,
-    )
-
-
-async def _synced_source(db, config_dir, *, auto_sync=False):
-    source = await _source(db, auto_sync=auto_sync)
-    handler = order_handler(
-        list_body=b'[{"gamekey":"%s"}]' % GAMEKEY.encode(),
-        order_bodies={GAMEKEY: fixture_bytes("order_comics.json")},
-    )
-    factory = make_factory(config_dir, httpx.MockTransport(handler))
-    await run_sync(db, factory, source, min_interval=0.0)
-    return source
-
-
-async def _comic(db, source_id, machine_name) -> SourceEntitlementRow:
-    for e in await repo.list_entitlements(db, source_id, classification="comic"):
-        if e.machine_name == machine_name:
-            return e
-    raise AssertionError(f"no entitlement {machine_name}")
-
-
-async def _mk_series(db, root_folder_id, format_profile_id, *, cvid, title):
-    async with db.write_session() as session:
-        series = await library_repo.create_series(
-            session,
-            cv_volume_id=cvid,
-            title=title,
-            format_profile_id=format_profile_id,
-            root_folder_id=root_folder_id,
-            path=f"/tmp/comics/{title} ({cvid})",
-        )
-        return series.id
 
 
 # --- match + accept-gates-download ------------------------------------------

@@ -568,9 +568,7 @@ async def _withdraw_import(
     row would strand a later restore + re-accept with no claimable row. The
     entitlement itself is untouched — the review action already reset its
     download axis. Runs inside the caller's import transaction."""
-    logger.info(
-        "process-imports: %s no longer accepted; import withdrawn", download_id
-    )
+    logger.info("import: %s no longer accepted; import withdrawn", download_id)
     row = await session.get(TrackedDownloadRow, row_id)
     if row is not None:
         await session.delete(row)
