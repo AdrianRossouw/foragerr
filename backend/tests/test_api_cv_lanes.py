@@ -85,8 +85,12 @@ def test_series_lookup_and_suggest_run_interactive(settings, lanes, monkeypatch)
         _returns(SuggestResult(candidates=(), complete=True)),
     )
     with TestClient(create_app(settings)) as client:
-        lookup = client.get("/api/v1/series/lookup", params={"term": "Saga"})
-        suggest = client.get("/api/v1/series/lookup/suggest", params={"term": "Saga"})
+        lookup = client.get(
+            "/api/v1/series/lookup", params={"term": "Synthetic Hero"}
+        )
+        suggest = client.get(
+            "/api/v1/series/lookup/suggest", params={"term": "Synthetic Hero"}
+        )
     assert lookup.status_code == 200 and suggest.status_code == 200
 
     assert lanes == [LANE_INTERACTIVE, LANE_INTERACTIVE]
@@ -101,7 +105,7 @@ async def test_library_import_volume_validation_runs_interactive(
 
     record = SeriesRecord(
         cv_volume_id=202,
-        name="Paper Girls",
+        name="Synthetic Hero",
         publisher=None,
         imprint=None,
         start_year=None,

@@ -360,9 +360,7 @@ class HealthService:
         # while batch already is). A paused batch lane is expected, self-clearing
         # operation, not a warning: it stays ``ok`` here and is carried in
         # ``detail`` so the meter still renders it.
-        approaching = _hottest_bucket(
-            health.get("path_budgets") or {}, approaching_only=True
-        )
+        approaching = _hottest_bucket(health.get("path_budgets") or {})
         if approaching is not None:
             bucket, info = approaching
             used = int(info.get("used", 0))
@@ -921,30 +919,32 @@ def _optional_int(value: Any) -> int | None:
         return None
 
 
+def _by_usage(item: tuple[str, dict[str, Any]]) -> tuple[int, str]:
+    """Sort key shared by :func:`_hottest_bucket` and :func:`_budget_detail`:
+    fullest bucket first (most ``used``), ties broken on bucket name for a
+    stable order."""
+    bucket, info = item
+    return (-_int(info.get("used")), bucket)
+
+
 def _hottest_bucket(
-    budgets: dict[str, dict[str, Any]], *, approaching_only: bool = False
+    budgets: dict[str, dict[str, Any]],
 ) -> tuple[str, dict[str, Any]] | None:
     """The bucket closest to its ceiling — the one a warning should name.
 
     ``budgets`` holds every bucket the gate reports, which is NOT the same set as
     "near the ceiling": a bucket also appears once its batch lane is paused, at
     the batch share (default 70%) and therefore below the 80% warning fraction.
-    ``approaching_only`` keeps just the buckets the gate flagged ``approaching``,
-    which is what the warning state must key on. Ties break on the bucket name
-    for a stable message.
+    Only buckets the gate flagged ``approaching`` are considered, which is what
+    the warning state must key on. Ties break on the bucket name for a stable
+    message.
     """
-    if approaching_only:
-        budgets = {
-            bucket: info
-            for bucket, info in budgets.items()
-            if bool(info.get("approaching"))
-        }
+    budgets = {
+        bucket: info for bucket, info in budgets.items() if bool(info.get("approaching"))
+    }
     if not budgets:
         return None
-    return min(
-        budgets.items(),
-        key=lambda item: (-_int(item[1].get("used")), item[0]),
-    )
+    return min(budgets.items(), key=_by_usage)
 
 
 def _approaching_remediation(info: dict[str, Any]) -> str:
@@ -1037,9 +1037,7 @@ def _budget_detail(health: dict[str, Any]) -> dict[str, Any] | None:
                 info.get("batch_resumes_in_seconds") or 0.0
             ),
         }
-        for bucket, info in sorted(
-            budgets.items(), key=lambda item: (-_int(item[1].get("used")), item[0])
-        )
+        for bucket, info in sorted(budgets.items(), key=_by_usage)
     ]
     return {
         "buckets": buckets,

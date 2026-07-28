@@ -70,7 +70,7 @@ from foragerr.sources.matching import (
     ProposedMatch,
     compute_proposed_match,
 )
-from foragerr.sources.models import MATCHED_VIA_AUTO, SourceEntitlementRow
+from foragerr.sources.models import MATCHED_VIA_AUTO
 
 logger = logging.getLogger("foragerr.sources.enrich")
 
@@ -156,17 +156,6 @@ def is_library_fallback(raw: str | None) -> bool:
     """
     data = _proposal_data(raw)
     return bool(data and data.get("universe") == UNIVERSE_LIBRARY_FALLBACK)
-
-
-def is_library_fallback_marker(raw: str | None) -> bool:
-    """True for a no-plausible-match MARKER computed without ComicVine.
-
-    The narrow shape: :func:`is_library_fallback` restricted to the no-match
-    verdict. Kept distinct because "we looked at the shelf and found nothing"
-    and "we ranked the shelf and picked this" are different things to say about
-    a row, even though both are revisited.
-    """
-    return is_library_fallback(raw) and is_marker(raw)
 
 
 def is_marker(raw: str | None) -> bool:
@@ -592,7 +581,6 @@ __all__ = [
     "eligible_for_enrichment",
     "enrich_source",
     "is_library_fallback",
-    "is_library_fallback_marker",
     "is_marker",
     "is_recompute_target",
     "predates_cv_universe",

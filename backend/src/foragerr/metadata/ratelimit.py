@@ -265,17 +265,7 @@ class _RateGate:
             ledger.popleft()
 
     @staticmethod
-    def _ages_out_in(stamps, over_by: int, now: float) -> float:
-        """Seconds until a count drops below its limit: the stamp at index
-        ``over_by`` (0-based, oldest first) must age out of the rolling window.
-
-        Using the index rather than the oldest stamp keeps the answer honest
-        when a lowered ceiling leaves the ledger holding more entries than the
-        limit (gate finding, cv-budget-caching review)."""
-        return max(0.0, stamps[over_by] + BUDGET_WINDOW_SECONDS - now)
-
-    @classmethod
-    def _resume_in(cls, stamps, used: int, limit: int, now: float) -> float:
+    def _resume_in(stamps, used: int, limit: int, now: float) -> float:
         """Seconds until ``used`` admissions over ``stamps`` fall below ``limit``.
 
         The ONE resume calculation, shared by the whole-path and batch-lane views
@@ -283,14 +273,18 @@ class _RateGate:
         ``retry_after_seconds`` and the meter's countdown can never disagree
         about the same constraint.
 
-        ``limit`` of 0 admits nothing, so no stamp aging out can clear it; that
-        reports a full window rather than indexing off the end of a ledger that
-        is (necessarily) shorter than the overshoot.
+        ``limit`` of 0 (or negative) admits nothing, so no stamp aging out can
+        ever clear it; that reports a full window rather than indexing off the
+        end of a ledger that is (necessarily) shorter than the overshoot.
+        Otherwise, the stamp at index ``used - limit`` (0-based, oldest first)
+        is the one that must age out of the rolling window for the count to
+        drop below the limit — using that index rather than the oldest stamp
+        keeps the answer honest when a lowered ceiling leaves the ledger
+        holding more entries than the limit.
         """
-        over_by = used - limit
-        if over_by < used:
-            return cls._ages_out_in(stamps, over_by, now)
-        return BUDGET_WINDOW_SECONDS
+        if limit <= 0:
+            return BUDGET_WINDOW_SECONDS
+        return max(0.0, stamps[used - limit] + BUDGET_WINDOW_SECONDS - now)
 
     def _refuse_if_exhausted(
         self,

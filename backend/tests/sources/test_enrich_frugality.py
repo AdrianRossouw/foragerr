@@ -42,7 +42,6 @@ from foragerr.sources.enrich import (
     eligible_for_enrichment,
     enrich_source,
     is_library_fallback,
-    is_library_fallback_marker,
     is_recompute_target,
     predates_cv_universe,
     recompute_proposals,
@@ -488,10 +487,6 @@ def test_pre_universe_shape_detection_reads_the_missing_universe_key():
     assert predates_cv_universe(None) is False
     assert predates_cv_universe("") is False
 
-    assert is_library_fallback_marker(FALLBACK_MARKER) is True
-    assert is_library_fallback_marker(CV_MARKER) is False
-    assert is_library_fallback_marker(LEGACY_PROPOSAL) is False
-
     stale = SimpleNamespace(proposed_match_json=LEGACY_PROPOSAL)
     marker = SimpleNamespace(proposed_match_json=CV_MARKER)
     unproposed = SimpleNamespace(proposed_match_json=None)
@@ -533,8 +528,6 @@ def test_every_keyless_proposal_is_revisited_not_only_the_markers():
     assert is_library_fallback(FALLBACK_BEST) is True
     assert is_library_fallback(FALLBACK_MARKER) is True
     assert is_library_fallback(CV_MARKER) is False
-    # ...and the narrow predicate keeps its narrow meaning.
-    assert is_library_fallback_marker(FALLBACK_BEST) is False
 
     # Path 1: the scheduled enrichment pass, once a key exists.
     for row in (best, marker):

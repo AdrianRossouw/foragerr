@@ -28,10 +28,9 @@ function bucket(
     ceiling: 150,
     batch_used: 105,
     batch_ceiling: 105,
-    // The backend's own answer, not a re-derivation: default it the way the
-    // gate computes it so a test that only sets `used` still gets a coherent
-    // bucket, and a test about the paused-lane case can say so explicitly.
-    approaching: overrides.used >= (overrides.ceiling ?? 150) * 0.8,
+    // The backend's own answer, never re-derived here: a test that needs a
+    // hot bucket says so explicitly with `approaching: true`.
+    approaching: overrides.approaching ?? false,
     resume_seconds: 0,
     batch_resume_seconds: 0,
     ...overrides,
@@ -126,8 +125,8 @@ describe('FRG-UI-040: ComicVine budget meter', () => {
     renderWithHealth(
       <ComicVineBudgetChip />,
       healthWithBuckets([
-        bucket({ bucket: 'issue', used: 145, resume_seconds: 0 }),
-        bucket({ bucket: 'volumes', used: 130 }),
+        bucket({ bucket: 'issue', used: 145, resume_seconds: 0, approaching: true }),
+        bucket({ bucket: 'volumes', used: 130, approaching: true }),
       ]),
     );
 
@@ -137,7 +136,9 @@ describe('FRG-UI-040: ComicVine budget meter', () => {
   });
 
   it('FRG-API-025 — the detail is read off the comicvine component only, and only when populated', () => {
-    const withBuckets = healthWithBuckets([bucket({ bucket: 'issue', used: 140 })]);
+    const withBuckets = healthWithBuckets([
+      bucket({ bucket: 'issue', used: 140, approaching: true }),
+    ]);
     expect(comicVineBudget(withBuckets)?.buckets).toHaveLength(1);
 
     // Absent detail, an empty bucket list, and a missing payload are all the
