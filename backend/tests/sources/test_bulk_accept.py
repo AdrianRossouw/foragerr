@@ -237,6 +237,194 @@ async def test_a_stale_proposal_target_errors_only_that_row(
     assert (await repo.get_entitlement(db, good.id)).review_status == "matched"
 
 
+# --- accept preconditions: only a row still in review (FRG-SRC-011) ---------
+
+
+@pytest.mark.req("FRG-SRC-011")
+async def test_bulk_accept_never_resurrects_an_ignored_row(
+    db, config_dir, root_folder_id, format_profile_id
+):
+    """The verified regression: an ignored row inside an accept selection was
+    flipped ignored → matched AND had its source-grab enqueued.
+
+    Accept applies a row's PROPOSAL, and a proposal is the automatic matcher's
+    suggestion for an undecided row — not a mandate over the operator's own
+    withdrawal. A "select all in bundle" after a few ignores (or any stale
+    selection) therefore silently re-downloaded exactly the items the operator
+    had said no to. The ignore now survives as a per-row error, and the
+    neighbouring row still resolves.
+    """
+    source = await _synced_source(db, config_dir)
+    series_id = await _mk_series(
+        db, root_folder_id, format_profile_id, cvid=7040, title="Synthetic Hero"
+    )
+    good = await _comic(db, source.id, "synth_singleissue_01")
+    withdrawn = await _comic(db, source.id, "synth_collected_edition_vol1")
+    await _set_proposal(db, good.id, _library_proposal(series_id))
+    await _set_proposal(db, withdrawn.id, _library_proposal(series_id))
+    await review.ignore_entitlement(db, withdrawn.id)
+    commands = FakeCommands()
+
+    result = await review.bulk_accept(
+        db,
+        make_settings(config_dir),
+        [withdrawn.id, good.id],
+        commands=commands,
+        matched_via=MATCHED_VIA_OPERATOR,
+    )
+
+    assert result.applied == 1
+    assert set(result.errors) == {withdrawn.id}
+    assert "ignored — restore it first" in result.errors[withdrawn.id]
+    after = await repo.get_entitlement(db, withdrawn.id)
+    assert after.review_status == "ignored"  # never resurrected
+    assert after.matched_series_id is None
+    assert after.download_state is None
+    # ...and no grab was enqueued for it.
+    assert {c[1]["entitlement_id"] for c in commands.grabs()} == {good.id}
+
+
+@pytest.mark.req("FRG-SRC-011")
+async def test_bulk_accept_refuses_an_already_matched_row(
+    db, config_dir, root_folder_id, format_profile_id
+):
+    """The other half of the precondition: an already-resolved row is not
+    re-decided by a bulk selection sweeping past it (and its ORIGINAL match
+    target is preserved, not overwritten by whatever the stale proposal says)."""
+    source = await _synced_source(db, config_dir)
+    chosen = await _mk_series(
+        db, root_folder_id, format_profile_id, cvid=7041, title="Synthetic Hero"
+    )
+    other = await _mk_series(
+        db, root_folder_id, format_profile_id, cvid=7042, title="Other Hero"
+    )
+    ent = await _comic(db, source.id, "synth_singleissue_01")
+    await _set_proposal(db, ent.id, _library_proposal(other))
+    await review.match_entitlement(
+        db, ent.id, series_id=chosen, commands=None,
+        matched_via=MATCHED_VIA_OPERATOR,
+    )
+
+    result = await review.bulk_accept(
+        db,
+        make_settings(config_dir),
+        [ent.id],
+        commands=FakeCommands(),
+        matched_via=MATCHED_VIA_OPERATOR,
+    )
+
+    assert result.applied == 0
+    assert "already matched" in result.errors[ent.id]
+    after = await repo.get_entitlement(db, ent.id)
+    assert after.matched_series_id == chosen  # the operator's choice stands
+
+
+@pytest.mark.req("FRG-SRC-011")
+async def test_single_accept_of_an_ignored_row_is_a_409(
+    db, config_dir, root_folder_id, format_profile_id
+):
+    """The per-row error above is the single-row action's 409."""
+    source = await _synced_source(db, config_dir)
+    series_id = await _mk_series(
+        db, root_folder_id, format_profile_id, cvid=7043, title="Synthetic Hero"
+    )
+    ent = await _comic(db, source.id, "synth_singleissue_01")
+    await _set_proposal(db, ent.id, _library_proposal(series_id))
+    await review.ignore_entitlement(db, ent.id)
+    with pytest.raises(review.EntitlementActionError) as exc:
+        await review.accept_entitlement(
+            db,
+            make_settings(config_dir),
+            ent.id,
+            commands=FakeCommands(),
+            matched_via=MATCHED_VIA_OPERATOR,
+        )
+    assert exc.value.status == 409
+
+
+@pytest.mark.req("FRG-SRC-011")
+async def test_the_accept_precondition_is_re_read_inside_the_write_transaction(
+    db, config_dir, root_folder_id, format_profile_id
+):
+    """The pre-check alone is a TOCTOU: accept validates in one session and
+    ``match_entitlement`` writes in another, so an ignore committing in between
+    would still land on a ``matched`` row. ``require_new`` re-reads under the
+    writer lock; calling the write path directly with it proves that is where
+    the guard bites, not merely in the caller."""
+    source = await _synced_source(db, config_dir)
+    series_id = await _mk_series(
+        db, root_folder_id, format_profile_id, cvid=7044, title="Synthetic Hero"
+    )
+    ent = await _comic(db, source.id, "synth_singleissue_01")
+    await review.ignore_entitlement(db, ent.id)
+    commands = FakeCommands()
+
+    with pytest.raises(review.EntitlementActionError) as exc:
+        await review.match_entitlement(
+            db,
+            ent.id,
+            series_id=series_id,
+            commands=commands,
+            matched_via=MATCHED_VIA_OPERATOR,
+            require_new=True,
+        )
+    assert exc.value.status == 409
+    assert (await repo.get_entitlement(db, ent.id)).review_status == "ignored"
+    assert commands.grabs() == []
+
+    # The OPERATOR's explicit match is unaffected — re-deciding a withdrawn row
+    # is a legitimate action, and that is the action they took.
+    await review.match_entitlement(
+        db, ent.id, series_id=series_id, commands=commands,
+        matched_via=MATCHED_VIA_OPERATOR,
+    )
+    assert (await repo.get_entitlement(db, ent.id)).review_status == "matched"
+
+
+@pytest.mark.req("FRG-SRC-010")
+async def test_a_no_plausible_match_marker_is_never_accepted_via_a_stale_column(
+    db, config_dir, root_folder_id, format_profile_id
+):
+    """A verdict marker is authoritative: "we looked, there is nothing".
+
+    The denormalized ``proposed_series_id`` column is only the fallback for an
+    ABSENT or unparseable proposal. Reading it for a marker row — whose whole
+    point is that the automatic matcher found nothing — resurrected whatever
+    series the column happened to still hold and accepted the row against it.
+    """
+    source = await _synced_source(db, config_dir)
+    stale_series = await _mk_series(
+        db, root_folder_id, format_profile_id, cvid=7045, title="Synthetic Hero"
+    )
+    ent = await _comic(db, source.id, "synth_singleissue_01")
+    marker = json.dumps(
+        {
+            "verdict": "no-plausible-match",
+            "universe": "comicvine",
+            "candidates": [],
+            "auto": False,
+        },
+        sort_keys=True,
+    )
+    async with db.write_session() as session:
+        row = await session.get(SourceEntitlementRow, ent.id)
+        row.proposed_match_json = marker
+        row.proposed_series_id = stale_series  # the stale denormalized column
+        row.updated_at = utcnow()
+
+    with pytest.raises(review.EntitlementActionError) as exc:
+        await review.accept_entitlement(
+            db,
+            make_settings(config_dir),
+            ent.id,
+            commands=FakeCommands(),
+            matched_via=MATCHED_VIA_OPERATOR,
+        )
+    assert exc.value.status == 422
+    assert "no proposed match" in str(exc.value)
+    assert (await repo.get_entitlement(db, ent.id)).review_status == "new"
+
+
 # --- same-volume group convergence (FRG-SRC-008 sweep) ----------------------
 
 

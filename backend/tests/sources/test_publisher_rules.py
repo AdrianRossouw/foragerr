@@ -13,9 +13,8 @@ from pathlib import Path
 
 import httpx
 import pytest
-from fastapi.testclient import TestClient
 
-from foragerr.app import create_app
+from conftest import running_app
 from foragerr.sources import ratelimit, repo, review
 from foragerr.sources.classify import DownloadOption, classify
 from foragerr.sources.models import MATCHED_VIA_OPERATOR
@@ -164,6 +163,45 @@ def test_rules_ship_empty_and_are_trimmed_deduped_and_bounded():
         )
 
 
+@pytest.mark.req("FRG-SRC-012")
+def test_rule_dedupe_uses_the_same_fold_the_classifier_matches_on():
+    """Storage and matching must share ONE rule identity.
+
+    De-duplication was ``str.casefold``, a strictly narrower equivalence than
+    the classifier's ``matching_key``: these four spellings all match the same
+    publisher at classify time, but three of them survived as separate stored
+    rules — a list showing duplicates the operator cannot tell apart, where
+    deleting one changes nothing.
+    """
+    spellings = [
+        "Modiphius Entertainment",
+        "modiphius entertainment",
+        "Modiphius  Entertainment.",
+        "The Modiphius Entertainment",
+    ]
+    settings = HumbleSettings(session_cookie="c", publisher_rules=spellings)
+    assert settings.publisher_rules == ["Modiphius Entertainment"]
+    # ...and every spelling still classifies the same way through that one rule.
+    for spelling in spellings:
+        assert (
+            classify(
+                [_opt("CBZ")],
+                publisher=spelling,
+                publisher_rules=settings.publisher_rules,
+            )
+            == "other"
+        )
+
+
+@pytest.mark.req("FRG-SRC-012")
+def test_a_rule_that_folds_to_nothing_keeps_its_own_identity():
+    """A punctuation-only rule can never match a publisher (``matching_key``
+    folds it away), so it must not collapse with every other such entry into a
+    single empty key."""
+    settings = HumbleSettings(session_cookie="c", publisher_rules=["...", "???"])
+    assert settings.publisher_rules == ["...", "???"]
+
+
 # --- sync-time application + reclassification -------------------------------
 
 
@@ -272,12 +310,13 @@ async def test_decided_rows_are_never_reclassified(
 
 
 @pytest.fixture
-def app_client(tmp_path: Path):
+async def app_client(tmp_path: Path):
+    """One event loop for the app and the test (see ``conftest.running_app``):
+    these tests mix HTTP calls with direct ``app.state.db`` awaits."""
     cfg = tmp_path / "cfg"
     cfg.mkdir()
-    app = create_app(make_settings(cfg))
-    with TestClient(app) as c:
-        yield c
+    async with running_app(make_settings(cfg)) as (_app, client):
+        yield client
 
 
 @pytest.mark.req("FRG-SRC-012")
@@ -290,11 +329,10 @@ async def test_patch_publisher_rules_round_trips_without_echoing_the_cookie(
     app = app_client.app
     source = await _source(app.state.db)
 
-    assert app_client.get("/api/v1/sources").json()[0]["settings"][
-        "publisher_rules"
-    ] == []
+    listed_before = (await app_client.get("/api/v1/sources")).json()[0]
+    assert listed_before["settings"]["publisher_rules"] == []
 
-    resp = app_client.patch(
+    resp = await app_client.patch(
         f"/api/v1/sources/{source.id}",
         json={"publisher_rules": ["Modiphius", "  Chaosium  ", "MODIPHIUS"]},
     )
@@ -302,14 +340,14 @@ async def test_patch_publisher_rules_round_trips_without_echoing_the_cookie(
     assert resp.json()["settings"]["publisher_rules"] == ["Modiphius", "Chaosium"]
     assert "session_cookie" not in resp.json()["settings"]
 
-    listed = app_client.get("/api/v1/sources").json()[0]
+    listed = (await app_client.get("/api/v1/sources")).json()[0]
     assert listed["settings"]["publisher_rules"] == ["Modiphius", "Chaosium"]
     # The credential still loads and still decrypts after the rewrite.
     row = await repo.get_source(app.state.db, source.id)
     model = repo.load_source_settings(row.type, row.settings)
     assert model.session_cookie.get_secret_value() == "SYNTH-COOKIE"
 
-    cleared = app_client.patch(
+    cleared = await app_client.patch(
         f"/api/v1/sources/{source.id}", json={"publisher_rules": []}
     )
     assert cleared.json()["settings"]["publisher_rules"] == []
@@ -319,7 +357,7 @@ async def test_patch_publisher_rules_round_trips_without_echoing_the_cookie(
 async def test_patch_can_set_rules_and_auto_sync_in_one_body(app_client):
     app = app_client.app
     source = await _source(app.state.db)
-    resp = app_client.patch(
+    resp = await app_client.patch(
         f"/api/v1/sources/{source.id}",
         json={"auto_sync": True, "publisher_rules": ["Modiphius"]},
     )
@@ -338,13 +376,77 @@ async def test_patch_rules_on_a_source_with_no_settings_envelope_is_a_409(
     silently minted without a cookie."""
     app = app_client.app
     source = await _source(app.state.db)
-    app_client.post(f"/api/v1/sources/{source.id}/disconnect")
+    await app_client.post(f"/api/v1/sources/{source.id}/disconnect")
 
-    resp = app_client.patch(
+    resp = await app_client.patch(
         f"/api/v1/sources/{source.id}", json={"publisher_rules": ["Modiphius"]}
     )
     assert resp.status_code == 409
     assert resp.json()["errors"][0]["field"] == "publisher_rules"
+
+
+@pytest.mark.req("FRG-SRC-012")
+async def test_a_rules_write_never_resurrects_a_deleted_credential(app_client):
+    """The verified credential-resurrection race.
+
+    The write used to be a read-modify-write across THREE transactions
+    (``get_source`` → decrypt in Python → ``update_source_settings``), and it
+    passed ``connection_state`` forward from the stale first read. A
+    ``disconnect`` committing in the middle — blanking the settings JSON and
+    setting ``disconnected`` — was then overwritten by the trailing write, which
+    re-persisted the decrypted-then-re-encrypted cookie the operator had just
+    deleted AND restored the ``connected`` state with it.
+
+    Simulated deterministically by racing the disconnect against the repo call:
+    the write must find a blank envelope and refuse (409), never rebuild one.
+    """
+    app = app_client.app
+    db = app.state.db
+    source = await _source(db)
+
+    # The disconnect commits first (the losing interleaving of the race).
+    await app_client.post(f"/api/v1/sources/{source.id}/disconnect")
+
+    resp = await app_client.patch(
+        f"/api/v1/sources/{source.id}", json={"publisher_rules": ["Modiphius"]}
+    )
+    assert resp.status_code == 409
+
+    row = await repo.get_source(db, source.id)
+    assert row.connection_state == "disconnected"  # never flipped back
+    assert row.settings == "{}"  # the credential stays deleted
+    with pytest.raises(Exception):
+        repo.load_source_settings(row.type, row.settings)
+
+
+@pytest.mark.req("FRG-SRC-012")
+async def test_the_rules_write_is_one_transaction_and_never_writes_state(db):
+    """The repo seam the API now delegates to: read → validate → merge →
+    serialize inside ONE ``write_session``, and ``connection_state`` is not a
+    parameter of it at all — a rules edit can no longer reconnect anything.
+
+    Proven on an ``expired`` source: the rules land and the state is preserved
+    rather than rewritten to whatever a stale read held."""
+    source = await repo.create_source(
+        db,
+        source_type=TYPE_HUMBLE,
+        name="Humble Bundle",
+        settings=HumbleSettings(session_cookie="SYNTH-COOKIE"),
+        connection_state="expired",
+    )
+    written = await repo.update_publisher_rules(db, source.id, ["Modiphius"])
+    assert written.connection_state == "expired"
+    model = repo.load_source_settings(written.type, written.settings)
+    assert model.publisher_rules == ["Modiphius"]
+    assert model.session_cookie.get_secret_value() == "SYNTH-COOKIE"
+
+    assert await repo.update_publisher_rules(db, 999999, []) is None
+
+    await repo.set_connection_state(
+        db, source.id, "disconnected", clear_credential=True
+    )
+    with pytest.raises(repo.SourceSettingsUnavailable):
+        await repo.update_publisher_rules(db, source.id, ["Modiphius"])
 
 
 @pytest.mark.req("FRG-SRC-012")
@@ -360,7 +462,7 @@ async def test_connect_accepts_publisher_rules_in_the_settings_body(
             order_handler(list_body=fixture_bytes("order_list.json"))
         ),
     )
-    resp = app_client.post(
+    resp = await app_client.post(
         "/api/v1/sources",
         json={
             "type": "humble",
@@ -373,7 +475,7 @@ async def test_connect_accepts_publisher_rules_in_the_settings_body(
     assert resp.status_code == 201
     assert resp.json()["source"]["settings"]["publisher_rules"] == ["Modiphius"]
 
-    schema = app_client.get("/api/v1/sources/schema").json()
+    schema = (await app_client.get("/api/v1/sources/schema")).json()
     humble = next(s for s in schema if s["type"] == "humble")
     field = next(f for f in humble["fields"] if f["name"] == "publisher_rules")
     assert field["required"] is False

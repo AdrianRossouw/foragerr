@@ -246,7 +246,9 @@ async def _persist_order(
     review buckets it was decided in.
 
     The bundle display name is a display detail like the title, so it is
-    refreshed on every row (backfilling pre-0026 rows on their next sync).
+    refreshed on every row (backfilling pre-0026 rows on their next sync) — but
+    only FORWARD: a payload with no bundle name leaves a previously captured one
+    in place rather than nulling it.
     """
     from sqlalchemy import select
 
@@ -310,7 +312,14 @@ async def _persist_order(
                 # Refresh display/format fields only; preserve operator decisions.
                 existing.human_name = ent.human_name
                 existing.publisher = ent.publisher
-                existing.bundle_human_name = ent.bundle_human_name
+                # A payload that simply OMITS the bundle name is not evidence
+                # that the row has none: Humble's order shapes vary, and a
+                # single such response would otherwise null a name captured on
+                # an earlier sync — silently emptying the "select bundle"
+                # affordance for those rows (FRG-SRC-011). Refresh forward only.
+                existing.bundle_human_name = (
+                    ent.bundle_human_name or existing.bundle_human_name
+                )
                 if existing.review_status == "new":
                     # Still the automatic classifier's row → re-derive it from
                     # the current formats + rules (FRG-SRC-012, both directions).

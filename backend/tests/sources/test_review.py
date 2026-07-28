@@ -177,6 +177,171 @@ async def test_ignore_then_restore_recomputes_proposal(
     assert restored.proposed_match_json is not None
 
 
+@pytest.mark.req("FRG-SRC-004")
+async def test_restore_acts_only_on_an_ignored_row(
+    db, config_dir, root_folder_id, format_profile_id
+):
+    """Restore is the inverse of ignore, and destructive to everything else: it
+    clears ``matched_series_id`` / ``matched_via`` and overwrites the proposal.
+
+    A mixed bulk restore — the natural result of "select all" over a filtered
+    list — therefore stripped matched rows of their match on the way past. Both
+    non-ignored states are per-row errors now and nothing is written.
+    """
+    source = await _synced_source(db, config_dir)
+    series_id = await _mk_series(
+        db, root_folder_id, format_profile_id, cvid=5601, title="Synthetic Hero"
+    )
+    matched = await _comic(db, source.id, "synth_singleissue_01")
+    await review.match_entitlement(
+        db, matched.id, series_id=series_id, commands=None,
+        matched_via=MATCHED_VIA_OPERATOR,
+    )
+    fresh = await _comic(db, source.id, "synth_collected_edition_vol1")
+
+    for eid, state in ((matched.id, "matched"), (fresh.id, "new")):
+        with pytest.raises(review.EntitlementActionError) as exc:
+            await review.restore_entitlement(db, eid)
+        assert exc.value.status == 409
+        assert state in str(exc.value)
+
+    after = await repo.get_entitlement(db, matched.id)
+    assert after.review_status == "matched"
+    assert after.matched_series_id == series_id
+    assert after.matched_via == "operator"
+
+
+@pytest.mark.req("FRG-SRC-004")
+async def test_bulk_restore_reports_non_ignored_rows_without_touching_them(
+    db, config_dir, root_folder_id, format_profile_id
+):
+    """A selection spanning review buckets restores the ignored rows and leaves
+    the rest exactly as they were, reported per row."""
+    source = await _synced_source(db, config_dir)
+    series_id = await _mk_series(
+        db, root_folder_id, format_profile_id, cvid=5602, title="Synthetic Hero"
+    )
+    ignored = await _comic(db, source.id, "synth_singleissue_01")
+    matched = await _comic(db, source.id, "synth_collected_edition_vol1")
+    await review.ignore_entitlement(db, ignored.id)
+    await review.match_entitlement(
+        db, matched.id, series_id=series_id, commands=None,
+        matched_via=MATCHED_VIA_OPERATOR,
+    )
+
+    result = await review.bulk_restore(db, [ignored.id, matched.id])
+
+    assert result.applied == 1
+    assert set(result.errors) == {matched.id}
+    assert (await repo.get_entitlement(db, ignored.id)).review_status == "new"
+    survivor = await repo.get_entitlement(db, matched.id)
+    assert (survivor.review_status, survivor.matched_series_id) == (
+        "matched",
+        series_id,
+    )
+
+
+@pytest.mark.req("FRG-SRC-010")
+async def test_restore_consults_comicvine_and_records_the_catalog_universe(
+    db, config_dir, root_folder_id, format_profile_id
+):
+    """Restore is operator-initiated and single-row, so it affords the one CV
+    call — and needs it: recomputing library-only stamped a
+    ``library-fallback`` proposal (with ``auto: true``!) that the review screen
+    renders as a catalog verdict and that freezes the row out of the next
+    enrichment pass."""
+    import json
+    from types import SimpleNamespace
+
+    class _FakeCV:
+        def __init__(self):
+            self.calls = 0
+
+        async def suggest_series(self, term):
+            self.calls += 1
+            return SimpleNamespace(
+                candidates=[
+                    SimpleNamespace(
+                        cv_volume_id=5603, name="Synthetic Hero", start_year=2018
+                    )
+                ]
+            )
+
+    source = await _synced_source(db, config_dir)
+    await _mk_series(
+        db, root_folder_id, format_profile_id, cvid=5603, title="Synthetic Hero"
+    )
+    ent = await _comic(db, source.id, "synth_singleissue_01")
+    await review.ignore_entitlement(db, ent.id)
+
+    cv = _FakeCV()
+    restored = await review.restore_entitlement(
+        db, ent.id, cv_client=cv, cv_configured=True
+    )
+
+    assert cv.calls == 1  # exactly one, not one per candidate
+    payload = json.loads(restored.proposed_match_json)
+    assert payload["universe"] == "comicvine"
+
+
+@pytest.mark.req("FRG-SRC-010")
+async def test_restore_leaves_the_row_retryable_when_the_budget_is_exhausted(
+    db, config_dir, root_folder_id, format_profile_id
+):
+    """Budget exhaustion is a DEFERRAL, not a verdict (FRG-META-016): the row
+    returns to ``new`` un-proposed so the next enrichment pass recomputes it. It
+    must never fall back to a library-only guess and never stamp a marker —
+    either would freeze the row with the CV lookup permanently skipped."""
+    from foragerr.metadata.errors import ComicVineBudgetExhausted
+
+    class _BudgetCV:
+        async def suggest_series(self, term):
+            raise ComicVineBudgetExhausted("volume", retry_after_seconds=60)
+
+    source = await _synced_source(db, config_dir)
+    # A library series that WOULD have produced a confident fallback proposal.
+    await _mk_series(
+        db, root_folder_id, format_profile_id, cvid=5604, title="Synthetic Hero"
+    )
+    ent = await _comic(db, source.id, "synth_singleissue_01")
+    await review.ignore_entitlement(db, ent.id)
+
+    restored = await review.restore_entitlement(
+        db, ent.id, cv_client=_BudgetCV(), cv_configured=True
+    )
+
+    assert restored.review_status == "new"
+    assert restored.proposed_match_json is None
+    assert restored.proposed_series_id is None
+
+
+@pytest.mark.req("FRG-SRC-010")
+async def test_restore_never_persists_a_library_fallback_on_a_keyed_deployment(
+    db, config_dir, root_folder_id, format_profile_id
+):
+    """The belt to the brace above. On a ComicVine-configured deployment a
+    ``library-fallback`` universe can only mean a CV call that should have
+    happened did not, so it is left un-proposed and retryable rather than
+    written out as a catalog verdict."""
+    source = await _synced_source(db, config_dir)
+    await _mk_series(
+        db, root_folder_id, format_profile_id, cvid=5605, title="Synthetic Hero"
+    )
+    ent = await _comic(db, source.id, "synth_singleissue_01")
+    await review.ignore_entitlement(db, ent.id)
+
+    restored = await review.restore_entitlement(
+        db, ent.id, cv_client=None, cv_configured=True
+    )
+    assert restored.review_status == "new"
+    assert restored.proposed_match_json is None
+
+    # The genuinely UNCONFIGURED deployment still gets its honest fallback.
+    await review.ignore_entitlement(db, ent.id)
+    honest = await review.restore_entitlement(db, ent.id, cv_configured=False)
+    assert '"universe": "library-fallback"' in honest.proposed_match_json
+
+
 # --- decision survives a re-sync (idempotency) ------------------------------
 
 

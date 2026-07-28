@@ -13,11 +13,10 @@ from pathlib import Path
 
 import httpx
 import pytest
-from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from conftest import running_app
 from foragerr.api.sources import _group_key
-from foragerr.app import create_app
 from foragerr.parser.normalize import matching_key
 from foragerr.sources import ratelimit, repo
 from foragerr.sources.humble import parse_order
@@ -151,6 +150,46 @@ async def test_resync_backfills_the_bundle_name_on_pre_migration_rows(
     } == {BUNDLE}
 
 
+@pytest.mark.req("FRG-SRC-011")
+async def test_a_payload_without_a_bundle_name_never_nulls_a_captured_one(
+    db, config_dir
+):
+    """The backfill is FORWARD-only.
+
+    Humble's order shapes vary (the ``product`` object is not always present —
+    see ``test_an_order_without_a_product_object_parses_with_a_null_bundle_name``),
+    and the refresh assigned the parsed value unconditionally. So a single such
+    response silently emptied the name on every row of that order, taking the
+    "select whole bundle" affordance with it — and the next well-formed sync was
+    the only way back. An absent name is not evidence that the row has none.
+    """
+    source = await _synced_source(db, config_dir)
+    assert {
+        r.bundle_human_name for r in await repo.list_entitlements(db, source.id)
+    } == {BUNDLE}
+
+    # The same order, re-served with its bundle-naming ``product`` object gone.
+    import json
+
+    payload = json.loads(fixture_bytes("order_comics.json"))
+    payload.pop("product", None)
+    factory = make_factory(
+        config_dir,
+        httpx.MockTransport(
+            order_handler(
+                list_body=b'[{"gamekey":"%s"}]' % GAMEKEY.encode(),
+                order_bodies={GAMEKEY: json.dumps(payload).encode()},
+            )
+        ),
+    )
+    result = await run_sync(db, factory, source, min_interval=0.0)
+
+    assert result.new_entitlements == 0
+    assert {
+        r.bundle_human_name for r in await repo.list_entitlements(db, source.id)
+    } == {BUNDLE}
+
+
 # --- the review resource ----------------------------------------------------
 
 
@@ -183,13 +222,43 @@ def test_group_key_of_an_unfoldable_title_is_empty_not_an_error():
 
 
 @pytest.mark.req("FRG-SRC-011")
+async def test_the_wire_group_key_is_always_a_string_never_null(
+    db, config_dir, tmp_path: Path
+):
+    """The ungroupable signal is ``""``, on the wire, deliberately — DECIDED
+    rather than left implicit (gate finding F4).
+
+    Emitting ``null``/omitting the field for an unfoldable title would re-key
+    the client's rule off ABSENCE; the client already implements exactly the
+    same behaviour off the empty string ("``''`` never groups"), so changing the
+    wire type buys nothing and breaks its typing. This pins the decision so a
+    later "tidy-up" to ``str | None`` fails here rather than in the UI: the
+    field is present, is a ``str``, and is ``""`` for a title that folds away.
+    """
+    from foragerr.api.sources import EntitlementResource
+
+    source = await _synced_source(db, config_dir)
+    rows = await repo.list_entitlements(db, source.id)
+    async with db.write_session() as session:
+        row = await session.get(SourceEntitlementRow, rows[0].id)
+        row.human_name = "###"
+    reloaded = await repo.get_entitlement(db, rows[0].id)
+
+    payload = EntitlementResource.from_row(reloaded).model_dump()
+    assert "group_key" in payload
+    assert payload["group_key"] == ""
+    assert isinstance(payload["group_key"], str)
+
+
+@pytest.mark.req("FRG-SRC-011")
 async def test_entitlement_resource_exposes_bundle_name_and_group_key(
     tmp_path: Path,
 ):
     cfg = tmp_path / "cfg"
     cfg.mkdir()
-    app = create_app(make_settings(cfg))
-    with TestClient(app) as client:
+    # One event loop for the app and the test (see ``conftest.running_app``):
+    # this test mixes HTTP calls with direct ``app.state.db`` awaits.
+    async with running_app(make_settings(cfg)) as (app, client):
         source = await repo.create_source(
             app.state.db,
             source_type=TYPE_HUMBLE,
@@ -208,8 +277,10 @@ async def test_entitlement_resource_exposes_bundle_name_and_group_key(
         )
         await run_sync(app.state.db, factory, source, min_interval=0.0)
 
-        listed = client.get(
-            f"/api/v1/sources/{source.id}/entitlements?classification=comic"
+        listed = (
+            await client.get(
+                f"/api/v1/sources/{source.id}/entitlements?classification=comic"
+            )
         ).json()
         assert listed
         assert {row["bundle_human_name"] for row in listed} == {BUNDLE}
@@ -218,8 +289,8 @@ async def test_entitlement_resource_exposes_bundle_name_and_group_key(
         )
         assert single["group_key"] == "synthetic hero"
 
-        detail = client.get(
-            f"/api/v1/sources/entitlements/{single['id']}"
+        detail = (
+            await client.get(f"/api/v1/sources/entitlements/{single['id']}")
         ).json()
         assert detail["bundle_human_name"] == BUNDLE
         assert detail["group_key"] == "synthetic hero"

@@ -112,6 +112,36 @@ async def _queue_grab(db, entitlement_id: int, commands) -> None:
         )
 
 
+#: Review states an ACCEPT may act on. Accept applies a row's own *proposal*,
+#: and a proposal only governs a row still in the automatic matcher's hands — a
+#: matched row is already resolved and an ignored row is a withdrawal. Neither
+#: may be silently re-decided by a bulk selection (FRG-SRC-011).
+_ACCEPTABLE_REVIEW_STATES = ("new",)
+
+
+def _accept_precondition_error(
+    entitlement_id: int, review_status: str
+) -> EntitlementActionError | None:
+    """The per-row error for accepting a row that is no longer in review.
+
+    ``None`` when the row is acceptable. The messages are the operator-facing
+    text of the two refusals, and they are per-ROW (a bulk accept reports them
+    against the id and keeps going) — never a failure of the whole request.
+    """
+    if review_status in _ACCEPTABLE_REVIEW_STATES:
+        return None
+    if review_status == "ignored":
+        return EntitlementActionError(
+            f"entitlement {entitlement_id} is ignored — restore it first",
+            status=409,
+        )
+    return EntitlementActionError(
+        f"entitlement {entitlement_id} is already matched — accept applies "
+        "only to items still in review",
+        status=409,
+    )
+
+
 async def match_entitlement(
     db,
     entitlement_id: int,
@@ -119,6 +149,7 @@ async def match_entitlement(
     series_id: int,
     commands=None,
     matched_via: str,
+    require_new: bool = False,
 ) -> SourceEntitlementRow:
     """Link an entitlement to an existing library series and accept it.
 
@@ -138,6 +169,17 @@ async def match_entitlement(
     the entitlement was already imported against a DIFFERENT series, that prior
     series' owned-via-edition fills are reverted so the re-match does not strand
     ownership pointing at the old collected edition (FRG-SRC-007).
+
+    ``require_new`` is the ACCEPT path's precondition (FRG-SRC-011), and it is
+    checked HERE — inside the write transaction that stamps ``matched`` —
+    because that is the only place it closes. The accept path validated the row
+    in an earlier session, so an ``ignore`` can commit in between; without an
+    in-transaction re-read that ignore is silently reversed (the row flips
+    ignored → matched) and :func:`_queue_grab`, seeing a legitimately
+    ``matched`` row, enqueues the source-grab the operator just withdrew. The
+    OPERATOR's explicit match action leaves it ``False``: choosing a series for
+    an already-decided row is a legitimate re-decision, and that is the action
+    the operator took.
     """
     from foragerr.library.models import SeriesRow
     from foragerr.sources.reconcile import revert_owned_via_edition_for_series
@@ -148,6 +190,10 @@ async def match_entitlement(
             raise EntitlementActionError(
                 f"entitlement {entitlement_id} not found", status=404
             )
+        if require_new:
+            refusal = _accept_precondition_error(entitlement_id, row.review_status)
+            if refusal is not None:
+                raise refusal
         if await session.get(SeriesRow, series_id) is None:
             raise EntitlementActionError(
                 f"series {series_id} does not exist", status=404
@@ -179,6 +225,7 @@ async def add_entitlement(
     root_folder_id: int | None = None,
     cv_volume_id: int | None = None,
     matched_via: str,
+    require_new: bool = False,
 ) -> SourceEntitlementRow:
     """Add a brand-new series for an entitlement via the normal add flow.
 
@@ -218,6 +265,13 @@ async def add_entitlement(
         raise EntitlementActionError(
             f"entitlement {entitlement_id} not found", status=404
         )
+    if require_new:
+        # Cheap pre-check so an accept of a withdrawn row never pays for an
+        # ``add_series`` (refresh + scan) it will then refuse to link. The
+        # AUTHORITATIVE check is the in-transaction one in ``match_entitlement``.
+        refusal = _accept_precondition_error(entitlement_id, row.review_status)
+        if refusal is not None:
+            raise refusal
     cvid = cv_volume_id if cv_volume_id is not None else _proposed_cv_id(row)
     if cvid is None:
         raise EntitlementActionError(
@@ -237,6 +291,7 @@ async def add_entitlement(
             series_id=existing_series_id,
             commands=commands,
             matched_via=matched_via,
+            require_new=require_new,
         )
 
     root_id = root_folder_id
@@ -282,6 +337,7 @@ async def add_entitlement(
                 series_id=raced_series_id,
                 commands=commands,
                 matched_via=matched_via,
+                require_new=require_new,
             )
         raise EntitlementActionError(
             f"add-series failed for volume {cvid}: {exc}", status=400
@@ -297,6 +353,7 @@ async def add_entitlement(
         series_title=result.series.title,
         commands=commands,
         matched_via=matched_via,
+        require_new=require_new,
     )
 
 
@@ -309,6 +366,7 @@ async def _resolve_as_match(
     series_title: str | None,
     commands=None,
     matched_via: str,
+    require_new: bool = False,
 ) -> SourceEntitlementRow:
     """Sweep sibling proposals for ``cv_volume_id`` then match the acting row.
 
@@ -336,6 +394,7 @@ async def _resolve_as_match(
         series_id=series_id,
         commands=commands,
         matched_via=matched_via,
+        require_new=require_new,
     )
 
 
@@ -347,6 +406,7 @@ async def _degrade_to_match(
     series_id: int,
     commands=None,
     matched_via: str,
+    require_new: bool = False,
 ) -> SourceEntitlementRow:
     """Resolve an add whose volume is already in the library as a match.
 
@@ -366,6 +426,7 @@ async def _degrade_to_match(
         series_title=series_title,
         commands=commands,
         matched_via=matched_via,
+        require_new=require_new,
     )
 
 
@@ -518,21 +579,50 @@ async def ignore_entitlement(db, entitlement_id: int) -> SourceEntitlementRow:
 
 
 async def restore_entitlement(
-    db, entitlement_id: int, *, cv_client=None
+    db, entitlement_id: int, *, cv_client=None, cv_configured: bool = False
 ) -> SourceEntitlementRow:
-    """Return an ignored item to ``new`` with its proposed match recomputed.
+    """Return an IGNORED item to ``new`` with its proposed match recomputed.
 
-    Recomputation is library-first (and CV-backed only when a ``cv_client`` is
-    supplied); a matched item that is restored drops its match target
-    (FRG-SRC-004 "restore returns the item to new with its proposed match
-    recomputed"). Idempotent.
+    **Ignored-only** (FRG-SRC-004). Restore is the inverse of ignore, and it is
+    destructive to everything else: it clears ``matched_series_id`` and
+    ``matched_via`` and overwrites the proposal. Applied to a ``matched`` row it
+    silently unmakes the operator's match (and, in a mixed bulk restore over a
+    selection that spans buckets, unmakes several at once); applied to a ``new``
+    row it throws away a proposal for no gain. So both are per-row errors and
+    nothing is written.
+
+    **ComicVine is consulted when it is available** (FRG-SRC-010). Restore is an
+    operator-initiated, one-row action, so the single CV call it costs is
+    affordable and correct — recomputing library-only would stamp a
+    ``library-fallback`` proposal on a CV-configured deployment, which the UI
+    then renders as a catalog verdict and which freezes the row out of the next
+    enrichment pass. Two shapes therefore leave the proposal NULL (un-proposed,
+    retryable — exactly the deferral semantics of FRG-META-016) instead:
+
+    * :class:`ComicVineBudgetExhausted` — the budget wall, caught here rather
+      than surfaced, because a restore is not a failure the operator can act on;
+    * a ``library-fallback`` proposal computed while ``cv_configured`` — the
+      belt to the brace above: on such a deployment a fallback can only mean a
+      CV call that should have happened did not.
+
+    ``cv_configured=False`` with ``cv_client=None`` is the genuinely
+    unconfigured deployment, where the library-only fallback IS the honest
+    answer and is persisted as such.
     """
     from foragerr.library import repo as library_repo
+    from foragerr.metadata.errors import ComicVineBudgetExhausted
+    from foragerr.sources.matching import UNIVERSE_COMICVINE
 
     row = await _reload(db, entitlement_id)
     if row is None:
         raise EntitlementActionError(
             f"entitlement {entitlement_id} not found", status=404
+        )
+    if row.review_status != "ignored":
+        raise EntitlementActionError(
+            f"entitlement {entitlement_id} is {row.review_status}, not ignored — "
+            "restore applies only to an ignored item",
+            status=409,
         )
     async with db.read_session() as session:
         series = await library_repo.list_series(session)
@@ -545,14 +635,41 @@ async def restore_entitlement(
         )
         for s in series
     ]
-    proposal = await compute_proposed_match(
-        human_name=row.human_name, library=library, cv_client=cv_client
-    )
+    try:
+        proposal = await compute_proposed_match(
+            human_name=row.human_name, library=library, cv_client=cv_client
+        )
+    except ComicVineBudgetExhausted as exc:
+        logger.info(
+            "sources.review: ComicVine budget exhausted restoring entitlement "
+            "%s (%s); leaving it un-proposed and retryable",
+            entitlement_id,
+            exc,
+        )
+        proposal = None
+    if (
+        proposal is not None
+        and cv_configured
+        and proposal.universe != UNIVERSE_COMICVINE
+    ):
+        logger.warning(
+            "sources.review: refusing to persist a %s proposal for entitlement "
+            "%s on a ComicVine-configured deployment; leaving it retryable",
+            proposal.universe,
+            entitlement_id,
+        )
+        proposal = None
     async with db.write_session() as session:
         fresh = await session.get(SourceEntitlementRow, entitlement_id)
         if fresh is None:
             raise EntitlementActionError(
                 f"entitlement {entitlement_id} not found", status=404
+            )
+        if fresh.review_status != "ignored":
+            raise EntitlementActionError(
+                f"entitlement {entitlement_id} is {fresh.review_status}, not "
+                "ignored — restore applies only to an ignored item",
+                status=409,
             )
         fresh.review_status = "new"
         fresh.matched_series_id = None
@@ -577,12 +694,20 @@ async def bulk_ignore(db, entitlement_ids: list[int]) -> BulkResult:
 
 
 async def bulk_restore(
-    db, entitlement_ids: list[int], *, cv_client=None
+    db, entitlement_ids: list[int], *, cv_client=None, cv_configured: bool = False
 ) -> BulkResult:
+    """Restore each ignored row in the selection (per-row errors, FRG-SRC-011).
+
+    A selection that spans review buckets — the natural result of "select all"
+    over a filtered list — reports the non-ignored rows as per-row errors and
+    leaves their state untouched, rather than stripping matched rows of their
+    match on the way past."""
     return await _bulk(
         db,
         entitlement_ids,
-        lambda eid: restore_entitlement(db, eid, cv_client=cv_client),
+        lambda eid: restore_entitlement(
+            db, eid, cv_client=cv_client, cv_configured=cv_configured
+        ),
     )
 
 
@@ -639,12 +764,27 @@ async def accept_entitlement(
     volume runs the add, whose FRG-SRC-008 sweep rewrites the siblings'
     proposals into library matches — so the siblings, re-read at their own turn,
     match into the new series instead of re-adding it.
+
+    **Only a row still in review (``new``) is acceptable** (FRG-SRC-011). Accept
+    applies a row's *proposal*, and a proposal is the automatic matcher's
+    suggestion for an undecided row — it is not a mandate over a decision the
+    operator already made. Without this, a bulk accept over a selection that
+    happens to include ignored rows (a "select all in bundle" after some
+    ignores, a stale selection) silently reversed those ignores: the row flipped
+    ignored → matched and its source-grab was enqueued, downloading exactly the
+    item the operator had withdrawn. Both refusals are per-ROW
+    (:func:`_accept_precondition_error`), so the rest of the batch still runs,
+    and the authoritative re-read happens inside the write transaction
+    (``require_new=True``) so a concurrent ignore cannot slip through the gap.
     """
     row = await _reload(db, entitlement_id)
     if row is None:
         raise EntitlementActionError(
             f"entitlement {entitlement_id} not found", status=404
         )
+    refusal = _accept_precondition_error(entitlement_id, row.review_status)
+    if refusal is not None:
+        raise refusal
     series_id = _proposed_series_id(row)
     if series_id is not None:
         return await match_entitlement(
@@ -653,6 +793,7 @@ async def accept_entitlement(
             series_id=series_id,
             commands=commands,
             matched_via=matched_via,
+            require_new=True,
         )
     cvid = _proposed_cv_id(row)
     if cvid is not None:
@@ -665,6 +806,7 @@ async def accept_entitlement(
             root_folder_id=root_folder_id,
             cv_volume_id=cvid,
             matched_via=matched_via,
+            require_new=True,
         )
     raise EntitlementActionError(
         f"entitlement {entitlement_id} has no proposed match to accept — "
@@ -768,10 +910,20 @@ async def _reresolve_sibling_proposals(
 
     Runs as ONE write transaction, so the whole sibling set moves together.
     Returns the number of rows rewritten.
+
+    **The volume filter is pushed into SQL** (``json_extract`` on the stored
+    proposal). Selecting every ``new`` row with a proposal and filtering in
+    Python meant the sweep loaded and JSON-parsed the entire review queue for
+    each accept — measured at 19.7 ms per add against 1,300 rows, INSIDE the
+    writer lock, so a 500-row bulk accept spent ~10 s serializing every other
+    writer behind it. The predicate is exact (the same key the Python filter
+    read), so the row set is unchanged; ``json_extract`` is available on every
+    SQLite build we ship against, and the residual Python check below stays as
+    the correctness guard.
     """
     import json
 
-    from sqlalchemy import select
+    from sqlalchemy import func, select
 
     rewritten = 0
     async with db.write_session() as session:
@@ -782,6 +934,11 @@ async def _reresolve_sibling_proposals(
                         SourceEntitlementRow.review_status == "new",
                         SourceEntitlementRow.id != exclude_entitlement_id,
                         SourceEntitlementRow.proposed_match_json.is_not(None),
+                        func.json_extract(
+                            SourceEntitlementRow.proposed_match_json,
+                            "$.cv_volume_id",
+                        )
+                        == cv_volume_id,
                     )
                 )
             )
@@ -846,8 +1003,15 @@ def _proposed_series_id(row: SourceEntitlementRow) -> int | None:
     The JSON is authoritative (the FRG-SRC-008 sweep rewrites ``kind`` and
     ``series_id`` together); the denormalized ``proposed_series_id`` column is
     the fallback for a row whose JSON is absent or unparseable. ``None`` for a
-    ComicVine-kind proposal — that one is an add, not a match."""
+    ComicVine-kind proposal — that one is an add, not a match — and ``None`` for
+    a VERDICT marker (FRG-SRC-010): "we looked, there is nothing plausible" is a
+    parsed, authoritative answer, so falling through to the denormalized column
+    would resurrect a stale series id the marker deliberately replaced and
+    accept the row against it. Fail-open on a row whose whole point is that
+    there is nothing to accept."""
     data = _loads_proposal(row.proposed_match_json)
+    if data is not None and data.get("verdict"):
+        return None
     if data is not None and data.get("kind") == "library":
         series_id = data.get("series_id")
         if isinstance(series_id, int):

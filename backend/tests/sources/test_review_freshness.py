@@ -393,6 +393,82 @@ async def test_sweep_leaves_matched_and_ignored_rows_untouched(
     assert still_ignored.proposed_series_id is None
 
 
+@pytest.mark.req("FRG-SRC-011")
+async def test_sweep_selects_only_the_matching_volume_in_sql(
+    db, config_dir, root_folder_id, format_profile_id
+):
+    """The sweep's volume filter is a SQL predicate, not a Python pass.
+
+    It used to ``SELECT`` every ``new`` row with a proposal and JSON-parse the
+    lot per accept — 19.7 ms per add at 1,300 rows, INSIDE the writer lock, so a
+    500-row bulk accept spent ~10 s serializing every other writer behind it.
+    This pins the behaviour the pushdown must preserve: rows proposing a
+    DIFFERENT volume are untouched, and rows proposing THIS one are rewritten —
+    the selected set is identical, only the cost changed.
+    """
+    source = await _synced_source(db, config_dir)
+    settings = flows_settings(config_dir)
+    factory = build_factory(
+        settings, FakeCV().volume(992, name="Synthetic Hero").handler()
+    )
+    comics = await repo.list_entitlements(db, source.id, classification="comic")
+    acting, sibling, stranger = comics[0], comics[1], comics[2]
+    await _set_proposal(db, acting.id, _cv_proposal(992))
+    await _set_proposal(db, sibling.id, _cv_proposal(992))
+    await _set_proposal(db, stranger.id, _cv_proposal(8888))  # another volume
+    stranger_before = (await repo.get_entitlement(db, stranger.id)).proposed_match_json
+
+    added = await review.add_entitlement(
+        db, settings, acting.id, commands=FakeCommands(), factory=factory,
+        matched_via=MATCHED_VIA_OPERATOR,
+    )
+
+    swept = await repo.get_entitlement(db, sibling.id)
+    assert json.loads(swept.proposed_match_json)["series_id"] == (
+        added.matched_series_id
+    )
+    untouched = await repo.get_entitlement(db, stranger.id)
+    assert untouched.proposed_match_json == stranger_before
+    assert untouched.proposed_series_id is None
+
+
+@pytest.mark.req("FRG-SRC-011")
+async def test_sweep_ignores_a_verdict_marker_row(
+    db, config_dir, root_folder_id, format_profile_id
+):
+    """A no-plausible-match marker carries no ``cv_volume_id``, so the SQL
+    predicate's ``json_extract`` yields NULL and the row is excluded — the same
+    outcome the Python filter produced, proven rather than assumed (a NULL
+    comparison must not accidentally match)."""
+    source = await _synced_source(db, config_dir)
+    settings = flows_settings(config_dir)
+    factory = build_factory(
+        settings, FakeCV().volume(993, name="Synthetic Hero").handler()
+    )
+    comics = await repo.list_entitlements(db, source.id, classification="comic")
+    acting, marked = comics[0], comics[1]
+    await _set_proposal(db, acting.id, _cv_proposal(993))
+    marker = json.dumps(
+        {
+            "verdict": "no-plausible-match",
+            "universe": "comicvine",
+            "candidates": [],
+            "auto": False,
+        },
+        sort_keys=True,
+    )
+    await _set_proposal(db, marked.id, marker)
+
+    await review.add_entitlement(
+        db, settings, acting.id, commands=FakeCommands(), factory=factory,
+        matched_via=MATCHED_VIA_OPERATOR,
+    )
+
+    after = await repo.get_entitlement(db, marked.id)
+    assert after.proposed_match_json == marker
+    assert after.proposed_series_id is None
+
+
 # --- FRG-SRC-009: retry ------------------------------------------------------
 
 

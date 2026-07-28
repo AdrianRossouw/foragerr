@@ -67,8 +67,12 @@ async def _load_library(db) -> list[LibrarySeriesLite]:
     ]
 
 
-def _build_cv_client(settings):
-    """A live ComicVine client when an api key is configured, else ``None``."""
+def build_cv_client(settings):
+    """A live ComicVine client when an api key is configured, else ``None``.
+
+    Public because the operator-initiated restore endpoints need the same
+    "is ComicVine available to this deployment at all?" answer, and a second
+    copy of the key check would be a second place to get it wrong."""
     try:
         key = settings.comicvine_api_key.get_secret_value()
     except Exception:  # noqa: BLE001 — a missing/odd key means "no CV"
@@ -98,7 +102,7 @@ async def enrich_source(db, settings, source, *, commands=None, cv_client=None) 
 
     owns_client = cv_client is None
     if cv_client is None:
-        cv_client = _build_cv_client(settings)
+        cv_client = build_cv_client(settings)
     # Captured before the ``finally`` closes/clears the client: was ComicVine
     # available to THIS run at all? It decides whether a ``library-fallback``
     # proposal is the honest no-key degradation or a stand-in for a CV call that
@@ -200,11 +204,23 @@ async def _auto_accept(
     ("Vol. N" → issue N) is withheld from them — a bare ``Vol. N`` store title
     clears the auto-match threshold easily, and that must not become a no-human
     route into an ordinal-derived issue mapping.
+
+    **The review state is re-read per row, inside the loop.** ``proposals`` is a
+    snapshot taken before the (potentially long) persist + accept run, and the
+    operator is looking at the same queue: a row ignored or matched by hand
+    while the loop is working is a decision, and auto-sync must not walk over it
+    with a proposal computed before that decision existed. ``accept_entitlement``
+    is not the seam here — auto-sync calls match/add directly — so the check
+    lives here; the authoritative in-transaction guard remains ``_queue_grab``'s
+    ``matched`` re-read.
     """
     accepted = 0
     for eid, proposal in proposals.items():
         if proposal.best is None:
             continue
+        current = await repo.get_entitlement(db, eid)
+        if current is None or current.review_status != "new":
+            continue  # decided by the operator mid-run — never overwrite it
         if cv_configured and proposal.universe != UNIVERSE_COMICVINE:
             logger.warning(
                 "auto-sync: refusing entitlement %s — %s proposal on a "
@@ -241,4 +257,4 @@ async def _auto_accept(
     return accepted
 
 
-__all__ = ["enrich_source"]
+__all__ = ["build_cv_client", "enrich_source"]

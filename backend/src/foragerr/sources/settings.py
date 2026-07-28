@@ -67,12 +67,26 @@ class HumbleSettings(BaseModel):
     @field_validator("publisher_rules")
     @classmethod
     def _clean_publisher_rules(cls, value: list[str]) -> list[str]:
-        """Trim, drop blanks, de-duplicate (case-insensitively), and bound the
-        list — the rule list is operator-typed free text (FRG-SRC-012).
+        """Trim, drop blanks, de-duplicate, and bound the list — the rule list
+        is operator-typed free text (FRG-SRC-012).
 
         Order is preserved so the settings screen renders what was entered;
         de-duplication keeps the first spelling of a repeated publisher.
+
+        **De-duplication uses the same fold the classifier matches on**
+        (:func:`~foragerr.parser.normalize.matching_key`, FRG-IMP-005). It used
+        to use ``str.casefold``, which is a STRICTLY narrower equivalence than
+        the classifier's: ``"Modiphius Entertainment"`` and ``"Modiphius
+        Entertainment."`` survived as two stored rules that then matched the
+        same publisher, so the stored list disagreed with its own effect — the
+        settings screen showed a duplicate the operator could not distinguish,
+        and removing one of them changed nothing. One fold, one rule identity.
+        (A rule that folds to nothing — punctuation only — keeps its casefolded
+        spelling as the dedupe key, since it can never match a publisher and
+        must not collapse with every other such entry.)
         """
+        from foragerr.parser.normalize import matching_key
+
         cleaned: list[str] = []
         seen: set[str] = set()
         for raw in value:
@@ -84,7 +98,7 @@ class HumbleSettings(BaseModel):
                     "a publisher rule must be at most "
                     f"{MAX_PUBLISHER_RULE_LENGTH} characters"
                 )
-            key = rule.casefold()
+            key = matching_key(rule) or rule.casefold()
             if key in seen:
                 continue
             seen.add(key)

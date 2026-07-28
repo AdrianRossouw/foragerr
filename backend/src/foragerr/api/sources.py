@@ -20,6 +20,7 @@ else built from settings — the same seam ``api.indexers`` uses.
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -39,6 +40,7 @@ from foragerr.sources.registry import (
 )
 from foragerr.sources.models import SourceEntitlementRow
 from foragerr.sources.repo import (
+    SourceSettingsUnavailable,
     delete_source,
     get_entitlement,
     get_source,
@@ -47,7 +49,7 @@ from foragerr.sources.repo import (
     load_source_settings,
     public_settings,
     set_auto_sync,
-    update_source_settings,
+    update_publisher_rules,
 )
 from foragerr.sources.review import (
     EntitlementActionError,
@@ -283,7 +285,7 @@ async def update_source_endpoint(
     if row is None:
         raise ApiError(404, f"source {source_id} not found")
     if body.publisher_rules is not None:
-        row = await _write_publisher_rules(db, row, body.publisher_rules)
+        row = await _write_publisher_rules(db, source_id, body.publisher_rules)
     if body.auto_sync is not None:
         row = await set_auto_sync(db, source_id, body.auto_sync)
         if row is None:
@@ -295,42 +297,31 @@ async def update_source_endpoint(
     return SourceResource.from_row(row, model)
 
 
-async def _write_publisher_rules(db, row: SourceRow, rules: list[str]) -> SourceRow:
-    """Replace a source's publisher rules inside its settings envelope
-    (FRG-SRC-012).
+async def _write_publisher_rules(db, source_id: int, rules: list[str]) -> SourceRow:
+    """Replace a source's publisher rules (FRG-SRC-012) — HTTP mapping only.
 
-    Re-validates the whole settings model (so the list is trimmed, de-duplicated
-    and bounded by the settings contract, and the cookie survives untouched) and
-    re-serializes it through the same keystore-aware writer the reconnect path
-    uses — the secret is decrypted and re-encrypted, never echoed.
-
-    A source with no loadable settings (disconnected — its credential was
-    deliberately deleted) has no envelope to write into, so this is a 409 rather
-    than a silent no-op or a settings row minted without a cookie."""
+    The read-modify-write itself belongs to
+    :func:`foragerr.sources.repo.update_publisher_rules`, which performs it as a
+    single write transaction that never touches ``connection_state``; doing it
+    here, across three transactions and echoing back a stale connection state,
+    is what let a concurrent ``disconnect`` be silently reversed (credential and
+    all). This function now only translates that call's outcomes into the
+    surface's error shapes: unknown id → 404, no settings envelope to write into
+    (a disconnected source) → 409, a rule list the contract rejects → the
+    uniform field-precise 400."""
     try:
-        model = load_source_settings(row.type, row.settings)
-    except Exception as exc:  # noqa: BLE001 — a blank/disconnected row has none
+        written = await update_publisher_rules(db, source_id, rules)
+    except SourceSettingsUnavailable as exc:
         raise ApiError(
             409,
-            f"source {row.id} has no stored settings to update — reconnect it "
-            "before editing its publisher rules",
+            f"source {source_id} has no stored settings to update — reconnect "
+            "it before editing its publisher rules",
             field="publisher_rules",
         ) from exc
-    try:
-        updated = validate_settings(
-            row.type,
-            {
-                **model.model_dump(),
-                "publisher_rules": rules,
-            },
-        )
     except ValidationError as exc:
         raise _validation_error(exc) from exc
-    written = await update_source_settings(
-        db, row.id, settings=updated, connection_state=row.connection_state
-    )
     if written is None:
-        raise ApiError(404, f"source {row.id} not found")
+        raise ApiError(404, f"source {source_id} not found")
     return written
 
 
@@ -410,8 +401,16 @@ class EntitlementResource(BaseModel):
     #: (``matching_key(query_term(human_name))``) — the key the review screen
     #: collapses same-title rows by (FRG-SRC-011 / FRG-UI-029). Computed here,
     #: server-side, from the one folding implementation (FRG-IMP-005) so the UI
-    #: never re-derives a second, drifting fold. Empty string when the title
-    #: folds to nothing.
+    #: never re-derives a second, drifting fold.
+    #:
+    #: **The empty string is the "ungroupable" signal, deliberately, and it is
+    #: NOT nullable.** A title that folds to nothing (punctuation/symbols only)
+    #: must never collapse with another such title — they share no evidence of
+    #: being the same series — and the client already implements exactly that
+    #: rule as "``''`` never groups". Emitting ``null`` instead would re-key the
+    #: rule off absence and change the wire type for no behavioural gain, so the
+    #: string stays and the invariant is pinned by a test rather than by a
+    #: convention. It is always a ``str``: never ``None``, never omitted.
     group_key: str
     classification: str
     review_status: str
@@ -578,10 +577,23 @@ async def ignore_entitlement_endpoint(
 async def restore_entitlement_endpoint(
     entitlement_id: int, request: Request
 ) -> EntitlementResource:
-    """Restore an ignored entitlement to ``new`` with a recomputed proposal."""
-    return await _run_action(
-        request, lambda db, commands: restore_entitlement(db, entitlement_id)
-    )
+    """Restore an ignored entitlement to ``new`` with a recomputed proposal.
+
+    The recomputation is ComicVine-backed when a key is configured
+    (FRG-SRC-010): restore is operator-initiated and single-row, so it costs one
+    CV call, and without it the row was stamped with a ``library-fallback``
+    proposal that the review screen renders as a catalog verdict. Ignored-only
+    — any other review state is a 409."""
+    async with _operator_cv_client(request) as (cv_client, cv_configured):
+        return await _run_action(
+            request,
+            lambda db, commands: restore_entitlement(
+                db,
+                entitlement_id,
+                cv_client=cv_client,
+                cv_configured=cv_configured,
+            ),
+        )
 
 
 @router.post(
@@ -620,7 +632,13 @@ async def bulk_entitlements_endpoint(
     if body.action == "ignore":
         result = await bulk_ignore(db, body.entitlement_ids)
     elif body.action == "restore":
-        result = await bulk_restore(db, body.entitlement_ids)
+        async with _operator_cv_client(request) as (cv_client, cv_configured):
+            result = await bulk_restore(
+                db,
+                body.entitlement_ids,
+                cv_client=cv_client,
+                cv_configured=cv_configured,
+            )
     elif body.action == "match":
         if body.series_id is None:
             raise ApiError(422, "match requires series_id", field="series_id")
@@ -647,6 +665,26 @@ async def bulk_entitlements_endpoint(
             field="action",
         )
     return {"applied": result.applied, "skipped": result.skipped, "errors": result.errors}
+
+
+@asynccontextmanager
+async def _operator_cv_client(request: Request):
+    """A ComicVine client for one operator-initiated action, always closed.
+
+    Yields ``(client, configured)``. ``client`` is ``None`` on a deployment with
+    no ComicVine key, and ``configured`` says so explicitly — the two are the
+    same fact today, but the restore path needs the DISTINCTION to refuse
+    persisting a library-fallback proposal on a keyed deployment (FRG-SRC-010),
+    so it is passed rather than re-derived. One client is shared across a bulk
+    restore so the batch honours a single budget/politeness envelope."""
+    from foragerr.sources.enrich import build_cv_client
+
+    client = build_cv_client(request.app.state.settings)
+    try:
+        yield client, client is not None
+    finally:
+        if client is not None:
+            await client.aclose()
 
 
 async def _run_action(request: Request, action) -> EntitlementResource:

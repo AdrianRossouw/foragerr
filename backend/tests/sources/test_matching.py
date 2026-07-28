@@ -21,6 +21,7 @@ import pytest
 from foragerr.metadata.errors import ComicVineBudgetExhausted, ComicVineError
 from foragerr.sources.matching import (
     AUTO_MATCH_THRESHOLD,
+    MAX_CONTAINMENT_CONFIDENCE,
     PROPOSE_MIN_SIMILARITY,
     UNIVERSE_COMICVINE,
     UNIVERSE_LIBRARY_FALLBACK,
@@ -29,6 +30,9 @@ from foragerr.sources.matching import (
     compute_proposed_match,
     query_term,
     shares_token,
+    stripped_key,
+    title_confidence,
+    trade_shape,
 )
 
 
@@ -95,6 +99,176 @@ def test_query_term_strips_issue_and_parenthetical():
     assert (
         query_term("Synthetic Hero Vol. 1 (collects #1-6)") == "Synthetic Hero Vol. 1"
     )
+
+
+@pytest.mark.req("FRG-SRC-011")
+def test_query_term_reapplies_the_parenthetical_strip_after_the_issue_strip():
+    """The print-year form "Spawn (1992) #1": the parenthetical is not TRAILING
+    until the issue token is gone, so a single pass left "Spawn (1992)".
+
+    That mattered beyond similarity: ``group_key`` is
+    ``matching_key(query_term(...))``, so every year-stamped row folded to its
+    own key ("spawn 1992") and the 145-row Spawn collapse group fragmented by
+    print year. The trims now alternate until the term stops shrinking.
+    """
+    from foragerr.parser.normalize import matching_key
+
+    assert query_term("Spawn (1992) #1") == "Spawn"
+    assert query_term("Spawn (1992) #274") == "Spawn"
+    assert query_term("Spawn #5") == "Spawn"
+    # The group-key consequence: all three rows collapse into one group.
+    keys = {
+        matching_key(query_term(t))
+        for t in ("Spawn (1992) #1", "Spawn (1992) #274", "Spawn #5")
+    }
+    assert keys == {"spawn"}
+
+
+# --- strip-then-score primitives --------------------------------------------
+
+
+@pytest.mark.req("FRG-SRC-010")
+def test_stripped_key_removes_edition_boilerplate_only():
+    """Designators, bare ordinals and the shared collected-edition cues go; the
+    substantive title words stay."""
+    assert stripped_key("Saga Volume 1") == "saga"
+    assert stripped_key("Saga Vol. 3") == "saga"
+    assert stripped_key("Monstress Book One") == "monstress"
+    assert stripped_key("Synthetic Hero TPB") == "synthetic hero"
+    assert stripped_key("Bone Hardcover") == "bone"
+    assert stripped_key("Hellboy Omnibus Volume 1: Seed of Destruction") == (
+        "hellboy seed of destruction"
+    )
+    # Nothing substantive is lost from a plain title.
+    assert stripped_key("Something is Killing the Children") == (
+        "something is killing children"
+    )
+
+
+@pytest.mark.req("FRG-SRC-010")
+def test_an_all_boilerplate_title_keeps_its_tokens_rather_than_vanishing():
+    """"Volume 1" strips to nothing; it keeps its folded tokens instead, the
+    same guard ``matching_key`` applies to an articles-only title. An empty
+    token set would gate-match nothing at all (or, symmetrically, everything)."""
+    assert stripped_key("Volume 1") == "volume 1"
+    assert stripped_key("52") == "52"
+
+
+@pytest.mark.req("FRG-SRC-010")
+def test_the_trade_shape_designators_are_a_subset_of_what_the_strip_removes():
+    """One vocabulary, one source: anything the shape detector treats as a
+    volume/book designator must be boilerplate the strip removes, or the two
+    would disagree about what the store title says."""
+    from foragerr.sources.matching import (
+        STRIP_DESIGNATORS,
+        VOLUME_SHAPE_DESIGNATORS,
+    )
+
+    assert VOLUME_SHAPE_DESIGNATORS <= STRIP_DESIGNATORS
+    assert VOLUME_SHAPE_DESIGNATORS  # ...and it is not vacuously empty
+
+
+@pytest.mark.req("FRG-SRC-010")
+def test_boilerplate_alone_never_opens_the_gate():
+    """"Saga Vol. 1" vs "Batman Vol. 1" share ``vol`` and ``1`` on the raw fold.
+    Post-strip they share nothing, so the gate — not the floor — refuses them."""
+    assert not shares_token("Saga Vol. 1", "Batman Vol. 1")
+    assert not shares_token("The Boys Vol. 1", "The Bots Vol. 1")
+    # ...while a real shared word still opens it.
+    assert shares_token("Saga Vol. 1", "Saga")
+
+
+@pytest.mark.req("FRG-SRC-010")
+async def test_boilerplate_overlap_neither_admits_nor_auto_accepts():
+    """The two halves of the FRG-SRC-010 "boilerplate is not identity evidence"
+    scenario, on the two verified repro pairs.
+
+    "The Boys Vol. 1" vs "The Bots Vol. 1" scored 0.90 — over the auto-accept
+    bar — off two shared boilerplate tokens and a single letter's difference.
+    """
+    boys = _FakeCV(candidates=[_cand(3001, "The Bots", 2010)])
+    proposal = await compute_proposed_match(
+        human_name="The Boys Vol. 1", library=[], cv_client=boys
+    )
+    # Not merely below the bar: nothing substantive is shared, so it is gated.
+    _assert_no_plausible_match(proposal, universe=UNIVERSE_COMICVINE)
+    assert title_confidence("The Boys Vol. 1", "The Bots Vol. 1") < (
+        AUTO_MATCH_THRESHOLD
+    )
+
+    saga = _FakeCV(candidates=[_cand(4000, "Batman", 1940)])
+    proposal = await compute_proposed_match(
+        human_name="Saga Vol. 1", library=[], cv_client=saga
+    )
+    _assert_no_plausible_match(proposal, universe=UNIVERSE_COMICVINE)
+
+
+@pytest.mark.req("FRG-SRC-010")
+async def test_decorated_store_title_no_longer_floors_out_the_exact_volume():
+    """The verified inversion (finding: "Saga Volume 1" floored its own answer).
+
+    Raw scoring gave ComicVine's exact "Saga" 0.4706 — under the 0.5 floor —
+    while the UNRELATED "Saga of the Swamp Thing" survived at 0.50, purely
+    because the decorated query is long and the right title is short. Stripped,
+    the exact volume scores 1.0 and the stranger is floored.
+    """
+    cv = _FakeCV(
+        candidates=[
+            _cand(18975, "Saga", 2012),
+            _cand(2001, "Saga of the Swamp Thing", 1982),
+        ]
+    )
+    proposal = await compute_proposed_match(
+        human_name="Saga Volume 1", library=[], cv_client=cv
+    )
+    assert proposal is not None
+    assert proposal.best.cv_volume_id == 18975
+    assert proposal.best.confidence == pytest.approx(1.0)
+    assert 2001 not in {c.cv_volume_id for c in proposal.candidates}
+
+
+@pytest.mark.req("FRG-SRC-010")
+async def test_containment_keeps_the_exact_titled_volume_proposable():
+    """FRG-SRC-010's "exact-titled volume survives a decorated store title".
+
+    "Hellboy" scores 0.4375 against the stripped "hellboy seed of destruction"
+    — length-asymmetric similarity buries it under the floor. Containment of
+    the stripped canonical title inside the stripped query rescues it.
+    """
+    cv = _FakeCV(candidates=[_cand(10000, "Hellboy", 1994)])
+    proposal = await compute_proposed_match(
+        human_name="Hellboy Omnibus Volume 1: Seed of Destruction",
+        library=[],
+        cv_client=cv,
+    )
+    assert proposal is not None
+    assert proposal.best.cv_volume_id == 10000
+    assert proposal.best.confidence >= PROPOSE_MIN_SIMILARITY
+
+
+@pytest.mark.req("FRG-SRC-010")
+async def test_a_containment_rescue_proposes_but_never_auto_accepts():
+    """Containment proves the store title DECORATES the candidate, which is
+    plausibility, not identity — "Batman" is contained in "Batman and Robin"
+    too. So a rescue is capped below the auto-accept bar, and an exact stripped
+    equality (1.0) always outranks it."""
+    assert MAX_CONTAINMENT_CONFIDENCE < AUTO_MATCH_THRESHOLD
+    cv = _FakeCV(
+        candidates=[
+            _cand(2740, "The Sandman", 1989),
+            _cand(44567, "The Sandman: Overture", 2013),
+        ]
+    )
+    proposal = await compute_proposed_match(
+        human_name="The Sandman: Overture", library=[], cv_client=cv
+    )
+    assert proposal is not None
+    # The exact title wins outright; the contained parent is offered, capped.
+    assert proposal.best.cv_volume_id == 44567
+    assert proposal.best.confidence == pytest.approx(1.0)
+    rescued = next(c for c in proposal.candidates if c.cv_volume_id == 2740)
+    assert rescued.confidence == pytest.approx(MAX_CONTAINMENT_CONFIDENCE)
+    assert rescued.confidence < AUTO_MATCH_THRESHOLD
 
 
 @pytest.mark.req("FRG-SRC-010")
@@ -264,9 +438,16 @@ async def test_local_rename_cannot_win_the_gate_for_an_unrelated_volume():
 
 @pytest.mark.req("FRG-SRC-010")
 async def test_trade_shaped_title_prefers_the_collected_edition():
-    """Raw similarity favours the singles line (0.9091 vs 0.8571); the shared
-    collected-edition cue vocabulary flips the order. The singles line is still
-    listed — a re-rank, never a filter."""
+    """The shared collected-edition cue vocabulary decides the order. The
+    singles line is still listed — a re-rank, never a filter.
+
+    UPDATED for the stripped-scoring gate finding (spec amendment b2dbffc):
+    both candidates now score 1.0, not 0.9091/0.8571, because the edition
+    boilerplate they differ by (``vol 1`` / ``tpb``) is stripped before scoring
+    — it was never identity evidence. The re-rank is what separates them, which
+    is exactly the division of labour the design intended: similarity answers
+    "same series?", the cue answers "which edition?".
+    """
     cv = _FakeCV(
         candidates=[
             _cand(11, "Synthetic Hero Vol 1", 2018),  # singles line
@@ -281,15 +462,30 @@ async def test_trade_shaped_title_prefers_the_collected_edition():
     assert proposal is not None
     assert proposal.best.cv_volume_id == 22
     assert [c.cv_volume_id for c in proposal.candidates] == [22, 11]
-    # The re-rank is ordering-only: the reported confidence stays the raw
-    # similarity, so the boost can never lift a candidate over the auto bar.
-    assert proposal.best.confidence == pytest.approx(0.8571, abs=1e-4)
+    # The re-rank is ordering-only: the reported confidence is still the plain
+    # stripped similarity, unmultiplied by TRADE_RERANK_BOOST.
+    assert proposal.best.confidence == pytest.approx(1.0)
 
 
 @pytest.mark.req("FRG-SRC-010")
-async def test_singles_shaped_title_keeps_plain_similarity_order():
-    """The control for the test above: with no cue in the store title the same
-    two candidates rank on similarity alone."""
+async def test_volume_ordinal_store_title_is_trade_shaped():
+    """A bare "Vol 1" is a trade shape too (spec amendment b2dbffc).
+
+    REPLACES the old "singles-shaped control" reading of this title. Cue-only
+    detection returned ``None`` for "Saga Vol. 1" / "Monstress Book One" /
+    "Hellboy Omnibus Vol. 1" — i.e. for how store fronts actually name collected
+    editions — so the trade re-rank never fired on the purchases it exists for.
+    FRG-SRC-010 now counts a volume/book-ordinal shape as trade-shaped, and the
+    collected candidate wins here as it does for the explicit-cue title above.
+    """
+    assert trade_shape("Synthetic Hero Vol 1") is not None
+    assert trade_shape("Saga Vol. 1") is not None
+    assert trade_shape("Monstress Book One") is not None
+    assert trade_shape("Hellboy Omnibus Volume 1") is not None
+    # ...but a SINGLE-issue designator is not a collection slice, so it must not
+    # re-rank collected editions to the top.
+    assert trade_shape("Synthetic Hero Issue 5") is None
+    assert trade_shape("Synthetic Hero Chapter 3") is None
     cv = _FakeCV(
         candidates=[
             _cand(11, "Synthetic Hero Vol 1", 2018),
@@ -302,7 +498,53 @@ async def test_singles_shaped_title_keeps_plain_similarity_order():
         cv_client=cv,
     )
     assert proposal is not None
+    assert proposal.best.cv_volume_id == 22
+
+
+@pytest.mark.req("FRG-SRC-010")
+async def test_singles_shaped_title_keeps_plain_similarity_order():
+    """The control: a title with NEITHER a collected cue NOR a volume-ordinal
+    shape is not trade-shaped, so the same two candidates rank on similarity
+    alone and the boost never fires."""
+    assert trade_shape("Synthetic Hero #1") is None
+    cv = _FakeCV(
+        candidates=[
+            _cand(11, "Synthetic Hero Vol 1", 2018),
+            _cand(22, "Synthetic Hero TPB", 2020),
+        ]
+    )
+    proposal = await compute_proposed_match(
+        human_name="Synthetic Hero #1",
+        library=[],
+        cv_client=cv,
+    )
+    assert proposal is not None
     assert proposal.best.cv_volume_id == 11
+
+
+@pytest.mark.req("FRG-SRC-010")
+async def test_trade_rerank_cannot_resurrect_a_wrong_collected_edition():
+    """The "Bone Hardcover" probe: the re-rank must not prefer a merely
+    similar-but-different collected edition over the exact-titled series.
+
+    Under raw scoring "Bone Handbook Hardcover" scored 0.78 against "Bone"'s
+    0.50 and the 1.5625 boost window kept it in front. Stripped scoring closes
+    it honestly — "Bone Handbook" is not the query, it is neither contained in
+    it nor near it, so it never reaches the re-rank at all — which is why
+    TRADE_RERANK_BOOST stays at 1.25.
+    """
+    cv = _FakeCV(
+        candidates=[
+            _cand(5000, "Bone", 1991),
+            _cand(5001, "Bone Handbook Hardcover", 2010),
+        ]
+    )
+    proposal = await compute_proposed_match(
+        human_name="Bone Hardcover", library=[], cv_client=cv
+    )
+    assert proposal is not None
+    assert proposal.best.cv_volume_id == 5000
+    assert 5001 not in {c.cv_volume_id for c in proposal.candidates}
 
 
 @pytest.mark.req("FRG-SRC-010")
@@ -439,6 +681,126 @@ async def test_comicvine_answering_with_no_candidates_is_a_no_match_verdict():
     )
     assert cv.calls == 1
     _assert_no_plausible_match(proposal, universe=UNIVERSE_COMICVINE)
+
+
+# --- the realistic 12-title corpus ------------------------------------------
+
+#: Real-shape store titles from the adversarial gate review, each with the
+#: ComicVine candidate pool the query would plausibly return, and the volume
+#: that MUST be proposed. Every one of these is a shape the raw-fold scoring got
+#: wrong in at least one direction (decorated query floors the exact volume;
+#: boilerplate overlap admits a stranger; the singles line beats the collected
+#: edition), so the corpus is the regression net for the whole overhaul rather
+#: than a set of individual assertions.
+#:
+#: ``(store title, [(cv id, cv name, year), ...], expected cv id)``
+REALISTIC_CORPUS = [
+    # Decoration must not bury the exact-titled volume, and the near-namesake
+    # ("Saga of the Swamp Thing") must not survive in its place.
+    (
+        "Saga Volume 1",
+        [(18975, "Saga", 2012), (2001, "Saga of the Swamp Thing", 1982)],
+        18975,
+    ),
+    (
+        "Saga Vol. 3",
+        [(18975, "Saga", 2012), (2001, "Saga of the Swamp Thing", 1982)],
+        18975,
+    ),
+    # A subtitle plus a volume designator, against two same-word siblings.
+    (
+        "The Sandman Vol. 1: Preludes & Nocturnes",
+        [
+            (2740, "The Sandman", 1989),
+            (9999, "The Sandman Presents: Lucifer", 1999),
+            (8888, "Sandman Mystery Theatre", 1993),
+        ],
+        2740,
+    ),
+    # ...and the converse: a genuinely distinct sub-series is NOT the parent.
+    (
+        "The Sandman: Overture",
+        [(2740, "The Sandman", 1989), (44567, "The Sandman: Overture", 2013)],
+        44567,
+    ),
+    # Spelled-out ordinals are boilerplate too ("Book One").
+    (
+        "Monstress Book One",
+        [(89000, "Monstress", 2015), (89001, "Monstress: Talk-Stories", 2021)],
+        89000,
+    ),
+    (
+        "Monstress Volume 2: The Blood",
+        [(89000, "Monstress", 2015), (89001, "Monstress: Talk-Stories", 2021)],
+        89000,
+    ),
+    # The containment scenario from the spec, and its discriminating sibling.
+    (
+        "Hellboy Omnibus Volume 1: Seed of Destruction",
+        [(10000, "Hellboy", 1994), (10001, "Hellboy in Hell", 2012)],
+        10000,
+    ),
+    (
+        "Hellboy in Hell Volume 1",
+        [(10000, "Hellboy", 1994), (10001, "Hellboy in Hell", 2012)],
+        10001,
+    ),
+    # A zero-overlap stranger ("Fairest") sits in the pool and must be gated.
+    (
+        "Fables Vol. 1: Legends in Exile",
+        [
+            (4600, "Fables", 2002),
+            (4601, "Fairest", 2012),
+            (4602, "Fables: The Wolf Among Us", 2014),
+        ],
+        4600,
+    ),
+    # A named collected edition beats its own parent series.
+    (
+        "Fables: The Deluxe Edition Book One",
+        [(4600, "Fables", 2002), (4603, "Fables: The Deluxe Edition", 2009)],
+        4603,
+    ),
+    # The print-year form, which only resolves once ``query_term`` re-strips.
+    (
+        "Spawn (1992) #1",
+        [(2010, "Spawn", 1992), (2011, "Spawn: The Undead", 1999)],
+        2010,
+    ),
+    (
+        "Spawn Origins Collection Vol. 1",
+        [(2010, "Spawn", 1992), (2012, "Spawn Origins Collection", 2009)],
+        2012,
+    ),
+]
+
+
+@pytest.mark.req("FRG-SRC-010")
+@pytest.mark.parametrize(
+    ("human_name", "candidates", "expected_cv_id"),
+    REALISTIC_CORPUS,
+    ids=[row[0] for row in REALISTIC_CORPUS],
+)
+async def test_realistic_corpus_proposes_the_correct_volume(
+    human_name, candidates, expected_cv_id
+):
+    cv = _FakeCV(candidates=[_cand(*c) for c in candidates])
+    proposal = await compute_proposed_match(
+        human_name=human_name, library=[], cv_client=cv
+    )
+    assert proposal is not None, f"{human_name!r} produced no proposal at all"
+    assert proposal.best is not None, f"{human_name!r} got the no-match verdict"
+    assert proposal.best.cv_volume_id == expected_cv_id
+
+
+@pytest.mark.req("FRG-SRC-010")
+def test_realistic_corpus_covers_the_shapes_the_gate_flagged():
+    """A tripwire on the corpus itself: the six store shapes the adversarial
+    review sampled must all stay represented if this list is ever edited."""
+    titles = " | ".join(row[0] for row in REALISTIC_CORPUS)
+    for shape in ("Sandman", "Saga", "Monstress", "Hellboy", "Fables", "Spawn"):
+        assert shape in titles
+    assert len(REALISTIC_CORPUS) == 12
 
 
 @pytest.mark.req("FRG-SRC-010")

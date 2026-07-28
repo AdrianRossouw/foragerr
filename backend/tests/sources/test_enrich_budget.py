@@ -327,6 +327,78 @@ async def test_the_marker_is_never_auto_accepted(
     assert (await repo.get_entitlement(db, eid)).review_status == "new"
 
 
+@pytest.mark.req("FRG-SRC-004")
+async def test_auto_accept_skips_a_row_decided_while_the_run_was_working(
+    db, config_dir, root_folder_id, format_profile_id
+):
+    """``proposals`` is a snapshot taken before the persist + accept run, and
+    the operator is looking at the same queue. A row ignored (or matched) by
+    hand mid-run is a DECISION, and auto-sync must not walk over it with a
+    proposal computed before that decision existed — it would resurrect the row
+    to ``matched`` and enqueue the grab the operator just withdrew.
+
+    Simulated at the seam it actually races: ``_auto_accept`` is handed the
+    proposal map after the row has been decided, exactly as it would be if the
+    ignore had committed during the persist pass.
+    """
+    from foragerr.sources import review
+    from foragerr.sources.enrich import _auto_accept
+    from foragerr.sources.matching import MatchCandidate, ProposedMatch
+
+    source = await _source(db, auto_sync=True)
+    await _series(
+        db,
+        root_folder_id,
+        format_profile_id,
+        cvid=910,
+        title="Synthetic Hero",
+        path="/tmp/comics/sh910",
+    )
+    async with db.read_session() as session:
+        from sqlalchemy import select
+
+        from foragerr.library.models import SeriesRow
+
+        series_id = (
+            await session.execute(
+                select(SeriesRow.id).where(SeriesRow.cv_volume_id == 910)
+            )
+        ).scalar_one()
+    keep = await _new_comic(db, source.id, "Synthetic Hero #1", machine_name="keep")
+    withdrawn = await _new_comic(
+        db, source.id, "Synthetic Hero #2", machine_name="withdrawn"
+    )
+
+    confident = ProposedMatch(
+        best=MatchCandidate(
+            kind="library",
+            series_id=series_id,
+            cv_volume_id=910,
+            title="Synthetic Hero",
+            year=2018,
+            confidence=1.0,
+        )
+    )
+    # The operator ignores one of them while the enrichment run is in flight.
+    await review.ignore_entitlement(db, withdrawn)
+
+    commands = FakeCommands()
+    accepted = await _auto_accept(
+        db,
+        make_settings(config_dir),
+        {keep: confident, withdrawn: confident},
+        commands=commands,
+        cv_configured=True,
+    )
+
+    assert accepted == 1
+    assert (await repo.get_entitlement(db, keep)).review_status == "matched"
+    after = await repo.get_entitlement(db, withdrawn)
+    assert after.review_status == "ignored"
+    assert after.matched_series_id is None
+    assert {c[1]["entitlement_id"] for c in commands.grabs()} == {keep}
+
+
 @pytest.mark.req("FRG-SRC-010")
 async def test_the_marker_is_not_written_on_a_budget_hit(
     db, config_dir, root_folder_id, format_profile_id
