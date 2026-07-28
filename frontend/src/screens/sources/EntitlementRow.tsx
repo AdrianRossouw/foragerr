@@ -6,6 +6,7 @@ import {
   searchSeedTerm,
   type PickedCandidate,
 } from './EntitlementSearch';
+import { proposalState } from './proposal';
 import {
   useAddEntitlement,
   useEntitlementDetail,
@@ -39,7 +40,8 @@ function pct(confidence: number): string {
 /** The reconcile explanation + issue chips for one expanded entitlement. */
 function ReconcileDetail({ entitlement }: { entitlement: EntitlementResource }) {
   const { data, isLoading } = useEntitlementDetail(entitlement.id, true);
-  const proposal = entitlement.proposed_match;
+  const state = proposalState(entitlement);
+  const proposal = state.kind === 'candidate' ? state.candidate : null;
 
   let explain: string;
   if (entitlement.review_status === 'matched') {
@@ -51,6 +53,9 @@ function ReconcileDetail({ entitlement }: { entitlement: EntitlementResource }) 
     explain = `Proposed match: ${proposal.title ?? 'a library series'} (in your library, ${pct(proposal.confidence)} confidence). Match to link this edition to it.`;
   } else if (proposal?.kind === 'comicvine') {
     explain = `Proposed match: ${proposal.title ?? 'a new series'} (add from ComicVine, ${pct(proposal.confidence)} confidence). Add to create it and file this edition.`;
+  } else if (state.kind === 'not-computed') {
+    explain =
+      'Match not computed yet — it runs on the next sync. Pick a series to match, or ignore.';
   } else {
     explain = 'No confident match yet — pick a series to match, or ignore.';
   }
@@ -172,7 +177,11 @@ export function EntitlementRow({
     retry.isPending;
 
   const status = entitlement.review_status;
-  const proposal = entitlement.proposed_match;
+  // Three wire shapes, three different sentences (FRG-SRC-010): a candidate, a
+  // stored "we looked and nothing fit" verdict, and a not-yet-computed row. Only
+  // the first is an acceptable proposal; none of them is a dead end.
+  const state = proposalState(entitlement);
+  const proposal = state.kind === 'candidate' ? state.candidate : null;
 
   // Matched rows link to a real library series, whose collected-edition
   // booktype (FRG-SER-018) is the truer chip than the source file's format —
@@ -227,7 +236,9 @@ export function EntitlementRow({
       ? 'Change this match — search ComicVine for the right volume.'
       : proposal
         ? `Automatic proposal: ${proposal.title ?? 'a candidate'} (${pct(proposal.confidence)}). Search ComicVine if it is wrong.`
-        : 'No plausible automatic match — search ComicVine for the right volume.';
+        : state.kind === 'not-computed'
+          ? 'Match not computed yet — search ComicVine for the right volume.'
+          : 'No plausible automatic match — search ComicVine for the right volume.';
 
   let actions;
   if (status === 'ignored') {
@@ -291,12 +302,16 @@ export function EntitlementRow({
           </button>
         ) : (
           // No proposal is not a dead end — the verdict sits beside the search
-          // affordance, which is always there (FRG-UI-039).
+          // affordance, which is always there (FRG-UI-039). "Nothing fit" and
+          // "not looked at yet" are different facts, so they read differently.
           <span
             className={styles.noMatchNote}
             data-testid={`no-match-${entitlement.id}`}
+            data-verdict={state.kind}
           >
-            No plausible match
+            {state.kind === 'not-computed'
+              ? 'Match not computed yet'
+              : 'No plausible match'}
           </span>
         )}
         <button
@@ -376,6 +391,18 @@ export function EntitlementRow({
             ]
               .filter(Boolean)
               .join(' · ') || 'Humble purchase'}
+            {/* Bundle provenance (FRG-SRC-011), subtle: it is what "select
+                bundle" names, so the operator can see which bundle a row came
+                from without opening anything. */}
+            {entitlement.bundle_human_name && (
+              <span
+                className={styles.bundleName}
+                data-testid={`bundle-${entitlement.id}`}
+              >
+                {' · '}
+                {entitlement.bundle_human_name}
+              </span>
+            )}
           </div>
           {entitlement.download_state === 'failed' && (
             <div className={styles.failedNote}>

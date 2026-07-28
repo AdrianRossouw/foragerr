@@ -137,25 +137,45 @@ export function useReconnectSource(): UseMutationResult<
   });
 }
 
+export interface UpdateSourceInput {
+  sourceId: number;
+  /** Flip the auto-sync control (FRG-SRC-004). */
+  auto_sync?: boolean;
+  /**
+   * WHOLE-LIST replace of the source's publisher rules (FRG-SRC-012) — the
+   * editor sends the list it wants and `[]` clears them. Takes effect on the
+   * next sync, and only over rows the automatic classifier still owns.
+   */
+  publisher_rules?: string[];
+}
+
 /**
  * PATCH /api/v1/sources/{id} — change a source's mutable controls post-connect
- * (FRG-SRC-004). Today that is the `auto_sync` toggle: flipping it ON persists
- * the flag only and NEVER retroactively accepts existing entitlements (the
- * backend auto-accepts confident matches on a subsequent sync). On success we
- * sweep the whole sources family so the toggle and any dependent view re-derive.
+ * (FRG-SRC-004 / FRG-SRC-012). `auto_sync`: flipping it ON persists the flag
+ * only and NEVER retroactively accepts existing entitlements (the backend
+ * auto-accepts confident matches on a subsequent sync). `publisher_rules`: a
+ * whole-list replace inside the source's existing encrypted settings envelope —
+ * a source with no loadable settings (disconnected) answers 409 rather than
+ * minting an envelope. Only the fields supplied are sent, so a caller never
+ * silently rewrites the control it did not touch. On success we sweep the whole
+ * sources family so the toggle, the rules editor and any dependent view
+ * re-derive together.
  */
 export function useUpdateSource(): UseMutationResult<
   StoreSourceResource,
   Error,
-  { sourceId: number; auto_sync: boolean }
+  UpdateSourceInput
 > {
   const fetcher = useFetcher();
   const invalidate = useInvalidateSources();
   return useMutation({
-    mutationFn: ({ sourceId, auto_sync }) =>
+    mutationFn: ({ sourceId, auto_sync, publisher_rules }) =>
       fetcher<StoreSourceResource>(`/api/v1/sources/${sourceId}`, {
         method: 'PATCH',
-        body: { auto_sync },
+        body: {
+          ...(auto_sync !== undefined ? { auto_sync } : {}),
+          ...(publisher_rules !== undefined ? { publisher_rules } : {}),
+        },
       }),
     onSuccess: invalidate,
   });
@@ -314,19 +334,27 @@ export function useRetryDownload(): UseMutationResult<
 export interface BulkEntitlementResult {
   applied: number;
   skipped: number;
-  errors: string[];
+  /**
+   * PER-ROW failures, keyed by entitlement id (the backend's `dict[int, str]`,
+   * so the JSON keys are id strings). A bulk call is a 200 even with entries
+   * here: one un-acceptable row never vetoes the batch, it just reports itself.
+   */
+  errors: Record<string, string>;
 }
 
 /**
- * POST /sources/entitlements/bulk — one review action over several rows. Only
- * `ignore` and `restore` are id-only (the `match` action needs one shared
- * series_id, which cannot be right across heterogeneous rows — per-row Match /
- * Add stays row-scoped). Backs the bulk-select accept/ignore workflow at scale.
+ * POST /sources/entitlements/bulk — one review action over several rows.
+ * `ignore` / `restore` / `accept` are id-only; `accept` (FRG-SRC-011) applies
+ * EACH row's OWN stored proposal server-side in a per-row transaction, which is
+ * what makes "apply to a whole group/bundle" one request instead of the old
+ * client-side loop. (`match` is deliberately absent from this union: it needs
+ * one shared series_id, which cannot be right across heterogeneous rows —
+ * per-row Match / Add stays row-scoped.)
  */
 export function useBulkEntitlements(): UseMutationResult<
   BulkEntitlementResult,
   Error,
-  { action: 'ignore' | 'restore'; entitlementIds: number[] }
+  { action: 'ignore' | 'restore' | 'accept'; entitlementIds: number[] }
 > {
   const fetcher = useFetcher();
   const invalidate = useInvalidateSources();

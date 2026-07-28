@@ -98,10 +98,13 @@ Large accounts land thousands of items at once (the review list stays fast
 at that scale — it renders only what's on screen). Three tools keep the work
 proportional (`FRG-SRC-011`):
 
-- **Groups**: rows that are really the same title collapse into one
-  expandable group with a count — 145 mislabeled "SPAWN Vol. NNN" singles
-  read as one line, not 145. A group header shows mixed statuses when its
-  rows differ, and expanding always reaches every row's full actions.
+- **Groups**: three or more rows that are really the same title collapse
+  into one expandable group with a count — 145 mislabeled "SPAWN Vol. NNN"
+  singles read as one line, not 145. A group header shows mixed statuses
+  when its rows differ (including a failed-download callout), its checkbox
+  selects the whole group, a shift-range across a collapsed group includes
+  the rows folded inside it, and expanding always reaches every row's full
+  actions — collapse is presentation, never a filter.
 - **Bundles**: every row remembers which Humble bundle it came from, and
   the bulk bar can select a whole bundle at once — the natural unit for
   "this was an RPG bundle, ignore all of it".
@@ -118,9 +121,11 @@ can't always tell them apart. Each source has an operator-managed
 **publisher rules** list (`FRG-SRC-012`): items from a listed publisher are
 classified as Other at sync time. The list ships **empty** — a suggested
 starter list of common RPG publishers is one click away, but it only fills
-the editor; nothing applies until you save. Rule changes reclassify only
-items still awaiting review; anything you've already matched or ignored
-never moves, and Other items remain visible on demand as always.
+the editor; nothing applies until you save, and saved rules take effect on
+the **next sync**. Rule changes reclassify only items still awaiting
+review; anything you've already matched or ignored never moves, and Other
+items remain visible on demand as always. Editing rules needs a connected
+source (a disconnected source asks you to reconnect first).
 
 Proposals stay honest as your library changes underneath them (`FRG-SRC-008`).
 Humble bundles routinely contain many items from the same series, all

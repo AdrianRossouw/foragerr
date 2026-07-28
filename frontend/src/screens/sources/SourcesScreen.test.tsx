@@ -50,6 +50,12 @@ function ent(
     machine_name: `m-${o.id}`,
     human_name: `Item ${o.id}`,
     publisher: 'Image',
+    bundle_human_name: null,
+    // The SERVER computes group_key (matching_key(query_term(human_name))) —
+    // the fixture states it as a LITERAL per row rather than re-implementing
+    // the fold, which is the whole point of it being server-side. The default
+    // is unique per row, so a fixture only groups when it says so.
+    group_key: `item-${o.id}`,
     classification: 'comic',
     review_status: 'new',
     download_state: null,
@@ -77,6 +83,14 @@ interface FetcherState {
   reconnectError?: ApiRequestError;
   /** Error the retry-download endpoint rejects with (e.g. a 409 conflict). */
   retryError?: ApiRequestError;
+  /** Error PATCH /sources/{id} rejects with (e.g. the 409 unloadable envelope). */
+  patchError?: ApiRequestError;
+  /**
+   * Bulk-endpoint result (FRG-SRC-011). Receives the request body so a test can
+   * assert on it and mutate `state.entitlements` to model the rows the server
+   * actually applied; defaults to "everything applied, no per-row errors".
+   */
+  bulkResult?: (body: { action: string; entitlement_ids: number[] }) => unknown;
   /** Library series the match-picker / booktype lookups resolve against;
    * defaults to a single "Descender" series (booktype null) when omitted. */
   librarySeries?: SeriesResource[];
@@ -160,21 +174,51 @@ function makeFetcher(state: FetcherState): Fetcher {
       if (/\/api\/v1\/sources\/\d+\/sync$/.test(path)) {
         return { command_id: 1, status: 'queued' };
       }
-      // PATCH /sources/{id} — flip a mutable control (auto_sync). Mutate the
-      // in-memory source so the invalidation-driven refetch reflects it.
+      // PATCH /sources/{id} — flip a mutable control (auto_sync) or replace the
+      // publisher rules (FRG-SRC-012). Mutate the in-memory source so the
+      // invalidation-driven refetch reflects it.
       const patchMatch = path.match(/^\/api\/v1\/sources\/(\d+)$/);
       if (patchMatch && init?.method === 'PATCH') {
+        if (state.patchError) throw state.patchError;
         const id = Number(patchMatch[1]);
-        const body = init.body as { auto_sync: boolean };
+        const body = init.body as {
+          auto_sync?: boolean;
+          publisher_rules?: string[];
+        };
         // Replace the array with a fresh one (a new reference) so the
         // invalidation-driven refetch is not short-circuited by identity.
         state.sources = state.sources.map((s) =>
-          s.id === id ? { ...s, auto_sync: body.auto_sync } : s,
+          s.id === id
+            ? {
+                ...s,
+                ...(body.auto_sync !== undefined
+                  ? { auto_sync: body.auto_sync }
+                  : {}),
+                ...(body.publisher_rules !== undefined
+                  ? {
+                      settings: {
+                        ...s.settings,
+                        publisher_rules: body.publisher_rules,
+                      },
+                    }
+                  : {}),
+              }
+            : s,
         );
         return state.sources.find((s) => s.id === id);
       }
       if (path === '/api/v1/sources/entitlements/bulk') {
-        return { applied: 2, skipped: 0, errors: [] };
+        const body = init!.body as {
+          action: string;
+          entitlement_ids: number[];
+        };
+        return (
+          state.bulkResult?.(body) ?? {
+            applied: body.entitlement_ids.length,
+            skipped: 0,
+            errors: {},
+          }
+        );
       }
       // Retry re-queues a failed download: the backend clears the failure, so
       // the in-memory row flips out of `failed` for the refetch that follows.
@@ -803,12 +847,21 @@ describe('FRG-SRC-009: failed-download retry affordance', () => {
  */
 describe('FRG-UI-039: per-row ComicVine search', () => {
   const source = makeSource({ id: 5, connection_state: 'connected' });
-  /** A row the proposal pass could not place — the dead-end case. */
+  /**
+   * A row the proposal pass RAN on and could not place — the dead-end case.
+   * The backend stores that as a verdict MARKER (not a null), so the UI can
+   * tell "we looked and nothing fit" apart from "not computed yet".
+   */
   const orphan = ent({
     id: 50,
     human_name: 'Something is Killing the Children Vol. 8 #3',
     review_status: 'new',
-    proposed_match: null,
+    proposed_match: {
+      verdict: 'no-plausible-match',
+      universe: 'comicvine',
+      candidates: [],
+      auto: false,
+    },
     proposed_series_id: null,
   });
   const library = [
@@ -1109,5 +1162,539 @@ describe('FRG-UI-029: virtualized review list at corpus scale', () => {
     expect(body.entitlement_ids).toHaveLength(51);
     expect(body.entitlement_ids).toContain(1000);
     expect(body.entitlement_ids).toContain(1050);
+  });
+});
+
+/*
+ * FRG-UI-029 (MODIFIED) — same-title collapse: a run of rows sharing the
+ * server's group_key folds into ONE expandable group with a count and its
+ * members' status counts. Collapse is presentation, never a state filter:
+ * every member's actions are one expand away, the header selects the whole
+ * group, and a shift-range across a collapsed header still takes its rows.
+ */
+describe('FRG-UI-029: same-title collapse groups', () => {
+  const source = makeSource({ id: 5, connection_state: 'connected' });
+
+  /** Four Spawn rows the server folded to one key, plus an unrelated row. */
+  function spawnCorpus(): EntitlementResource[] {
+    return [
+      ent({ id: 60, human_name: 'Spawn, Vol. 1', group_key: 'spawn' }),
+      ent({ id: 61, human_name: 'Spawn, Vol. 2', group_key: 'spawn' }),
+      ent({
+        id: 62,
+        human_name: 'Spawn, Vol. 3',
+        group_key: 'spawn',
+        review_status: 'matched',
+        matched_series_id: 1,
+      }),
+      ent({
+        id: 63,
+        human_name: 'Spawn, Vol. 4',
+        group_key: 'spawn',
+        download_state: 'failed',
+        download_error: 'md5 mismatch',
+      }),
+      ent({ id: 70, human_name: 'Descender, Vol. 1' }),
+    ];
+  }
+
+  it('FRG-UI-029 — a run of 3+ same-title rows collapses into one group with a count, and a pair does not', async () => {
+    renderScreen({
+      sources: [source],
+      entitlements: [
+        ...spawnCorpus(),
+        // A two-row run stays below the collapse threshold — no header, and
+        // both rows render plainly.
+        ent({ id: 80, human_name: 'Saga, Vol. 1', group_key: 'saga' }),
+        ent({ id: 81, human_name: 'Saga, Vol. 2', group_key: 'saga' }),
+      ],
+      calls: [],
+    });
+
+    const header = await screen.findByTestId('group-header-spawn');
+    expect(header).toHaveAttribute('data-collapsed', 'true');
+    expect(screen.getByTestId('group-count-spawn')).toHaveTextContent('4 items');
+    // The group's title is the members' shared prefix.
+    expect(within(header).getByText('Spawn')).toBeInTheDocument();
+
+    // Collapsed: the member rows are not rendered…
+    expect(screen.queryByTestId('entitlement-row-60')).toBeNull();
+    expect(screen.queryByTestId('entitlement-row-63')).toBeNull();
+    // …while everything outside the group still is, including the sub-threshold
+    // pair and the count line, which counts ROWS, never groups.
+    expect(screen.getByTestId('entitlement-row-70')).toBeInTheDocument();
+    expect(screen.getByTestId('entitlement-row-80')).toBeInTheDocument();
+    expect(screen.getByTestId('entitlement-row-81')).toBeInTheDocument();
+    expect(screen.queryByTestId('group-header-saga')).toBeNull();
+    expect(screen.getByTestId('count-line')).toHaveTextContent('7 items');
+  });
+
+  it('FRG-UI-029 — a mixed-status group surfaces its counts (incl. a failed download) on the header', async () => {
+    renderScreen({ sources: [source], entitlements: spawnCorpus(), calls: [] });
+
+    const statuses = await screen.findByTestId('group-statuses-spawn');
+    // Three new + one matched, and the failed download is called out — the
+    // collapse hides no actionable state.
+    expect(statuses).toHaveTextContent('3 new');
+    expect(statuses).toHaveTextContent('1 matched');
+    expect(statuses).toHaveTextContent('1 failed download');
+  });
+
+  it('FRG-UI-029 — expanding a group reaches every member row and its full actions', async () => {
+    const user = userEvent.setup();
+    renderScreen({ sources: [source], entitlements: spawnCorpus(), calls: [] });
+
+    await user.click(await screen.findByTestId('group-toggle-spawn'));
+
+    expect(screen.getByTestId('group-header-spawn')).toHaveAttribute(
+      'data-collapsed',
+      'false',
+    );
+    for (const id of [60, 61, 62, 63]) {
+      expect(screen.getByTestId(`entitlement-row-${id}`)).toBeInTheDocument();
+      // The ever-present row search (FRG-UI-039) and the expand caret.
+      expect(screen.getByTestId(`search-${id}`)).toBeInTheDocument();
+      expect(screen.getByTestId(`expand-${id}`)).toBeInTheDocument();
+    }
+    // Per-status actions: the new rows offer Ignore, the matched one Change…,
+    // and the failed one its Retry.
+    expect(screen.getByTestId('ignore-60')).toBeInTheDocument();
+    expect(screen.getByTestId('search-62')).toHaveTextContent('Change…');
+    expect(screen.getByTestId('retry-63')).toBeInTheDocument();
+  });
+
+  it('FRG-UI-029 — the group header checkbox selects the whole group, collapsed and all', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: spawnCorpus(),
+      calls: [],
+    };
+    renderScreen(state);
+
+    await user.click(await screen.findByTestId('group-select-spawn'));
+    expect(await screen.findByTestId('bulk-bar')).toHaveTextContent('4 selected');
+
+    // It toggles as a unit: a second click clears the whole group…
+    await user.click(screen.getByTestId('group-select-spawn'));
+    expect(screen.getByTestId('bulk-bar')).toHaveTextContent('0 selected');
+    await user.click(screen.getByTestId('group-select-spawn'));
+    expect(screen.getByTestId('bulk-bar')).toHaveTextContent('4 selected');
+
+    // …and the whole group is what the bulk action then receives.
+    await user.click(screen.getByTestId('bulk-ignore'));
+    await waitFor(() =>
+      expect(state.calls.find((c) => c.path.endsWith('/bulk'))).toBeTruthy(),
+    );
+    const body = state.calls.find((c) => c.path.endsWith('/bulk'))!.init!.body as {
+      entitlement_ids: number[];
+    };
+    expect([...body.entitlement_ids].sort((a, b) => a - b)).toEqual([
+      60, 61, 62, 63,
+    ]);
+  });
+
+  it('FRG-UI-029 — shift-range stays index-coherent across a collapsed group header', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [
+        ent({ id: 59, human_name: 'Before The Group' }),
+        ...spawnCorpus().slice(0, 4),
+        ent({ id: 70, human_name: 'Descender, Vol. 1' }),
+      ],
+      calls: [],
+    };
+    renderScreen(state);
+
+    // Anchor before the group, shift-click after it: the span crosses the
+    // header, which stands for the four rows folded inside it.
+    await user.click(await screen.findByTestId('select-59'));
+    await user.keyboard('{Shift>}');
+    await user.click(screen.getByTestId('select-70'));
+    await user.keyboard('{/Shift}');
+
+    expect(await screen.findByTestId('bulk-bar')).toHaveTextContent('6 selected');
+
+    await user.click(screen.getByTestId('bulk-ignore'));
+    await waitFor(() =>
+      expect(state.calls.find((c) => c.path.endsWith('/bulk'))).toBeTruthy(),
+    );
+    const body = state.calls.find((c) => c.path.endsWith('/bulk'))!.init!.body as {
+      entitlement_ids: number[];
+    };
+    expect([...body.entitlement_ids].sort((a, b) => a - b)).toEqual([
+      59, 60, 61, 62, 63, 70,
+    ]);
+  });
+});
+
+/*
+ * FRG-SRC-011 — bundle identity on the review surface: rows and groups name the
+ * bundle they came from, the bulk bar can select a whole bundle, and "apply the
+ * match to this lot" is ONE server-side bulk accept in which each row
+ * contributes its own proposal (per-row errors, never a vetoed batch).
+ */
+describe('FRG-SRC-011: bundle display, bundle selection, and bulk accept', () => {
+  const source = makeSource({ id: 5, connection_state: 'connected' });
+  const BUNDLE = 'Humble Comics Bundle: Image Firsts';
+
+  const bundled = [
+    ent({ id: 90, human_name: 'Saga, Vol. 1', bundle_human_name: BUNDLE }),
+    ent({ id: 91, human_name: 'Deadly Class, Vol. 1', bundle_human_name: BUNDLE }),
+    // Same bundle, but ignored — invisible under the "New" filter, so a
+    // bundle selection made there must not reach it.
+    ent({
+      id: 92,
+      human_name: 'Nailbiter, Vol. 1',
+      review_status: 'ignored',
+      bundle_human_name: BUNDLE,
+    }),
+    ent({
+      id: 93,
+      human_name: 'Descender, Vol. 1',
+      bundle_human_name: 'Humble Comics Bundle: Descender',
+    }),
+  ];
+
+  it('FRG-SRC-011 — a row names its bundle, and the group header names a shared one', async () => {
+    renderScreen({
+      sources: [source],
+      entitlements: [
+        ...bundled,
+        ent({ id: 94, human_name: 'Spawn, Vol. 1', group_key: 'spawn', bundle_human_name: BUNDLE }),
+        ent({ id: 95, human_name: 'Spawn, Vol. 2', group_key: 'spawn', bundle_human_name: BUNDLE }),
+        ent({ id: 96, human_name: 'Spawn, Vol. 3', group_key: 'spawn', bundle_human_name: BUNDLE }),
+      ],
+      calls: [],
+    });
+
+    expect(await screen.findByTestId('bundle-90')).toHaveTextContent(BUNDLE);
+    expect(screen.getByTestId('group-header-spawn')).toHaveTextContent(BUNDLE);
+  });
+
+  it('FRG-SRC-011 — "Select bundle" selects exactly that bundle\'s VISIBLE rows', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: bundled,
+      calls: [],
+    };
+    renderScreen(state);
+
+    // Scope to New: the ignored row of the same bundle is out of view.
+    await user.click(await screen.findByTestId('filter-new'));
+    await user.click(screen.getByTestId('select-bundle'));
+    await user.click(screen.getByTestId(`bundle-option-${BUNDLE}`));
+
+    expect(await screen.findByTestId('bulk-bar')).toHaveTextContent('2 selected');
+
+    await user.click(screen.getByTestId('bulk-ignore'));
+    await waitFor(() =>
+      expect(state.calls.find((c) => c.path.endsWith('/bulk'))).toBeTruthy(),
+    );
+    const body = state.calls.find((c) => c.path.endsWith('/bulk'))!.init!.body as {
+      entitlement_ids: number[];
+    };
+    // The bundle's two visible rows — not its ignored row, not the other bundle.
+    expect([...body.entitlement_ids].sort((a, b) => a - b)).toEqual([90, 91]);
+  });
+
+  it('FRG-SRC-011 — bulk accept is ONE request carrying the ids, with no shared series_id', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [
+        ent({
+          id: 100,
+          human_name: 'Saga, Vol. 1',
+          proposed_series_id: 1,
+          proposed_match: {
+            kind: 'library',
+            series_id: 1,
+            cv_volume_id: null,
+            title: 'Saga',
+            year: 2012,
+            confidence: 0.93,
+          },
+        }),
+        ent({
+          id: 101,
+          human_name: 'Monstress, Vol. 1',
+          proposed_match: {
+            kind: 'comicvine',
+            series_id: null,
+            cv_volume_id: 4050_1111,
+            title: 'Monstress',
+            year: 2015,
+            confidence: 0.88,
+          },
+        }),
+      ],
+      calls: [],
+    };
+    renderScreen(state);
+
+    await user.click(await screen.findByTestId('select-100'));
+    await user.keyboard('{Shift>}');
+    await user.click(screen.getByTestId('select-101'));
+    await user.keyboard('{/Shift}');
+    await user.click(screen.getByTestId('bulk-accept'));
+
+    await waitFor(() =>
+      expect(state.calls.filter((c) => c.path.endsWith('/bulk'))).toHaveLength(1),
+    );
+    const call = state.calls.find((c) => c.path.endsWith('/bulk'))!;
+    const body = call.init!.body as {
+      action: string;
+      entitlement_ids: number[];
+      series_id?: number;
+    };
+    // Heterogeneous rows (one match, one add) in ONE accept — each applies its
+    // own stored proposal, so the body carries no shared series_id.
+    expect(body.action).toBe('accept');
+    expect([...body.entitlement_ids].sort((a, b) => a - b)).toEqual([100, 101]);
+    expect(body.series_id).toBeUndefined();
+    // …and the per-row match endpoint was never touched (no client-side loop).
+    expect(state.calls.some((c) => c.path.endsWith('/match'))).toBe(false);
+  });
+
+  it('FRG-SRC-011 — per-row accept failures are reported by name while the succeeded rows refresh', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [
+        ent({
+          id: 110,
+          human_name: 'Saga, Vol. 1',
+          proposed_series_id: 1,
+          proposed_match: {
+            kind: 'library',
+            series_id: 1,
+            cv_volume_id: null,
+            title: 'Saga',
+            year: 2012,
+            confidence: 0.93,
+          },
+        }),
+        // The row the pass looked at and could not place: the server refuses it
+        // per-row, the batch still applies the rest.
+        ent({
+          id: 111,
+          human_name: 'Mystery Anthology',
+          proposed_match: {
+            verdict: 'no-plausible-match',
+            universe: 'comicvine',
+            candidates: [],
+          },
+        }),
+      ],
+      calls: [],
+      bulkResult: (body) => {
+        if (body.action !== 'accept') {
+          return { applied: body.entitlement_ids.length, skipped: 0, errors: {} };
+        }
+        // The server applied 110 and refused 111 — model both.
+        state.entitlements = state.entitlements.map((e) =>
+          e.id === 110
+            ? { ...e, review_status: 'matched' as const, matched_series_id: 1 }
+            : e,
+        );
+        return {
+          applied: 1,
+          skipped: 1,
+          errors: {
+            '111': 'entitlement 111 has no proposed match to accept',
+          },
+        };
+      },
+    };
+    renderScreen(state);
+
+    await user.click(await screen.findByTestId('select-110'));
+    await user.click(screen.getByTestId('select-111'));
+    await user.click(screen.getByTestId('bulk-accept'));
+
+    // The count of failures, expandable to the row names and the reasons.
+    const toggle = await screen.findByTestId('bulk-errors-toggle');
+    expect(toggle).toHaveTextContent('1 item could not be accepted');
+    await user.click(toggle);
+    const failure = await screen.findByTestId('bulk-error-111');
+    expect(failure).toHaveTextContent('Mystery Anthology');
+    expect(failure).toHaveTextContent('has no proposed match to accept');
+    expect(screen.getByTestId('bulk-bar')).toHaveTextContent('Accepted 1 of 2.');
+
+    // The succeeded row still refreshed — the failures never cost the batch.
+    await waitFor(() =>
+      expect(screen.getByTestId('entitlement-row-110')).toHaveAttribute(
+        'data-status',
+        'matched',
+      ),
+    );
+    // …and the failure stays selected, so it is the operator's to-do list.
+    expect(screen.getByTestId('bulk-bar')).toHaveTextContent('1 selected');
+  });
+});
+
+/*
+ * FRG-SRC-010 — the three proposal shapes read differently: a candidate, a
+ * stored "we looked and nothing fit" verdict marker, and a NULL (not computed
+ * yet, e.g. deferred on the ComicVine budget ceiling). None of them is a dead
+ * end — the row search is there in every case.
+ */
+describe('FRG-SRC-010: proposal verdict vs not-yet-computed', () => {
+  const source = makeSource({ id: 5, connection_state: 'connected' });
+
+  it('FRG-SRC-010 — a no-plausible-match verdict marker reads as a verdict, not as a proposal', async () => {
+    renderScreen({
+      sources: [source],
+      entitlements: [
+        ent({
+          id: 120,
+          human_name: 'Odd Curio',
+          proposed_match: {
+            verdict: 'no-plausible-match',
+            universe: 'comicvine',
+            candidates: [],
+            auto: false,
+          },
+        }),
+      ],
+      calls: [],
+    });
+
+    const note = await screen.findByTestId('no-match-120');
+    expect(note).toHaveTextContent('No plausible match');
+    expect(note).toHaveAttribute('data-verdict', 'no-plausible-match');
+    // No accept affordance was minted out of the marker…
+    expect(screen.queryByTestId('match-120')).toBeNull();
+    expect(screen.queryByTestId('add-120')).toBeNull();
+    // …and the row is still fully actionable.
+    expect(screen.getByTestId('search-120')).toBeInTheDocument();
+  });
+
+  it('FRG-SRC-010 — a null proposal says the match has not been computed yet', async () => {
+    renderScreen({
+      sources: [source],
+      entitlements: [ent({ id: 121, human_name: 'Deferred Item', proposed_match: null })],
+      calls: [],
+    });
+
+    const note = await screen.findByTestId('no-match-121');
+    expect(note).toHaveTextContent('Match not computed yet');
+    expect(note).toHaveAttribute('data-verdict', 'not-computed');
+    expect(screen.getByTestId('search-121')).toBeInTheDocument();
+  });
+});
+
+/*
+ * FRG-SRC-012 — operator-owned publisher rules: a per-source list of publishers
+ * whose items are always filed as Other. Ships EMPTY; the starter list is
+ * OFFERED (it fills the editor) and only written when the operator saves.
+ */
+describe('FRG-SRC-012: publisher rules editor', () => {
+  const source = makeSource({ id: 5, connection_state: 'connected' });
+
+  async function openRules(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(await screen.findByTestId('publisher-rules-toggle'));
+  }
+
+  it('FRG-SRC-012 — the editor ships empty', async () => {
+    const user = userEvent.setup();
+    renderScreen({ sources: [source], entitlements: [], calls: [] });
+    await openRules(user);
+
+    expect(screen.getByTestId('rules-empty')).toHaveTextContent(
+      'No publisher rules',
+    );
+    expect(screen.queryByTestId('rules-list')).toBeNull();
+  });
+
+  it('FRG-SRC-012 — the suggested starter list FILLS the editor and saves nothing', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [],
+      calls: [],
+    };
+    renderScreen(state);
+    await openRules(user);
+
+    await user.click(screen.getByTestId('rules-starter'));
+
+    // The RPG publishers are in the editor, ready to be pruned…
+    expect(screen.getByTestId('rule-Chaosium')).toBeInTheDocument();
+    expect(screen.getByTestId('rule-Paizo')).toBeInTheDocument();
+    // …and nothing was written: no PATCH left the screen.
+    expect(
+      state.calls.filter((c) => c.init?.method === 'PATCH'),
+    ).toHaveLength(0);
+  });
+
+  it('FRG-SRC-012 — Save PATCHes the WHOLE list (add + remove, then save)', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [],
+      calls: [],
+    };
+    renderScreen(state);
+    await openRules(user);
+
+    await user.click(screen.getByTestId('rules-starter'));
+    await user.click(screen.getByTestId('rule-remove-Chaosium'));
+    await user.type(screen.getByTestId('rule-input'), 'Onyx Path');
+    await user.click(screen.getByTestId('rule-add'));
+    await user.click(screen.getByTestId('rules-save'));
+
+    await waitFor(() =>
+      expect(
+        state.calls.find(
+          (c) => c.path === '/api/v1/sources/5' && c.init?.method === 'PATCH',
+        ),
+      ).toBeTruthy(),
+    );
+    const body = state.calls.find((c) => c.path === '/api/v1/sources/5')!.init!
+      .body as { publisher_rules: string[]; auto_sync?: boolean };
+    expect(body.publisher_rules).toContain('Paizo');
+    expect(body.publisher_rules).toContain('Onyx Path');
+    expect(body.publisher_rules).not.toContain('Chaosium');
+    // The rules PATCH never rewrites the control it did not touch.
+    expect(body.auto_sync).toBeUndefined();
+    expect(await screen.findByTestId('rules-saved')).toBeInTheDocument();
+    // The saved list re-seeds from the server intact — a multi-word publisher
+    // is ONE rule, not two.
+    expect(screen.getByTestId('rule-Pelgrane Press')).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId('rules-list')).getAllByRole('listitem'),
+    ).toHaveLength(body.publisher_rules.length);
+  });
+
+  it('FRG-SRC-012 — a 409 (no settings envelope to write into) surfaces the reconnect guidance', async () => {
+    const user = userEvent.setup();
+    renderScreen({
+      sources: [source],
+      entitlements: [],
+      calls: [],
+      patchError: new ApiRequestError(
+        409,
+        {
+          message:
+            'source 5 has no stored settings to update — reconnect it before editing its publisher rules',
+          errors: [{ field: 'publisher_rules', message: 'no settings' }],
+        },
+        '/api/v1/sources/5',
+      ),
+    });
+    await openRules(user);
+
+    await user.type(screen.getByTestId('rule-input'), 'Chaosium');
+    await user.click(screen.getByTestId('rule-add'));
+    await user.click(screen.getByTestId('rules-save'));
+
+    const note = await screen.findByTestId('rules-error');
+    expect(note).toHaveTextContent('reconnect it before editing its publisher rules');
+    // The draft survives the failure — nothing the operator typed is lost.
+    expect(screen.getByTestId('rule-Chaosium')).toBeInTheDocument();
   });
 });
