@@ -13,6 +13,7 @@ cleanly) is re-asserted below against the new mechanism.
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -23,11 +24,36 @@ from foragerr.sources.matching import (
     PROPOSE_MIN_SIMILARITY,
     UNIVERSE_COMICVINE,
     UNIVERSE_LIBRARY_FALLBACK,
+    VERDICT_NO_PLAUSIBLE_MATCH,
     LibrarySeriesLite,
     compute_proposed_match,
     query_term,
     shares_token,
 )
+
+
+def _assert_no_plausible_match(proposal, *, universe) -> dict:
+    """The explicit verdict shape: computed, nothing plausible (FRG-SRC-010).
+
+    Distinguishable from a NULL (never-computed / deferred) proposal, and inert
+    for every existing reader — no ``kind``, no ids, no candidates, never auto.
+    """
+    assert proposal is not None, "a ran-and-found-nothing computation is a verdict"
+    assert proposal.is_no_match is True
+    assert proposal.best is None
+    assert proposal.candidates == ()
+    assert proposal.verdict == VERDICT_NO_PLAUSIBLE_MATCH
+    assert proposal.universe == universe
+    assert proposal.proposed_series_id is None
+    assert proposal.is_auto is False
+    payload = json.loads(proposal.to_json())
+    assert payload == {
+        "verdict": "no-plausible-match",
+        "universe": universe,
+        "candidates": [],
+        "auto": False,
+    }
+    return payload
 
 
 def _lib(*rows) -> list[LibrarySeriesLite]:
@@ -88,7 +114,7 @@ async def test_zero_token_overlap_is_never_proposed_the_green_arrow_repro():
     """The exact live-rig repro (finding #7): "Absolute Green Arrow" scored
     0.3273 against "Something is Killing the Children Vol. 8" on a
     character-level ratio. Zero shared tokens ⇒ it is discarded BEFORE scoring,
-    at any similarity, and the row carries no automatic proposal."""
+    at any similarity, and the row carries the explicit no-match verdict."""
     cv = _FakeCV(candidates=[_cand(1, "Absolute Green Arrow", 2024)])
     proposal = await compute_proposed_match(
         human_name="Something is Killing the Children Vol. 8",
@@ -96,7 +122,7 @@ async def test_zero_token_overlap_is_never_proposed_the_green_arrow_repro():
         cv_client=cv,
     )
     assert cv.calls == 1
-    assert proposal is None  # "no plausible automatic match"
+    _assert_no_plausible_match(proposal, universe=UNIVERSE_COMICVINE)
 
 
 @pytest.mark.req("FRG-SRC-010")
@@ -106,7 +132,7 @@ async def test_zero_overlap_gate_also_applies_to_the_library_fallback():
         library=_lib((7, "Absolute Green Arrow", 2024, 1)),
         cv_client=None,
     )
-    assert proposal is None
+    _assert_no_plausible_match(proposal, universe=UNIVERSE_LIBRARY_FALLBACK)
 
 
 # --- the library overlay ----------------------------------------------------
@@ -171,6 +197,66 @@ async def test_overlay_wins_a_tie_against_an_equally_scored_add():
     assert proposal.best.series_id == 7
     # Both remain offered — the overlay reorders, it never drops a candidate.
     assert {c.cv_volume_id for c in proposal.candidates} == {4242, 556}
+
+
+@pytest.mark.req("FRG-SRC-010")
+async def test_overlay_is_applied_after_gating_so_a_local_rename_cannot_demote():
+    """The operator's local series title is a DISPLAY name, not evidence about
+    catalog identity: a library series titled ``"Saga (2012)"`` for ComicVine's
+    ``"Saga"`` must still be scored on the CV title.
+
+    Applying the overlay before the gate scored the store title against the
+    LOCAL title instead — 0.6154 here rather than 1.0 — silently dropping the
+    row below the auto-match threshold and leaking shelf metadata into the
+    CV-first gate."""
+    cv = _FakeCV(candidates=[_cand(18975, "Saga", 2012)])
+    proposal = await compute_proposed_match(
+        human_name="Saga #1",
+        library=_lib((7, "Saga (2012)", 2012, 18975)),
+        cv_client=cv,
+    )
+    assert proposal is not None
+    # Scored on the CV title...
+    assert proposal.confidence == pytest.approx(1.0)
+    assert proposal.confidence >= AUTO_MATCH_THRESHOLD
+    # ...and the overlay still lands: kind, series_id and the DISPLAY title.
+    assert proposal.best.kind == "library"
+    assert proposal.best.series_id == 7
+    assert proposal.best.cv_volume_id == 18975
+    assert proposal.best.title == "Saga (2012)"
+
+
+@pytest.mark.req("FRG-SRC-010")
+async def test_local_title_sharing_no_token_with_the_query_still_matches():
+    """The extreme of the same bug: a library series renamed to something that
+    shares NO token with the store title (a localized/alternate title) used to
+    be discarded by the token gate — even though the ComicVine candidate it
+    overlays matched the query exactly."""
+    cv = _FakeCV(candidates=[_cand(18975, "Saga", 2012)])
+    proposal = await compute_proposed_match(
+        human_name="Saga #1",
+        library=_lib((7, "Kroniki Wygnancow", 2012, 18975)),
+        cv_client=cv,
+    )
+    # The CV title cleared the gate; the overlay is display-only.
+    assert proposal is not None
+    assert proposal.best.kind == "library"
+    assert proposal.best.series_id == 7
+
+
+@pytest.mark.req("FRG-SRC-010")
+async def test_local_rename_cannot_win_the_gate_for_an_unrelated_volume():
+    """The converse guard: the overlay must not RESCUE a candidate either. A
+    tracked volume whose CV title fails the gate stays discarded however
+    conveniently its local title matches the store title."""
+    cv = _FakeCV(candidates=[_cand(1, "Absolute Green Arrow", 2024)])
+    proposal = await compute_proposed_match(
+        human_name="Synthetic Hero #1",
+        # The local title matches the store title; the CV title does not.
+        library=_lib((7, "Synthetic Hero", 2018, 1)),
+        cv_client=cv,
+    )
+    _assert_no_plausible_match(proposal, universe=UNIVERSE_COMICVINE)
 
 
 # --- the trade re-rank ------------------------------------------------------
@@ -246,7 +332,7 @@ async def test_gated_candidate_below_the_floor_is_not_proposed():
     proposal = await compute_proposed_match(
         human_name="Synthetic Hero #1", library=[], cv_client=cv
     )
-    assert proposal is None
+    _assert_no_plausible_match(proposal, universe=UNIVERSE_COMICVINE)
 
 
 @pytest.mark.req("FRG-SRC-010")
@@ -323,6 +409,9 @@ async def test_budget_exhausted_propagates_even_with_a_perfect_library_row():
 
 @pytest.mark.req("FRG-SRC-010")
 async def test_other_comicvine_errors_are_not_fatal():
+    """A CV failure is not a verdict: ``None`` (row stays NULL/retryable), NOT
+    the no-plausible-match marker — freezing a marker on an upstream blip is the
+    same hazard as freezing a fallback proposal on a budget hit."""
     cv = _FakeCV(raises=ComicVineError("upstream 500"))
     proposal = await compute_proposed_match(
         human_name="Synthetic Hero #1",
@@ -333,8 +422,43 @@ async def test_other_comicvine_errors_are_not_fatal():
 
 
 @pytest.mark.req("FRG-SRC-010")
-async def test_no_pool_returns_none():
+async def test_empty_library_fallback_pool_is_an_explicit_no_match_verdict():
+    """The no-key fallback RAN (it just had nothing to rank), so it records the
+    verdict rather than leaving the row indistinguishable from a deferred one."""
     proposal = await compute_proposed_match(
         human_name="Wholly Unknown Comic #1", library=[], cv_client=None
     )
-    assert proposal is None
+    _assert_no_plausible_match(proposal, universe=UNIVERSE_LIBRARY_FALLBACK)
+
+
+@pytest.mark.req("FRG-SRC-010")
+async def test_comicvine_answering_with_no_candidates_is_a_no_match_verdict():
+    cv = _FakeCV(candidates=[])
+    proposal = await compute_proposed_match(
+        human_name="Wholly Unknown Comic #1", library=[], cv_client=cv
+    )
+    assert cv.calls == 1
+    _assert_no_plausible_match(proposal, universe=UNIVERSE_COMICVINE)
+
+
+@pytest.mark.req("FRG-SRC-010")
+async def test_normal_proposal_json_carries_no_verdict_key():
+    """The marker is ADDITIVE: a real proposal's serialized shape is unchanged,
+    so every existing reader of the stored JSON is untouched."""
+    cv = _FakeCV(candidates=[_cand(4242, "Synthetic Hero", 2018)])
+    proposal = await compute_proposed_match(
+        human_name="Synthetic Hero #1", library=[], cv_client=cv
+    )
+    payload = json.loads(proposal.to_json())
+    assert proposal.verdict is None
+    assert set(payload) == {
+        "kind",
+        "series_id",
+        "cv_volume_id",
+        "title",
+        "year",
+        "confidence",
+        "auto",
+        "universe",
+        "candidates",
+    }
