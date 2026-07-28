@@ -34,3 +34,8 @@ When a series is added, the system SHALL execute a chained sequence: fetch and p
 
 - **WHEN** a series is added with a monitoring strategy that yields no wanted issues (e.g. monitor none) and search-on-add unchecked
 - **THEN** no search command is enqueued
+
+#### Scenario: Importing an existing library never sweeps
+
+- **WHEN** the Library Import flow creates series for groups of files already on disk (each about to be imported)
+- **THEN** no default search sweeps are enqueued for those series — the sweep exists for the operator's add intent, and a thousand-group import must not race a thousand searches against its own imports

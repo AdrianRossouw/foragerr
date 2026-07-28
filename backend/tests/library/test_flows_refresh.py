@@ -750,3 +750,181 @@ async def test_interrupted_refresh_resumes_from_persisted_queue(
         assert series.add_options is None  # strategy applied exactly once
     finally:
         await service.drain(1.0)
+
+
+# --- the default mini-sweep on add (MODIFIED FRG-SER-005, m11) --------------
+#
+# Acquisition used to depend on a checkbox: an operator who added a monitored
+# series without ticking "search on add" downloaded nothing until the six-hour
+# backlog tick (rig finding #2). The bounded per-series search now runs for any
+# add that actually wants something; the checkbox keeps its exact meaning for an
+# add that wants nothing yet, and nothing else about the chain moves.
+
+
+async def _command_names(db) -> list[str]:
+    async with db.read_session() as session:
+        return list(
+            (await session.execute(select(CommandRow.name))).scalars().all()
+        )
+
+
+async def _refresh_added_series(
+    db, settings, commands, root_folder_path, format_profile_id,
+    *,
+    strategy: str,
+    search_on_add: bool,
+    cv_volume_id: int = 1,
+    monitored: bool = True,
+    sweep_on_add: bool = True,
+) -> int:
+    """Add-shaped refresh: a series carrying add_options over two released
+    issues, refreshed exactly once (which applies and clears the strategy)."""
+    series_id = await _make_series(
+        db, root_folder_path, format_profile_id,
+        cv_volume_id=cv_volume_id,
+        monitored=monitored,
+        add_options=encode_add_options(
+            monitor_strategy=strategy,
+            monitor_new_items="all",
+            search_on_add=search_on_add,
+        ),
+    )
+    fake = FakeCV().volume(cv_volume_id).issues(
+        cv_volume_id,
+        [
+            issue(500, "1", cover_date="2001-01-01"),
+            issue(501, "2", cover_date="2001-01-01"),
+        ],
+    )
+    await refresh_series(
+        db, settings, series_id, commands=commands,
+        factory=build_factory(settings, fake.handler()),
+        sweep_on_add=sweep_on_add,
+    )
+    return series_id
+
+
+@pytest.mark.req("FRG-SER-005")
+async def test_default_mini_sweep_fires_for_a_monitored_add(
+    db, settings, commands, root_folder_id, root_folder_path, format_profile_id
+):
+    """The finding: an unticked checkbox must not mean 'acquire nothing'."""
+    await _refresh_added_series(
+        db, settings, commands, root_folder_path, format_profile_id,
+        strategy="all", search_on_add=False,
+    )
+    names = await _command_names(db)
+    assert names.count("series-search") == 1
+    assert "scan-series" in names  # the rest of the chain is untouched
+
+
+@pytest.mark.req("FRG-SER-005")
+async def test_a_no_wanted_add_stays_quiet(
+    db, settings, commands, root_folder_id, root_folder_path, format_profile_id
+):
+    """`monitor none` is an explicit "don't go looking" — the sweep respects it."""
+    await _refresh_added_series(
+        db, settings, commands, root_folder_path, format_profile_id,
+        strategy="none", search_on_add=False,
+    )
+    names = await _command_names(db)
+    assert "series-search" not in names
+    assert "scan-series" in names
+
+
+@pytest.mark.req("FRG-SER-005")
+async def test_an_unmonitored_series_add_stays_quiet(
+    db, settings, commands, root_folder_id, root_folder_path, format_profile_id
+):
+    """Wanted is series-monitored AND issue-monitored: an unmonitored series
+    wants nothing however its issues are flagged, so nothing is searched."""
+    await _refresh_added_series(
+        db, settings, commands, root_folder_path, format_profile_id,
+        strategy="all", search_on_add=False, monitored=False,
+    )
+    assert "series-search" not in await _command_names(db)
+
+
+@pytest.mark.req("FRG-SER-005")
+async def test_search_on_add_still_fires_for_an_add_that_wants_nothing_yet(
+    db, settings, commands, root_folder_id, root_folder_path, format_profile_id
+):
+    """Checkbox semantics preserved EXACTLY: an explicit request is honoured
+    even where the default sweep would have stayed quiet."""
+    await _refresh_added_series(
+        db, settings, commands, root_folder_path, format_profile_id,
+        strategy="none", search_on_add=True,
+    )
+    assert (await _command_names(db)).count("series-search") == 1
+
+
+@pytest.mark.req("FRG-SER-005")
+async def test_the_checkbox_and_the_default_sweep_never_double_enqueue(
+    db, settings, commands, root_folder_id, root_folder_path, format_profile_id
+):
+    """Both conditions true — and, on top of that, a search already queued for
+    this series from an earlier run. Dedup (FRG-SCHED-003) collapses the lot to
+    the one bounded command."""
+    series_id = await _make_series(
+        db, root_folder_path, format_profile_id,
+        add_options=encode_add_options(
+            monitor_strategy="all", monitor_new_items="all", search_on_add=True
+        ),
+    )
+    await commands.enqueue("series-search", {"series_id": series_id})
+
+    fake = FakeCV().volume(1).issues(1, [issue(500, "1", cover_date="2001-01-01")])
+    await refresh_series(
+        db, settings, series_id, commands=commands,
+        factory=build_factory(settings, fake.handler()),
+    )
+
+    assert (await _command_names(db)).count("series-search") == 1
+
+
+@pytest.mark.req("FRG-SER-005")
+async def test_a_routine_refresh_never_sweeps(
+    db, settings, commands, root_folder_id, root_folder_path, format_profile_id
+):
+    """The sweep belongs to the ADD, not to refreshing. Once add_options are
+    cleared, every later refresh of a series full of wanted issues is silent —
+    the scheduled backlog search owns that ground."""
+    series_id = await _refresh_added_series(
+        db, settings, commands, root_folder_path, format_profile_id,
+        strategy="all", search_on_add=False,
+    )
+    async with db.write_session() as session:
+        for row in (
+            (await session.execute(select(CommandRow))).scalars().all()
+        ):
+            await session.delete(row)
+
+    fake = FakeCV().volume(1).issues(
+        1, [issue(500, "1", cover_date="2001-01-01"), issue(502, "3")]
+    )
+    await refresh_series(
+        db, settings, series_id, commands=commands,
+        factory=build_factory(settings, fake.handler()),
+    )
+
+    names = await _command_names(db)
+    assert "series-search" not in names
+    assert "scan-series" in names  # the scan still chains, as it always has
+
+
+@pytest.mark.req("FRG-SER-005")
+async def test_library_import_path_never_sweeps(
+    db, settings, commands, root_folder_id, root_folder_path, format_profile_id
+):
+    """The Library Import carve-out: a series created to receive files already
+    on disk (``sweep_on_add=False``) enqueues its scan but never the default
+    search sweep, however many wanted issues its all-monitored strategy shows
+    at that instant — a thousand-group import must not race a thousand
+    searches against its own imports."""
+    await _refresh_added_series(
+        db, settings, commands, root_folder_path, format_profile_id,
+        strategy="all", search_on_add=False, sweep_on_add=False,
+    )
+    names = await _command_names(db)
+    assert "series-search" not in names
+    assert "scan-series" in names

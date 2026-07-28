@@ -632,3 +632,60 @@ async def test_pull_source_remediation_speaks_ui_language_not_config_keys(db):
     # It still names the concept in plain UI terms.
     assert "weekly pull source url" in remediation.lower()
     assert "calendar" in remediation.lower()
+
+
+# --- completed downloads the importer cannot see (FRG-DL-015) ---------------
+
+
+async def _insert_stalled(
+    db, *, download_id: str, count: int, first_stalled_at: dt.datetime | None
+) -> None:
+    from foragerr.downloads.models import TrackedDownloadRow
+
+    async with db.write_session() as session:
+        session.add(
+            TrackedDownloadRow(
+                download_id=download_id,
+                client_id=None,
+                protocol="usenet",
+                source="indexer",
+                state="import_blocked",
+                status="warning",
+                output_path="/downloads/complete/Die Loaded",
+                import_stall_count=count,
+                first_stalled_at=first_stalled_at,
+                added_at=dt.datetime(2026, 7, 28, 9, 0),
+                updated_at=dt.datetime(2026, 7, 28, 9, 30),
+            )
+        )
+
+
+@pytest.mark.req("FRG-DL-015")
+async def test_no_stalled_downloads_contributes_no_component(db):
+    await _insert_stalled(
+        db, download_id="fine", count=0, first_stalled_at=None
+    )
+    assert "downloads-stalled" not in _by_component(await _service(db).component_view())
+
+
+@pytest.mark.req("FRG-DL-015")
+async def test_a_download_past_the_threshold_degrades_health_with_path_guidance(db):
+    oldest = dt.datetime(2026, 7, 28, 9, 0)
+    await _insert_stalled(db, download_id="stuck", count=7, first_stalled_at=oldest)
+    await _insert_stalled(
+        db, download_id="also", count=5, first_stalled_at=dt.datetime(2026, 7, 28, 9, 5)
+    )
+    # Under the default threshold: present in the queue, absent from health.
+    await _insert_stalled(
+        db, download_id="young", count=2, first_stalled_at=dt.datetime(2026, 7, 28, 9, 9)
+    )
+
+    component = _by_component(await _service(db).component_view())["downloads-stalled"]
+
+    assert component.state == "degraded"
+    assert "2 completed download(s)" in component.message  # the young one excluded
+    assert oldest.isoformat() in component.message  # oldest stall, not newest retry
+    remediation = (component.remediation or "").lower()
+    assert "mount" in remediation and "path mapping" in remediation
+    warning = next(w for w in await _service(db).warnings() if w.source == "downloads-stalled")
+    assert warning.type == "warning"

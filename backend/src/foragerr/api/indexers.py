@@ -18,10 +18,12 @@ constructs HTTP clients for indexer traffic.
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, ValidationError
+from sqlalchemy import func, select
 
 from foragerr.api.errors import ApiError
 from foragerr.http import HttpClientFactory
@@ -57,7 +59,13 @@ from foragerr.indexers.repo import (
 )
 from foragerr.indexers.schema import schema_for
 
+logger = logging.getLogger("foragerr.api.indexers")
+
 router = APIRouter(prefix="/indexer", tags=["indexer"])
+
+#: ``triggered_by`` stamped on the FRG-SCHED-012 first-enabled-indexer sweep, so
+#: job history distinguishes it from the scheduled tick and a manual run.
+FIRST_INDEXER_TRIGGER = "first-indexer"
 
 
 class IndexerImplementationSchema(BaseModel):
@@ -222,6 +230,11 @@ async def create_indexer_endpoint(
         enable_auto=body.enable_auto,
         enable_interactive=body.enable_interactive,
     )
+    # FRG-SCHED-012: a brand-new row that leaves exactly ONE enabled indexer on
+    # the deployment IS the zero-to-one transition — nothing else could have
+    # supplied that one. A create on a populated deployment counts >1 and stays
+    # silent, so re-creating a deleted indexer never re-fires.
+    await _maybe_first_indexer_sweep(request, enabled=row.enabled)
     return IndexerResource.from_row(row, model)
 
 
@@ -265,9 +278,16 @@ async def update_indexer_endpoint(
         except ValidationError as exc:
             raise _validation_error(exc) from exc
 
+    # Captured BEFORE the write: the sweep is owed to the disabled→enabled
+    # TRANSITION, not to the enabled state. Re-saving the only enabled indexer
+    # (a name or priority edit) leaves the count at 1 and must fire nothing.
+    became_enabled = body.enabled is True and not existing.enabled
+
     row = await update_indexer(db, indexer_id, **updates)
     # get_indexer already proved the row exists; update runs in one writer txn.
     assert row is not None
+    if became_enabled:
+        await _maybe_first_indexer_sweep(request, enabled=row.enabled)
     return IndexerResource.from_row(row, _settings_for_response(row))
 
 
@@ -319,6 +339,47 @@ async def indexer_test(body: IndexerTestRequest, request: Request) -> IndexerTes
         categories=caps.categories,
         degraded=caps.degraded,
     )
+
+
+async def _maybe_first_indexer_sweep(request: Request, *, enabled: bool) -> None:
+    """Enqueue ONE backlog search when the first enabled indexer appears
+    (FRG-SCHED-012).
+
+    The fresh-install order is series first, indexers second, so a new install
+    would otherwise download nothing until the six-hour backlog tick. The guard
+    is the enabled COUNT being exactly one after the write: only the row just
+    created/enabled can account for it, which is precisely the zero-to-one
+    transition. Everything downstream is unchanged — the same
+    ``backlog-search`` command the scheduler runs, bounded by its own wanted
+    walk with the usual politeness delay, and collapsed by CommandService's
+    payload dedup (FRG-SCHED-003) if one is already queued or running.
+
+    Best-effort by construction: configuring an indexer must succeed even if the
+    sweep cannot be queued, so a missing command service or an enqueue failure
+    is logged, never surfaced — the scheduled tick remains the backstop.
+    """
+    if not enabled:
+        return
+    commands = getattr(request.app.state, "commands", None)
+    if commands is None:  # pragma: no cover - always wired by create_app
+        return
+    db = request.app.state.db
+    async with db.read_session() as session:
+        enabled_count = await session.scalar(
+            select(func.count())
+            .select_from(IndexerRow)
+            .where(IndexerRow.enabled.is_(True))
+        )
+    if (enabled_count or 0) != 1:
+        return
+    try:
+        await commands.enqueue("backlog-search", triggered_by=FIRST_INDEXER_TRIGGER)
+    except Exception:  # noqa: BLE001 - the indexer is saved; the tick backstops
+        logger.warning(
+            "first-indexer sweep could not be enqueued; the scheduled "
+            "backlog search still covers it",
+            exc_info=True,
+        )
 
 
 def _reject_reserved_secret_prefix(implementation: str, supplied: dict[str, Any]) -> None:

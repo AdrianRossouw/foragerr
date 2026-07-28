@@ -771,7 +771,14 @@ async def _refresh_before_import(
     (files can only match issues that exist). Returns False — with the failure
     visible on the staging row — when the refresh could not run."""
     try:
-        await refresh_series(db, settings, series_id, commands=commands, factory=factory)
+        await refresh_series(
+            db,
+            settings,
+            series_id,
+            commands=commands,
+            factory=factory,
+            sweep_on_add=False,
+        )
     except ComicVineError as exc:
         message = (
             f"metadata refresh failed before import: {COMICVINE_CREDENTIAL_MESSAGE}"

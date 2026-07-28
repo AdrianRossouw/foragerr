@@ -81,6 +81,7 @@ async def refresh_series(
     *,
     commands: CommandService,
     factory: HttpClientFactory | None = None,
+    sweep_on_add: bool = True,
 ) -> str:
     """Refresh one series' metadata and issues, then chain the scan/search.
 
@@ -266,6 +267,16 @@ async def refresh_series(
 
         applied = await _apply_add_strategy_once(session, series)
 
+        # Does this ADD actually want anything (FRG-SER-005, m11 mini-sweep)?
+        # Computed inside the SAME transaction that just applied the add-time
+        # monitoring strategy, so the decision reads the monitored flags this
+        # run wrote — never a stale pre-strategy view. Only an add is asked:
+        # ``applied`` is non-None exactly once per series (the add-options are
+        # cleared above), so a routine refresh never enqueues a sweep.
+        add_wanted_count = (
+            await _wanted_count(session, series_id) if applied is not None else 0
+        )
+
         queue_event(session, SeriesRefreshed(series_id, partial=not walk_complete))
 
     result = RefreshResult(stats=stats, partial=not walk_complete, applied=applied)
@@ -279,7 +290,23 @@ async def refresh_series(
     await commands.enqueue(
         "scan-series", {"series_id": series_id}, triggered_by="refresh-series"
     )
-    if applied is not None and applied.search_on_add:
+    # The mini-sweep (MODIFIED FRG-SER-005, m11-acquisition-responsiveness).
+    # An add whose monitoring strategy yields wanted issues gets the SAME
+    # bounded per-series search the ``search_on_add`` checkbox always
+    # enqueued — the checkbox is no longer what makes acquisition happen, it
+    # only guarantees the sweep for an add that wants nothing yet (e.g. a
+    # future-only strategy). A no-wanted add with the box unticked (monitor
+    # "none") stays completely quiet. One enqueue either way: the two
+    # conditions share a single call, and CommandService's payload dedup
+    # (FRG-SCHED-003) collapses any command an earlier run already queued.
+    # Library Import passes sweep_on_add=False: its series exist to receive
+    # files already on disk, and a thousand-group import must never race a
+    # thousand searches against its own imports (FRG-SER-005's carve-out).
+    if (
+        applied is not None
+        and sweep_on_add
+        and (applied.search_on_add or add_wanted_count > 0)
+    ):
         await commands.enqueue(
             "series-search", {"series_id": series_id}, triggered_by="refresh-series"
         )
@@ -504,6 +531,23 @@ def _strategy_monitored(
         release = issue.store_date or issue.cover_date
         return release is not None and release > today
     return True  # pragma: no cover - validated upstream
+
+
+async def _wanted_count(session, series_id: int) -> int:
+    """How many issues this series currently WANTS (FRG-SER-005 mini-sweep).
+
+    Reuses FRG-SER-004's ONE ``wanted_issues()`` selectable rather than
+    re-deriving "wanted" here, so the sweep's fire/quiet decision can never
+    drift from what the Wanted screen and the search commands themselves
+    count. Called right after the add-time strategy is applied, inside the
+    same transaction — an unmonitored series or a ``none`` strategy yields 0.
+    """
+    count = await session.scalar(
+        select(func.count()).select_from(
+            repo.wanted_issues().where(IssueRow.series_id == series_id).subquery()
+        )
+    )
+    return int(count or 0)
 
 
 # --- cover cache (FRG-META-013) ---------------------------------------------

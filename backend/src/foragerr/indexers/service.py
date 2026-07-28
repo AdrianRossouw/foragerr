@@ -84,6 +84,16 @@ class IndexerSearchOutcome:
     #: True when the indexer was skipped because it is inside its back-off
     #: window — no request was issued.
     backing_off: bool = False
+    #: True when this indexer's search was cancelled for exceeding the
+    #: interactive per-indexer time budget (FRG-SRCH-015). Deliberately a
+    #: sibling of ``backing_off`` rather than a ``failure``: a slow indexer is
+    #: not a failing one, so the back-off ladder is left untouched and
+    #: ``failure`` stays ``None``. No partial page from a timed-out indexer is
+    #: mixed in — the outcome carries no candidates.
+    timed_out: bool = False
+    #: The budget (seconds) that bounded this indexer; set only with
+    #: ``timed_out`` so the operator sees WHICH budget cut the search short.
+    time_budget_seconds: float | None = None
     #: The typed failure that ended this indexer's search, if any.
     failure: IndexerFailure | None = None
     #: True when capabilities were conservative fallbacks, not a live probe.

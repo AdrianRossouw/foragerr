@@ -20,6 +20,13 @@ Structure follows Sonarr's split (design decision 3):
 Change 5 only DRIVES the ``downloading → import_pending | import_blocked | failed
 | ignored`` subset; ``importing`` / ``imported`` belong to change 6's import
 pipeline and are treated as terminal here (never regressed).
+
+Deliberate non-write (FRG-DL-015): the cheap check re-queues a still-completed
+``import_blocked`` row as ``import_pending`` every cycle, and it must NOT touch
+``import_stall_count`` / ``first_stalled_at`` while doing so. Those columns exist
+precisely to survive that reset — they count consecutive no-importable-files
+verdicts, not the row's instantaneous state — and only the import drain
+(``imports._apply_state``) ever writes them.
 """
 
 from __future__ import annotations

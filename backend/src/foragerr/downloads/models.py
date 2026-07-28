@@ -121,6 +121,21 @@ class TrackedDownloadRow(Base):
     encrypted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     added_at: Mapped[dt.datetime] = mapped_column(StrictDateTime, nullable=False)
     updated_at: Mapped[dt.datetime] = mapped_column(StrictDateTime, nullable=False)
+    #: Consecutive import attempts that found NO importable files under
+    #: ``output_path`` (FRG-DL-015, migration 0028). Deliberately independent of
+    #: ``state``: the completed-item retry loop keeps flipping the row between
+    #: ``import_blocked`` and ``import_pending``, so only this counter can say
+    #: how long a path-visibility stall has really been running. Reset to 0 by
+    #: any outcome that saw real files.
+    import_stall_count: Mapped[int] = mapped_column(
+        StrictInteger, nullable=False, default=0
+    )
+    #: When the CURRENT stall streak began — stamped once, then left alone while
+    #: the streak continues, so health reports the oldest stall rather than the
+    #: newest retry. NULL whenever ``import_stall_count`` is 0.
+    first_stalled_at: Mapped[dt.datetime | None] = mapped_column(
+        StrictDateTime, nullable=True
+    )
 
     __table_args__ = (
         UniqueConstraint(

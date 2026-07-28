@@ -39,8 +39,10 @@ from foragerr.search_ops.grab import (
 )
 from foragerr.search_ops.pipeline import (
     SearchResult,
+    effective_search_budget,
     make_indexer_factory,
     run_search,
+    search_budget_for_path,
 )
 
 __all__ = [
@@ -53,6 +55,7 @@ __all__ = [
     "SearchResult",
     "cache_decisions",
     "effective_backlog_delay",
+    "effective_search_budget",
     "enqueue_grab",
     "get_cached",
     "handoff_from_decision",
@@ -60,4 +63,5 @@ __all__ = [
     "prune_expired",
     "run_search",
     "run_series_search",
+    "search_budget_for_path",
 ]
