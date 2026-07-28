@@ -860,6 +860,15 @@ describe('FRG-SRC-009: failed-download retry affordance', () => {
  * verdict beside a live search rather than a dead end. Picking an in-library
  * volume matches; picking one that is not adds and matches in one action.
  */
+describe('FRG-UI-039: search seed precedence', () => {
+  it('FRG-UI-039 — seeds from the server group_key, falling back to the trimmed title', async () => {
+    const { searchSeedTerm } = await import('./EntitlementSearch');
+    expect(searchSeedTerm('TITLE Vol. 243 #3', 'title')).toBe('title');
+    expect(searchSeedTerm('Plain Title #12', '')).toBe('Plain Title');
+    expect(searchSeedTerm('Plain Title #12', null)).toBe('Plain Title');
+  });
+});
+
 describe('FRG-UI-039: per-row ComicVine search', () => {
   const source = makeSource({ id: 5, connection_state: 'connected' });
   /**
@@ -870,6 +879,7 @@ describe('FRG-UI-039: per-row ComicVine search', () => {
   const orphan = ent({
     id: 50,
     human_name: 'Nobody is Guarding the Lighthouse Vol. 8 #3',
+    group_key: 'nobody is guarding lighthouse',
     review_status: 'new',
     proposed_match: {
       verdict: 'no-plausible-match',
@@ -908,9 +918,10 @@ describe('FRG-UI-039: per-row ComicVine search', () => {
     expect(within(panel).getByTestId('row-search-note-50')).toHaveTextContent(
       'No plausible automatic match',
     );
-    // The seed drops the trailing issue ordinal — a volume search, not an issue.
+    // The seed is the SERVER's stripped series-shaped fold (group_key), so
+    // edition boilerplate never empties the suggest (live-rig finding).
     const input = within(panel).getByTestId('row-search-input-50');
-    expect(input).toHaveValue('Nobody is Guarding the Lighthouse Vol. 8');
+    expect(input).toHaveValue('nobody is guarding lighthouse');
 
     await user.clear(input);
     await user.type(input, 'guarding lighthouse');
