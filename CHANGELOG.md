@@ -9,6 +9,14 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.12.1] — 2026-07-28
+
+Patch: the review row's ComicVine search now seeds with the server's
+stripped series term (`group_key`) instead of the raw store title, so
+edition boilerplate ("Vol. 243") no longer empties the suggest — the
+live-dogfood finding that every row's search needed hand-trimming.
+(`FRG-UI-039`)
+
 ## [v0.12.0] — 2026-07-28
 
 M11 import-intelligence, change 3: spend the ComicVine budget like it's
