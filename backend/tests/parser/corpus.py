@@ -301,7 +301,31 @@ CORPUS: tuple[Row, ...] = (
     Row(81, "Batman (f1) 404 (1987).cbz", "Batman", ("FRG-IMP-017", "FRG-IMP-021"),
         issue="404", display="404", year=1987,
         annotations_contain=(("generic", "f1"),)),
+    # 82-87: store-source naming idioms met on the test rig (FRG-IMP-026).
+    # 82/86: `Vol. N` with no issue — pinned UNCHANGED. The parser reports an
+    # ordinal volume and no issue (FRG-IMP-012 field separation); resolving
+    # such a file to an issue is the import pipeline's job (FRG-PP-022).
+    Row(82, "SPAWN Vol. 243.cbz", "SPAWN", ("FRG-IMP-026", "FRG-IMP-012"),
+        vol=243),
+    # 83: the plain anchored shape the filler rule must not disturb.
+    Row(83, "Spawn #211.cbz", "Spawn", ("FRG-IMP-026",),
+        issue="211", display="211"),
+    # 84/85: a bare `Issue`/`Issues` sitting on the issue evidence is filler,
+    # not title — both the spaced anchor (`Issue # 279`) and the glued one
+    # (`Issues #8`, where the anchor rides the number token).
+    Row(84, "SPAWN Issue # 279.cbz", "SPAWN", ("FRG-IMP-026",),
+        issue="279", display="279"),
+    Row(85, "Strangelands Issues #8.cbz", "Strangelands", ("FRG-IMP-026",),
+        issue="8", display="8"),
+    Row(86, "Something is Killing the Children Vol. 8.cbz",
+        "Something is Killing the Children", ("FRG-IMP-026", "FRG-IMP-012"),
+        vol=8),
+    # 87: mid-title preservation (constructed probe) — `Issue` is followed by
+    # title words, not by the issue evidence, so the strip rule never fires.
+    Row(87, "The Death Issue Files 004 (2019).cbz", "The Death Issue Files",
+        ("FRG-IMP-026",),
+        issue="4", display="004", year=2019),
 )
 
-assert len(CORPUS) == 81
-assert [r.n for r in CORPUS] == list(range(1, 82))
+assert len(CORPUS) == 87
+assert [r.n for r in CORPUS] == list(range(1, 88))

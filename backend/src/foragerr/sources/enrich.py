@@ -28,7 +28,7 @@ from foragerr.sources.matching import (
     ProposedMatch,
     compute_proposed_match,
 )
-from foragerr.sources.models import SourceEntitlementRow
+from foragerr.sources.models import MATCHED_VIA_AUTO, SourceEntitlementRow
 
 logger = logging.getLogger("foragerr.sources.enrich")
 
@@ -149,6 +149,12 @@ async def _auto_accept(
     Only fires when the source toggle is ON (caller-gated). A library proposal
     links to the existing series; a ComicVine proposal runs the add flow. Both
     queue the grab. Below-threshold items are left in review.
+
+    Every acceptance here is stamped ``matched_via = "auto"`` (FRG-PP-022 guard
+    3): no human chose these series, so the import pipeline's ordinal fallback
+    ("Vol. N" → issue N) is withheld from them — a bare ``Vol. N`` store title
+    clears the auto-match threshold easily, and that must not become a no-human
+    route into an ordinal-derived issue mapping.
     """
     accepted = 0
     for eid, proposal in proposals.items():
@@ -157,7 +163,11 @@ async def _auto_accept(
         try:
             if proposal.best.kind == "library" and proposal.best.series_id:
                 await review.match_entitlement(
-                    db, eid, series_id=proposal.best.series_id, commands=commands
+                    db,
+                    eid,
+                    series_id=proposal.best.series_id,
+                    commands=commands,
+                    matched_via=MATCHED_VIA_AUTO,
                 )
             elif proposal.best.kind == "comicvine" and proposal.best.cv_volume_id:
                 await review.add_entitlement(
@@ -166,6 +176,7 @@ async def _auto_accept(
                     eid,
                     commands=commands,
                     cv_volume_id=proposal.best.cv_volume_id,
+                    matched_via=MATCHED_VIA_AUTO,
                 )
             else:
                 continue

@@ -87,6 +87,15 @@ _FIX_MARKER_RE = re.compile(r"f(\d{1,2})")
 #: Trade formats whose trailing number reads as a volume (FRG-IMP-016).
 _TRADE_BOOKTYPES = (Booktype.TPB, Booktype.GN, Booktype.HC)
 
+#: Bare filler words that introduce the issue number and are never series
+#: title content when they sit directly on the issue evidence (FRG-IMP-026):
+#: `Strangelands Issues #8`, `SPAWN Issue # 279`.
+_ISSUE_FILLER_WORDS = frozenset({"issue", "issues"})
+
+#: `Part`/`Pt` cue words that introduce the issue/chapter number and are
+#: never volume content (FRG-IMP-012).
+_PART_CUE_WORDS = frozenset({"part", "pt", "pt."})
+
 
 def parse(
     name: str,
@@ -484,6 +493,7 @@ class _State:
             if t.kind is TokenKind.HASH and not self.consumed[t.index]:
                 hash_pending = True
                 self.consume(t.index, "issue-anchor")
+                self._consume_cue_word(t.index, _ISSUE_FILLER_WORDS, role="issue-cue")
                 continue
             if t.kind is not TokenKind.WORD or self.consumed[t.index]:
                 continue
@@ -525,21 +535,29 @@ class _State:
         if self.selected is not None:
             self.issue_pos = self.selected.index
             self.roles[self.issue_pos] = "issue"
-            self._consume_part_cue()
+            self._consume_cue_word(self.issue_pos, _PART_CUE_WORDS, role="issue-cue")
+            self._consume_cue_word(self.issue_pos, _ISSUE_FILLER_WORDS, role="issue-cue")
 
-    def _consume_part_cue(self) -> None:
-        """`Part N` is an issue/chapter cue, never a volume (FRG-IMP-012):
-        when the selected issue follows a `part` token, consume the cue so it
-        does not leak into the series title."""
-        i = (self.issue_pos or 0) - 1
-        if i >= 1:
-            prev = self.tokens[i]
-            if (
-                prev.kind is TokenKind.WORD
-                and not self.consumed[i]
-                and prev.folded in ("part", "pt", "pt.")
-            ):
-                self.consume(i, "issue-cue")
+    def _consume_cue_word(
+        self, before: int, words: frozenset[str], *, role: str = "issue-cue"
+    ) -> None:
+        """A bare cue word (e.g. `Issue`/`Issues`, `Part`/`Pt`) directly left
+        of the issue evidence is filler, never title (FRG-IMP-026,
+        FRG-IMP-012). Anchored and narrow: it fires only immediately before
+        an issue-anchor `#` or the selected issue token, so a mid-title
+        `Issue` (`The Death Issue Files 004`) survives. Index 0 is never
+        consumed — a title must remain.
+        """
+        i = before - 1
+        if i < 1:
+            return
+        prev = self.tokens[i]
+        if (
+            prev.kind is TokenKind.WORD
+            and not self.consumed[i]
+            and prev.folded in words
+        ):
+            self.consume(i, role)
 
     def _dash_demoted_indices(self) -> set[int]:
         """Candidates sitting inside a post-dash subtitle are demoted

@@ -137,6 +137,7 @@ def test_spec_order_is_stable():
     assert names == [
         "remote-path-mapped",
         "mapped-to-issue",
+        "ordinal-fallback-guard",
         "embedded-id-conflict",
         "archive-valid",
         "not-a-sample",

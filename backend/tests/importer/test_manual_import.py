@@ -9,17 +9,28 @@ only difference, and the full ``default_specs()`` set always runs.
 from __future__ import annotations
 
 import datetime as dt
+import os
+import zipfile
+from pathlib import Path
 
 import pytest
 from sqlalchemy import select
 
 from foragerr.db import utcnow
+from foragerr.downloads import manual_import as manual_import_mod
 from foragerr.downloads.manual_import import (
     ManualFileSpec,
     execute_manual_import,
     list_manual_candidates,
 )
 from foragerr.downloads.models import GrabHistoryRow, TrackedDownloadRow
+from foragerr.downloads.state import (
+    TRACKED_STATUS_OK,
+    TRACKED_STATUS_WARNING,
+    TrackedDownloadState,
+)
+from foragerr.downloads.tracking import TrackedStateChanged, decode_messages
+from foragerr.events import EventBus
 from foragerr.importer import (
     CompletedDownloadSource,
     ImportStatus,
@@ -30,9 +41,10 @@ from foragerr.importer import (
     import_candidate,
 )
 from foragerr.importer.pipeline import gather
-from foragerr.library import repo
 from foragerr.library.models import IssueFileRow
 from foragerr.naming import RenameFields, render_filename
+from foragerr.sources.models import SourceEntitlementRow
+from foragerr.sources.review import ignore_entitlement
 
 _CVID_TEMPLATE = "{Series Title} {Issue Number:000} ({Year}) {CvIssueId}"
 
@@ -42,6 +54,7 @@ from importer._archives import (
     make_cbz_with_comicinfo,
     make_corrupt,
 )
+from importer.conftest import _add_issue
 
 
 async def _run(db, source, ctx):
@@ -72,15 +85,62 @@ async def _issue_files(db):
         return (await session.execute(select(IssueFileRow))).scalars().all()
 
 
-async def _add_issue(db, series_id, *, cv_issue_id, issue_number):
+def _make_big_cbz(path: Path, *, filler: int = 200 * 1024) -> Path:
+    """A valid cbz whose on-disk size clears the DEFAULT junk floor (100 KiB).
+
+    ``execute_manual_import`` builds its own :class:`ImportContext` from
+    ``Settings`` rather than the test ``import_ctx`` fixture, so a file driven
+    through it must be a realistic size or ``JunkFilterSpec`` — not the mapping
+    under test — decides the outcome."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("page000.png", _PNG_1x1_BYTES)
+        zf.writestr("filler.bin", os.urandom(filler))
+    return path
+
+
+_PNG_1x1_BYTES = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
+    "890000000a49444154789c6360000002000154a24f9f0000000049454e44ae42"
+    "6082"
+)
+
+
+async def _insert_tracked(db, *, download_id, output_path, messages=None):
+    """A blocked tracked row standing for the download the operator is resolving."""
+    now = utcnow()
     async with db.write_session() as session:
-        issue = await repo.create_issue(
-            session,
-            series_id=series_id,
-            cv_issue_id=cv_issue_id,
-            issue_number=issue_number,
+        row = TrackedDownloadRow(
+            download_id=download_id,
+            client_id=None,
+            state=TrackedDownloadState.IMPORT_BLOCKED.value,
+            status=TRACKED_STATUS_WARNING,
+            status_messages=messages,
+            title="a blocked download",
+            output_path=str(output_path),
+            added_at=now,
+            updated_at=now,
         )
-        return issue.id
+        session.add(row)
+        await session.flush()
+        return row.id
+
+
+async def _tracked_row(db, download_id):
+    async with db.read_session() as session:
+        row = (
+            (
+                await session.execute(
+                    select(TrackedDownloadRow).where(
+                        TrackedDownloadRow.download_id == download_id
+                    )
+                )
+            )
+            .scalars()
+            .one()
+        )
+        session.expunge(row)
+        return row
 
 
 # --- FRG-IMP-024: embedded read reconciliation ------------------------------
@@ -530,3 +590,350 @@ async def test_execute_cannot_force_a_rejected_file_past_the_specs(
     # force-imported. No issue_files row was written.
     assert "failed=1" in summary
     assert await _issue_files(db) == []
+
+
+# --- FRG-PP-016: the download-scoped execute ends like the drain -------------
+
+
+@pytest.mark.req("FRG-PP-016")
+async def test_download_scoped_execute_applies_the_tracked_terminal_state(
+    db, seed, tmp_path
+):
+    """A resolved download must not linger as ``import_blocked``: the execute ends
+    through the drain's own state-application path, so the tracked row reaches the
+    imported terminal state and the SAME queue event is emitted. A non-source
+    download id carries no entitlement, so only the queue row moves."""
+    s = await seed(title="Batman", issue_number="404", cv_issue_id=9001)
+    staging = tmp_path / "staging"
+    cbz = _make_big_cbz(staging / "unknown-release-xyz.cbz")
+    await _insert_tracked(
+        db, download_id="dl-1", output_path=staging, messages='["stale: no match"]'
+    )
+
+    bus = EventBus()
+    seen: list[TrackedStateChanged] = []
+    bus.subscribe(TrackedStateChanged, seen.append)
+    db.event_publisher = bus.publish
+
+    summary = await execute_manual_import(
+        db,
+        None,
+        [
+            ManualFileSpec(
+                path=str(cbz),
+                series_id=s.series_id,
+                issue_id=s.issue_id,
+                download_id="dl-1",
+            )
+        ],
+    )
+
+    assert "imported=1" in summary
+    row = await _tracked_row(db, "dl-1")
+    assert row.state == TrackedDownloadState.IMPORTED.value
+    assert row.status == TRACKED_STATUS_OK
+    assert decode_messages(row.status_messages) == []  # the stale reason is gone
+    # The same TrackedStateChanged the drain emits (the queue's WS refresh).
+    assert [(e.download_id, e.state) for e in seen] == [
+        ("dl-1", TrackedDownloadState.IMPORTED.value)
+    ]
+
+
+@pytest.mark.req("FRG-PP-016")
+async def test_download_scoped_execute_reflects_a_mixed_result(db, seed, tmp_path):
+    """One file imports, one stays blocked: the row takes the drain's aggregation
+    for a mixed result (``import_blocked`` naming the file that is still stuck) —
+    not a silent stale ``import_blocked`` carrying the reason from before."""
+    s = await seed(title="Batman", issue_number="404", cv_issue_id=9001)
+    staging = tmp_path / "staging"
+    good = _make_big_cbz(staging / "unknown-release-xyz.cbz")
+    stuck = _make_big_cbz(staging / "totally-unknown-thing-99.cbz")
+    await _insert_tracked(
+        db, download_id="dl-1", output_path=staging, messages='["stale: no match"]'
+    )
+
+    summary = await execute_manual_import(
+        db,
+        None,
+        [
+            ManualFileSpec(
+                path=str(good),
+                series_id=s.series_id,
+                issue_id=s.issue_id,
+                download_id="dl-1",
+            ),
+            ManualFileSpec(path=str(stuck), download_id="dl-1"),
+        ],
+    )
+
+    assert "imported=1" in summary and "blocked=1" in summary
+    row = await _tracked_row(db, "dl-1")
+    assert row.state == TrackedDownloadState.IMPORT_BLOCKED.value
+    assert row.status == TRACKED_STATUS_WARNING
+    messages = decode_messages(row.status_messages)
+    assert messages and all(stuck.name in m for m in messages)
+    assert not any("stale" in m for m in messages)  # rewritten, never left stale
+
+
+@pytest.mark.req("FRG-PP-016")
+async def test_one_plan_failing_never_rolls_back_another_plans_import(
+    db, seed, tmp_path, monkeypatch
+):
+    """Each download gets its OWN write session, as the drain gives each row.
+    ``import_candidate`` moves files inside the transaction, so a later download
+    raising must not roll back an earlier one's rows — the moved file would be
+    orphaned: gone from staging, unknown to the library."""
+    s = await seed(title="Batman", issue_number="404", cv_issue_id=9001)
+    id_405 = await _add_issue(db, s.series_id, cv_issue_id=9002, issue_number="405")
+    staging_a = tmp_path / "a"
+    good = _make_big_cbz(staging_a / "unknown-release-one.cbz")
+    staging_b = tmp_path / "b"
+    boom = _make_big_cbz(staging_b / "unknown-release-two.cbz")
+    await _insert_tracked(db, download_id="dl-a", output_path=staging_a)
+    await _insert_tracked(db, download_id="dl-b", output_path=staging_b)
+
+    real_import = manual_import_mod.import_candidate
+
+    async def _explode(session, candidate, ctx):
+        if candidate.file_name == boom.name:
+            raise RuntimeError("the second plan blew up mid-transaction")
+        return await real_import(session, candidate, ctx)
+
+    monkeypatch.setattr(manual_import_mod, "import_candidate", _explode)
+
+    with pytest.raises(RuntimeError):
+        await execute_manual_import(
+            db,
+            None,
+            [
+                ManualFileSpec(
+                    path=str(good),
+                    series_id=s.series_id,
+                    issue_id=s.issue_id,
+                    download_id="dl-a",
+                ),
+                ManualFileSpec(
+                    path=str(boom),
+                    series_id=s.series_id,
+                    issue_id=id_405,
+                    download_id="dl-b",
+                ),
+            ],
+        )
+
+    # The first download's import stands: file moved AND its rows durable.
+    assert not good.exists()
+    files = await _issue_files(db)
+    assert len(files) == 1 and files[0].issue_id == s.issue_id
+    row = await _tracked_row(db, "dl-a")
+    assert row.state == TrackedDownloadState.IMPORTED.value
+
+
+@pytest.mark.req("FRG-PP-016")
+async def test_partial_pick_keeps_the_download_blocked_until_all_files_resolve(
+    db, seed, tmp_path
+):
+    """Resolving ONE file of a two-file blocked download must not mark the whole
+    download imported: the verdict is folded over the download, so the unpicked
+    file contributes its own blocked outcome and its reason stays on the queue.
+    Picking the second file then converges the row to ``imported`` (the first is
+    no longer gathered — it was MOVED into the library)."""
+    s = await seed(title="Batman", issue_number="404", cv_issue_id=9001)
+    id_405 = await _add_issue(db, s.series_id, cv_issue_id=9002, issue_number="405")
+    staging = tmp_path / "staging"
+    first = _make_big_cbz(staging / "unknown-release-one.cbz")
+    second = _make_big_cbz(staging / "totally-unknown-thing-99.cbz")
+    await _insert_tracked(
+        db, download_id="dl-1", output_path=staging, messages='["stale: no match"]'
+    )
+
+    summary = await execute_manual_import(
+        db,
+        None,
+        [
+            ManualFileSpec(
+                path=str(first),
+                series_id=s.series_id,
+                issue_id=s.issue_id,
+                download_id="dl-1",
+            )
+        ],
+    )
+
+    assert "imported=1" in summary
+    row = await _tracked_row(db, "dl-1")
+    assert row.state == TrackedDownloadState.IMPORT_BLOCKED.value
+    assert row.status == TRACKED_STATUS_WARNING
+    messages = decode_messages(row.status_messages)
+    # The still-unresolved file is named, and the pre-existing reason is rewritten.
+    assert messages and all(second.name in m for m in messages)
+    assert not any("stale" in m for m in messages)
+
+    summary2 = await execute_manual_import(
+        db,
+        None,
+        [
+            ManualFileSpec(
+                path=str(second),
+                series_id=s.series_id,
+                issue_id=id_405,
+                download_id="dl-1",
+            )
+        ],
+    )
+
+    assert "imported=1" in summary2
+    row2 = await _tracked_row(db, "dl-1")
+    assert row2.state == TrackedDownloadState.IMPORTED.value
+    assert row2.status == TRACKED_STATUS_OK
+    assert decode_messages(row2.status_messages) == []
+
+
+@pytest.mark.req("FRG-PP-016")
+async def test_arbitrary_folder_execute_touches_no_tracked_row(
+    db, seed, library_root, tmp_path
+):
+    """An arbitrary-folder pick carries no ``download_id`` and therefore owns no
+    queue row: an unrelated blocked download is left exactly as it was."""
+    s = await seed(title="Batman", issue_number="404", cv_issue_id=9001)
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    await _insert_tracked(
+        db, download_id="dl-1", output_path=staging, messages='["stale: no match"]'
+    )
+    before = await _tracked_row(db, "dl-1")
+    picked = _make_big_cbz(library_root / "unknown-release-xyz.cbz")
+
+    summary = await execute_manual_import(
+        db,
+        None,
+        [ManualFileSpec(path=str(picked), series_id=s.series_id, issue_id=s.issue_id)],
+    )
+
+    assert "imported=1" in summary
+    after = await _tracked_row(db, "dl-1")
+    assert (after.state, after.status, after.status_messages, after.updated_at) == (
+        before.state,
+        before.status,
+        before.status_messages,
+        before.updated_at,
+    )
+
+
+# --- FRG-SRC-004: the drain's withdrawal gate, on the manual path ------------
+
+
+async def _store_entitlement(db, *, matched_series_id: int) -> int:
+    """A matched Humble entitlement whose grab already reached the import queue.
+
+    Built directly (no keystore round-trip) — only the ``humble:{id}`` identity
+    and the review/download axes matter to the withdrawal gate."""
+    from foragerr.sources.models import MATCHED_VIA_OPERATOR, SourceRow
+
+    now = utcnow()
+    async with db.write_session() as session:
+        source = SourceRow(
+            type="humble",
+            name="Humble Bundle",
+            settings="{}",
+            connection_state="connected",
+            auto_sync=False,
+            added_at=now,
+        )
+        session.add(source)
+        await session.flush()
+        row = SourceEntitlementRow(
+            source_id=source.id,
+            gamekey="gk",
+            machine_name="mn",
+            human_name="Batman #404",
+            classification="comic",
+            review_status="matched",
+            download_state="import_blocked",
+            matched_series_id=matched_series_id,
+            matched_via=MATCHED_VIA_OPERATOR,
+            md5="a" * 32,
+            file_size=1,
+            filename="batman-404.cbz",
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(row)
+        await session.flush()
+        return row.id
+
+
+@pytest.mark.req("FRG-SRC-004")
+@pytest.mark.req("FRG-PP-016")
+async def test_manual_import_withdraws_a_store_item_ignored_after_listing(
+    db, seed, tmp_path, monkeypatch
+):
+    """The drain's withdrawal gate applies to the manual path too (FRG-SRC-004).
+
+    ``execute_manual_import`` snapshots the tracked row + its download source
+    BEFORE opening the plan's write transaction, so an operator ``ignore`` can
+    commit in between — deleting the tracked row and clearing the entitlement's
+    download axis. Without an in-transaction re-check the plan would still MOVE
+    the file into the library and write ``issue_files`` while
+    ``apply_source_import`` skipped the entitlement mirror, leaving a withdrawn
+    store item imported under withdrawn-looking state. Nothing may land: no
+    issue_files row, no file move, and the withdrawal is reported."""
+    s = await seed(title="Batman", issue_number="404", cv_issue_id=9001)
+    eid = await _store_entitlement(db, matched_series_id=s.series_id)
+    download_id = f"humble:{eid}"
+    staging = tmp_path / "staging"
+    cbz = _make_big_cbz(staging / "unknown-release-xyz.cbz")
+    await _insert_tracked(
+        db,
+        download_id=download_id,
+        output_path=staging,
+        messages='["stale: no match"]',
+    )
+
+    real_snapshot = manual_import_mod._completed_source_for_download
+
+    async def _ignore_after_the_snapshot(db_, dl_id):
+        # The plan is built from this read; the operator's ignore commits right
+        # after it, i.e. before the plan's write transaction opens.
+        result = await real_snapshot(db_, dl_id)
+        await ignore_entitlement(db_, eid)
+        return result
+
+    monkeypatch.setattr(
+        manual_import_mod,
+        "_completed_source_for_download",
+        _ignore_after_the_snapshot,
+    )
+
+    summary = await execute_manual_import(
+        db,
+        None,
+        [
+            ManualFileSpec(
+                path=str(cbz),
+                series_id=s.series_id,
+                issue_id=s.issue_id,
+                download_id=download_id,
+            )
+        ],
+    )
+
+    assert summary == "imported=0 blocked=0 failed=0 withdrawn=1"
+    assert cbz.exists()  # the file never moved out of staging
+    assert await _issue_files(db) == []  # nothing entered the library
+    async with db.read_session() as session:
+        ent = await session.get(SourceEntitlementRow, eid)
+        assert ent.review_status == "ignored"
+        assert ent.download_state is None  # never resurrected by the mirror
+        rows = (
+            (
+                await session.execute(
+                    select(TrackedDownloadRow).where(
+                        TrackedDownloadRow.download_id == download_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert rows == []  # de-tracked, so a restore + re-accept can hand off afresh

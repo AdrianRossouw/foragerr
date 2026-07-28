@@ -272,6 +272,7 @@ async def _handoff_to_import(
 
     from foragerr.downloads.models import GrabHistoryRow, TrackedDownloadRow
     from foragerr.downloads.state import TRACKED_STATUS_OK, TrackedDownloadState
+    from foragerr.sources.import_hook import GRAB_SOURCE_STORE
 
     download_id = f"humble:{ent.id}"
     now = utcnow()
@@ -298,7 +299,7 @@ async def _handoff_to_import(
                 issue_id=None,
                 title=ent.human_name,
                 protocol="humble",
-                source="store",
+                source=GRAB_SOURCE_STORE,
                 created_at=now,
             )
         )
@@ -308,7 +309,7 @@ async def _handoff_to_import(
                 client_id=None,
                 client_name="Humble Bundle",
                 protocol="humble",
-                source="store",
+                source=GRAB_SOURCE_STORE,
                 state=TrackedDownloadState.IMPORT_PENDING.value,
                 status=TRACKED_STATUS_OK,
                 series_id=ent.matched_series_id,

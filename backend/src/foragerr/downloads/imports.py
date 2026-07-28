@@ -248,17 +248,16 @@ async def _process_one(
 
     if not output_path:
         # Claimed but nothing to import from: block, never lose it.
-        final_state, status, messages = _resolve_final([], [], no_output=True)
         async with db.write_session() as session:
             if await source_import_withdrawn(session, download_id):
                 return await _withdraw_import(session, row_id, download_id)
-            await _apply_state(session, row_id, final_state, status, messages, ctx.now)
-            await apply_source_import(
+            final_state = await finalize_download_import(
                 session,
+                row_id=row_id,
                 download_id=download_id,
-                final_state=final_state,
-                imported_issues=[],
+                outcomes=[],
                 now=ctx.now,
+                no_output=True,
             )
         return final_state
 
@@ -306,39 +305,58 @@ async def _process_one(
             return await _withdraw_import(session, row_id, download_id)
         for candidate in candidates:
             outcomes.append(await import_candidate(session, candidate, ctx))
-        final_state, status, messages = _resolve_final(
-            candidates, outcomes, no_output=False
-        )
-        await _apply_state(session, row_id, final_state, status, messages, ctx.now)
-        # Store-source hook (FRG-SRC-006/007): mirror the verdict onto the
-        # entitlement and, on success, fill owned-via-edition singles for any
-        # imported collected edition — all inside this import transaction.
-        imported_issues = [
-            (o.issue_id, o.imported_path)
-            for o in outcomes
-            if o.status is ImportStatus.IMPORTED
-            and o.issue_id is not None
-            and o.imported_path
-        ]
-        await apply_source_import(
+        # Terminal transition + store-source hook, in this same import
+        # transaction. Shared with manual import (FRG-PP-016 / FRG-SRC-006) so
+        # both flows compute and apply the identical verdict.
+        final_state = await finalize_download_import(
             session,
+            row_id=row_id,
             download_id=download_id,
-            final_state=final_state,
-            imported_issues=imported_issues,
+            outcomes=outcomes,
             now=ctx.now,
         )
 
     # 4. Post-commit side-effects — OUTSIDE the write lock so they can open their
-    #    own sessions (the writer lock is not re-entrant): change-5 failure loop
-    #    on a corrupt archive, or FRG-DL-010 client cleanup on success.
+    #    own sessions (the writer lock is not re-entrant).
+    await run_post_import_side_effects(
+        db,
+        settings,
+        final_state=final_state,
+        client_id=client_id,
+        download_id=download_id,
+        commands=commands,
+        now=ctx.now,
+    )
+
+    return final_state
+
+
+async def run_post_import_side_effects(
+    db: Database,
+    settings: Settings | None,
+    *,
+    final_state: TrackedDownloadState | None,
+    client_id: int | None,
+    download_id: str,
+    commands=None,
+    now: dt.datetime,
+) -> None:
+    """The post-commit half of one download's import (FRG-DL-010, FRG-DL-013).
+
+    Runs AFTER the import transaction commits and outside its write session (the
+    writer lock is not re-entrant, and client data must never be removed before
+    the ``issue_files`` row is durable): change-5's failure loop on a corrupt
+    archive, or the FRG-DL-010 client remove/mark-imported on success.
+
+    Shared by the drain and manual import (FRG-PP-016) so a download an operator
+    resolves by hand ends exactly like a drained one — client cleanup included.
+    """
     if final_state is TrackedDownloadState.IMPORTED:
         await _post_import_cleanup(
             db, settings, client_id=client_id, download_id=download_id
         )
     elif final_state is TrackedDownloadState.FAILED_PENDING:
-        await process_failures(db, commands=commands, settings=settings, now=ctx.now)
-
-    return final_state
+        await process_failures(db, commands=commands, settings=settings, now=now)
 
 
 async def _reconcile_recovered_import(
@@ -452,8 +470,8 @@ async def _reconcile_recovered_import(
     return TrackedDownloadState.IMPORTED
 
 
-def _resolve_final(
-    candidates, outcomes: list[ImportOutcome], *, no_output: bool
+def resolve_terminal_state(
+    outcomes: list[ImportOutcome], *, no_output: bool = False
 ) -> tuple[TrackedDownloadState, str, list[str]]:
     """Fold per-file outcomes into one tracked (state, status, messages) verdict.
 
@@ -461,6 +479,10 @@ def _resolve_final(
     failed handling); otherwise every file must import for ``imported``; anything
     short of that (including zero importable files) blocks with per-file reasons —
     never lost (FRG-DL-009).
+
+    The ONE aggregation policy: the drain and manual import (FRG-PP-016) both
+    fold through here, so identical per-file outcomes always yield an identical
+    tracked state — there is no second, drifting manual policy.
     """
     if no_output or not outcomes:
         return (
@@ -487,6 +509,53 @@ def _resolve_final(
     return TrackedDownloadState.IMPORT_BLOCKED, TRACKED_STATUS_WARNING, messages
 
 
+async def finalize_download_import(
+    session: AsyncSession,
+    *,
+    row_id: int,
+    download_id: str,
+    outcomes: list[ImportOutcome],
+    now: dt.datetime,
+    no_output: bool = False,
+) -> TrackedDownloadState:
+    """Apply one download's terminal import verdict inside the caller's txn.
+
+    The shared ending of EVERY import path (FRG-DL-009, FRG-PP-016,
+    FRG-SRC-006): fold the per-file outcomes with :func:`resolve_terminal_state`,
+    write the tracked-row transition (emitting the queue event) and mirror the
+    verdict onto a store entitlement — running FRG-SRC-007's owned-via-edition
+    reconciliation for every imported issue. The automatic drain and a manual
+    import of the same download therefore land the same tracked state, the same
+    queue event, and the same entitlement transitions.
+
+    Runs entirely in the caller's write session so the tracked state, the
+    ``issue_files`` rows and any owned-via-edition fills commit as one.
+    """
+    final_state, status, messages = resolve_terminal_state(
+        outcomes, no_output=no_output
+    )
+    await _apply_state(session, row_id, final_state, status, messages, now)
+    # Store-source hook (FRG-SRC-006/007): mirror the verdict onto the
+    # entitlement and, on success, fill owned-via-edition singles for any
+    # imported collected edition — all inside this import transaction. A no-op
+    # for a non-store download id.
+    imported_issues = [
+        (o.issue_id, o.imported_path)
+        for o in outcomes
+        if o.status is ImportStatus.IMPORTED
+        and o.issue_id is not None
+        and o.imported_path
+    ]
+    await apply_source_import(
+        session,
+        download_id=download_id,
+        final_state=final_state,
+        imported_issues=imported_issues,
+        now=now,
+    )
+    return final_state
+
+
 async def _withdraw_import(
     session: AsyncSession,
     row_id: int,
@@ -499,9 +568,7 @@ async def _withdraw_import(
     row would strand a later restore + re-accept with no claimable row. The
     entitlement itself is untouched — the review action already reset its
     download axis. Runs inside the caller's import transaction."""
-    logger.info(
-        "process-imports: %s no longer accepted; import withdrawn", download_id
-    )
+    logger.info("import: %s no longer accepted; import withdrawn", download_id)
     row = await session.get(TrackedDownloadRow, row_id)
     if row is not None:
         await session.delete(row)
@@ -588,5 +655,8 @@ __all__ = [
     "PROCESS_IMPORTS_TASK",
     "ProcessImportsCommand",
     "build_import_context",
+    "finalize_download_import",
     "process_imports",
+    "resolve_terminal_state",
+    "run_post_import_side_effects",
 ]

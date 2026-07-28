@@ -36,6 +36,7 @@ import logging
 import os
 from dataclasses import dataclass, replace
 from enum import Enum
+from fractions import Fraction
 from pathlib import Path
 
 from sqlalchemy import func, select
@@ -44,6 +45,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from foragerr.importer import convert, fileops, history
 from foragerr.importer.context import ImportContext
 from foragerr.importer.decisions import (
+    ORDINAL_REFUSED_AUTO_MATCH,
+    ORDINAL_REFUSED_EXISTING_FILE,
+    ORDINAL_REFUSED_TRADE,
+    ORDINAL_REFUSED_UNPROVEN_MATCH,
     ImportDecision,
     ImportEvaluation,
     decide,
@@ -55,6 +60,7 @@ from foragerr.importer.evidence import (
     PROV_COMICINFO,
     PROV_COMICINFO_CONFLICT,
     PROV_MANUAL_OVERRIDE,
+    PROV_ORDINAL_REFUSED,
     Evidence,
     aggregate,
 )
@@ -73,6 +79,7 @@ from foragerr.importer.sources import (
     RescanSource,
 )
 from foragerr.library import matching, repo
+from foragerr.library.booktype import COLLECTED_BOOKTYPES
 from foragerr.library.models import IssueFileRow, IssueRow, SeriesRow
 from foragerr.metadata.comicinfo import (
     EmbeddedMetadata,
@@ -81,7 +88,7 @@ from foragerr.metadata.comicinfo import (
     tag_cbz,
 )
 from foragerr.parser import parse
-from foragerr.parser.result import Booktype, IssueClassification
+from foragerr.parser.result import Booktype, Issue, IssueClassification
 from foragerr.quality.models import FormatProfileRow, decode_formats
 from foragerr.security.archives import inspect_archive
 from foragerr.security.paths import safe_join
@@ -176,6 +183,77 @@ def aggregate_candidate(candidate: ImportCandidate, ctx: ImportContext) -> Evide
 # --- reconciliation (FRG-PP-003) --------------------------------------------
 
 
+#: Parse book-types that mark a file as a recognizable collected edition
+#: (FRG-PP-022 guard 1). ``Booktype.ISSUE`` (no cue) and ``ONE_SHOT`` are not
+#: collected editions, so they never trip the guard.
+_COLLECTED_BOOKTYPE_EVIDENCE = (Booktype.TPB, Booktype.GN, Booktype.HC)
+
+
+@dataclass(frozen=True, slots=True)
+class StoreProvenance:
+    """A store download's CURRENT entitlement state, read at import time
+    (FRG-PP-021).
+
+    ``series_id`` is the entitlement's ``matched_series_id`` as it stands NOW
+    (validated to exist), not the series recorded on the grab row — a re-match
+    between grab and import is therefore honored automatically. The two match
+    -provenance flags are the only question the ordinal fallback asks
+    (FRG-PP-022 guard 3); both are False for a legacy row whose match predates
+    match-provenance tracking, which is deliberately NOT treated as
+    operator-made.
+    """
+
+    entitlement_id: int
+    series_id: int
+    operator_matched: bool
+    auto_matched: bool
+
+
+async def _store_provenance(
+    session: AsyncSession, candidate: ImportCandidate
+) -> StoreProvenance | None:
+    """The store authority for this candidate, or ``None`` (FRG-PP-021).
+
+    ``None`` — meaning "no provenance authority, resolve by the pre-existing
+    rules" — for every one of:
+
+    * a candidate that is not a store grab at all (an indexer force-grab whose
+      release mapped a series but no issue: `POST /release` writes exactly that
+      shape with no operator involvement, so it must not confer authority);
+    * an entitlement that has since been deleted, or is no longer matched to any
+      series (authority withdrawn rather than exercised over nothing);
+    * a match pointing at a series that no longer exists — the phantom case: the
+      file falls back to normal resolution instead of blocking with a reason
+      naming a row id nothing can be done about (and a reused row id could
+      otherwise repoint the match at an unrelated series).
+
+    The entitlement is read HERE, inside the import transaction, so the series
+    is the current one and the existence check cannot go stale between them.
+    """
+    if candidate.store_entitlement_id is None:
+        return None
+    # Deferred import: `foragerr.sources` is a sibling leaf, but keeping every
+    # non-importer package import inside the function preserves the isolated
+    # importability guard documented in `importer.sources`.
+    from foragerr.sources.models import (
+        MATCHED_VIA_AUTO,
+        MATCHED_VIA_OPERATOR,
+        SourceEntitlementRow,
+    )
+
+    row = await session.get(SourceEntitlementRow, candidate.store_entitlement_id)
+    if row is None or row.matched_series_id is None:
+        return None
+    if await session.get(SeriesRow, row.matched_series_id) is None:
+        return None
+    return StoreProvenance(
+        entitlement_id=row.id,
+        series_id=row.matched_series_id,
+        operator_matched=row.matched_via == MATCHED_VIA_OPERATOR,
+        auto_matched=row.matched_via == MATCHED_VIA_AUTO,
+    )
+
+
 async def _issue_index_for_series(
     session: AsyncSession, series_id: int, ctx: ImportContext
 ) -> list:
@@ -197,6 +275,115 @@ async def _match_issue_in_series(
     return matching.match_issue_id(
         issue, await _issue_index_for_series(session, series_id, ctx)
     )
+
+
+async def _issue_has_file(session: AsyncSession, issue_id: int) -> bool:
+    """Whether the issue already has ANY ``issue_files`` row (FRG-PP-022 guard 2).
+
+    Deliberately unfiltered — the same set :func:`build_evaluation` would hand to
+    the upgrade/duplicate specs, owned-via-edition rows included — because the
+    guard's job is to keep an ordinal-derived mapping out of arbitration
+    entirely, not to re-judge which existing copy would win it."""
+    return bool(
+        await session.scalar(
+            select(func.count())
+            .select_from(IssueFileRow)
+            .where(IssueFileRow.issue_id == issue_id)
+        )
+    )
+
+
+async def _ordinal_guards_refuse(
+    session: AsyncSession,
+    series_id: int,
+    evidence: Evidence,
+    store: StoreProvenance | None,
+) -> str | None:
+    """The FRG-PP-022 guard that refuses the ordinal fallback here, or ``None``.
+
+    Checked BEFORE the ordinal is looked up (guards 1 and 3) and after it
+    resolves (guard 2, in the caller — it needs the resolved issue). These bound
+    the fallback's blast radius; each returns the code
+    :class:`~foragerr.importer.decisions.OrdinalFallbackSpec` renders.
+    """
+    # Guard 3 (store provenance only): the fallback's whole safety argument is
+    # that a HUMAN chose this series for this item. An auto-sync match did not —
+    # and a bare "Vol. N" store title clears the auto-match threshold easily, so
+    # honoring it here would be a no-human route from a store title straight into
+    # an issue mapping. A match whose provenance was never recorded (a row that
+    # predates the matched_via column) is treated the same way: unproven, so the
+    # file blocks exactly as it did before this change.
+    if store is not None and not store.operator_matched:
+        return (
+            ORDINAL_REFUSED_AUTO_MATCH
+            if store.auto_matched
+            else ORDINAL_REFUSED_UNPROVEN_MATCH
+        )
+    # Guard 1: a recognizable trade never lands on a single-issue line
+    # (FRG-SER-019). "Saga Vol 04 TPB" reads as ordinal 4, and a singles Saga
+    # holds a #4 — filing it there would put a collected edition on a single's
+    # issue and (worse) let it win the duplicate contest against the real single.
+    if evidence.booktype in _COLLECTED_BOOKTYPE_EVIDENCE:
+        series = await session.get(SeriesRow, series_id)
+        if series is None or series.booktype not in COLLECTED_BOOKTYPES:
+            return ORDINAL_REFUSED_TRADE
+    return None
+
+
+async def _derive_issue_in_series(
+    session: AsyncSession,
+    series_id: int,
+    evidence: Evidence,
+    ctx: ImportContext,
+    *,
+    store: StoreProvenance | None = None,
+) -> tuple[int | None, str | None]:
+    """The issue of a KNOWN series that the parse evidence resolves to, plus the
+    guard code that refused an ordinal fallback (FRG-PP-021, FRG-PP-022).
+
+    Used only where the target series is already established — a provenance
+    (store-grab) series, a series-scoped rescan, or a library-import group — so
+    the series identity is never at stake here, only the issue.
+
+    A parsed issue number is the ONLY evidence consulted when one is present: an
+    issue number that misses the series' index is a real disagreement and must
+    block, never be second-guessed by a weaker signal. It is also never subject
+    to the guards below — they bound the ORDINAL fallback alone, which is the
+    only inference this function makes. Only when the evidence carries no issue
+    at all does an ordinal volume stand in for it (FRG-PP-022): a ``Vol. 243``
+    file lands as #243 exactly when the known series' index really holds #243 —
+    the index, not the parse, is what makes the fallback safe — and only when
+    all three guards pass. The parser's ``issue``/``volume_ordinal`` separation
+    (FRG-IMP-012) is untouched: the reinterpretation happens here, under a
+    series a human chose, and never globally.
+
+    Returns ``(issue_id, refusal)``. A refusal always comes with
+    ``issue_id = None``: the mapping is withheld, so the candidate blocks with
+    the guard's reason and never enters upgrade/duplicate arbitration.
+    """
+    if evidence.issue is not None:
+        return (
+            await _match_issue_in_series(session, series_id, evidence.issue, ctx),
+            None,
+        )
+    if evidence.volume_ordinal is None:
+        return None, None
+    refusal = await _ordinal_guards_refuse(session, series_id, evidence, store)
+    if refusal is not None:
+        return None, refusal
+    ordinal = Issue(
+        value=Fraction(evidence.volume_ordinal), display=str(evidence.volume_ordinal)
+    )
+    issue_id = await _match_issue_in_series(session, series_id, ordinal, ctx)
+    if issue_id is None:
+        return None, None  # an ordinal miss is not a refusal — nothing to explain
+    # Guard 2: an ordinal-derived mapping NEVER replaces an existing file. The
+    # inference is too weak to enter the duplicate-size contest, whose loser is
+    # deleted — a mislabeled "Vol. N" must not be able to destroy a file the
+    # operator already has. Manual confirmation is the only way in.
+    if await _issue_has_file(session, issue_id):
+        return None, ORDINAL_REFUSED_EXISTING_FILE
+    return issue_id, None
 
 
 async def _resolve_override(
@@ -300,6 +487,12 @@ async def _filename_series_match(
 _BASE_TAG = "tag"
 _BASE_GRAB = "grab"
 _BASE_FILENAME = "filename"
+#: A grab record that fixed the SERIES only (the store-grab shape, FRG-PP-021):
+#: the series is authoritative, but the ISSUE was derived from the parse (or not
+#: derived at all). Distinct from :data:`_BASE_GRAB` — which resolved BOTH halves
+#: and so outranks the embedded ComicInfo layer outright — because here the
+#: embedded layer may still speak for the issue, confined to that series.
+_BASE_GRAB_SERIES = "grab_series"
 
 
 async def reconcile(
@@ -384,14 +577,31 @@ async def reconcile(
     if base_source not in (_BASE_TAG, _BASE_GRAB):
         issue_row = await _embedded_issue(session, embedded)
         if issue_row is not None:
-            scope_ok = (
-                candidate.series_scope_id is None
-                or issue_row.series_id == candidate.series_scope_id
+            # A provenance series (FRG-PP-021) that could not derive an issue
+            # confines the embedded layer exactly as a scoped rescan does: an
+            # embedded id resolving INSIDE the operator-matched series may still
+            # supply the issue the parse could not, but one resolving outside it
+            # never silently relocates the file — that is a conflict. The
+            # filename's series evidence is not consulted at all in that case
+            # (the operator's match already settled series identity).
+            provenance_series = (
+                base_series if base_source == _BASE_GRAB_SERIES else None
             )
-            filename_series = await _filename_series_match(session, candidate, evidence)
-            filename_conflict = (
-                filename_series is not None and filename_series != issue_row.series_id
+            scope_series = (
+                candidate.series_scope_id
+                if candidate.series_scope_id is not None
+                else provenance_series
             )
+            scope_ok = scope_series is None or issue_row.series_id == scope_series
+            filename_conflict = False
+            if provenance_series is None:
+                filename_series = await _filename_series_match(
+                    session, candidate, evidence
+                )
+                filename_conflict = (
+                    filename_series is not None
+                    and filename_series != issue_row.series_id
+                )
             if scope_ok and not filename_conflict:
                 # Beats the filename heuristic (the only signal below it here).
                 evidence.provenance["series"] = PROV_COMICINFO
@@ -495,18 +705,67 @@ async def _reconcile_base(
     if candidate.grab_series_id is not None and candidate.grab_issue_id is not None:
         return candidate.grab_series_id, candidate.grab_issue_id, _BASE_GRAB
 
+    # 2b. Series-only STORE provenance (FRG-PP-021). The operator matched the
+    # entitlement to a series and no specific issue was grabbed. That match is
+    # authoritative for series identity, so the issue is derived WITHIN the
+    # series and control never falls through to step 3's unscoped filename
+    # lookup — falling through would let a parseable-but-wrong filename relocate
+    # the file to another series, inverting FRG-PP-004's confidence order (a
+    # grab record outranks the filename). With no derivable issue the series
+    # still comes back, so the rejection names it (MappedToIssueSpec) instead of
+    # claiming the series was unmatchable; manual import remains the escape
+    # hatch.
+    #
+    # The authority is STORE-GATED and read from the entitlement, not the grab
+    # row (:func:`_store_provenance`): a series-only hint from an indexer
+    # force-grab is not an operator match at all and keeps the pre-change rules,
+    # and a store grab resolves against the entitlement's CURRENT match so a
+    # re-match between grab and import is honored and a dangling one withdraws
+    # the authority. Both of those cases simply fall through to step 3 — exactly
+    # what this code did before FRG-PP-021 existed.
+    #
+    # Reported as _BASE_GRAB_SERIES whether or not an issue was derived: the
+    # grab settled the SERIES, so a verified embedded ComicInfo id may still
+    # correct/supply the issue within it (FRG-IMP-024) — only a both-ids grab
+    # (_BASE_GRAB) outranks that layer outright.
+    store = await _store_provenance(session, candidate)
+    if store is not None:
+        issue_id, refusal = await _derive_issue_in_series(
+            session, store.series_id, evidence, ctx, store=store
+        )
+        if refusal is not None:
+            evidence.provenance[PROV_ORDINAL_REFUSED] = refusal
+        return store.series_id, issue_id, _BASE_GRAB_SERIES
+
     # 3. parser heuristic.
-    if evidence.issue is None:
-        return None, None, None
     if candidate.series_scope_id is not None:
         series = await session.get(SeriesRow, candidate.series_scope_id)
         if series is None or not matching.series_title_matches(
             evidence.matching_key, series.matching_key
         ):
             return None, None, None
-        issue_id = await _match_issue_in_series(session, series.id, evidence.issue, ctx)
+        # The scoped series is explicitly known, so the FRG-PP-022 ordinal
+        # fallback applies here too (a `Vol. N` file rescanned inside its own
+        # series folder), guards included — the trade-into-singles and
+        # never-replace-an-existing-file guards are properties of the inference,
+        # not of the store path. Guard 3 (operator-made match) is store-specific
+        # and simply does not apply: a scoped rescan/library import IS an
+        # operator-directed action on that series.
+        issue_id, refusal = await _derive_issue_in_series(
+            session, series.id, evidence, ctx
+        )
+        if refusal is not None:
+            # Series-scoped: report the series so the refusal reason can name it
+            # (the file is genuinely THIS series' — only the issue is refused).
+            evidence.provenance[PROV_ORDINAL_REFUSED] = refusal
+            return series.id, None, _BASE_FILENAME
         return (series.id, issue_id, _BASE_FILENAME) if issue_id is not None else (None, None, None)
 
+    # Unscoped: no known series, so the filename must carry both halves. No
+    # ordinal fallback here — with the series itself in question, a bare
+    # `Vol. N` is not issue evidence.
+    if evidence.issue is None:
+        return None, None, None
     if evidence.matching_key is None:
         return None, None, None
     series = (
@@ -595,16 +854,26 @@ async def build_evaluation(
         override=candidate.override,
         embedded=embedded,
     )
+    # An ordinal-fallback refusal only speaks when NOTHING else resolved the
+    # issue. A layer above the fallback (a verified embedded ComicVine id inside
+    # the same series) supplying it is a real, stronger mapping — not an
+    # ordinal-derived one — so the refusal is spent, not a block.
+    ordinal_refusal = evidence.provenance.get(PROV_ORDINAL_REFUSED)
+    if issue_id is not None:
+        evidence.provenance.pop(PROV_ORDINAL_REFUSED, None)
+        ordinal_refusal = None
 
     existing_path: str | None = None
     existing_format: str | None = None
     existing_size: int | None = None
     existing_fix_revision: int | None = None
+    series_title: str | None = None
     ladder: tuple[str, ...] = ()
     dest_dir = ctx.library_root
     if series_id is not None:
         series = await session.get(SeriesRow, series_id)
         if series is not None:
+            series_title = series.title
             dest_dir = series.path
             profile = await session.get(FormatProfileRow, series.format_profile_id)
             if profile is not None:
@@ -644,6 +913,7 @@ async def build_evaluation(
         size=candidate.size,
         series_id=series_id,
         issue_id=issue_id,
+        series_title=series_title,
         archive=archive,
         existing_file_path=existing_path,
         existing_format=existing_format,
@@ -662,6 +932,7 @@ async def build_evaluation(
         existing_fix_revision=existing_fix_revision,
         new_fix_revision=evidence.fix_revision,
         duplicate_constraint=ctx.duplicate_constraint,
+        ordinal_refusal=ordinal_refusal,
     )
 
 

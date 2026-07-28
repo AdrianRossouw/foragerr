@@ -8,13 +8,23 @@ and an injected ``httpx.MockTransport`` serving the committed fixtures.
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import pytest
 
 from foragerr.http import HttpClientFactory
+from foragerr.library import repo as library_repo
+from foragerr.sources import repo
 from foragerr.sources.humble import HUMBLE_API_BASE
+from foragerr.sources.models import SourceEntitlementRow
+from foragerr.sources.registry import TYPE_HUMBLE
+from foragerr.sources.service import run_sync
+from foragerr.sources.settings import HumbleSettings
 from http_support import PUBLIC_V4, StubResolver, make_settings
+
+#: The synthetic Humble order gamekey every synced-source fixture serves.
+GAMEKEY = "aBcD1234synthetic"
 
 
 @pytest.fixture
@@ -99,3 +109,67 @@ def order_handler(
         return json_response(404, b"{}")
 
     return handler
+
+
+class FakeCommands:
+    """Records enqueued commands (the grab / refresh hand-offs) without a real
+    queue."""
+
+    def __init__(self):
+        self.enqueued: list[tuple] = []
+
+    async def enqueue(self, name, payload=None, *, triggered_by="manual"):
+        self.enqueued.append((name, payload, triggered_by))
+        return SimpleNamespace(id=len(self.enqueued), status="queued")
+
+    def grabs(self) -> list[tuple]:
+        return [c for c in self.enqueued if c[0] == "source-grab"]
+
+
+async def _synced_source(
+    db,
+    config_dir: Path,
+    *,
+    auto_sync: bool = False,
+    connection_state: str | None = None,
+):
+    """Create + sync a Humble source against the shared ``order_comics.json``
+    fixture. ``connection_state`` is passed through to ``repo.create_source``
+    only when given — omitted (the default) leaves the repo's own default in
+    place, matching callers that never cared about connection state."""
+    kwargs: dict = {
+        "source_type": TYPE_HUMBLE,
+        "name": "Humble Bundle",
+        "settings": HumbleSettings(session_cookie="SYNTH-COOKIE"),
+        "auto_sync": auto_sync,
+    }
+    if connection_state is not None:
+        kwargs["connection_state"] = connection_state
+    source = await repo.create_source(db, **kwargs)
+    handler = order_handler(
+        list_body=b'[{"gamekey":"%s"}]' % GAMEKEY.encode(),
+        order_bodies={GAMEKEY: fixture_bytes("order_comics.json")},
+    )
+    factory = make_factory(config_dir, httpx.MockTransport(handler))
+    await run_sync(db, factory, source, min_interval=0.0)
+    return source
+
+
+async def _comic(db, source_id, machine_name) -> SourceEntitlementRow:
+    for e in await repo.list_entitlements(db, source_id, classification="comic"):
+        if e.machine_name == machine_name:
+            return e
+    raise AssertionError(f"no entitlement {machine_name}")
+
+
+async def _mk_series(db, root_folder_id, format_profile_id, *, cvid, title):
+    async with db.write_session() as session:
+        series = await library_repo.create_series(
+            session,
+            cv_volume_id=cvid,
+            title=title,
+            format_profile_id=format_profile_id,
+            root_folder_id=root_folder_id,
+            path=f"/tmp/comics/{title} ({cvid})",
+        )
+        return series.id

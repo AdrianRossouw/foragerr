@@ -169,6 +169,12 @@ class HealthService:
             label="Store sources",
         )
         components += await self._safe(
+            lambda: self._source_downloads_component(),
+            component="source-downloads",
+            kind="source",
+            label="Store source downloads",
+        )
+        components += await self._safe(
             lambda: self._scheduler_component(),
             component="scheduler",
             kind="scheduler",
@@ -555,6 +561,66 @@ class HealthService:
             )
         return components
 
+    async def _source_downloads_component(self) -> list[ComponentHealth]:
+        """Failed store-source downloads, AGGREGATED per source (FRG-SRC-009).
+
+        A failed entitlement download is terminal until the operator retries, so
+        any failed row degrades its source immediately (no debounce). One
+        component per SOURCE carrying the failed count — never one per row: a
+        1,318-item collection must not turn a bad night into a hundred health
+        lines. The component disappears the moment no failed rows remain (a
+        retry that re-queues clears the state), so it needs no explicit reset.
+        """
+        from sqlalchemy import func
+
+        from foragerr.sources.models import SourceEntitlementRow, SourceRow
+
+        async with self._db.read_session() as session:
+            rows = (
+                await session.execute(
+                    select(
+                        SourceRow.id,
+                        SourceRow.name,
+                        func.count(SourceEntitlementRow.id),
+                        func.min(SourceEntitlementRow.updated_at),
+                        func.max(SourceEntitlementRow.updated_at),
+                    )
+                    .join(
+                        SourceEntitlementRow,
+                        SourceEntitlementRow.source_id == SourceRow.id,
+                    )
+                    .where(SourceEntitlementRow.download_state == "failed")
+                    .group_by(SourceRow.id, SourceRow.name)
+                    .order_by(SourceRow.id)
+                )
+            ).all()
+
+        components: list[ComponentHealth] = []
+        for source_id, name, failed, oldest, newest in rows:
+            if not failed:
+                continue
+            oldest_note = (
+                f"; oldest failed {_stamp(oldest)}" if oldest is not None else ""
+            )
+            components.append(
+                ComponentHealth(
+                    component=f"source-downloads:{source_id}",
+                    kind="source",
+                    label=f"Source downloads: {name}",
+                    state=_STATE_DEGRADED,
+                    message=(
+                        f"'{name}' has {failed} failed download(s){oldest_note}"
+                    ),
+                    remediation=(
+                        "Open Sources, review the failed items and use Retry on "
+                        "each; a retry re-queues the download. Items that keep "
+                        "failing usually need the store session re-pasted."
+                    ),
+                    last_failure=_as_datetime(newest),
+                )
+            )
+        return components
+
     async def _scheduler_component(self) -> ComponentHealth:
         label = "Scheduler"
         if self._scheduler is None:
@@ -778,6 +844,24 @@ class HealthService:
 
 def _gib(nbytes: int) -> str:
     return f"{nbytes / 1024**3:.1f}"
+
+
+def _as_datetime(value: Any) -> dt.datetime | None:
+    """A datetime from an aggregate column value (SQLite may hand back a str)."""
+    if isinstance(value, dt.datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return dt.datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _stamp(value: Any) -> str:
+    """A timestamp rendered for a health message (ISO, or the raw value)."""
+    parsed = _as_datetime(value)
+    return parsed.isoformat() if parsed is not None else str(value)
 
 
 def health_service_from_app(app: Any) -> HealthService:

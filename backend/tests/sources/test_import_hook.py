@@ -13,18 +13,20 @@ import datetime as dt
 import os
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
 
 from foragerr.downloads.imports import process_imports
+from foragerr.downloads.manual_import import ManualFileSpec, execute_manual_import
 from foragerr.downloads.models import GrabHistoryRow, TrackedDownloadRow
 from foragerr.downloads.state import TRACKED_STATUS_OK, TrackedDownloadState
 from foragerr.library import repo as library_repo
 from foragerr.library.containment import RangeInput, replace_issue_collections
 from foragerr.sources import repo
 from foragerr.sources.import_hook import apply_source_import
-from foragerr.sources.models import SourceEntitlementRow
+from foragerr.sources.models import MATCHED_VIA_OPERATOR, SourceEntitlementRow
 from foragerr.sources.registry import TYPE_HUMBLE
 from foragerr.sources.settings import HumbleSettings
 from http_support import make_settings
@@ -69,6 +71,10 @@ async def _entitlement(db, *, matched_series_id, download_state) -> int:
             review_status="matched",
             download_state=download_state,
             matched_series_id=matched_series_id,
+            # The real review action's stamp (FRG-PP-022 guard 3): these
+            # fixtures stand in for an operator-matched entitlement, which is
+            # what unlocks the import pipeline's ordinal fallback.
+            matched_via=MATCHED_VIA_OPERATOR,
             md5="a" * 32,
             file_size=1,
             filename="synthetic.cbz",
@@ -483,3 +489,220 @@ async def test_drain_withdraws_claimed_import_of_unaccepted_entitlement(
     ent = await repo.get_entitlement(db, eid)
     assert ent.review_status == "ignored"
     assert ent.download_state is None
+
+
+# --- FRG-PP-016 / FRG-SRC-006: manual import ends exactly like the drain ------
+
+
+async def _collected_edition_download(
+    db,
+    *,
+    root: Path,
+    root_folder_id: int,
+    format_profile_id: int,
+    tag: str,
+    cv_base: int,
+):
+    """One complete store-download fixture: a 3-issue run collected by a trade, a
+    matched entitlement for that trade, and its completed download on disk.
+
+    Built twice per test so the two import paths can be driven over IDENTICAL
+    material and their end states compared."""
+    async with db.write_session() as session:
+        run = await library_repo.create_series(
+            session,
+            cv_volume_id=cv_base,
+            title=f"Synthetic Hero {tag}",
+            format_profile_id=format_profile_id,
+            root_folder_id=root_folder_id,
+            path=str(root / f"run-{tag}"),
+            monitored=True,
+        )
+        await session.flush()
+        single_ids = []
+        for i in range(1, 4):
+            iss = await library_repo.create_issue(
+                session,
+                series_id=run.id,
+                cv_issue_id=cv_base * 10 + i,
+                issue_number=str(i),
+                monitored=True,
+            )
+            single_ids.append(iss.id)
+        trade = await library_repo.create_series(
+            session,
+            cv_volume_id=cv_base + 1,
+            title=f"Synthetic Hero {tag} HC",
+            format_profile_id=format_profile_id,
+            root_folder_id=root_folder_id,
+            path=str(root / f"trade-{tag}"),
+            monitored=True,
+        )
+        trade.booktype = "tpb"  # containment can only be declared on a trade
+        await session.flush()
+        trade_issue = await library_repo.create_issue(
+            session,
+            series_id=trade.id,
+            cv_issue_id=(cv_base + 1) * 10 + 1,
+            issue_number="1",
+            monitored=True,
+        )
+        run_id, trade_id, trade_issue_id = run.id, trade.id, trade_issue.id
+    async with db.write_session() as session:
+        await replace_issue_collections(
+            session,
+            trade_issue_id,
+            [
+                RangeInput(
+                    target_series_id=run_id,
+                    start_issue_id=single_ids[0],
+                    end_issue_id=single_ids[2],
+                )
+            ],
+        )
+
+    eid = await _entitlement(
+        db, matched_series_id=trade_id, download_state="import_pending"
+    )
+    download_id = f"humble:{eid}"
+    dl_dir = root.parent / "downloads" / tag
+    cbz = dl_dir / f"Synthetic Hero {tag} HC 001 (2024).cbz"
+    _make_cbz(cbz)
+    await _tracked(
+        db,
+        download_id=download_id,
+        series_id=trade_id,
+        output_path=str(dl_dir),
+        title=cbz.stem,
+    )
+    return SimpleNamespace(
+        eid=eid,
+        download_id=download_id,
+        cbz=cbz,
+        trade_id=trade_id,
+        trade_issue_id=trade_issue_id,
+        single_ids=single_ids,
+    )
+
+
+async def _tracked_row(db, download_id: str) -> TrackedDownloadRow:
+    async with db.read_session() as session:
+        row = (
+            (
+                await session.execute(
+                    select(TrackedDownloadRow).where(
+                        TrackedDownloadRow.download_id == download_id
+                    )
+                )
+            )
+            .scalars()
+            .one()
+        )
+        session.expunge(row)
+        return row
+
+
+@pytest.mark.req("FRG-SRC-006")
+@pytest.mark.req("FRG-SRC-007")
+@pytest.mark.req("FRG-PP-016")
+async def test_manual_import_of_source_download_matches_the_drain(
+    db, config_dir, format_profile_id, tmp_path
+):
+    """A blocked store download resolved by manual import leaves NOTHING stale:
+    the tracked row reaches ``imported``, the entitlement mirrors ``imported``, and
+    FRG-SRC-007 owned-via-edition reconciliation fills the trade's covered singles
+    — and the automatic drain over an identical fixture ends in the IDENTICAL
+    tracked + entitlement state (the D5 path-equivalence guard)."""
+    root = tmp_path / "lib-root"
+    root.mkdir(exist_ok=True)
+    async with db.write_session() as session:
+        rf = await library_repo.create_root_folder(session, str(root))
+        await session.flush()
+        root_folder_id = rf.id
+
+    manual = await _collected_edition_download(
+        db,
+        root=root,
+        root_folder_id=root_folder_id,
+        format_profile_id=format_profile_id,
+        tag="alpha",
+        cv_base=500,
+    )
+    drained = await _collected_edition_download(
+        db,
+        root=root,
+        root_folder_id=root_folder_id,
+        format_profile_id=format_profile_id,
+        tag="beta",
+        cv_base=600,
+    )
+
+    # The manual fixture is a download the automatic drain already gave up on.
+    async with db.write_session() as session:
+        row = await session.get(
+            SourceEntitlementRow, manual.eid
+        )
+        row.download_state = "import_blocked"
+    async with db.write_session() as session:
+        tracked = (
+            (
+                await session.execute(
+                    select(TrackedDownloadRow).where(
+                        TrackedDownloadRow.download_id == manual.download_id
+                    )
+                )
+            )
+            .scalars()
+            .one()
+        )
+        tracked.state = TrackedDownloadState.IMPORT_BLOCKED.value
+        tracked.status = "warning"
+        tracked.status_messages = '["stale: could not match this file"]'
+
+    summary = await execute_manual_import(
+        db,
+        make_settings(config_dir),
+        [
+            ManualFileSpec(
+                path=str(manual.cbz),
+                series_id=manual.trade_id,
+                issue_id=manual.trade_issue_id,
+                download_id=manual.download_id,
+            )
+        ],
+        now=_NOW,
+    )
+    assert "imported=1" in summary
+
+    # The identical fixture through the automatic drain (the blocked row above is
+    # no longer claimable, so this drains exactly the untouched one).
+    assert await process_imports(db, make_settings(config_dir), now=_NOW) == (
+        "imported=1 blocked=0 failed=0"
+    )
+
+    manual_row = await _tracked_row(db, manual.download_id)
+    drained_row = await _tracked_row(db, drained.download_id)
+    assert (manual_row.state, manual_row.status, manual_row.status_messages) == (
+        drained_row.state,
+        drained_row.status,
+        drained_row.status_messages,
+    )
+    assert manual_row.state == TrackedDownloadState.IMPORTED.value
+    assert manual_row.status == TRACKED_STATUS_OK
+    assert manual_row.status_messages is None  # the stale reason is gone
+
+    manual_ent = await repo.get_entitlement(db, manual.eid)
+    drained_ent = await repo.get_entitlement(db, drained.eid)
+    assert (manual_ent.download_state, manual_ent.download_error) == (
+        drained_ent.download_state,
+        drained_ent.download_error,
+    )
+    assert manual_ent.download_state == "imported"
+    assert manual_ent.download_error is None
+
+    # Owned-via-edition ran on BOTH paths: neither trade's covered singles are
+    # still wanted (FRG-SRC-007 runs exactly once, identically, in each flow).
+    async with db.read_session() as session:
+        wanted = set(await library_repo.wanted_issue_ids(session))
+    assert not (set(manual.single_ids) & wanted)
+    assert not (set(drained.single_ids) & wanted)

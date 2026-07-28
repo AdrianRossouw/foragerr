@@ -40,6 +40,15 @@ class RejectionKind(Enum):
 DUPLICATE_CONSTRAINT_LARGER_SIZE = "larger-size"
 DUPLICATE_CONSTRAINT_PREFERRED_FORMAT = "preferred-format"
 
+#: Ordinal-fallback refusal codes (FRG-PP-022's three guards). Recorded on the
+#: evidence provenance by the pipeline and rendered into the operator-visible
+#: reason by :class:`OrdinalFallbackSpec` — each names the guard that fired so
+#: the fix is obvious (all four resolve through manual import).
+ORDINAL_REFUSED_TRADE = "trade-into-singles"
+ORDINAL_REFUSED_EXISTING_FILE = "issue-has-file"
+ORDINAL_REFUSED_AUTO_MATCH = "auto-matched-series"
+ORDINAL_REFUSED_UNPROVEN_MATCH = "unproven-match"
+
 
 @dataclass(frozen=True, slots=True)
 class ImportRejection:
@@ -64,6 +73,10 @@ class ImportEvaluation:
     size: int
     series_id: int | None = None
     issue_id: int | None = None
+    #: Title of the resolved series, when one resolved — so a series-established
+    #: mapping failure can name it (FRG-PP-021) instead of claiming the series
+    #: itself was unmatchable. Display only; no spec branches on it.
+    series_title: str | None = None
     archive: ArchiveReport | None = None
     existing_file_path: str | None = None
     existing_format: str | None = None
@@ -91,6 +104,11 @@ class ImportEvaluation:
     existing_fix_revision: int | None = None
     new_fix_revision: int | None = None
     duplicate_constraint: str = DUPLICATE_CONSTRAINT_LARGER_SIZE
+    #: Set when the FRG-PP-022 ordinal fallback was refused by one of its three
+    #: guards (an ``ORDINAL_REFUSED_*`` code). The mapping deliberately did NOT
+    #: resolve, so ``issue_id`` is ``None`` and no upgrade/duplicate arbitration
+    #: input was computed — :class:`OrdinalFallbackSpec` owns the reason.
+    ordinal_refusal: str | None = None
 
 
 class ImportSpec:
@@ -125,10 +143,85 @@ class MappedToIssueSpec(ImportSpec):
             return None  # the mapping spec already owns this failure
         if ev.series_id is not None and ev.issue_id is not None:
             return None
+        if ev.ordinal_refusal is not None:
+            # A guarded refusal, not an absent issue: OrdinalFallbackSpec owns
+            # this failure and states which guard fired (the same "one spec owns
+            # one failure" split the mapping-warning case above uses). Saying
+            # "no issue number in its name" here would hide the real reason —
+            # the name DID carry a usable ordinal.
+            return None
+        if ev.series_id is not None:
+            # The series IS established (an operator-matched source entitlement,
+            # FRG-PP-021, or a series-scoped import) — only the issue could not
+            # be derived. Saying "could not match … series and issue" here would
+            # be a lie about the half that succeeded, and would send the operator
+            # looking for the wrong fix.
+            label = (
+                f'"{ev.series_title}"'
+                if ev.series_title
+                else f"#{ev.series_id}"
+            )
+            return ImportRejection(
+                reason=(
+                    f"matched this file to series {label} but could not derive "
+                    "an issue number from its name; use manual import to set "
+                    "the issue"
+                ),
+                spec=self.name,
+            )
         return ImportRejection(
             reason="could not match this file to a known series and issue",
             spec=self.name,
         )
+
+
+class OrdinalFallbackSpec(ImportSpec):
+    """Block a candidate whose ordinal fallback a FRG-PP-022 guard refused.
+
+    The fallback ("Vol. N" → issue N under an explicitly known series) is only
+    safe under three conditions; when one fails the pipeline deliberately
+    resolves NO issue and records the guard code, and this spec turns it into a
+    reason the operator can act on. Every case is resolvable through manual
+    import — that is the whole point of blocking rather than filing the file.
+    """
+
+    name = "ordinal-fallback-guard"
+
+    def evaluate(self, ev: ImportEvaluation) -> ImportRejection | None:
+        if ev.mapping_warning is not None or ev.ordinal_refusal is None:
+            return None
+        series = f'"{ev.series_title}"' if ev.series_title else "the target series"
+        booktype = ev.evidence.booktype.value
+        detail = {
+            ORDINAL_REFUSED_TRADE: (
+                f"this file looks like a collected edition ({booktype}) but "
+                f"{series} is a single-issue line, so its volume number was not "
+                "read as an issue number — import it to the collected-edition "
+                "series, or set the issue explicitly with manual import"
+            ),
+            ORDINAL_REFUSED_EXISTING_FILE: (
+                f"this file's volume number points at an issue of {series} that "
+                "already has a file; a volume-number guess never replaces an "
+                "existing file — confirm the issue with manual import if it is "
+                "really a better copy"
+            ),
+            ORDINAL_REFUSED_AUTO_MATCH: (
+                f"{series} was matched to this download automatically, not by "
+                "you, so this file's volume number was not read as an issue "
+                "number — confirm the match (or the issue) to import it"
+            ),
+            ORDINAL_REFUSED_UNPROVEN_MATCH: (
+                f"how {series} came to be matched to this download was not "
+                "recorded (the match predates match tracking), so this file's "
+                "volume number was not read as an issue number — re-match the "
+                "item, or set the issue with manual import"
+            ),
+        }.get(
+            ev.ordinal_refusal,
+            f"a volume-number issue mapping into {series} was refused by a "
+            "safety guard; use manual import to set the issue",
+        )
+        return ImportRejection(reason=detail, spec=self.name)
 
 
 class EmbeddedIdConflictSpec(ImportSpec):
@@ -355,6 +448,7 @@ def default_specs() -> tuple[ImportSpec, ...]:
     return (
         RemotePathMappedSpec(),
         MappedToIssueSpec(),
+        OrdinalFallbackSpec(),
         EmbeddedIdConflictSpec(),
         ArchiveValidSpec(),
         JunkFilterSpec(),
@@ -417,6 +511,11 @@ __all__ = [
     "ImportSpec",
     "JunkFilterSpec",
     "MappedToIssueSpec",
+    "ORDINAL_REFUSED_AUTO_MATCH",
+    "ORDINAL_REFUSED_EXISTING_FILE",
+    "ORDINAL_REFUSED_TRADE",
+    "ORDINAL_REFUSED_UNPROVEN_MATCH",
+    "OrdinalFallbackSpec",
     "RejectionKind",
     "RemotePathMappedSpec",
     "UpgradeAllowedSpec",

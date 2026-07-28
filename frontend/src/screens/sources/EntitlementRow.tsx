@@ -7,6 +7,7 @@ import {
   useIgnoreEntitlement,
   useMatchEntitlement,
   useRestoreEntitlement,
+  useRetryDownload,
 } from '../../api/sourceHooks';
 import type {
   EntitlementResource,
@@ -155,8 +156,13 @@ export function EntitlementRow({
   const add = useAddEntitlement();
   const ignore = useIgnoreEntitlement();
   const restore = useRestoreEntitlement();
+  const retry = useRetryDownload();
   const busy =
-    match.isPending || add.isPending || ignore.isPending || restore.isPending;
+    match.isPending ||
+    add.isPending ||
+    ignore.isPending ||
+    restore.isPending ||
+    retry.isPending;
 
   const status = entitlement.review_status;
   const proposal = entitlement.proposed_match;
@@ -351,6 +357,17 @@ export function EntitlementRow({
           {entitlement.download_state === 'failed' && (
             <div className={styles.failedNote}>
               Download failed{entitlement.download_error ? `: ${entitlement.download_error}` : ''}
+              {/* The failure is terminal until the operator acts (FRG-SRC-009):
+                  Retry clears it and re-queues the grab. */}
+              <button
+                type="button"
+                className={styles.retryBtn}
+                disabled={busy}
+                onClick={() => retry.mutate(entitlement.id)}
+                data-testid={`retry-${entitlement.id}`}
+              >
+                {retry.isPending ? 'Retrying…' : 'Retry'}
+              </button>
             </div>
           )}
         </div>
