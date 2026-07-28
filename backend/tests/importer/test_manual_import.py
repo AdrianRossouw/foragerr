@@ -44,6 +44,8 @@ from foragerr.importer.pipeline import gather
 from foragerr.library import repo
 from foragerr.library.models import IssueFileRow
 from foragerr.naming import RenameFields, render_filename
+from foragerr.sources.models import SourceEntitlementRow
+from foragerr.sources.review import ignore_entitlement
 
 _CVID_TEMPLATE = "{Series Title} {Issue Number:000} ({Year}) {CvIssueId}"
 
@@ -827,3 +829,122 @@ async def test_arbitrary_folder_execute_touches_no_tracked_row(
         before.status_messages,
         before.updated_at,
     )
+
+
+# --- FRG-SRC-004: the drain's withdrawal gate, on the manual path ------------
+
+
+async def _store_entitlement(db, *, matched_series_id: int) -> int:
+    """A matched Humble entitlement whose grab already reached the import queue.
+
+    Built directly (no keystore round-trip) — only the ``humble:{id}`` identity
+    and the review/download axes matter to the withdrawal gate."""
+    from foragerr.sources.models import MATCHED_VIA_OPERATOR, SourceRow
+
+    now = utcnow()
+    async with db.write_session() as session:
+        source = SourceRow(
+            type="humble",
+            name="Humble Bundle",
+            settings="{}",
+            connection_state="connected",
+            auto_sync=False,
+            added_at=now,
+        )
+        session.add(source)
+        await session.flush()
+        row = SourceEntitlementRow(
+            source_id=source.id,
+            gamekey="gk",
+            machine_name="mn",
+            human_name="Batman #404",
+            classification="comic",
+            review_status="matched",
+            download_state="import_blocked",
+            matched_series_id=matched_series_id,
+            matched_via=MATCHED_VIA_OPERATOR,
+            md5="a" * 32,
+            file_size=1,
+            filename="batman-404.cbz",
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(row)
+        await session.flush()
+        return row.id
+
+
+@pytest.mark.req("FRG-SRC-004")
+@pytest.mark.req("FRG-PP-016")
+async def test_manual_import_withdraws_a_store_item_ignored_after_listing(
+    db, seed, tmp_path, monkeypatch
+):
+    """The drain's withdrawal gate applies to the manual path too (FRG-SRC-004).
+
+    ``execute_manual_import`` snapshots the tracked row + its download source
+    BEFORE opening the plan's write transaction, so an operator ``ignore`` can
+    commit in between — deleting the tracked row and clearing the entitlement's
+    download axis. Without an in-transaction re-check the plan would still MOVE
+    the file into the library and write ``issue_files`` while
+    ``apply_source_import`` skipped the entitlement mirror, leaving a withdrawn
+    store item imported under withdrawn-looking state. Nothing may land: no
+    issue_files row, no file move, and the withdrawal is reported."""
+    s = await seed(title="Batman", issue_number="404", cv_issue_id=9001)
+    eid = await _store_entitlement(db, matched_series_id=s.series_id)
+    download_id = f"humble:{eid}"
+    staging = tmp_path / "staging"
+    cbz = _make_big_cbz(staging / "unknown-release-xyz.cbz")
+    await _insert_tracked(
+        db,
+        download_id=download_id,
+        output_path=staging,
+        messages='["stale: no match"]',
+    )
+
+    real_snapshot = manual_import_mod._completed_source_for_download
+
+    async def _ignore_after_the_snapshot(db_, dl_id):
+        # The plan is built from this read; the operator's ignore commits right
+        # after it, i.e. before the plan's write transaction opens.
+        result = await real_snapshot(db_, dl_id)
+        await ignore_entitlement(db_, eid)
+        return result
+
+    monkeypatch.setattr(
+        manual_import_mod,
+        "_completed_source_for_download",
+        _ignore_after_the_snapshot,
+    )
+
+    summary = await execute_manual_import(
+        db,
+        None,
+        [
+            ManualFileSpec(
+                path=str(cbz),
+                series_id=s.series_id,
+                issue_id=s.issue_id,
+                download_id=download_id,
+            )
+        ],
+    )
+
+    assert summary == "imported=0 blocked=0 failed=0 withdrawn=1"
+    assert cbz.exists()  # the file never moved out of staging
+    assert await _issue_files(db) == []  # nothing entered the library
+    async with db.read_session() as session:
+        ent = await session.get(SourceEntitlementRow, eid)
+        assert ent.review_status == "ignored"
+        assert ent.download_state is None  # never resurrected by the mirror
+        rows = (
+            (
+                await session.execute(
+                    select(TrackedDownloadRow).where(
+                        TrackedDownloadRow.download_id == download_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert rows == []  # de-tracked, so a restore + re-accept can hand off afresh

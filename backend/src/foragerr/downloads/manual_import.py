@@ -43,6 +43,7 @@ from foragerr.commands.service import HandlerContext
 from foragerr.config import Settings
 from foragerr.db import Database, utcnow
 from foragerr.downloads.imports import (
+    _withdraw_import,
     build_import_context,
     finalize_download_import,
     run_post_import_side_effects,
@@ -64,6 +65,7 @@ from foragerr.importer.decisions import decide
 from foragerr.importer.pipeline import aggregate_candidate, build_evaluation, gather
 from foragerr.library import repo
 from foragerr.security.paths import PathConfinementError, validate_under_root
+from foragerr.sources.import_hook import source_import_withdrawn
 
 logger = logging.getLogger("foragerr.downloads.manual_import")
 
@@ -365,6 +367,7 @@ async def execute_manual_import(
     settings: Settings | None,
     files: list[ManualFileSpec],
     *,
+    commands=None,
     offload=None,
     now: dt.datetime | None = None,
 ) -> str:
@@ -398,9 +401,18 @@ async def execute_manual_import(
     owned-via-edition reconciliation — in this same write transaction
     (FRG-PP-016, FRG-SRC-006). Once that transaction commits, the drain's
     post-commit half runs too
-    (:func:`~foragerr.downloads.imports.run_post_import_side_effects`), so a
-    client-backed download is removed/marked exactly as a drained one
-    (FRG-DL-010). Arbitrary-folder picks touch no tracked row.
+    (:func:`~foragerr.downloads.imports.run_post_import_side_effects`) — with the
+    SAME ``commands`` handle the drain passes, so a manual failure promotion also
+    enqueues the replacement issue-search (FRG-DL-013) instead of silently
+    skipping it — and a client-backed download is removed/marked exactly as a
+    drained one (FRG-DL-010). Arbitrary-folder picks touch no tracked row.
+
+    A download-scoped plan also carries the drain's store-source WITHDRAWAL gate
+    (FRG-SRC-004): the plan is built from a snapshot taken before its write
+    transaction, so an operator ignore can commit in between — deleting the
+    tracked row and clearing the entitlement's download axis. The gate is
+    re-checked INSIDE the write transaction, before any file moves, so a
+    withdrawn item imports nothing.
 
     Each plan (one download, or the whole arbitrary-folder pick) owns its OWN
     write session, as the drain gives each download: file moves are irreversible,
@@ -473,7 +485,7 @@ async def execute_manual_import(
             )
         )
 
-    imported = blocked = failed = unresolved = 0
+    imported = blocked = failed = unresolved = withdrawn = 0
     for source, picked, tracked in plans:
         # ONE write session PER PLAN, matching the drain's per-download isolation
         # (FRG-DL-009): ``import_candidate`` moves files on disk inside the
@@ -482,6 +494,28 @@ async def execute_manual_import(
         final_state: TrackedDownloadState | None = None
         acted = False
         async with db.write_session() as session:
+            if tracked is not None and await source_import_withdrawn(
+                session, tracked[0]
+            ):
+                # The drain's store-source withdrawal gate (FRG-SRC-004), applied
+                # to the manual path with the SAME in-transaction ordering. The
+                # tracked row and its source were snapshotted BEFORE this write
+                # transaction, so an ``ignore`` can have committed in between;
+                # without this re-check the plan would still move the file into
+                # the library and write issue_files while ``apply_source_import``
+                # skipped the entitlement mirror — an operator-withdrawn store
+                # item imported under withdrawn-looking state. Re-checked here,
+                # before ANY file move, so a withdrawn plan imports nothing.
+                #
+                # Termination is the drain's own :func:`_withdraw_import`
+                # (shared, never re-implemented): the tracked row is deleted so a
+                # later restore + re-accept can hand off afresh — usually already
+                # gone, since ``ignore_entitlement`` deletes any non-``importing``
+                # row itself, in which case there is simply nothing to finalize.
+                dl_id, row_id, _client_id = tracked
+                await _withdraw_import(session, row_id, dl_id)
+                withdrawn += 1
+                continue
             outcomes: list[ImportOutcome] = []
             for candidate in await gather(source, session, ctx):
                 if picked is not None and candidate.local_path not in picked:
@@ -528,12 +562,15 @@ async def execute_manual_import(
                 final_state=final_state,
                 client_id=client_id,
                 download_id=dl_id,
+                commands=commands,
                 now=ctx.now,
             )
 
     summary = f"imported={imported} blocked={blocked} failed={failed}"
     if unresolved:
         summary += f" unresolved={unresolved}"
+    if withdrawn:
+        summary += f" withdrawn={withdrawn}"
     if dropped:
         summary += f" dropped={dropped}"
     logger.info("manual-import: %s", summary)
@@ -544,8 +581,15 @@ async def execute_manual_import(
 async def _handle_manual_import(
     command: ManualImportCommand, ctx: HandlerContext
 ) -> str:
+    # ``ctx.commands`` is threaded through exactly as ProcessImportsCommand does
+    # (FRG-DL-013): the post-commit half enqueues the replacement issue-search on
+    # a failure promotion, which needs the command service handle.
     return await execute_manual_import(
-        ctx.db, ctx.settings, command.files, offload=ctx.offload
+        ctx.db,
+        ctx.settings,
+        command.files,
+        commands=ctx.commands,
+        offload=ctx.offload,
     )
 
 

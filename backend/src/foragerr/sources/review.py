@@ -68,6 +68,16 @@ async def _queue_grab(db, entitlement_id: int, commands) -> None:
     that transition actually occurred — so a double-accept (or a re-accept while a
     grab is in flight) never spawns a duplicate grab or tracked-download row.
 
+    **Acceptance is re-read here, in the write transaction** (FRG-SRC-004): every
+    caller validated the row in an EARLIER session, so an ``ignore`` can commit in
+    between — and ignore resets ``download_state`` to ``None``, which is itself a
+    queueable value, so the download-axis guard alone would happily queue an
+    ignored row. That leaves a stale ``queued`` axis on an ``ignored`` item which
+    ``run_grab`` then skips at its own re-read guard but never clears. Requiring
+    ``review_status == "matched"`` under the writer lock closes it: the retry /
+    match / add / auto-accept callers all commit ``matched`` before reaching this
+    session, so a non-matched read here is always a real withdrawal.
+
     Kept import-local to avoid a module import cycle with the grab command."""
     from foragerr.sources.grab import SOURCE_GRAB_TASK
 
@@ -76,6 +86,8 @@ async def _queue_grab(db, entitlement_id: int, commands) -> None:
         row = await session.get(SourceEntitlementRow, entitlement_id)
         if row is None or not _is_grabbable(row):
             return
+        if row.review_status != "matched":
+            return  # ignored / restored since the caller read it — never grab
         if row.download_state not in _QUEUEABLE_STATES:
             return  # already queued / in flight / imported — no duplicate grab
         row.download_state = "queued"
@@ -339,6 +351,11 @@ async def retry_download(
     A stale ``humble:{id}`` tracked row is dropped first
     (:func:`_drop_stale_tracked_row`) — without that, a retry after an
     IMPORT-level failure would re-download into a no-op handoff and wedge.
+
+    The ``failed`` validation above runs in a READ session, so an ``ignore`` can
+    still commit before the grab is queued; :func:`_queue_grab` re-reads the
+    acceptance inside its own write transaction, so such a retry queues nothing
+    and leaves the ignored row clean.
     """
     async with db.read_session() as session:
         row = await session.get(SourceEntitlementRow, entitlement_id)

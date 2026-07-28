@@ -550,6 +550,64 @@ async def test_manual_import_runs_the_post_import_client_cleanup(
     assert fake.imported == []
 
 
+@pytest.mark.req("FRG-DL-013")
+@pytest.mark.req("FRG-PP-016")
+async def test_manual_import_failure_enqueues_the_replacement_search(db, tmp_path):
+    """The manual path runs the drain's post-commit half with the SAME command
+    handle (FRG-PP-016). ``process_failures`` only enqueues the FRG-DL-013
+    replacement issue-search when ``commands`` is not None, so a manual import
+    that promotes a client-backed download to ``failed_pending`` must hand its
+    command service through — otherwise resolving a corrupt download by hand
+    silently skips the re-search the drain would have queued."""
+    from foragerr.downloads.manual_import import ManualFileSpec, execute_manual_import
+    from tracking_support import FakeCommands
+
+    client_id = await _insert_client(db, remove_completed=False)
+    series_id, issue_id = await seed_library(db, tmp_path)
+    dl_dir = tmp_path / "downloads" / "manual-corrupt"
+    cbz = make_corrupt(dl_dir / "Spawn 001 (2024).cbz")
+    await insert_grab_history(
+        db, download_id="d-man-bad", series_id=series_id, issue_id=issue_id
+    )
+    await insert_tracked(
+        db,
+        download_id="d-man-bad",
+        state=TrackedDownloadState.IMPORT_BLOCKED,
+        client_id=client_id,
+        series_id=series_id,
+        issue_id=issue_id,
+    )
+    async with db.write_session() as session:
+        (await tracked_by_download_id_session(session, "d-man-bad")).output_path = str(
+            dl_dir
+        )
+
+    commands = FakeCommands()
+    summary = await execute_manual_import(
+        db,
+        None,
+        [
+            ManualFileSpec(
+                path=str(cbz),
+                series_id=series_id,
+                issue_id=issue_id,
+                download_id="d-man-bad",
+            )
+        ],
+        commands=commands,
+    )
+
+    assert "failed=1" in summary
+    row = await tracked_by_download_id(db, "d-man-bad")
+    # process_failures ran: failed_pending was promoted AND the re-search queued.
+    assert row.state == TrackedDownloadState.FAILED.value
+    assert (
+        "issue-search",
+        {"series_id": series_id, "issue_id": issue_id},
+        "failure",
+    ) in commands.enqueued
+
+
 @pytest.mark.req("FRG-DL-010")
 async def test_post_import_cleanup_marks_when_disabled(db, tmp_path, monkeypatch):
     client_id = await _insert_client(db, remove_completed=False)

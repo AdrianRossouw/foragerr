@@ -582,6 +582,41 @@ async def test_retry_while_the_import_is_claimed_is_a_conflict(
     assert after.download_state == "failed"  # untouched
 
 
+@pytest.mark.req("FRG-SRC-004")
+@pytest.mark.req("FRG-SRC-009")
+async def test_retry_losing_to_a_concurrent_ignore_queues_nothing(
+    db, config_dir, root_folder_id, format_profile_id, monkeypatch
+):
+    """Retry validates ``download_state == "failed"`` in a READ session, so an
+    ``ignore`` can commit before the grab is queued — and ignore CLEARS the
+    download axis to ``None``, which is itself a queueable value. Without an
+    acceptance re-read inside ``_queue_grab``'s write transaction the ignored row
+    would be stamped ``queued``: a stale download axis on an ``ignored`` item that
+    ``run_grab`` later skips at its own guard but never clears. Nothing may be
+    queued, and the row must stay ignored and clean (FRG-SRC-004)."""
+    source = await _synced_source(db, config_dir)
+    ent = await _comic(db, source.id, "synth_singleissue_01")
+    await _mark_failed(db, ent.id, error="md5 mismatch on the downloaded file")
+
+    real_drop = review._drop_stale_tracked_row
+
+    async def _ignore_mid_retry(db_, entitlement_id):
+        # The operator's ignore lands after retry's validation read and before
+        # _queue_grab opens its write transaction.
+        await real_drop(db_, entitlement_id)
+        await review.ignore_entitlement(db_, entitlement_id)
+
+    monkeypatch.setattr(review, "_drop_stale_tracked_row", _ignore_mid_retry)
+    commands = FakeCommands()
+
+    row = await review.retry_download(db, ent.id, commands=commands)
+
+    assert commands.enqueued == []  # no grab for a withdrawn item
+    assert row.review_status == "ignored"
+    assert row.download_state is None  # no stale "queued" axis left behind
+    assert row.download_error is None
+
+
 @pytest.mark.req("FRG-SRC-009")
 async def test_retry_on_an_unknown_entitlement_is_404(db):
     with pytest.raises(review.EntitlementActionError) as exc:
