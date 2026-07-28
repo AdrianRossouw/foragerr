@@ -891,8 +891,17 @@ export interface SystemHealthComponent {
  * are the whole path's rolling-hour usage; `batch_used`/`batch_ceiling` are the
  * background lane's share of it (FRG-META-022) and are `null` when the backend
  * published no lane figures — a meter must then say nothing about lanes rather
- * than render an invented zero. `resume_seconds` is > 0 only once the bucket is
- * actually at its ceiling.
+ * than render an invented zero.
+ *
+ * A reported bucket is NOT necessarily a hot one: the backend also reports a
+ * bucket whose background lane has paused, which happens well below the ceiling.
+ * `approaching` is the backend's own answer to "is this one near its ceiling?",
+ * so a surface that should stay quiet until then reads the flag instead of
+ * re-deriving the warning fraction here.
+ *
+ * The two countdowns match the two walls: `resume_seconds` is > 0 only once the
+ * whole path is at its ceiling, `batch_resume_seconds` only while the background
+ * lane is paused.
  */
 export interface ComicVineBudgetBucket {
   bucket: string;
@@ -900,7 +909,9 @@ export interface ComicVineBudgetBucket {
   ceiling: number;
   batch_used: number | null;
   batch_ceiling: number | null;
+  approaching: boolean;
   resume_seconds: number;
+  batch_resume_seconds: number;
 }
 
 /** The ComicVine component's budget detail (FRG-API-025) — see FRG-UI-040. */

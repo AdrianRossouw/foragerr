@@ -39,7 +39,9 @@ from foragerr.db.base import utcnow
 from foragerr.metadata.errors import ComicVineBudgetExhausted, ComicVineError
 from foragerr.sources import ratelimit, repo
 from foragerr.sources.enrich import (
+    eligible_for_enrichment,
     enrich_source,
+    is_library_fallback,
     is_library_fallback_marker,
     is_recompute_target,
     predates_cv_universe,
@@ -54,7 +56,12 @@ from foragerr.sources.models import SourceEntitlementRow
 from foragerr.sources.registry import TYPE_HUMBLE
 from foragerr.sources.settings import HumbleSettings
 from http_support import make_settings
-from sources_support import fixture_bytes, make_factory, order_handler
+from sources_support import (  # noqa: F401 — imported fixtures
+    fixture_bytes,
+    make_factory,
+    order_handler,
+    root_folder_id,
+)
 
 # --- doubles ----------------------------------------------------------------
 
@@ -115,6 +122,25 @@ FALLBACK_MARKER = json.dumps(
         "candidates": [],
         "universe": UNIVERSE_LIBRARY_FALLBACK,
         "verdict": VERDICT_NO_PLAUSIBLE_MATCH,
+    },
+    sort_keys=True,
+)
+
+#: The other half of the keyless era, and the half that MATTERS to an operator:
+#: a proposal the shelf-only ranker actually picked. It carries a ``best``, so
+#: the review screen renders it as a real proposal — and it has no no-match
+#: verdict, which is what made it invisible to a marker-shaped revisit check.
+FALLBACK_BEST = json.dumps(
+    {
+        "auto": False,
+        "candidates": [],
+        "confidence": 0.62,
+        "cv_volume_id": None,
+        "kind": "library",
+        "series_id": 4,
+        "title": "A Shelf-Local Guess",
+        "universe": UNIVERSE_LIBRARY_FALLBACK,
+        "year": None,
     },
     sort_keys=True,
 )
@@ -311,6 +337,49 @@ async def test_an_errored_row_is_spaced_out_on_the_scheduled_path(db, config_dir
 
 
 @pytest.mark.req("FRG-SRC-013")
+def test_the_error_spacing_default_fits_inside_the_sync_interval(config_dir):
+    """The spacing and the schedule that has to clear it are two independent
+    settings, and at 86400 each they were exactly equal — so an errored row's
+    spacing had not *quite* elapsed when the next nightly sync arrived, and the
+    row waited for the one after that. "Retry tomorrow" silently meant "retry
+    every other day", and on a large source that halves the convergence rate for
+    precisely the rows already struggling.
+
+    A strict inequality is the invariant; 12 h is one comfortable choice of
+    margin (the run itself takes time, and nothing schedules to the second)."""
+    settings = make_settings(config_dir)
+    assert settings.comicvine_error_retry_spacing_seconds == 43200
+    assert (
+        settings.comicvine_error_retry_spacing_seconds
+        < settings.source_sync_interval_seconds
+    )
+
+
+@pytest.mark.req("FRG-SRC-013")
+async def test_an_errored_row_is_retried_by_the_very_next_scheduled_run(
+    db, config_dir
+):
+    """The behaviour that inequality buys, at the defaults: a row that errored
+    on last night's run is asked again on tonight's, not skipped for a day."""
+    source = await _source(db)
+    settings = make_settings(config_dir)
+    a_day_ago = utcnow() - dt.timedelta(seconds=settings.source_sync_interval_seconds)
+    eid = await _comic(
+        db,
+        source.id,
+        "Cursed Title #1",
+        "a",
+        attempted_at=a_day_ago,
+        errored=True,
+    )
+
+    cv = _FakeCV()
+    await enrich_source(db, settings, source, cv_client=cv)
+    assert cv.terms == ["Cursed Title"]  # asked, not skipped
+    assert (await _row(db, eid)).proposed_match_json is not None
+
+
+@pytest.mark.req("FRG-SRC-013")
 async def test_spacing_never_holds_back_a_budget_deferred_row(db, config_dir):
     """Only errors are spaced. Spacing a row the budget wall deferred would turn
     a rolling-window refusal into a day-long freeze — the opposite of frugal."""
@@ -417,7 +486,7 @@ def test_pre_universe_shape_detection_reads_the_missing_universe_key():
     assert predates_cv_universe(CV_MARKER) is False
     assert predates_cv_universe(FALLBACK_MARKER) is False
     assert predates_cv_universe(None) is False
-    assert predates_cv_universe("not json at all") is False
+    assert predates_cv_universe("") is False
 
     assert is_library_fallback_marker(FALLBACK_MARKER) is True
     assert is_library_fallback_marker(CV_MARKER) is False
@@ -432,6 +501,87 @@ def test_pre_universe_shape_detection_reads_the_missing_universe_key():
     # A row with no proposal belongs to the enrichment pass, not to recompute —
     # targeting it here would spend the same budget twice on one backlog.
     assert is_recompute_target(unproposed, include_markers=True) is False
+
+
+@pytest.mark.req("FRG-SRC-013")
+def test_an_unreadable_stored_proposal_is_recomputable_not_frozen():
+    """A stored value that will not parse is the worst of both worlds: non-NULL,
+    so the enrichment pass skips it forever, and unreadable, so it renders as
+    nothing and no shape predicate claims it. Treating it as pre-universe is what
+    lets the operator's recompute unstick it — the cost of being wrong is one
+    ComicVine call, the cost of being right is a row that is permanently dead."""
+    assert predates_cv_universe("not json at all") is True
+    assert predates_cv_universe("[1, 2, 3]") is True  # JSON, but not a proposal
+
+    garbled = SimpleNamespace(proposed_match_json="not json at all")
+    assert is_recompute_target(garbled, include_markers=False) is True
+    # It is NOT the enrichment pass's business — that row is non-NULL, and
+    # eligibility there is still "no proposal, or a keyless one".
+    assert eligible_for_enrichment(garbled, cv_configured=True) is False
+
+
+@pytest.mark.req("FRG-SRC-013")
+def test_every_keyless_proposal_is_revisited_not_only_the_markers():
+    """The keyless era produced two stored shapes, and the shelf-ranked BEST is
+    the consequential one — it is what the review screen renders as a proposal.
+    Keying the revisit on the no-match VERDICT reached only the other half, so a
+    deployment that added its ComicVine key after a keyless sync kept exactly the
+    wrong-universe guesses it was shown, forever, on both revisit paths."""
+    best = SimpleNamespace(proposed_match_json=FALLBACK_BEST)
+    marker = SimpleNamespace(proposed_match_json=FALLBACK_MARKER)
+
+    assert is_library_fallback(FALLBACK_BEST) is True
+    assert is_library_fallback(FALLBACK_MARKER) is True
+    assert is_library_fallback(CV_MARKER) is False
+    # ...and the narrow predicate keeps its narrow meaning.
+    assert is_library_fallback_marker(FALLBACK_BEST) is False
+
+    # Path 1: the scheduled enrichment pass, once a key exists.
+    for row in (best, marker):
+        assert eligible_for_enrichment(row, cv_configured=True) is True
+        # Without a key the fallback IS the honest answer — nothing to redo.
+        assert eligible_for_enrichment(row, cv_configured=False) is False
+
+    # Path 2: the bulk recompute — unconditional, exactly like a pre-universe
+    # proposal, because the walk cannot run at all without a key.
+    for row in (best, marker):
+        assert is_recompute_target(row, include_markers=False) is True
+
+
+@pytest.mark.req("FRG-SRC-013")
+async def test_a_keyless_best_guess_is_re_proposed_by_the_next_keyed_run(
+    db, config_dir
+):
+    """End to end on the shape that was unreachable: a stored shelf-ranked
+    proposal (not a marker) is replaced with a catalog one by the ordinary
+    scheduled pass, with no operator action at all."""
+    source = await _source(db)
+    eid = await _comic(db, source.id, "Synthetic Hero #1", "a", proposal=FALLBACK_BEST)
+
+    cv = _FakeCV()
+    await enrich_source(db, make_settings(config_dir), source, cv_client=cv)
+    assert cv.terms == ["Synthetic Hero"]
+    refreshed = json.loads((await _row(db, eid)).proposed_match_json)
+    assert refreshed["universe"] == UNIVERSE_COMICVINE
+    assert refreshed["cv_volume_id"] == 777
+
+
+@pytest.mark.req("FRG-SRC-013")
+async def test_recompute_reaches_a_keyless_best_without_the_marker_opt_in(
+    db, config_dir
+):
+    """The recompute half of the same gap: no ``include_markers`` needed, since
+    a keyless proposal is stale for the same reason a pre-universe one is."""
+    source = await _source(db)
+    eid = await _comic(db, source.id, "Synthetic Hero #1", "a", proposal=FALLBACK_BEST)
+
+    cv = _FakeCV()
+    summary = await recompute_proposals(
+        db, make_settings(config_dir, comicvine_api_key="k"), source, cv_client=cv
+    )
+    assert "1 refreshed" in summary
+    assert cv.terms == ["Synthetic Hero"]
+    assert json.loads((await _row(db, eid)).proposed_match_json)["cv_volume_id"] == 777
 
 
 # --- bulk recompute ----------------------------------------------------------
@@ -579,6 +729,122 @@ async def test_recompute_refuses_to_run_without_a_comicvine_key(db, config_dir):
     assert (await _row(db, eid)).proposed_match_json == LEGACY_PROPOSAL
 
 
+# --- lanes: auto-sync is background work, whatever it calls ------------------
+
+
+@pytest.mark.req("FRG-META-022")
+async def test_auto_sync_adds_through_the_batch_lane(
+    db, config_dir, root_folder_id, monkeypatch
+):
+    """``add_series`` is the operator's Add button for every caller but one, and
+    it declared the interactive lane accordingly. Auto-sync reaches it from the
+    nightly enrichment batch with nobody waiting — so left as it was, a source
+    with a thousand confident matches could spend the whole interactive reserve
+    on background adds before the operator's first search of the day.
+
+    Pinned at the ``add_series`` seam, which is where the lane finally becomes a
+    ComicVine client: everything between here and there is just passing it on."""
+    from foragerr.library.flows import add as add_flow
+
+    source = await _source(db, auto_sync=True)
+    await _comic(db, source.id, "Synthetic Hero #1", "a")
+
+    lanes: list[str] = []
+
+    async def recording_add_series(*args, lane: str = "interactive", **kwargs):
+        lanes.append(lane)
+        raise RuntimeError("stop here — the lane is the whole assertion")
+
+    monkeypatch.setattr(add_flow, "add_series", recording_add_series)
+
+    await enrich_source(db, make_settings(config_dir), source, cv_client=_FakeCV())
+
+    assert lanes == ["batch"]
+
+
+@pytest.mark.req("FRG-META-022")
+async def test_the_review_screens_own_add_stays_interactive(
+    db, config_dir, root_folder_id, monkeypatch
+):
+    """The other side of the same seam: an operator clicking Add IS waiting, and
+    must keep drawing on the full path budget. A fix that made everything batch
+    would pass the test above and break the reserve's purpose."""
+    from foragerr.library.flows import add as add_flow
+    from foragerr.sources import review
+
+    source = await _source(db)
+    eid = await _comic(db, source.id, "Synthetic Hero #1", "a")
+
+    lanes: list[str] = []
+
+    async def recording_add_series(*args, lane: str = "interactive", **kwargs):
+        lanes.append(lane)
+        raise RuntimeError("stop here — the lane is the whole assertion")
+
+    monkeypatch.setattr(add_flow, "add_series", recording_add_series)
+
+    with pytest.raises(Exception):  # noqa: B017 — the add is stopped on purpose
+        await review.add_entitlement(
+            db,
+            make_settings(config_dir),
+            eid,
+            cv_volume_id=777,
+            matched_via="operator",
+        )
+    assert lanes == ["interactive"]
+
+
+# --- attempt stamps are bookkeeping about WORK, and work is on `new` rows ----
+
+
+@pytest.mark.req("FRG-SRC-013")
+async def test_a_row_decided_mid_pass_is_not_stamped_at_all(db, config_dir):
+    """FRG-SRC-013 says matched and ignored rows are untouched, and the attempt
+    stamp is a touch. The pass reads its candidates, then writes in one
+    transaction; an operator deciding a row in between used to get that row
+    stamped anyway.
+
+    It matters because decisions are REVERSIBLE. A restore drops the row back to
+    ``new`` carrying whatever bookkeeping it was left with — a fresh
+    ``proposal_attempted_at`` that sends it to the back of the next run's work
+    order, and on an errored attempt an error flag that makes it sit out the
+    retry spacing for something that happened before the operator ever touched
+    it."""
+    source = await _source(db)
+    ids = {
+        "decided": await _comic(db, source.id, "Cursed Title #1", "a"),
+        "untouched": await _comic(db, source.id, "Synthetic Hero #1", "b"),
+    }
+
+    # The pass has already computed its outcomes; the operator decides one row
+    # before the write lands.
+    async with db.write_session() as session:
+        row = await session.get(SourceEntitlementRow, ids["decided"])
+        row.review_status = "ignored"
+
+    await repo.record_proposal_attempts(
+        db,
+        {
+            ids["decided"]: repo.ProposalAttempt(errored=True),
+            ids["untouched"]: repo.ProposalAttempt(
+                proposed_series_id=None,
+                proposed_match_json=CV_MARKER,
+                store=True,
+            ),
+        },
+    )
+
+    decided = await _row(db, ids["decided"])
+    assert decided.review_status == "ignored"  # the decision stands
+    assert decided.proposal_attempted_at is None  # ...and nothing was stamped
+    assert decided.proposal_attempt_error is None
+
+    # The still-new row in the same transaction is written exactly as before.
+    other = await _row(db, ids["untouched"])
+    assert other.proposal_attempted_at is not None
+    assert other.proposed_match_json == CV_MARKER
+
+
 # --- the operator endpoint ---------------------------------------------------
 
 
@@ -589,11 +855,10 @@ def _reset_gates():
     ratelimit.reset_gates()
 
 
-@pytest.fixture
-def client(tmp_path):
+def _api_app(tmp_path, **overrides):
     cfg = tmp_path / "cfg"
     cfg.mkdir()
-    app = create_app(make_settings(cfg))
+    app = create_app(make_settings(cfg, **overrides))
     app.state.http_factory = make_factory(
         tmp_path,
         httpx.MockTransport(
@@ -605,6 +870,18 @@ def client(tmp_path):
     )
     with TestClient(app) as c:
         yield c
+
+
+@pytest.fixture
+def client(tmp_path):
+    """The ordinary deployment: a ComicVine key IS configured."""
+    yield from _api_app(tmp_path, comicvine_api_key="CV-SECRET-KEY-abc123")
+
+
+@pytest.fixture
+def keyless_client(tmp_path):
+    """A deployment with no ComicVine key at all."""
+    yield from _api_app(tmp_path)
 
 
 def _connected_source_id(client) -> int:
@@ -637,3 +914,26 @@ def test_recompute_endpoint_404s_on_an_unknown_source(client):
     assert (
         client.post("/api/v1/sources/9999/recompute-proposals").status_code == 404
     )
+
+
+@pytest.mark.req("FRG-SRC-013")
+def test_recompute_endpoint_409s_without_a_comicvine_key(keyless_client):
+    """The runner already refuses a keyless recompute (it could only downgrade
+    proposals to shelf-local guesses). Accepting the request anyway would report
+    "202, queued" for work guaranteed to no-op — the operator would watch a
+    command run and finish having changed nothing, with the real reason buried in
+    its summary. The endpoint refuses the same way it refuses an unknown source:
+    with the reason, before anything is enqueued."""
+    source_id = _connected_source_id(keyless_client)
+
+    resp = keyless_client.post(f"/api/v1/sources/{source_id}/recompute-proposals")
+    assert resp.status_code == 409
+    body = resp.json()
+    assert "not configured" in body["message"]
+    assert "downgrade" in body["message"]  # the WHY, not just the what
+    assert body["errors"][0]["field"] == "comicvine_api_key"
+
+    # Nothing was queued — the refusal is the whole outcome.
+    listing = keyless_client.get("/api/v1/command").json()
+    names = [record["name"] for record in listing["records"]]
+    assert "source-recompute-proposals" not in names

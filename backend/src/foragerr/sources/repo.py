@@ -147,9 +147,17 @@ async def record_proposal_attempts(db, attempts: dict[int, ProposalAttempt]) -> 
     pass was working keeps its decision — the pass only ever writes a proposal
     onto a row that is still ``new`` (FRG-SRC-008/012 stickiness).
 
-    The attempt STAMP is applied to any row that still exists, decided or not: it
-    is bookkeeping about the pass, not about the row's review state, and a
-    decided row is out of the pending set anyway.
+    That re-read gates the attempt STAMP too, not just the proposal write. A
+    decided row is not "out of the pending set anyway" from the row's point of
+    view: matched and ignored rows are RESTORABLE, and a restore drops one back
+    into ``new`` carrying whatever attempt bookkeeping it was left with. Stamping
+    a row the operator decided mid-pass would hand it a fresh
+    ``proposal_attempted_at`` it never earned — sending it to the back of the
+    next run's work order — and, on an errored attempt, an
+    ``proposal_attempt_error`` that makes the restored row sit out the retry
+    spacing for something that happened before the operator touched it. The
+    stamps exist to order work; work is only ever done on ``new`` rows, so only
+    ``new`` rows are stamped.
     """
     if not attempts:
         return 0
@@ -160,12 +168,12 @@ async def record_proposal_attempts(db, attempts: dict[int, ProposalAttempt]) -> 
             row = await session.get(SourceEntitlementRow, eid)
             if row is None:
                 continue
+            if row.review_status != "new":
+                continue  # an operator decision landed mid-pass — leave it alone
             row.proposal_attempted_at = now
             row.proposal_attempt_error = attempt.errored
             if not attempt.store:
                 continue
-            if row.review_status != "new":
-                continue  # an operator decision landed mid-pass — leave it alone
             if row.proposed_match_json != attempt.expect_json:
                 continue  # the proposal changed under this pass — its value wins
             row.proposed_series_id = attempt.proposed_series_id

@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from collections import deque
 
 from foragerr.metadata.errors import ComicVineBudgetExhausted
@@ -73,6 +74,28 @@ LANE_INTERACTIVE = "interactive"
 #: background work viable; the ceiling keeps a real interactive reserve.
 BATCH_SHARE_FLOOR = 0.30
 BATCH_SHARE_CEILING = 0.95
+
+#: Last-resort batch share when the settings object cannot supply a usable
+#: declared default (a stub/namespace in a test, a model without the field).
+#: The real default is read off the Settings field itself, so the two cannot
+#: drift for any real deployment.
+BATCH_SHARE_FALLBACK = 0.70
+
+
+def _declared_default(settings, name: str, fallback: float) -> float:
+    """The DECLARED default for ``name`` on this settings object's own model.
+
+    Read off ``type(settings).model_fields`` rather than duplicated here, so a
+    non-finite configured value falls back to exactly the documented default an
+    operator would read in the manual — and this module never becomes a second
+    place the default is written down. Anything that cannot supply a usable
+    number (a plain namespace in a test) yields ``fallback``.
+    """
+    field = getattr(type(settings), "model_fields", {}).get(name)
+    default = getattr(field, "default", None)
+    if isinstance(default, (int, float)) and math.isfinite(float(default)):
+        return float(default)
+    return fallback
 
 
 def normalize_lane(lane: str | None) -> str:
@@ -127,8 +150,30 @@ def effective_batch_share(settings) -> float:
     (with a one-line warning when clamping), mirroring :func:`effective_budget`.
 
     Below the floor, background refresh/enrichment would starve; above the
-    ceiling, the interactive reserve stops being a reserve."""
+    ceiling, the interactive reserve stops being a reserve.
+
+    A non-finite value is handled BEFORE the clamp, because NaN survives one:
+    every comparison against NaN is false, so ``min(max(nan, floor), ceiling)``
+    is still NaN, and the NaN then reaches :func:`batch_ceiling` where
+    ``int(budget * nan)`` raises — turning one typo'd env var into a 500 on every
+    ComicVine request. Infinities would clamp, but a share of infinity is not an
+    intent worth guessing at, so they take the same route: fall back to the
+    DECLARED default with a warning, the same correct-and-continue shape as the
+    clamp. (``allow_inf_nan=False`` on the field is deliberately NOT used: it
+    would make the same typo a hard boot failure, where every sibling ComicVine
+    knob corrects-and-warns instead.)"""
     configured = float(settings.comicvine_batch_budget_share)
+    if not math.isfinite(configured):
+        fallback = _declared_default(
+            settings, "comicvine_batch_budget_share", BATCH_SHARE_FALLBACK
+        )
+        logger.warning(
+            "comicvine_batch_budget_share=%s is not a finite number; using the "
+            "default %s",
+            configured,
+            fallback,
+        )
+        return fallback
     clamped = min(max(configured, BATCH_SHARE_FLOOR), BATCH_SHARE_CEILING)
     if clamped != configured:
         logger.warning(
@@ -165,7 +210,16 @@ class _Stamp(float):
 
     __slots__ = ("lane",)
 
-    def __new__(cls, value: float, lane: str) -> "_Stamp":
+    def __new__(cls, value: float, lane: str = LANE_BATCH) -> "_Stamp":
+        # ``lane`` MUST have a default: ``copy``/``pickle`` reconstruct a float
+        # subclass by calling ``cls.__new__(cls, value)`` with the numeric value
+        # alone, so a required second argument makes a tagged ledger
+        # un-copyable (TypeError) — and a deque of stamps is exactly the kind of
+        # thing a snapshot/diagnostic helper deep-copies. The lane itself rides
+        # the __slots__ state, so a round-trip keeps its tag; anywhere the tag
+        # IS lost, arithmetic on a stamp degrades to a plain float, which
+        # :func:`_lane_of` reads as batch — fail-frugal, the same default the
+        # gate applies to any unclassified caller.
         stamp = super().__new__(cls, value)
         stamp.lane = lane
         return stamp
@@ -220,6 +274,24 @@ class _RateGate:
         limit (gate finding, cv-budget-caching review)."""
         return max(0.0, stamps[over_by] + BUDGET_WINDOW_SECONDS - now)
 
+    @classmethod
+    def _resume_in(cls, stamps, used: int, limit: int, now: float) -> float:
+        """Seconds until ``used`` admissions over ``stamps`` fall below ``limit``.
+
+        The ONE resume calculation, shared by the whole-path and batch-lane views
+        and by both the refusal path and the health snapshot — so a refusal's
+        ``retry_after_seconds`` and the meter's countdown can never disagree
+        about the same constraint.
+
+        ``limit`` of 0 admits nothing, so no stamp aging out can clear it; that
+        reports a full window rather than indexing off the end of a ledger that
+        is (necessarily) shorter than the overshoot.
+        """
+        over_by = used - limit
+        if over_by < used:
+            return cls._ages_out_in(stamps, over_by, now)
+        return BUDGET_WINDOW_SECONDS
+
     def _refuse_if_exhausted(
         self,
         bucket: str,
@@ -241,18 +313,23 @@ class _RateGate:
           interactive reserve. That refusal is lane-scoped: it names the lane
           and says the reserve remains.
 
-        ``retry_after_seconds`` is the earliest time BOTH conditions the caller
-        needs are satisfied. Each count is non-increasing as the window rolls
-        (no admissions happen while a caller is refused), so "both hold" first
-        happens at the later of the two age-out times — hence ``max``."""
+        ``retry_after_seconds`` is a LOWER BOUND: the earliest moment both
+        conditions the caller needs could hold, computed as the later of the two
+        age-out times (hence ``max``). It is not a promise. The counts are only
+        non-increasing while NOTHING is admitted, and a lane-scoped refusal
+        leaves the other lane free to keep spending — so an interactive stream
+        running through the pause can push the path count back up and defer a
+        batch caller past this time. Consumers log it as an estimate; none
+        schedules against it."""
         ledger = self._ledgers.setdefault(bucket, deque())
         self._prune(ledger, now)
         used = len(ledger)
 
+        # ``budget`` of 0 admits nothing, so ``used >= budget`` holds on an EMPTY
+        # ledger — the shared resume helper reports a full window there rather
+        # than indexing nothing.
         blocked_total = used >= budget
-        wait_total = (
-            self._ages_out_in(ledger, used - budget, now) if blocked_total else 0.0
-        )
+        wait_total = self._resume_in(ledger, used, budget, now) if blocked_total else 0.0
 
         blocked_batch = False
         wait_batch = 0.0
@@ -263,15 +340,7 @@ class _RateGate:
             batch_used = len(batch_stamps)
             if batch_used >= ceiling:
                 blocked_batch = True
-                over_by = batch_used - ceiling
-                if over_by < batch_used:
-                    wait_batch = self._ages_out_in(batch_stamps, over_by, now)
-                else:
-                    # ceiling 0 — the share leaves batch no capacity at all on
-                    # this budget (only reachable well below the documented
-                    # budget floor of 10). No stamp can age out to clear it, so
-                    # report a full window rather than indexing nothing.
-                    wait_batch = BUDGET_WINDOW_SECONDS
+                wait_batch = self._resume_in(batch_stamps, batch_used, ceiling, now)
 
         if not (blocked_total or blocked_batch):
             return
@@ -297,7 +366,7 @@ class _RateGate:
         logger.warning(
             "comicvine %s share exhausted for path %r (%d/%d of the batch "
             "share, %d/%d overall); refusing locally, the interactive reserve "
-            "remains, resumes in ~%.0fs",
+            "remains, resumes in ~%.0fs at the earliest",
             LANE_BATCH,
             bucket,
             batch_used,
@@ -392,19 +461,31 @@ class _RateGate:
 
         Returns ``(path_budgets, budget_exhausted)`` where ``path_budgets`` maps
         each REPORTABLE bucket to ``{used, ceiling, batch_used, batch_ceiling,
-        resumes_in_seconds}`` — so the common quiet case is an empty map and the
-        payload stays small — and ``budget_exhausted`` is ``True`` when any
-        bucket is at/over its ceiling. ``resumes_in_seconds`` is the duration
-        until the bucket next falls below the ceiling (0 while it still has
-        headroom).
+        approaching, resumes_in_seconds, batch_resumes_in_seconds}`` — so the
+        common quiet case is an empty map and the payload stays small — and
+        ``budget_exhausted`` is ``True`` when any bucket is at/over its ceiling.
+
+        There are TWO countdowns because there are two walls.
+        ``resumes_in_seconds`` is the whole path's: the duration until the bucket
+        falls back below its ceiling (0 while it still has headroom).
+        ``batch_resumes_in_seconds`` is the batch lane's: the duration until
+        background work can spend again (0 while it still can). A bucket can sit
+        at the second without being anywhere near the first, which is the ordinary
+        state of a nightly enrichment run.
 
         A bucket is reportable when its usage is AT OR ABOVE the warning
         threshold (≥80% of the ceiling) OR its batch lane has spent its share
         (FRG-META-022) — the batch share (default 70%) sits *below* the warning
         fraction, so a paused batch lane would otherwise be invisible exactly
         when an operator most wants to know why background work stopped.
-        ``batch_used``/``batch_ceiling`` are additive keys: existing consumers
-        of ``used``/``ceiling`` are unaffected.
+
+        Those two admission reasons are DIFFERENT states, so ``approaching``
+        publishes which one applies rather than leaving a consumer to infer it
+        from membership. Membership stopped meaning "near the ceiling" the moment
+        batch-paused buckets joined the map: at the defaults a nightly batch run
+        parks a bucket here at 105/150, which is a paused lane, not an
+        approaching wall. ``approaching``/``batch_used``/``batch_ceiling`` are
+        additive keys: existing consumers of ``used``/``ceiling`` are unaffected.
 
         Best-effort: with no running loop (no monotonic clock) it reports a
         compact/empty snapshot.
@@ -428,23 +509,35 @@ class _RateGate:
                 continue
             if used >= ceiling:
                 exhausted = True
-            batch_used = sum(1 for s in ledger if _lane_of(s) == LANE_BATCH)
+            batch_stamps = [s for s in ledger if _lane_of(s) == LANE_BATCH]
+            batch_used = len(batch_stamps)
             batch_paused = share is not None and batch_used >= batch_cap
-            if used >= threshold or batch_paused:
-                if used >= ceiling:
-                    # The admission at index (used - ceiling) must age out before
-                    # the bucket drops back below the ceiling.
-                    resumes_in = max(
-                        0.0, ledger[used - ceiling] + BUDGET_WINDOW_SECONDS - now
-                    )
-                else:
-                    resumes_in = 0.0
+            approaching = used >= threshold
+            if approaching or batch_paused:
+                resumes_in = (
+                    self._resume_in(ledger, used, ceiling, now)
+                    if used >= ceiling
+                    else 0.0
+                )
+                # The batch lane has its own wall and therefore its own
+                # countdown. Folding it into ``resumes_in_seconds`` would lie to
+                # the exhausted-path message (which means the WHOLE path);
+                # leaving it out lies to the meter, which would show a paused
+                # lane with no answer to "until when?" — the one question a
+                # pause raises. So it is its own key, 0.0 while batch is running.
+                batch_resumes_in = (
+                    self._resume_in(batch_stamps, batch_used, batch_cap, now)
+                    if batch_paused
+                    else 0.0
+                )
                 budgets[bucket] = {
                     "used": used,
                     "ceiling": ceiling,
                     "batch_used": batch_used,
                     "batch_ceiling": batch_cap,
+                    "approaching": approaching,
                     "resumes_in_seconds": round(resumes_in, 3),
+                    "batch_resumes_in_seconds": round(batch_resumes_in, 3),
                 }
         return budgets, exhausted
 
@@ -529,14 +622,17 @@ def comicvine_health() -> dict[str, object]:
 
     Shape: ``{"degraded": bool, "cooldown_remaining_seconds": float,
     "path_budgets": {bucket: {used, ceiling, batch_used, batch_ceiling,
-    resumes_in_seconds}}, "budget_exhausted": bool, "auth_failed": bool}``.
-    ``path_budgets`` lists only buckets at or above the 80% warning threshold
-    or with a batch lane at its share (empty in the common quiet case), and
+    approaching, resumes_in_seconds, batch_resumes_in_seconds}},
+    "budget_exhausted": bool,
+    "auth_failed": bool}``. ``path_budgets`` lists only buckets at or above the
+    80% warning threshold or with a batch lane at its share (empty in the common
+    quiet case); ``approaching`` says WHICH of those two a listed bucket is, and
     ``budget_exhausted`` flags a bucket at/over its ceiling (FRG-META-016). The
     budget dimension is INDEPENDENT of ``degraded`` — a local budget refusal
-    never flips the rate-limit back-off state. ``batch_used``/``batch_ceiling``
-    (FRG-META-022) are additive: a consumer reading only ``used``/``ceiling``
-    keeps working unchanged.
+    never flips the rate-limit back-off state.
+    ``approaching``/``batch_used``/``batch_ceiling``/``batch_resumes_in_seconds``
+    (FRG-META-022) are additive: a consumer reading only ``used``/``ceiling``/
+    ``resumes_in_seconds`` keeps working unchanged.
     """
     path_budgets, budget_exhausted = _GATE.budget_health()
     return {

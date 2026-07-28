@@ -621,7 +621,7 @@ class Settings(BaseSettings):
         ),
     )
     comicvine_error_retry_spacing_seconds: int = Field(
-        default=86400,
+        default=43200,
         ge=0,
         description=(
             "Minimum wait before SCHEDULED source enrichment re-attempts a row "
@@ -632,8 +632,12 @@ class Settings(BaseSettings):
             "retried at its next turn with no wait, because a window refusal is "
             "not a failure of the row. Operator-initiated paths (restore, the "
             "per-row search, the bulk recompute) ignore the spacing entirely — "
-            "the operator asking is itself the retry decision. Default one day; "
-            "set 0 to disable spacing."
+            "the operator asking is itself the retry decision. The default "
+            "43200 (12 h) sits BELOW the daily sync interval so an errored row "
+            "is retried on the next scheduled run, not skipped for one: a "
+            "spacing equal to the interval loses the race with it and turns "
+            "'retry tomorrow' into 'retry every other day'. Set 0 to disable "
+            "spacing."
         ),
     )
     # Per-provider credentials (DogNZB/NZB.su/SABnzbd API keys) live in per-row

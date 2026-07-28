@@ -28,7 +28,12 @@ function bucket(
     ceiling: 150,
     batch_used: 105,
     batch_ceiling: 105,
+    // The backend's own answer, not a re-derivation: default it the way the
+    // gate computes it so a test that only sets `used` still gets a coherent
+    // bucket, and a test about the paused-lane case can say so explicitly.
+    approaching: overrides.used >= (overrides.ceiling ?? 150) * 0.8,
     resume_seconds: 0,
+    batch_resume_seconds: 0,
     ...overrides,
   };
 }
@@ -141,11 +146,43 @@ describe('FRG-UI-040: ComicVine budget meter', () => {
     expect(comicVineBudget(healthWithBuckets([]))).toBeNull();
     expect(comicVineBudget(undefined)).toBeNull();
 
-    // The threshold is applied to usage against the ceiling, not to whatever
-    // the backend chose to report.
+    // "Reported" and "hot" are different questions — the backend also reports a
+    // bucket whose background lane has paused, well below the ceiling — and the
+    // backend answers the second one. The threshold lives in the gate; a copy
+    // of it here would drift the day the gate's changed.
     expect(hotBuckets(comicVineBudget(withBuckets))).toHaveLength(1);
     expect(
       hotBuckets(comicVineBudget(healthWithBuckets([bucket({ bucket: 'issue', used: 119 })]))),
     ).toHaveLength(0);
+  });
+
+  it('FRG-UI-040 — the chip follows the backend flag, not a threshold re-derived here', async () => {
+    // A bucket the backend flagged, at a usage a client-side 80% rule would
+    // have called quiet. Whatever the gate's fraction is, the chip agrees with
+    // it — that is the whole reason the flag is on the wire.
+    renderWithHealth(
+      <ComicVineBudgetChip />,
+      healthWithBuckets([bucket({ bucket: 'issue', used: 60, approaching: true })]),
+    );
+
+    expect(await screen.findByTestId('cv-budget-chip')).toHaveTextContent(
+      'ComicVine issue 60/150',
+    );
+  });
+
+  it('FRG-UI-040 — a paused background lane shows its OWN countdown', async () => {
+    // The path is nowhere near its ceiling, so the row's whole-path resume is 0
+    // and says nothing about when background work restarts. A pause with no
+    // answer to "until when?" is the one thing a pause has to answer.
+    renderWithHealth(
+      <ComicVineBudgetMeter />,
+      healthWithBuckets([
+        bucket({ bucket: 'issue', used: 105, resume_seconds: 0, batch_resume_seconds: 600 }),
+      ]),
+    );
+
+    const note = await screen.findByTestId('cv-budget-batch-issue');
+    expect(note).toHaveTextContent('paused, interactive reserve remains');
+    expect(note).toHaveTextContent('resumes in ~10 min');
   });
 });

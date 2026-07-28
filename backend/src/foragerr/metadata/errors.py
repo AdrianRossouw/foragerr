@@ -54,9 +54,12 @@ class ComicVineBudgetExhausted(ComicVineError):
     ComicVine saw nothing — so unlike :class:`ComicVineRateLimited` it does NOT
     flip the degraded/back-off state and never blocks the caller waiting for
     capacity. It carries the ``bucket`` (the normalized first path segment) and
-    ``retry_after_seconds`` (a duration until the oldest admission ages out of
+    ``retry_after_seconds`` (a duration until the relevant admission ages out of
     the window), so a call site can defer cleanly and surface an honest resume
-    time. Every raise is logged by the caller — a deferral is never silent.
+    time. It is a LOWER BOUND, not a promise — traffic admitted in the meantime
+    (notably the other lane, which a lane-scoped refusal leaves free) can push
+    the resume time out. Every raise is logged by the caller — a deferral is
+    never silent.
 
     ``lane`` (FRG-META-022) is set ONLY when the refusal was lane-scoped: the
     batch lane spent its configured share of the path budget while the
@@ -83,7 +86,7 @@ class ComicVineBudgetExhausted(ComicVineError):
             message = (
                 f"comicvine {lane} share of path {bucket!r} exhausted; "
                 f"interactive reserve remains; "
-                f"resumes in ~{retry_after_seconds:.0f}s"
+                f"resumes in ~{retry_after_seconds:.0f}s at the earliest"
             )
         super().__init__(message)
         self.bucket = bucket

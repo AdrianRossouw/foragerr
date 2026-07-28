@@ -58,7 +58,10 @@ message says exactly that — the warning names the lane that is paused.
 `SystemHealthComponent` gains an optional `detail` object (additive);
 for the ComicVine component it carries
 `{buckets: [{bucket, used, ceiling, batch_used, batch_ceiling,
-resume_seconds}], degraded, exhausted}` — numbers `comicvine_health()`
+approaching, resume_seconds, batch_resume_seconds}], degraded,
+exhausted}` — `approaching` is the gate's explicit warning-fraction
+flag (health never infers severity from payload membership), and a
+paused batch lane carries its own resume figure — numbers `comicvine_health()`
 already computes. No new endpoint. Settings → General renders the full
 meter beside the key; the Sources manage bar renders a compact
 used/ceiling chip when any bucket is above the warning fraction
@@ -72,7 +75,9 @@ touches in a run (proposed, marker, deferred, errored) and orders the
 pending set NULLs-first-then-oldest-attempt, so each run starts where
 work is least recent — a failing head can delay its own retry, never the
 tail's first attempt. CV-error rows additionally respect a minimum
-re-attempt spacing (config, default 24h) instead of every run forever.
+re-attempt spacing (config, default 12h — deliberately below the
+daily sync interval so an errored row retries on the next scheduled
+run, not every other one) instead of every run forever.
 FRG-SRC-010's invariant stands: budget hits still leave rows NULL and
 retryable; the stamp changes ORDER, never eligibility.
 

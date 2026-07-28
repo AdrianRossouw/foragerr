@@ -37,16 +37,19 @@ therefore moves behind the rows it did not reach, so it can only ever delay its
 OWN retry; before this, an oldest-id-first walk restarted at the same doomed
 rows every night and the tail was never seen at all. Rows whose ComicVine
 consultation ERRORED additionally wait out
-``comicvine_error_retry_spacing_seconds`` on this scheduled path (operator paths
-never do). The stamps order work and nothing else: a budget-deferred row still
-has a NULL proposal and is still eligible, exactly as FRG-SRC-010 requires.
+``comicvine_error_retry_spacing_seconds`` on this scheduled path. The three
+operator-initiated paths — restore, the review row's per-row search, and the
+bulk recompute — ignore the spacing entirely, because the operator asking IS the
+retry decision. (Manual "Sync now" is NOT one of them: it runs the same
+scheduled command, so it spaces exactly as the nightly run does.) The stamps
+order work and nothing else: a budget-deferred row still has a NULL proposal and
+is still eligible, exactly as FRG-SRC-010 requires.
 
 Two revisit shapes rejoin the pending set rather than staying frozen:
-``library-fallback`` no-match markers once a ComicVine key IS configured (they
-were computed catalog-blind, so they are verdicts about the shelf, not the
-catalog), and — through the operator-triggered
-:func:`recompute_proposals` — proposals stored before the CV-first universe
-existed.
+``library-fallback`` proposals once a ComicVine key IS configured (they were
+computed catalog-blind — verdicts and guesses about the shelf, not the catalog),
+and — through the operator-triggered :func:`recompute_proposals` — proposals
+stored before the CV-first universe existed.
 """
 
 from __future__ import annotations
@@ -91,6 +94,20 @@ async def _load_library(db) -> list[LibrarySeriesLite]:
     ]
 
 
+def comicvine_configured(settings) -> bool:
+    """Whether this deployment has a usable ComicVine key at all.
+
+    The ONE key check every "is ComicVine available here?" caller shares — the
+    client builder below, and the surfaces that must answer the question WITHOUT
+    paying for a client (an endpoint deciding whether a ComicVine-only action is
+    even runnable). A second copy would be a second place to get it wrong."""
+    try:
+        key = settings.comicvine_api_key.get_secret_value()
+    except Exception:  # noqa: BLE001 — a missing/odd key means "no CV"
+        return False
+    return bool(key.strip())
+
+
 def build_cv_client(settings, *, lane: str = "batch"):
     """A live ComicVine client when an api key is configured, else ``None``.
 
@@ -102,11 +119,7 @@ def build_cv_client(settings, *, lane: str = "batch"):
     are the nightly enrichment run — and the operator-initiated endpoints pass
     ``interactive`` so an exhausted batch share never blocks the person waiting
     at the review screen."""
-    try:
-        key = settings.comicvine_api_key.get_secret_value()
-    except Exception:  # noqa: BLE001 — a missing/odd key means "no CV"
-        return None
-    if not key.strip():
+    if not comicvine_configured(settings):
         return None
     from foragerr.library.flows._common import comicvine_factory
     from foragerr.metadata.comicvine import ComicVineClient
@@ -125,21 +138,35 @@ def _proposal_data(raw: str | None) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
-def is_library_fallback_marker(raw: str | None) -> bool:
-    """True for a no-plausible-match marker computed WITHOUT ComicVine.
+def is_library_fallback(raw: str | None) -> bool:
+    """True for ANY proposal computed WITHOUT ComicVine (FRG-SRC-013).
 
-    Such a marker says "nothing on your shelf resembles this", which is not the
-    question the review screen asks — and it freezes the row out of the pending
-    set forever. Once a key exists the row deserves a catalog verdict, so it
-    rejoins the pending set (FRG-SRC-013). A marker computed WITH ComicVine is a
-    real verdict and stays put.
+    The universe alone is the signature, because the whole stored proposal — a
+    no-match marker AND a ranked best guess — was produced against the local
+    shelf rather than the catalog. Both are answers to a question the review
+    screen does not ask, and both are non-NULL, so both freeze the row out of
+    every later pass. Once a key exists the row deserves a catalog answer and
+    rejoins the pending set.
+
+    Keying on the verdict as well would have covered only half the keyless era:
+    a shelf-ranked BEST (universe ``library-fallback`` with a candidate) is the
+    more consequential half — it is what the review screen renders as a
+    proposal — and it would have been the one shape neither revisit path could
+    reach. A proposal computed WITH ComicVine is a real answer and stays put.
     """
     data = _proposal_data(raw)
-    return bool(
-        data
-        and data.get("verdict") == VERDICT_NO_PLAUSIBLE_MATCH
-        and data.get("universe") == UNIVERSE_LIBRARY_FALLBACK
-    )
+    return bool(data and data.get("universe") == UNIVERSE_LIBRARY_FALLBACK)
+
+
+def is_library_fallback_marker(raw: str | None) -> bool:
+    """True for a no-plausible-match MARKER computed without ComicVine.
+
+    The narrow shape: :func:`is_library_fallback` restricted to the no-match
+    verdict. Kept distinct because "we looked at the shelf and found nothing"
+    and "we ranked the shelf and picked this" are different things to say about
+    a row, even though both are revisited.
+    """
+    return is_library_fallback(raw) and is_marker(raw)
 
 
 def is_marker(raw: str | None) -> bool:
@@ -155,9 +182,20 @@ def predates_cv_universe(raw: str | None) -> bool:
     (FRG-SRC-010), so a stored proposal LACKING the key was ranked against the
     local library alone, whatever it claims. That absence is what the bulk
     recompute targets — it cannot be inferred from the value of any other field.
+
+    A stored value that will not parse counts as pre-universe too. It is
+    non-NULL, so the enrichment pass skips it forever; it has no readable
+    universe, so no other predicate claims it; and it renders as nothing on the
+    review screen. Recomputing it is the only way it can ever become a proposal
+    again, and the cost of being wrong is one ComicVine call. Only a genuinely
+    absent proposal (``None``/empty) stays the enrichment pass's business.
     """
+    if not raw:
+        return False
     data = _proposal_data(raw)
-    return bool(data is not None and "universe" not in data)
+    if data is None:
+        return True
+    return "universe" not in data
 
 
 def _error_spacing_blocked(row, *, now: dt.datetime, spacing_seconds: int) -> bool:
@@ -183,12 +221,16 @@ def eligible_for_enrichment(row, *, cv_configured: bool) -> bool:
     * a NULL proposal — never computed, or deferred/errored last time
       (FRG-SRC-010: a deferral leaves the row eligible, and no stamp changes
       that);
-    * a ``library-fallback`` marker on a run where ComicVine IS configured —
-      the keyless verdict a key has now made answerable.
+    * ANY ``library-fallback`` proposal on a run where ComicVine IS configured —
+      marker or shelf-ranked best alike, the keyless answer a key has now made
+      answerable. Not just the marker: a keyless run that DID find a shelf
+      candidate stored it as a fallback best, and gating on the no-match verdict
+      left exactly those rows — the ones showing the operator a proposal — frozen
+      on a keyed deployment.
     """
     if row.proposed_match_json is None:
         return True
-    return cv_configured and is_library_fallback_marker(row.proposed_match_json)
+    return cv_configured and is_library_fallback(row.proposed_match_json)
 
 
 def select_pending(
@@ -402,6 +444,13 @@ async def _auto_accept(
                     cv_volume_id=proposal.best.cv_volume_id,
                     matched_via=MATCHED_VIA_AUTO,
                     require_new=True,
+                    # Nobody is waiting on an auto-accept: it runs from the
+                    # nightly enrichment batch, and the add's ComicVine
+                    # existence check must be capped at the batch share like
+                    # the rest of it (FRG-META-022). Left interactive, a
+                    # 1,318-item auto-sync would spend the reserve that exists
+                    # to keep the operator's own searches answering.
+                    lane="batch",
                 )
             else:
                 continue
@@ -420,15 +469,22 @@ def is_recompute_target(row, *, include_markers: bool) -> bool:
 
     * one written before the ComicVine-first universe (no ``universe`` key —
       library-ranked whatever it looks like), the v0.11.0 upgrade gap;
-    * on explicit opt-in, a no-plausible-match marker — the operator saying "look
-      again", e.g. after the library or the catalog moved. Opt-in because
-      re-asking ComicVine about every marker is exactly the kind of unprompted
-      spend this change exists to stop.
+    * one written IN the ``library-fallback`` universe — the same gap one
+      version later. A keyless deployment's proposals are shelf-ranked for
+      exactly the reason a pre-universe one is, and this walk cannot run at all
+      without a key (see :func:`recompute_proposals`), so reaching them here is
+      unconditional rather than an opt-in. Without it, a deployment that added
+      its key AFTER a keyless sync had a class of rows no revisit path could
+      touch;
+    * on explicit opt-in, a ComicVine no-plausible-match marker — the operator
+      saying "look again", e.g. after the library or the catalog moved. Opt-in
+      because re-asking ComicVine about every real verdict is exactly the kind
+      of unprompted spend this change exists to stop.
     """
     raw = row.proposed_match_json
     if raw is None:
         return False
-    if predates_cv_universe(raw):
+    if predates_cv_universe(raw) or is_library_fallback(raw):
         return True
     return include_markers and is_marker(raw)
 
@@ -532,8 +588,10 @@ async def recompute_proposals(
 
 __all__ = [
     "build_cv_client",
+    "comicvine_configured",
     "eligible_for_enrichment",
     "enrich_source",
+    "is_library_fallback",
     "is_library_fallback_marker",
     "is_marker",
     "is_recompute_target",

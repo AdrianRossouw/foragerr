@@ -391,11 +391,31 @@ async def recompute_proposals_endpoint(
     ComicVine and the local rows only, so a source whose cookie has expired can
     still have its review queue improved. Only ``new`` rows are touched; matched
     and ignored rows keep their decisions.
+
+    It IS gated on a configured ComicVine key. Without one the command can only
+    no-op — recomputing library-only would replace catalog-shaped proposals with
+    shelf-local guesses, so the runner refuses — and a 202 for work that will
+    never happen is the endpoint telling the operator a command was accepted
+    when nothing was. The same discipline as the 404 above: refuse what cannot
+    run, with the reason, rather than enqueue it.
     """
+    # Local import, matching ``_operator_cv_client``'s: the enrichment module
+    # pulls in the library/metadata flows, and this router is imported at app
+    # construction.
+    from foragerr.sources.enrich import comicvine_configured
+
     db = request.app.state.db
     row = await get_source(db, source_id)
     if row is None:
         raise ApiError(404, f"source {source_id} not found")
+    if not comicvine_configured(request.app.state.settings):
+        raise ApiError(
+            409,
+            "ComicVine is not configured; a recompute without a catalog could "
+            "only downgrade proposals to shelf-local guesses. Set the ComicVine "
+            "API key in Settings → General first.",
+            field="comicvine_api_key",
+        )
     include_markers = bool(body.include_markers) if body is not None else False
     record = await request.app.state.commands.enqueue(
         SOURCE_RECOMPUTE_TASK,

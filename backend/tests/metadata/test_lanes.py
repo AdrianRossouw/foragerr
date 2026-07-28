@@ -16,7 +16,9 @@ position: the alternative is sleeping out an hour to observe the prune.
 from __future__ import annotations
 
 import asyncio
+import copy
 import logging
+import math
 from collections import deque
 from pathlib import Path
 
@@ -310,6 +312,44 @@ async def test_a_zero_batch_ceiling_refuses_cleanly():
 
 
 @pytest.mark.req("FRG-META-022")
+@pytest.mark.req("FRG-META-016")
+async def test_a_zero_budget_refuses_cleanly_on_an_empty_ledger():
+    """The whole-path mirror of the zero-batch-ceiling case above. ``budget=0``
+    means ``used >= budget`` holds with NOTHING in the ledger, and the resume
+    math has to age out the stamp at index 0 — which does not exist. That was an
+    IndexError (a 500 on every request) where the batch branch, given the same
+    shape, had always answered with a full window."""
+    gate = ratelimit.gate()
+    with pytest.raises(ComicVineBudgetExhausted) as excinfo:
+        await gate.acquire(0.0, bucket="volume", budget=0)
+    assert excinfo.value.lane is None
+    assert excinfo.value.retry_after_seconds == BUDGET_WINDOW_SECONDS
+    # ...and it stays a purely local decision, as every budget refusal is.
+    assert comicvine_degraded() is False
+
+
+@pytest.mark.req("FRG-META-022")
+async def test_a_lane_refusal_promises_only_a_lower_bound(caplog):
+    """The resume time is the EARLIEST the caller could be admitted, not a
+    schedule: a lane-scoped refusal leaves the other lane free to keep spending,
+    so the counts a lane refusal is waiting on are not non-increasing. The
+    wording says so; no consumer schedules against it."""
+    gate = ratelimit.gate()
+    budget, share = 10, 0.5
+    for _ in range(5):
+        await gate.acquire(0.0, bucket="volume", budget=budget, batch_share=share)
+    with caplog.at_level(logging.WARNING, logger="foragerr.metadata.ratelimit"):
+        with pytest.raises(ComicVineBudgetExhausted) as excinfo:
+            await gate.acquire(
+                0.0, bucket="volume", budget=budget, batch_share=share
+            )
+    assert "at the earliest" in str(excinfo.value)
+    assert any(
+        "at the earliest" in record.getMessage() for record in caplog.records
+    )
+
+
+@pytest.mark.req("FRG-META-022")
 async def test_every_lane_deferral_is_logged(caplog):
     """A deferral is never silent — the log line names the lane."""
     gate = ratelimit.gate()
@@ -351,6 +391,69 @@ def test_batch_share_defaults_to_seventy_percent(tmp_path):
     settings = make_settings(tmp_path)
     assert effective_batch_share(settings) == 0.70
     assert batch_ceiling(150, effective_batch_share(settings)) == 105
+
+
+@pytest.mark.req("FRG-META-022")
+def test_a_non_finite_batch_share_falls_back_to_the_declared_default(
+    tmp_path, caplog, monkeypatch
+):
+    """NaN survives a clamp — every comparison against it is false, so
+    ``min(max(nan, floor), ceiling)`` is still NaN — and the NaN then reaches
+    ``int(budget * share)``, which RAISES. One typo'd env var would have been a
+    500 on every ComicVine request. It corrects to the declared default with a
+    warning, the same shape as an out-of-range value, rather than failing the
+    boot: every sibling ComicVine knob corrects-and-warns."""
+    # Every non-finite value takes the same route, infinities included. They
+    # would survive the clamp (inf -> ceiling, -inf -> floor) but "infinity" is
+    # not a share of anything, so reading it as a deliberate 95% would be
+    # inventing an intent; the default is the honest reading. Checked first,
+    # while the env is still clean.
+    for value in (float("inf"), float("-inf")):
+        assert (
+            effective_batch_share(
+                make_settings(tmp_path, comicvine_batch_budget_share=value)
+            )
+            == 0.70
+        )
+    # The finite bounds are still the CLAMP's business, unchanged.
+    assert BATCH_SHARE_FLOOR < 0.70 < BATCH_SHARE_CEILING
+
+    monkeypatch.setenv("FORAGERR_COMICVINE_BATCH_BUDGET_SHARE", "nan")
+    settings = Settings(config_dir=tmp_path)
+    assert math.isnan(settings.comicvine_batch_budget_share)  # it really got in
+
+    with caplog.at_level(logging.WARNING, logger="foragerr.metadata.ratelimit"):
+        share = effective_batch_share(settings)
+    assert share == 0.70  # the declared field default, not a second copy of it
+    assert any(
+        "comicvine_batch_budget_share" in r.getMessage() for r in caplog.records
+    )
+    # The point of the guard: the ceiling math is computable again.
+    assert batch_ceiling(150, share) == 105
+
+
+@pytest.mark.req("FRG-META-022")
+async def test_a_tagged_ledger_survives_being_copied():
+    """``_Stamp`` is a float subclass, and copy/pickle rebuild one by calling
+    ``cls.__new__(cls, value)`` with the number alone. A required ``lane``
+    argument therefore made a whole ledger un-copyable — and a deque of stamps is
+    exactly what a snapshot or diagnostic helper deep-copies. The default keeps
+    the round-trip working AND keeps it frugal: anywhere a tag is lost, the
+    result reads as batch."""
+    ledger = deque(
+        [_Stamp(1.0, LANE_INTERACTIVE), _Stamp(2.0, LANE_BATCH), _Stamp(3.0)]
+    )
+    copied = copy.deepcopy(ledger)
+
+    assert [float(s) for s in copied] == [1.0, 2.0, 3.0]
+    assert [_lane_of(s) for s in copied] == [
+        LANE_INTERACTIVE,
+        LANE_BATCH,
+        LANE_BATCH,
+    ]
+    # Arithmetic on a stamp degrades to a plain float, which reads as batch —
+    # the same fail-frugal default an unclassified caller gets.
+    assert _lane_of(_Stamp(1.0, LANE_INTERACTIVE) + 0.0) == LANE_BATCH
 
 
 @pytest.mark.req("FRG-META-022")
@@ -406,6 +509,69 @@ async def test_health_payload_carries_batch_numbers_additively():
     entry = comicvine_health()["path_budgets"]["volume"]
     assert entry["used"] == 8
     assert entry["batch_used"] == 7
+
+
+@pytest.mark.req("FRG-META-022")
+@pytest.mark.req("FRG-API-025")
+async def test_a_paused_batch_lane_publishes_its_own_countdown():
+    """A pause below the path ceiling is the ORDINARY end-state of a nightly
+    run, and "until when?" is the only question it raises. The whole-path
+    ``resumes_in_seconds`` cannot answer it — the path is nowhere near its
+    ceiling, so that figure is 0 — so the lane gets its own, computed from the
+    same oldest-batch-stamp age-out an actual lane refusal uses. Without it the
+    meter renders a paused lane with no resume time at all."""
+    budget, share = 10, 0.7  # batch ceiling 7, warning threshold 8
+    gate, _ = _seed(
+        "volume",
+        [(3000.0, LANE_BATCH)] + [(100.0, LANE_BATCH)] * 6,
+        budget=budget,
+        share=share,
+    )
+
+    entry = comicvine_health()["path_budgets"]["volume"]
+    assert entry["batch_used"] == 7 and entry["batch_ceiling"] == 7
+    assert entry["approaching"] is False  # 7/10 is not near the CEILING
+    assert entry["resumes_in_seconds"] == 0.0  # ...and the path is wide open
+    # The oldest batch stamp (3000 s ago) ages out at 3600 s — the same answer a
+    # refusal would give, from the same one ledger.
+    assert entry["batch_resumes_in_seconds"] == pytest.approx(
+        BUDGET_WINDOW_SECONDS - 3000.0, abs=1.0
+    )
+    with pytest.raises(ComicVineBudgetExhausted) as refusal:
+        await gate.acquire(
+            0.0, bucket="volume", budget=budget, lane=LANE_BATCH, batch_share=share
+        )
+    assert refusal.value.retry_after_seconds == pytest.approx(
+        entry["batch_resumes_in_seconds"], abs=1.0
+    )
+
+
+@pytest.mark.req("FRG-META-022")
+@pytest.mark.req("FRG-META-016")
+async def test_approaching_is_published_not_inferred_from_membership():
+    """Two buckets, both reported, only one near its ceiling. Membership stopped
+    meaning "approaching" the moment batch-paused buckets joined the payload, so
+    the gate says which is which rather than leaving a consumer to re-derive the
+    warning fraction (and get it wrong for every paused lane)."""
+    budget, share = 10, 0.7  # batch ceiling 7, warning threshold 8
+    gate = ratelimit.gate()
+    for _ in range(7):  # paused batch lane, 7/10 — reported, NOT approaching
+        await gate.acquire(0.0, bucket="volume", budget=budget, batch_share=share)
+    for _ in range(8):  # 8/10 — approaching, batch untouched
+        await gate.acquire(
+            0.0,
+            bucket="issue",
+            budget=budget,
+            lane=LANE_INTERACTIVE,
+            batch_share=share,
+        )
+
+    budgets = comicvine_health()["path_budgets"]
+    assert set(budgets) == {"volume", "issue"}  # both worth showing
+    assert budgets["volume"]["approaching"] is False
+    assert budgets["issue"]["approaching"] is True
+    # Neither is exhausted — approaching is strictly before the wall.
+    assert comicvine_health()["budget_exhausted"] is False
 
 
 # -- the client seam ------------------------------------------------------

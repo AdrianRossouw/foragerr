@@ -226,6 +226,7 @@ async def add_entitlement(
     cv_volume_id: int | None = None,
     matched_via: str,
     require_new: bool = False,
+    lane: str = "interactive",
 ) -> SourceEntitlementRow:
     """Add a brand-new series for an entitlement via the normal add flow.
 
@@ -256,6 +257,12 @@ async def add_entitlement(
     with "already in the library". That rejection is re-checked rather than
     surfaced (see the except clause) — the race lands on the same degrade path,
     never on the 400 FRG-SRC-008 exists to remove.
+
+    ``lane`` (FRG-META-022) is passed straight to ``add_series`` for its
+    ComicVine existence check. It defaults to ``interactive`` — this is the
+    review screen's Add button — but auto-sync accepts through this same
+    function from the nightly batch, with nobody waiting, and passes ``batch``
+    so a bulk auto-accept cannot drain the operator's interactive reserve.
     """
     from foragerr.library import repo as library_repo
     from foragerr.library.flows.add import add_series
@@ -313,6 +320,7 @@ async def add_entitlement(
             root_folder_id=root_id,
             commands=commands,
             factory=factory,
+            lane=lane,
         )
     except Exception as exc:  # noqa: BLE001 — surface the add failure to the API
         # TOCTOU repair (FRG-SRC-008): the pre-check and the add are separate

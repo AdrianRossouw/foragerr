@@ -29,15 +29,6 @@ import styles from './ComicVineBudget.module.css';
  * with the Health screen about the state of the budget.
  */
 
-/**
- * Fraction of a path ceiling at which a bucket is "hot" — mirrors the
- * backend's `BUDGET_WARNING_FRACTION`. The backend may report a bucket BELOW
- * this (e.g. a paused batch lane at 70%), which the full meter shows; the
- * compact chip applies this threshold so the review screen stays quiet until
- * the ceiling itself is in question (FRG-UI-040 scenario 2).
- */
-export const BUDGET_WARNING_FRACTION = 0.8;
-
 /** The ComicVine component's budget detail from a health payload, if any. */
 export function comicVineBudget(
   components: SystemHealthComponent[] | undefined,
@@ -53,14 +44,20 @@ export function useComicVineBudget(): ComicVineBudgetDetail | null {
   return comicVineBudget(health.data);
 }
 
-/** Buckets at or above the warning fraction of their ceiling. */
+/**
+ * Buckets near their ceiling, as flagged by the backend.
+ *
+ * The backend reports MORE than these — a bucket also appears once its
+ * background lane pauses, which happens below the warning fraction — so
+ * "reported" and "hot" are different questions. The answer comes from the
+ * `approaching` flag rather than a fraction re-derived here: the threshold is
+ * the gate's, and a second copy of it would drift the day the gate's changed.
+ */
 export function hotBuckets(
   detail: ComicVineBudgetDetail | null,
 ): ComicVineBudgetBucket[] {
   if (!detail) return [];
-  return detail.buckets.filter(
-    (b) => b.ceiling > 0 && b.used / b.ceiling >= BUDGET_WARNING_FRACTION,
-  );
+  return detail.buckets.filter((b) => b.approaching);
 }
 
 /** Seconds until capacity returns -> "resumes in ~4 min" (blank when open). */
@@ -88,6 +85,7 @@ function BucketRow({ bucket }: { bucket: ComicVineBudgetBucket }) {
   const exhausted = bucket.used >= bucket.ceiling;
   const paused = batchPaused(bucket);
   const resume = resumeNote(bucket.resume_seconds);
+  const batchResume = resumeNote(bucket.batch_resume_seconds);
   // Where the batch lane's share ends, drawn on the same track as the usage
   // fill: the gap to its right IS the interactive reserve, which is the one
   // thing the raw numbers do not make obvious.
@@ -129,7 +127,14 @@ function BucketRow({ bucket }: { bucket: ComicVineBudgetBucket }) {
         {bucket.batch_ceiling != null && bucket.batch_used != null && (
           <span data-testid={`cv-budget-batch-${bucket.bucket}`}>
             background {bucket.batch_used} / {bucket.batch_ceiling}
-            {paused ? ' — paused, interactive reserve remains' : ''}
+            {/* A pause needs its own countdown: the path may be nowhere near
+                its ceiling, so the row's `resume` says nothing about when
+                background work starts again. */}
+            {paused
+              ? ` — paused, interactive reserve remains${
+                  batchResume ? ` (${batchResume})` : ''
+                }`
+              : ''}
           </span>
         )}
         {resume && <span className={styles.resume}>{resume}</span>}

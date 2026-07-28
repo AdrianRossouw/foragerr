@@ -130,12 +130,18 @@ def _cv_health(**overrides):
 
 
 def _bucket(used: int, ceiling: int = 10, **overrides):
+    """One gate-shaped bucket entry. ``approaching`` defaults the way the gate
+    computes it (>=80% of the ceiling) rather than to a constant, so a caller
+    that wants the batch-paused-but-not-approaching case simply passes a low
+    ``used`` and gets an honest payload."""
     info = {
         "used": used,
         "ceiling": ceiling,
         "batch_used": min(used, 7),
         "batch_ceiling": 7,
+        "approaching": used >= ceiling * ratelimit.BUDGET_WARNING_FRACTION,
         "resumes_in_seconds": 0.0,
+        "batch_resumes_in_seconds": 0.0,
     }
     info.update(overrides)
     return info
@@ -197,6 +203,90 @@ async def test_approaching_warning_names_the_paused_batch_lane(db):
     assert comp.state == "degraded"
     assert "paused" in message and "batch" in message
     assert "reserve" in message
+
+
+@pytest.mark.req("FRG-META-016")
+@pytest.mark.req("FRG-META-022")
+async def test_a_paused_batch_lane_alone_does_not_degrade_health(db):
+    """The gate reports a bucket the moment its BATCH lane pauses, which at the
+    defaults happens at 70% — below the 80% warning fraction. That is the normal
+    end-state of a nightly enrichment run, not a warning: Health stays ok, and
+    the meter still gets the numbers.
+
+    Inferring "approaching" from payload membership got both halves of the
+    message wrong at once — it claimed a bucket at 105/150 was approaching its
+    ceiling, and told the operator "nothing is refused yet" while background work
+    was being refused."""
+    gate = ratelimit.gate()
+    budget = 10  # batch ceiling 7, warning threshold 8
+    for _ in range(7):
+        await gate.acquire(
+            0.0, bucket="issue", budget=budget, lane="batch", batch_share=0.7
+        )
+
+    service = _service(db)
+    comp = _by_component(await service.component_view())["comicvine"]
+    assert comp.state == "ok"
+    assert comp.message is None
+    assert "comicvine" not in {w.source for w in await service.warnings()}
+    # ... but the meter still renders it, with the paused lane's own countdown.
+    bucket = (comp.detail or {})["buckets"][0]
+    assert bucket["bucket"] == "issue"
+    assert bucket["approaching"] is False
+    assert bucket["batch_used"] == 7 and bucket["batch_ceiling"] == 7
+    assert bucket["batch_resume_seconds"] > 0  # a pause always says "until when"
+    assert bucket["resume_seconds"] == 0.0  # the PATH is nowhere near its wall
+
+
+@pytest.mark.req("FRG-META-016")
+@pytest.mark.req("FRG-META-022")
+async def test_at_the_warning_fraction_the_approaching_state_returns(db):
+    """The boundary the previous test's bucket has not reached: one more
+    admission takes usage to the fraction itself and the warning appears."""
+    gate = ratelimit.gate()
+    budget = 10
+    for _ in range(7):
+        await gate.acquire(
+            0.0, bucket="issue", budget=budget, lane="batch", batch_share=0.7
+        )
+    await gate.acquire(  # 8/10 == the 80% threshold
+        0.0, bucket="issue", budget=budget, lane="interactive", batch_share=0.7
+    )
+
+    comp = _by_component(await _service(db).component_view())["comicvine"]
+    assert comp.state == "degraded"
+    assert "approaching" in (comp.message or "").lower()
+    assert (comp.detail or {})["buckets"][0]["approaching"] is True
+
+
+@pytest.mark.req("FRG-META-016")
+@pytest.mark.req("FRG-META-022")
+async def test_the_approaching_remediation_never_denies_a_pause_in_progress(
+    db, monkeypatch
+):
+    """"Nothing is refused yet" is the right thing to say only while nothing is.
+    Once the batch lane is spent, background work IS being deferred, and a
+    remediation that says otherwise sends the operator looking for a fault that
+    is not there."""
+    monkeypatch.setattr(
+        health_service,
+        "comicvine_health",
+        lambda: _cv_health(path_budgets={"issue": _bucket(9, batch_used=7)}),
+    )
+    comp = _by_component(await _service(db).component_view())["comicvine"]
+    remediation = (comp.remediation or "").lower()
+    assert "nothing is refused yet" not in remediation
+    assert "already being deferred" in remediation
+    assert "interactive" in remediation  # ...and what still works
+
+    # While batch still has room, the reassurance is accurate and stays.
+    monkeypatch.setattr(
+        health_service,
+        "comicvine_health",
+        lambda: _cv_health(path_budgets={"issue": _bucket(9, batch_used=2)}),
+    )
+    comp = _by_component(await _service(db).component_view())["comicvine"]
+    assert "nothing is refused yet" in (comp.remediation or "").lower()
 
 
 @pytest.mark.req("FRG-META-016")
@@ -283,7 +373,9 @@ async def test_comicvine_detail_carries_the_meter_numbers_hottest_first(
         "ceiling": 10,
         "batch_used": 7,
         "batch_ceiling": 7,
+        "approaching": True,
         "resume_seconds": 240.5,
+        "batch_resume_seconds": 0.0,
     }
 
 
@@ -311,7 +403,12 @@ async def test_comicvine_detail_never_fabricates_missing_lane_figures(
         "comicvine_health",
         lambda: _cv_health(
             path_budgets={
-                "issue": {"used": 8, "ceiling": 10, "resumes_in_seconds": 0.0}
+                "issue": {
+                    "used": 8,
+                    "ceiling": 10,
+                    "approaching": True,
+                    "resumes_in_seconds": 0.0,
+                }
             }
         ),
     )

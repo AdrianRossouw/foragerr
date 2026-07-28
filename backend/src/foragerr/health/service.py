@@ -260,11 +260,15 @@ class HealthService:
         1. **auth** (error) — a rejected key means NOTHING succeeds.
         2. **degraded** (429/ban back-off) — ComicVine itself is pushing back.
         3. **budget exhausted** — a local refusal is already happening.
-        4. **approaching the ceiling** (FRG-META-016, m11-cv-budget) — nothing
-           is refused yet, but the batch lane is about to pause; a warning
-           BEFORE the wall, derived from the same >=80% data the payload has
-           always computed and, until now, only rendered at 100%.
-        5. ok.
+        4. **approaching the ceiling** (FRG-META-016, m11-cv-budget) — a bucket
+           the gate flagged ``approaching`` (>=80% of its ceiling): a warning
+           BEFORE the wall, derived from the same data the payload has always
+           computed and, until now, only rendered at 100%.
+        5. ok — including a bucket whose BATCH lane is paused but which is not
+           approaching its ceiling. That is FRG-META-022 working as designed
+           (background work yielding to the interactive reserve, self-clearing
+           as the window rolls), so it belongs in ``detail``'s meter, not in the
+           operator's warnings list.
 
         Every variant carries the structured budget ``detail`` (FRG-API-025)
         when there is anything to render, so the meter shows real numbers even
@@ -346,13 +350,19 @@ class HealthService:
                     "ComicVine's documented 200/hour/path limit."
                 ),
             )
-        # Approaching the ceiling (MODIFIED FRG-META-016): the gate publishes a
-        # bucket once it crosses the warning fraction, so a non-empty payload
-        # here — with nothing exhausted, per the branch above — IS the
-        # approaching state. Name the hottest bucket and the lane that pauses
-        # first, so the operator knows what will stop and what is protected
-        # (FRG-META-022's reserve) before anything is refused.
-        approaching = _hottest_bucket(health.get("path_budgets") or {})
+        # Approaching the ceiling (MODIFIED FRG-META-016): the gate's explicit
+        # per-bucket ``approaching`` flag, NOT payload membership. Membership
+        # stopped meaning "near the ceiling" once FRG-META-022 started publishing
+        # batch-PAUSED buckets too — those sit at the batch share (default 70%),
+        # below the 80% warning fraction, so a plain nightly enrichment run would
+        # otherwise park Health in degraded with a message wrong in both
+        # directions ("approaching" at 105/150, and "nothing is refused yet"
+        # while batch already is). A paused batch lane is expected, self-clearing
+        # operation, not a warning: it stays ``ok`` here and is carried in
+        # ``detail`` so the meter still renders it.
+        approaching = _hottest_bucket(
+            health.get("path_budgets") or {}, approaching_only=True
+        )
         if approaching is not None:
             bucket, info = approaching
             used = int(info.get("used", 0))
@@ -364,12 +374,7 @@ class HealthService:
                     f"ceiling on path '{bucket}': {used}/{ceiling} — "
                     f"{_lane_note(info)}"
                 ),
-                remediation=(
-                    "Nothing is refused yet. Background (batch) ComicVine work "
-                    "pauses first so interactive searches keep working; usage "
-                    "falls automatically as the rolling hour clears. Settings → "
-                    "General shows the full meter."
-                ),
+                remediation=_approaching_remediation(info),
             )
         return component(_STATE_OK)
 
@@ -917,19 +922,58 @@ def _optional_int(value: Any) -> int | None:
 
 
 def _hottest_bucket(
-    budgets: dict[str, dict[str, Any]],
+    budgets: dict[str, dict[str, Any]], *, approaching_only: bool = False
 ) -> tuple[str, dict[str, Any]] | None:
     """The bucket closest to its ceiling — the one a warning should name.
 
-    ``budgets`` already contains only buckets at or above the warning fraction
-    (the gate omits the quiet ones), so this is a pick, not a filter. Ties break
-    on the bucket name for a stable message.
+    ``budgets`` holds every bucket the gate reports, which is NOT the same set as
+    "near the ceiling": a bucket also appears once its batch lane is paused, at
+    the batch share (default 70%) and therefore below the 80% warning fraction.
+    ``approaching_only`` keeps just the buckets the gate flagged ``approaching``,
+    which is what the warning state must key on. Ties break on the bucket name
+    for a stable message.
     """
+    if approaching_only:
+        budgets = {
+            bucket: info
+            for bucket, info in budgets.items()
+            if bool(info.get("approaching"))
+        }
     if not budgets:
         return None
     return min(
         budgets.items(),
         key=lambda item: (-_int(item[1].get("used")), item[0]),
+    )
+
+
+def _approaching_remediation(info: dict[str, Any]) -> str:
+    """What the operator can do about a bucket nearing its ceiling.
+
+    Branches on whether the batch lane has ALREADY paused (FRG-META-022): a
+    bucket can cross the warning fraction with background work either still
+    running or already refused, and "Nothing is refused yet" is simply false in
+    the second case — the operator would be told nothing is deferred while the
+    nightly enrichment is being deferred.
+    """
+    batch_used = _optional_int(info.get("batch_used"))
+    batch_ceiling = _optional_int(info.get("batch_ceiling"))
+    tail = (
+        "Usage falls automatically as the rolling hour clears. Settings → "
+        "General shows the full meter."
+    )
+    if (
+        batch_used is not None
+        and batch_ceiling is not None
+        and batch_used >= batch_ceiling
+    ):
+        return (
+            "Background (batch) ComicVine work is already being deferred so "
+            "interactive searches keep working; it resumes on its own. " + tail
+        )
+    return (
+        "Nothing is refused yet. Background (batch) ComicVine work pauses "
+        "first so interactive searches keep working. " + tail
     )
 
 
@@ -963,12 +1007,19 @@ def _budget_detail(health: dict[str, Any]) -> dict[str, Any] | None:
     meter (FRG-UI-040) and nothing more.
 
     ``{"buckets": [{bucket, used, ceiling, batch_used, batch_ceiling,
-    resume_seconds}], "degraded": bool, "exhausted": bool}``, hottest bucket
-    first. ``None`` in the quiet case (no bucket has crossed the warning
-    fraction) so the common payload is byte-identical to before this change and
-    the UI has one unambiguous "nothing to say" signal. Lane figures are
-    optional per bucket: a gate that did not publish them yields ``null``, never
-    a fabricated zero.
+    approaching, resume_seconds, batch_resume_seconds}], "degraded": bool,
+    "exhausted": bool}``, hottest bucket first. The two resume figures are the
+    gate's two walls: ``resume_seconds`` counts down the whole path's ceiling,
+    ``batch_resume_seconds`` the background lane's share — a paused lane needs a
+    countdown of its own, and it is usually the only one running. ``None`` in the quiet case (no bucket has crossed the
+    warning fraction and no batch lane is paused) so the UI has one unambiguous
+    "nothing to say" signal. Lane figures are optional per bucket: a gate that
+    did not publish them yields ``null``, never a fabricated zero.
+
+    ``approaching`` is forwarded so the compact chip can render on the gate's
+    own answer instead of re-deriving the warning fraction client-side — the
+    reported set includes batch-paused buckets that are NOT near the ceiling, so
+    "reported" and "hot" are different questions and only the gate knows both.
     """
     budgets = health.get("path_budgets") or {}
     if not budgets:
@@ -980,7 +1031,11 @@ def _budget_detail(health: dict[str, Any]) -> dict[str, Any] | None:
             "ceiling": _int(info.get("ceiling")),
             "batch_used": _optional_int(info.get("batch_used")),
             "batch_ceiling": _optional_int(info.get("batch_ceiling")),
+            "approaching": bool(info.get("approaching")),
             "resume_seconds": float(info.get("resumes_in_seconds") or 0.0),
+            "batch_resume_seconds": float(
+                info.get("batch_resumes_in_seconds") or 0.0
+            ),
         }
         for bucket, info in sorted(
             budgets.items(), key=lambda item: (-_int(item[1].get("used")), item[0])
