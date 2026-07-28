@@ -9,10 +9,14 @@ library changes underneath them. The add action on an entitlement whose
 proposed (or explicitly supplied) ComicVine volume already exists in the
 library SHALL degrade to matching the entitlement to that existing series
 instead of failing. When an add action successfully creates a series, the
-system SHALL, in the same transaction, re-resolve the proposals of
+system SHALL, before the action returns, re-resolve the proposals of
 sibling entitlements still in review whose proposal targeted the same
 ComicVine volume, converting them to match proposals against the new
-series so their next action succeeds on the first click.
+series so their next action succeeds on the first click. The
+re-resolution need not share one database transaction with the series
+add (which commits in its own steps), but every intermediate state SHALL
+be self-healing: a sibling acted on before or without the sweep degrades
+to the equivalent match rather than erroring.
 
 #### Scenario: Add on an in-library volume degrades to match
 

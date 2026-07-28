@@ -47,6 +47,27 @@ unification, review-picker/bulk UX (change 2), budget behavior
 
 ## Decisions
 
+**D1a — Gate amendments (2026-07-28, from the adversarial + state-machine
+review angles; findings verified empirically before adoption).** Four
+hardenings to D1/D2 as originally written: (i) provenance authority is
+**store-gated** — a series-only grab hint from a non-store grab (an
+indexer force-grab whose release mapped a series but no issue) keeps
+pre-change behavior; (ii) store provenance resolves from the
+entitlement's **current** match at import time, not the grab-time
+snapshot — a re-match between grab and import is honored and a
+dangling/deleted series withdraws authority; (iii) the ordinal fallback
+gains three guards (trade-booktype refusal against non-collected series,
+never-replace-an-existing-file, operator-made-match-only — auto-sync
+matches block for review), closing the verified
+trade-deletes-single blocker and the no-human auto-route (measured:
+bare `Vol. N` store titles clear the 0.85 auto-match bar, e.g. "The
+Unbeatable Squirrel Girl Vol. 2" at 0.889); (iv) a retry from a failed
+*import* clears the stale terminal tracked row before re-queueing so the
+re-grab hands off fresh instead of dedup-wedging at import_pending. The
+operator-made-match discriminator is a new `matched_via` column on
+source entitlements (migration), stamped by the match/add actions vs
+auto-sync.
+
 **D1 — Split the grab short-circuit, keep tag precedence.**
 `_reconcile_base` step 2 becomes two cases: (a) both ids present →
 unchanged; (b) `grab_series_id` present, `grab_issue_id` None → the
