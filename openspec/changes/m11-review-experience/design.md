@@ -159,6 +159,18 @@ the migration itself). Frontend dep addition registered in SOUP. No
 other schema change; rollback = revert tag (column inert to older
 code).
 
+**D9 — Marker rows are settled, not pending (gate amendment,
+2026-07-28).** "Computation ran and found nothing" persists an inert
+no-plausible-match marker (distinguishable from NULL = not-yet-computed/
+deferred; CV transport errors and budget hits stay NULL and retry next
+sync). Marker rows deliberately leave the nightly enrichment's pending
+set — recomputation happens via restore or the ever-present row search —
+which keeps hopeless rows from burning CV budget every night (the
+finding-#20 class change 3 also targets). Never-terminal is satisfied by
+the search affordance, not by endless recomputation. Auto-accept refuses
+markers and, on CV-configured runs, any non-ComicVine universe; no-key
+deployments keep their approved library-only degradation.
+
 ## Open Questions
 
 None blocking. Numbers chosen at implementation and pinned by tests:
