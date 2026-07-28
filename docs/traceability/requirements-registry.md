@@ -323,6 +323,7 @@ milestone-to-minor mapping. No id renumbered.
 | FRG-UI-036 | Unknown routes render a not-found screen | ui | implemented | M9 |
 | FRG-UI-037 | Completed downloads awaiting import are visible in Queue | ui | implemented | M9 |
 | FRG-UI-038 | Automated accessibility conformance of core screens | ui | implemented | M9 |
+| FRG-UI-039 | Per-row ComicVine search picker | ui | implemented | M11 |
 | FRG-SRC-001 | store-source model and connection lifecycle | sources | implemented | M6 |
 | FRG-SRC-002 | Humble session-cookie authentication | sources | implemented | M6 |
 | FRG-SRC-003 | entitlement sync | sources | implemented | M6 |
@@ -332,6 +333,9 @@ milestone-to-minor mapping. No id renumbered.
 | FRG-SRC-007 | collected-edition reconciliation never suppresses singles | sources | implemented | M6 |
 | FRG-SRC-008 | Review-proposal freshness after library mutations | sources | implemented | M11 |
 | FRG-SRC-009 | Failed source-download visibility and retry | sources | implemented | M11 |
+| FRG-SRC-010 | ComicVine-first honest proposals | sources | implemented | M11 |
+| FRG-SRC-011 | Bundle identity, group actions, and accept-in-bulk | sources | implemented | M11 |
+| FRG-SRC-012 | Publisher classification rules | sources | implemented | M11 |
 | FRG-EXT-001 | Explicit-action cookie-to-clipboard copy | extension | implemented | 0.9.x |
 | FRG-EXT-002 | Least-privilege, no-network permission surface | extension | implemented | 0.9.x |
 | FRG-EXT-003 | Cross-browser parity and reproducible self-distributed build | extension | implemented | 0.9.x |

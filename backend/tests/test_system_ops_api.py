@@ -6,12 +6,13 @@ list + force-run (``GET``/``POST /api/v1/system/task*``), the
 wires area 1's restore-marker / quick_check hooks into ``app.py``
 (FRG-API-014, FRG-NFR-011, FRG-DB-009).
 
-Most tests here drive the app's lifespan directly on the CURRENT event loop
-(``async with app.router.lifespan_context(app):``) plus an ASGI-transport
-``httpx.AsyncClient``, rather than ``TestClient``'s separate portal thread —
-this lets a test freely mix HTTP calls with direct ``app.state`` access (e.g.
-seeding an indexer / forcing a provider into back-off) on one loop without
-cross-event-loop errors against the async engine. The startup-hook ordering
+Most tests here drive the app through ``conftest.running_app`` — lifespan on the
+CURRENT event loop plus an ASGI-transport ``httpx.AsyncClient``, rather than
+``TestClient``'s separate portal thread — which lets a test freely mix HTTP
+calls with direct ``app.state`` access (e.g. seeding an indexer / forcing a
+provider into back-off) on one loop without cross-event-loop errors against the
+async engine. (That helper started life here and now lives in the root conftest,
+since the store-source API tests need the same guarantee.) The startup-hook ordering
 tests are plain sync tests using ``TestClient``, matching ``test_app.py``'s
 existing style, since they only need to observe call order via monkeypatched
 spies.
@@ -21,13 +22,12 @@ from __future__ import annotations
 
 import datetime as dt
 import json
-from contextlib import asynccontextmanager
 from pathlib import Path
 
-import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from conftest import running_app
 from foragerr.app import create_app
 from foragerr.config import Settings
 from foragerr.db import DB_FILENAME
@@ -40,21 +40,6 @@ def _settings(tmp_path: Path, **overrides) -> Settings:
     cfg = tmp_path / "cfg"
     cfg.mkdir()
     return Settings(config_dir=cfg, **overrides)
-
-
-@asynccontextmanager
-async def running_app(settings: Settings):
-    """A fully started app (lifespan driven on the CURRENT loop) plus an
-    ASGI-transport client — yields ``(app, client)``."""
-    app = create_app(settings)
-    async with app.router.lifespan_context(app):
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://test"
-        ) as client:
-            # Auth: attach the bootstrap API key so requests pass the default-deny
-            # perimeter (FRG-AUTH-010); the app seeded it at lifespan startup above.
-            client.headers["X-Api-Key"] = app.state.bootstrap_api_key
-            yield app, client
 
 
 async def _add_indexer(app, name: str = "DogNZB", settings_json: str = "{}") -> int:

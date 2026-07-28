@@ -11,9 +11,8 @@ from pathlib import Path
 
 import httpx
 import pytest
-from fastapi.testclient import TestClient
 
-from foragerr.app import create_app
+from conftest import running_app
 from foragerr.library import repo as library_repo
 from foragerr.quality.models import DEFAULT_PROFILE_NAME, FormatProfileRow
 from foragerr.sources import ratelimit, repo
@@ -35,12 +34,14 @@ def _reset_gates():
 
 
 @pytest.fixture
-def app_client(tmp_path: Path):
+async def app_client(tmp_path: Path):
+    """The app driven on the TEST's own event loop (see ``running_app``): these
+    tests mix HTTP calls with direct ``app.state.db`` awaits, which is only safe
+    when there is exactly one loop."""
     cfg = tmp_path / "cfg"
     cfg.mkdir()
-    app = create_app(make_settings(cfg))
-    with TestClient(app) as c:
-        yield c
+    async with running_app(make_settings(cfg)) as (_app, client):
+        yield client
 
 
 async def _populate(app) -> int:
@@ -77,8 +78,10 @@ async def test_list_and_detail(app_client):
     app = app_client.app
     source_id = await _populate(app)
 
-    comics = app_client.get(
-        f"/api/v1/sources/{source_id}/entitlements?classification=comic"
+    comics = (
+        await app_client.get(
+            f"/api/v1/sources/{source_id}/entitlements?classification=comic"
+        )
     ).json()
     assert len(comics) == 3
     assert all(c["classification"] == "comic" for c in comics)
@@ -86,8 +89,8 @@ async def test_list_and_detail(app_client):
     # review + download axes are present.
     assert {"review_status", "download_state"} <= set(comics[0])
 
-    detail = app_client.get(
-        f"/api/v1/sources/entitlements/{comics[0]['id']}"
+    detail = (
+        await app_client.get(f"/api/v1/sources/entitlements/{comics[0]['id']}")
     ).json()
     assert detail["id"] == comics[0]["id"]
     assert detail["fill_sets"] == []  # no matched series yet
@@ -99,11 +102,80 @@ async def test_ignore_restore_roundtrip(app_client):
     source_id = await _populate(app)
     eid = await _first_comic_id(app, source_id)
 
-    ignored = app_client.post(f"/api/v1/sources/entitlements/{eid}/ignore").json()
+    ignored = (
+        await app_client.post(f"/api/v1/sources/entitlements/{eid}/ignore")
+    ).json()
     assert ignored["review_status"] == "ignored"
 
-    restored = app_client.post(f"/api/v1/sources/entitlements/{eid}/restore").json()
+    restored = (
+        await app_client.post(f"/api/v1/sources/entitlements/{eid}/restore")
+    ).json()
     assert restored["review_status"] == "new"
+
+
+@pytest.mark.req("FRG-SRC-004")
+async def test_restore_endpoint_refuses_a_row_that_is_not_ignored(app_client):
+    """Restore is the inverse of ignore and destructive to anything else (it
+    clears the match target and overwrites the proposal), so a non-ignored row
+    is a 409 through the surface too — the per-row error the bulk form reports
+    is the same refusal."""
+    app = app_client.app
+    source_id = await _populate(app)
+    eid = await _first_comic_id(app, source_id)
+
+    resp = await app_client.post(f"/api/v1/sources/entitlements/{eid}/restore")
+    assert resp.status_code == 409
+    assert (await repo.get_entitlement(app.state.db, eid)).review_status == "new"
+
+
+@pytest.mark.req("FRG-SRC-010")
+async def test_restore_endpoint_threads_a_comicvine_client_when_one_exists(
+    app_client, monkeypatch
+):
+    """The endpoint owns the CV client for this operator-initiated action: it
+    builds one when a key is configured, passes it (with the ``cv_configured``
+    fact) into the action, and always closes it.
+
+    Without this the restore recomputed library-only and stamped a
+    ``library-fallback`` proposal — rendered by the review screen as a catalog
+    verdict — on a deployment that has a ComicVine key.
+    """
+    import foragerr.api.sources as api_sources
+
+    app = app_client.app
+    source_id = await _populate(app)
+    eid = await _first_comic_id(app, source_id)
+    await app_client.post(f"/api/v1/sources/entitlements/{eid}/ignore")
+
+    seen: dict = {}
+
+    class _FakeCV:
+        def __init__(self):
+            self.closed = False
+
+        async def suggest_series(self, term):
+            from types import SimpleNamespace
+
+            seen["term"] = term
+            return SimpleNamespace(candidates=[])
+
+        async def aclose(self):
+            self.closed = True
+
+    fake = _FakeCV()
+    monkeypatch.setattr(
+        "foragerr.sources.enrich.build_cv_client", lambda settings: fake
+    )
+    assert api_sources._operator_cv_client  # the seam under test
+
+    resp = await app_client.post(f"/api/v1/sources/entitlements/{eid}/restore")
+    assert resp.status_code == 200
+    assert resp.json()["review_status"] == "new"
+    assert seen.get("term")  # ComicVine WAS consulted
+    assert fake.closed is True  # ...and the client was closed
+    # CV answered with nothing, so the row carries the catalog verdict — never a
+    # library-fallback proposal dressed as one.
+    assert resp.json()["proposed_match"]["universe"] == "comicvine"
 
 
 @pytest.mark.req("FRG-SRC-004")
@@ -136,7 +208,7 @@ async def test_match_endpoint_links_series(app_client):
         )
         series_id = series.id
 
-    resp = app_client.post(
+    resp = await app_client.post(
         f"/api/v1/sources/entitlements/{eid}/match", json={"series_id": series_id}
     )
     assert resp.status_code == 200
@@ -203,7 +275,7 @@ async def test_add_endpoint_degrades_to_match_when_volume_is_in_library(app_clie
     series_id = await _series_with_cv(app, cv_volume_id=9100, title="Synthetic Hero")
     app.state.commands = _FakeCommands(app.state.commands)
 
-    resp = app_client.post(
+    resp = await app_client.post(
         f"/api/v1/sources/entitlements/{eid}/add", json={"cv_volume_id": 9100}
     )
     assert resp.status_code == 200
@@ -232,7 +304,7 @@ async def test_retry_download_endpoint_requeues_then_conflicts(app_client):
         row.download_state = "failed"
         row.download_error = "md5 mismatch on the downloaded file"
 
-    resp = app_client.post(f"/api/v1/sources/entitlements/{eid}/retry-download")
+    resp = await app_client.post(f"/api/v1/sources/entitlements/{eid}/retry-download")
     assert resp.status_code == 200
     body = resp.json()
     assert body["download_state"] == "queued"
@@ -241,7 +313,9 @@ async def test_retry_download_endpoint_requeues_then_conflicts(app_client):
         ("source-grab", {"entitlement_id": eid}, "accept")
     ]
 
-    conflict = app_client.post(f"/api/v1/sources/entitlements/{eid}/retry-download")
+    conflict = await app_client.post(
+        f"/api/v1/sources/entitlements/{eid}/retry-download"
+    )
     assert conflict.status_code == 409
     after = await repo.get_entitlement(app.state.db, eid)
     assert after.download_state == "queued"  # unchanged by the rejected retry
@@ -251,7 +325,7 @@ async def test_retry_download_endpoint_requeues_then_conflicts(app_client):
 @pytest.mark.req("FRG-SRC-009")
 async def test_retry_download_unknown_entitlement_is_404(app_client):
     app_client.app  # noqa: B018 — ensure the app/db fixtures are live
-    resp = app_client.post("/api/v1/sources/entitlements/999999/retry-download")
+    resp = await app_client.post("/api/v1/sources/entitlements/999999/retry-download")
     assert resp.status_code == 404
 
 
@@ -262,15 +336,18 @@ async def test_bulk_ignore_endpoint(app_client):
     comics = await repo.list_entitlements(app.state.db, source_id, classification="comic")
     ids = [c.id for c in comics]
 
-    resp = app_client.post(
+    resp = await app_client.post(
         "/api/v1/sources/entitlements/bulk",
         json={"action": "ignore", "entitlement_ids": ids},
     )
     assert resp.status_code == 200
     assert resp.json()["applied"] == len(ids)
 
-    remaining = app_client.get(
-        f"/api/v1/sources/{source_id}/entitlements?review_status=new&classification=comic"
+    remaining = (
+        await app_client.get(
+            f"/api/v1/sources/{source_id}"
+            "/entitlements?review_status=new&classification=comic"
+        )
     ).json()
     assert remaining == []
 
@@ -280,7 +357,7 @@ async def test_bulk_match_requires_series_id(app_client):
     app = app_client.app
     source_id = await _populate(app)
     comics = await repo.list_entitlements(app.state.db, source_id, classification="comic")
-    resp = app_client.post(
+    resp = await app_client.post(
         "/api/v1/sources/entitlements/bulk",
         json={"action": "match", "entitlement_ids": [comics[0].id]},
     )
@@ -294,17 +371,17 @@ async def test_patch_auto_sync_flips_on_then_off_and_persists(app_client):
     app = app_client.app
     source_id = await _populate(app)
     # Ships OFF.
-    assert app_client.get("/api/v1/sources").json()[0]["auto_sync"] is False
+    assert (await app_client.get("/api/v1/sources")).json()[0]["auto_sync"] is False
 
-    on = app_client.patch(f"/api/v1/sources/{source_id}", json={"auto_sync": True})
+    on = await app_client.patch(f"/api/v1/sources/{source_id}", json={"auto_sync": True})
     assert on.status_code == 200
     assert on.json()["auto_sync"] is True
-    assert app_client.get("/api/v1/sources").json()[0]["auto_sync"] is True
+    assert (await app_client.get("/api/v1/sources")).json()[0]["auto_sync"] is True
 
-    off = app_client.patch(f"/api/v1/sources/{source_id}", json={"auto_sync": False})
+    off = await app_client.patch(f"/api/v1/sources/{source_id}", json={"auto_sync": False})
     assert off.status_code == 200
     assert off.json()["auto_sync"] is False
-    assert app_client.get("/api/v1/sources").json()[0]["auto_sync"] is False
+    assert (await app_client.get("/api/v1/sources")).json()[0]["auto_sync"] is False
     # The cookie is never echoed back on the manage response.
     assert "session_cookie" not in off.json()["settings"]
 
@@ -321,7 +398,7 @@ async def test_patch_auto_sync_on_does_not_retroactively_accept(app_client):
     )
     assert before  # the fixture yields un-reviewed new comics
 
-    resp = app_client.patch(f"/api/v1/sources/{source_id}", json={"auto_sync": True})
+    resp = await app_client.patch(f"/api/v1/sources/{source_id}", json={"auto_sync": True})
     assert resp.status_code == 200
 
     # Every previously-new comic is STILL new — nothing was accepted/matched.
@@ -342,12 +419,12 @@ async def test_patch_rejects_unknown_field_and_empty_body(app_client):
     app = app_client.app
     source_id = await _populate(app)
 
-    unknown = app_client.patch(
+    unknown = await app_client.patch(
         f"/api/v1/sources/{source_id}", json={"auto_sync": True, "bogus": 1}
     )
     assert unknown.status_code == 400
 
-    empty = app_client.patch(f"/api/v1/sources/{source_id}", json={})
+    empty = await app_client.patch(f"/api/v1/sources/{source_id}", json={})
     assert empty.status_code == 400
     assert empty.json()["errors"][0]["field"] == "auto_sync"
 
@@ -356,5 +433,116 @@ async def test_patch_rejects_unknown_field_and_empty_body(app_client):
 async def test_patch_unknown_source_is_404(app_client):
     """PATCH against an unknown source id is a 404 (FRG-SRC-004)."""
     app_client.app  # noqa: B018 — ensure the app/db fixtures are live
-    resp = app_client.patch("/api/v1/sources/9999", json={"auto_sync": True})
+    resp = await app_client.patch("/api/v1/sources/9999", json={"auto_sync": True})
     assert resp.status_code == 404
+
+
+# --- explicit operator provenance at the API boundary (design D7) ------------
+
+
+@pytest.mark.req("FRG-SRC-004")
+async def test_match_endpoint_stamps_operator_provenance_explicitly(app_client):
+    """The endpoints pass ``MATCHED_VIA_OPERATOR`` themselves rather than
+    inheriting a default (FRG-PP-022 guard 3 / D7): a human hit this route, so
+    the stamp is asserted here, at the boundary that knows it."""
+    app = app_client.app
+    source_id = await _populate(app)
+    eid = await _first_comic_id(app, source_id)
+    series_id = await _series_with_cv(app, cv_volume_id=9300, title="Synthetic Hero")
+    app.state.commands = _FakeCommands(app.state.commands)
+
+    resp = await app_client.post(
+        f"/api/v1/sources/entitlements/{eid}/match", json={"series_id": series_id}
+    )
+    assert resp.status_code == 200
+    assert (await repo.get_entitlement(app.state.db, eid)).matched_via == "operator"
+
+
+@pytest.mark.req("FRG-SRC-004")
+async def test_add_endpoint_stamps_operator_provenance_explicitly(app_client):
+    app = app_client.app
+    source_id = await _populate(app)
+    eid = await _first_comic_id(app, source_id)
+    await _series_with_cv(app, cv_volume_id=9301, title="Synthetic Hero")
+    app.state.commands = _FakeCommands(app.state.commands)
+
+    resp = await app_client.post(
+        f"/api/v1/sources/entitlements/{eid}/add", json={"cv_volume_id": 9301}
+    )
+    assert resp.status_code == 200
+    assert (await repo.get_entitlement(app.state.db, eid)).matched_via == "operator"
+
+
+# --- bulk accept (FRG-SRC-011) ----------------------------------------------
+
+
+async def _set_library_proposal(app, entitlement_id: int, series_id: int) -> None:
+    import json
+
+    async with app.state.db.write_session() as session:
+        row = await session.get(SourceEntitlementRow, entitlement_id)
+        row.proposed_series_id = series_id
+        row.proposed_match_json = json.dumps(
+            {
+                "kind": "library",
+                "series_id": series_id,
+                "cv_volume_id": None,
+                "title": "Synthetic Hero",
+                "year": 2019,
+                "confidence": 0.9,
+                "auto": False,
+                "candidates": [],
+            },
+            sort_keys=True,
+        )
+
+
+@pytest.mark.req("FRG-SRC-011")
+async def test_bulk_accept_endpoint_applies_each_rows_own_proposal(app_client):
+    """``accept`` carries NO series_id — every row resolves to its own stored
+    proposal, and an un-proposed row is reported under its id while the rest
+    still apply (the request itself is a 200)."""
+    app = app_client.app
+    source_id = await _populate(app)
+    comics = await repo.list_entitlements(
+        app.state.db, source_id, classification="comic"
+    )
+    series_id = await _series_with_cv(app, cv_volume_id=9302, title="Synthetic Hero")
+    proposed, bare = comics[0], comics[1]
+    await _set_library_proposal(app, proposed.id, series_id)
+    app.state.commands = _FakeCommands(app.state.commands)
+
+    resp = await app_client.post(
+        "/api/v1/sources/entitlements/bulk",
+        json={"action": "accept", "entitlement_ids": [proposed.id, bare.id]},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["applied"] == 1
+    assert body["skipped"] == 1
+    # The wire keys are STRINGS: ``BulkResult.errors`` is keyed by int and JSON
+    # object keys can only be strings, so the client indexes by ``String(id)``.
+    # Asserting through a ``{str(k) for k in ...}`` normalisation hid that — it
+    # passed whether the server sent ints or strings, so it pinned nothing.
+    assert set(body["errors"]) == {str(bare.id)}
+    assert all(isinstance(k, str) for k in body["errors"])
+
+    after = await repo.get_entitlement(app.state.db, proposed.id)
+    assert (after.review_status, after.matched_series_id) == ("matched", series_id)
+    assert after.matched_via == "operator"
+    assert (await repo.get_entitlement(app.state.db, bare.id)).review_status == "new"
+
+
+@pytest.mark.req("FRG-SRC-011")
+async def test_bulk_rejects_an_unknown_action_by_name(app_client):
+    app = app_client.app
+    source_id = await _populate(app)
+    comics = await repo.list_entitlements(
+        app.state.db, source_id, classification="comic"
+    )
+    resp = await app_client.post(
+        "/api/v1/sources/entitlements/bulk",
+        json={"action": "obliterate", "entitlement_ids": [comics[0].id]},
+    )
+    assert resp.status_code == 400
+    assert "accept" in resp.json()["errors"][0]["message"]

@@ -150,12 +150,18 @@ def test_resubmitting_an_equal_bodied_command_dedups_to_the_same_id(client):
     second = client.post("/api/v1/command", json={"name": "noop", "payload": payload})
     assert first.status_code == 201
     assert second.status_code == 201
-    # Racy only if the first command finishes before the second POST lands;
-    # noop with a fresh unique payload here is fast but not instantaneous,
-    # and dedup only applies while queued/started — assert the *typical*
-    # observable case: while still eligible, the id matches.
-    if first.json()["status"] != "completed":
-        assert second.json()["id"] == first.json()["id"]
+    # Dedup only applies while the original is still queued/started, and a
+    # worker can finish this `noop` between the two POSTs — after which a NEW
+    # id is the CORRECT answer. The eligibility check must therefore read the
+    # original's LIVE state, not the creation-time snapshot the POST returned
+    # (that snapshot is always "queued", so it never actually guarded anything;
+    # under load the first command completed first and the test failed with
+    # mismatched ids). Command status only moves forward, so "still eligible
+    # now" proves "eligible when the second POST landed".
+    first_id = first.json()["id"]
+    live = client.get(f"/api/v1/command/{first_id}").json()
+    if live["status"] in ("queued", "started"):
+        assert second.json()["id"] == first_id
 
 
 @pytest.mark.req("FRG-API-001")

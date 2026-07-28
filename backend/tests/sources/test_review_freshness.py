@@ -27,7 +27,7 @@ from foragerr.library.flows._common import SeriesValidationError
 from foragerr.library.models import SeriesRow
 from foragerr.sources import ratelimit, repo, review
 from foragerr.sources.grab import _handoff_to_import
-from foragerr.sources.models import SourceEntitlementRow
+from foragerr.sources.models import MATCHED_VIA_OPERATOR, SourceEntitlementRow
 from flows_support import FakeCV, build_factory, flows_settings, reset_gate
 from http_support import make_settings
 from sources_support import (  # noqa: F401 — imported fixtures
@@ -165,7 +165,8 @@ async def test_add_on_in_library_volume_degrades_to_match(
     commands = FakeCommands()
 
     row = await review.add_entitlement(
-        db, make_settings(config_dir), ent.id, commands=commands
+        db, make_settings(config_dir), ent.id, commands=commands,
+        matched_via=MATCHED_VIA_OPERATOR,
     )
 
     assert row.review_status == "matched"
@@ -194,6 +195,7 @@ async def test_add_with_explicit_in_library_cv_id_degrades_to_match(
         ent.id,
         commands=FakeCommands(),
         cv_volume_id=881,
+        matched_via=MATCHED_VIA_OPERATOR,
     )
     assert row.review_status == "matched"
     assert row.matched_series_id == series_id
@@ -213,7 +215,8 @@ async def test_genuine_add_failure_still_surfaces_as_400(
 
     with pytest.raises(review.EntitlementActionError) as exc:
         await review.add_entitlement(
-            db, settings, ent.id, commands=FakeCommands(), factory=factory
+            db, settings, ent.id, commands=FakeCommands(), factory=factory,
+            matched_via=MATCHED_VIA_OPERATOR,
         )
     assert exc.value.status == 400
     after = await repo.get_entitlement(db, ent.id)
@@ -245,7 +248,8 @@ async def test_add_losing_a_concurrent_race_degrades_instead_of_400(
     commands = FakeCommands()
 
     row = await review.add_entitlement(
-        db, make_settings(config_dir), ent.id, commands=commands
+        db, make_settings(config_dir), ent.id, commands=commands,
+        matched_via=MATCHED_VIA_OPERATOR,
     )
 
     assert row.review_status == "matched"
@@ -274,7 +278,8 @@ async def test_degrade_to_match_also_reresolves_siblings(
         await _set_proposal(db, eid, _cv_proposal(885))
 
     await review.add_entitlement(
-        db, make_settings(config_dir), acting.id, commands=FakeCommands()
+        db, make_settings(config_dir), acting.id, commands=FakeCommands(),
+        matched_via=MATCHED_VIA_OPERATOR,
     )
 
     after = await repo.get_entitlement(db, sibling.id)
@@ -316,7 +321,8 @@ async def test_successful_add_reresolves_sibling_proposals(
 
     commands = FakeCommands()
     added = await review.add_entitlement(
-        db, settings, acting.id, commands=commands, factory=factory
+        db, settings, acting.id, commands=commands, factory=factory,
+        matched_via=MATCHED_VIA_OPERATOR,
     )
     assert added.review_status == "matched"
     new_series_id = added.matched_series_id
@@ -336,7 +342,8 @@ async def test_successful_add_reresolves_sibling_proposals(
 
     # ...and that next single action succeeds on the first click.
     matched = await review.match_entitlement(
-        db, sibling.id, series_id=after.proposed_series_id, commands=commands
+        db, sibling.id, series_id=after.proposed_series_id, commands=commands,
+        matched_via=MATCHED_VIA_OPERATOR,
     )
     assert matched.review_status == "matched"
     assert matched.matched_series_id == new_series_id
@@ -362,7 +369,8 @@ async def test_sweep_leaves_matched_and_ignored_rows_untouched(
     for e in comics:
         await _set_proposal(db, e.id, _cv_proposal(991))
     await review.match_entitlement(
-        db, matched_row.id, series_id=other_series_id, commands=FakeCommands()
+        db, matched_row.id, series_id=other_series_id, commands=FakeCommands(),
+        matched_via=MATCHED_VIA_OPERATOR,
     )
     await review.ignore_entitlement(db, ignored_row.id)
     await _set_proposal(db, matched_row.id, _cv_proposal(991))
@@ -370,7 +378,8 @@ async def test_sweep_leaves_matched_and_ignored_rows_untouched(
     frozen = _cv_proposal(991)
 
     await review.add_entitlement(
-        db, settings, acting.id, commands=FakeCommands(), factory=factory
+        db, settings, acting.id, commands=FakeCommands(), factory=factory,
+        matched_via=MATCHED_VIA_OPERATOR,
     )
 
     still_matched = await repo.get_entitlement(db, matched_row.id)
@@ -382,6 +391,82 @@ async def test_sweep_leaves_matched_and_ignored_rows_untouched(
     assert still_ignored.review_status == "ignored"
     assert still_ignored.proposed_match_json == frozen
     assert still_ignored.proposed_series_id is None
+
+
+@pytest.mark.req("FRG-SRC-011")
+async def test_sweep_selects_only_the_matching_volume_in_sql(
+    db, config_dir, root_folder_id, format_profile_id
+):
+    """The sweep's volume filter is a SQL predicate, not a Python pass.
+
+    It used to ``SELECT`` every ``new`` row with a proposal and JSON-parse the
+    lot per accept — 19.7 ms per add at 1,300 rows, INSIDE the writer lock, so a
+    500-row bulk accept spent ~10 s serializing every other writer behind it.
+    This pins the behaviour the pushdown must preserve: rows proposing a
+    DIFFERENT volume are untouched, and rows proposing THIS one are rewritten —
+    the selected set is identical, only the cost changed.
+    """
+    source = await _synced_source(db, config_dir)
+    settings = flows_settings(config_dir)
+    factory = build_factory(
+        settings, FakeCV().volume(992, name="Synthetic Hero").handler()
+    )
+    comics = await repo.list_entitlements(db, source.id, classification="comic")
+    acting, sibling, stranger = comics[0], comics[1], comics[2]
+    await _set_proposal(db, acting.id, _cv_proposal(992))
+    await _set_proposal(db, sibling.id, _cv_proposal(992))
+    await _set_proposal(db, stranger.id, _cv_proposal(8888))  # another volume
+    stranger_before = (await repo.get_entitlement(db, stranger.id)).proposed_match_json
+
+    added = await review.add_entitlement(
+        db, settings, acting.id, commands=FakeCommands(), factory=factory,
+        matched_via=MATCHED_VIA_OPERATOR,
+    )
+
+    swept = await repo.get_entitlement(db, sibling.id)
+    assert json.loads(swept.proposed_match_json)["series_id"] == (
+        added.matched_series_id
+    )
+    untouched = await repo.get_entitlement(db, stranger.id)
+    assert untouched.proposed_match_json == stranger_before
+    assert untouched.proposed_series_id is None
+
+
+@pytest.mark.req("FRG-SRC-011")
+async def test_sweep_ignores_a_verdict_marker_row(
+    db, config_dir, root_folder_id, format_profile_id
+):
+    """A no-plausible-match marker carries no ``cv_volume_id``, so the SQL
+    predicate's ``json_extract`` yields NULL and the row is excluded — the same
+    outcome the Python filter produced, proven rather than assumed (a NULL
+    comparison must not accidentally match)."""
+    source = await _synced_source(db, config_dir)
+    settings = flows_settings(config_dir)
+    factory = build_factory(
+        settings, FakeCV().volume(993, name="Synthetic Hero").handler()
+    )
+    comics = await repo.list_entitlements(db, source.id, classification="comic")
+    acting, marked = comics[0], comics[1]
+    await _set_proposal(db, acting.id, _cv_proposal(993))
+    marker = json.dumps(
+        {
+            "verdict": "no-plausible-match",
+            "universe": "comicvine",
+            "candidates": [],
+            "auto": False,
+        },
+        sort_keys=True,
+    )
+    await _set_proposal(db, marked.id, marker)
+
+    await review.add_entitlement(
+        db, settings, acting.id, commands=FakeCommands(), factory=factory,
+        matched_via=MATCHED_VIA_OPERATOR,
+    )
+
+    after = await repo.get_entitlement(db, marked.id)
+    assert after.proposed_match_json == marker
+    assert after.proposed_series_id is None
 
 
 # --- FRG-SRC-009: retry ------------------------------------------------------
@@ -442,7 +527,8 @@ async def test_retry_on_a_non_failed_download_is_a_conflict(
     )
     ent = await _comic(db, source.id, "synth_singleissue_01")
     await review.match_entitlement(
-        db, ent.id, series_id=series_id, commands=FakeCommands()
+        db, ent.id, series_id=series_id, commands=FakeCommands(),
+        matched_via=MATCHED_VIA_OPERATOR,
     )
     commands = FakeCommands()
 
@@ -471,7 +557,8 @@ async def test_retry_after_an_import_failure_clears_the_wedging_tracked_row(
     )
     ent = await _comic(db, source.id, "synth_singleissue_01")
     await review.match_entitlement(
-        db, ent.id, series_id=series_id, commands=FakeCommands()
+        db, ent.id, series_id=series_id, commands=FakeCommands(),
+        matched_via=MATCHED_VIA_OPERATOR,
     )
     # The grab handed off; the drain then FAILED the import — apply_source_import
     # mirrors "failed" onto the entitlement while the tracked row lives on.
@@ -509,7 +596,8 @@ async def test_retry_while_the_import_is_claimed_is_a_conflict(
     )
     ent = await _comic(db, source.id, "synth_singleissue_01")
     await review.match_entitlement(
-        db, ent.id, series_id=series_id, commands=FakeCommands()
+        db, ent.id, series_id=series_id, commands=FakeCommands(),
+        matched_via=MATCHED_VIA_OPERATOR,
     )
     await _handoff(db, ent.id, tmp_path / "attempt-1.cbz")
     await _set_tracked_state(db, ent.id, TrackedDownloadState.IMPORTING)

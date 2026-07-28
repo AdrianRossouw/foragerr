@@ -14,6 +14,12 @@ The store-source service layer:
   non-comic items, skips-and-logs malformed/transient orders, and preserves
   partial results — a 401 mid-sync raises :class:`HumbleAuthError` up to the
   caller to flip the source to ``expired`` (no retry storm).
+
+Sync is also where the two m11 review-experience fields land (FRG-SRC-011/012):
+each row carries its order's bundle display name (backfilled on re-sync like any
+other display detail), and classification is (re-)computed from the CURRENT
+format shape combined with the source's CURRENT publisher rules — but only for
+rows still in the automatic classifier's hands (``review_status = "new"``).
 """
 
 from __future__ import annotations
@@ -24,6 +30,7 @@ from dataclasses import dataclass, field
 from pydantic import BaseModel
 
 from foragerr.db.base import utcnow
+from foragerr.sources.classify import classify, folded_publisher_rules
 from foragerr.sources.humble import (
     HUMBLE_API_BASE,
     HumbleAuthError,
@@ -180,6 +187,8 @@ async def run_sync(
     the source to ``expired`` (FRG-SRC-005); a transient/malformed order is
     skipped-and-logged and the run continues."""
     settings = load_source_settings(source.type, source.settings)
+    # The operator's publisher rules, folded once for the whole run (FRG-SRC-012).
+    rules = folded_publisher_rules(getattr(settings, "publisher_rules", None))
     result = SyncResult()
     async with HumbleClient(
         factory,
@@ -204,7 +213,9 @@ async def run_sync(
                 )
                 result.skipped_orders += 1
                 continue
-            await _persist_order(db, source.id, entitlements, result)
+            await _persist_order(
+                db, source.id, entitlements, result, publisher_rules=rules
+            )
             result.orders += 1
             result.partial = True
     return result
@@ -215,22 +226,40 @@ async def _persist_order(
     source_id: int,
     entitlements: list[ParsedEntitlement],
     result: SyncResult,
+    *,
+    publisher_rules: frozenset[str] = frozenset(),
 ) -> None:
     """Upsert one order's entitlements by the store-native key (idempotent).
 
     A new item is inserted as ``new`` with NULL proposed/actual match fields
     (worker A2 fills the proposed match). An existing item's DISPLAY fields are
     refreshed but its review status, download state, and operator match decisions
-    are PRESERVED — a re-sync never resets a decision or creates a duplicate."""
+    are PRESERVED — a re-sync never resets a decision or creates a duplicate.
+
+    **Classification is re-derived every sync** from the item's CURRENT formats
+    and the source's CURRENT publisher rules (FRG-SRC-012) — but written back
+    ONLY while the row is still ``review_status = "new"``. That is what makes a
+    rule change take effect in both directions on the next sync (added rule:
+    comic → other; removed rule: other → comic) while leaving every decided row
+    exactly where the operator put it: a matched or ignored row is an operator
+    decision, and a later rule edit must never silently move it between the
+    review buckets it was decided in.
+
+    The bundle display name is a display detail like the title, so it is
+    refreshed on every row (backfilling pre-0026 rows on their next sync) — but
+    only FORWARD: a payload with no bundle name leaves a previously captured one
+    in place rather than nulling it.
+    """
     from sqlalchemy import select
 
     now = utcnow()
     async with db.write_session() as session:
         for ent in entitlements:
-            if ent.classification == "comic":
-                result.comic += 1
-            else:
-                result.other += 1
+            classification = classify(
+                list(ent.options),
+                publisher=ent.publisher,
+                publisher_rules=publisher_rules,
+            )
             existing = (
                 await session.execute(
                     select(SourceEntitlementRow).where(
@@ -240,6 +269,18 @@ async def _persist_order(
                     )
                 )
             ).scalar_one_or_none()
+            # The run counters report what the row ACTUALLY carries after this
+            # sync — a decided row keeps its stored classification, so counting
+            # the freshly-derived value there would over-report a rule's effect.
+            effective = (
+                classification
+                if existing is None or existing.review_status == "new"
+                else existing.classification
+            )
+            if effective == "comic":
+                result.comic += 1
+            else:
+                result.other += 1
             preferred = ent.preferred
             formats_json = _formats_json(ent)
             if existing is None:
@@ -250,7 +291,8 @@ async def _persist_order(
                         machine_name=ent.machine_name,
                         human_name=ent.human_name,
                         publisher=ent.publisher,
-                        classification=ent.classification,
+                        bundle_human_name=ent.bundle_human_name,
+                        classification=classification,
                         review_status="new",
                         download_state=None,
                         preferred_format=preferred.format if preferred else None,
@@ -270,7 +312,18 @@ async def _persist_order(
                 # Refresh display/format fields only; preserve operator decisions.
                 existing.human_name = ent.human_name
                 existing.publisher = ent.publisher
-                existing.classification = ent.classification
+                # A payload that simply OMITS the bundle name is not evidence
+                # that the row has none: Humble's order shapes vary, and a
+                # single such response would otherwise null a name captured on
+                # an earlier sync — silently emptying the "select bundle"
+                # affordance for those rows (FRG-SRC-011). Refresh forward only.
+                existing.bundle_human_name = (
+                    ent.bundle_human_name or existing.bundle_human_name
+                )
+                if existing.review_status == "new":
+                    # Still the automatic classifier's row → re-derive it from
+                    # the current formats + rules (FRG-SRC-012, both directions).
+                    existing.classification = classification
                 existing.preferred_format = preferred.format if preferred else None
                 existing.md5 = preferred.md5 if preferred else None
                 existing.file_size = preferred.file_size if preferred else None

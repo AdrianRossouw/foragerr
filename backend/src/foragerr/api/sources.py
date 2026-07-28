@@ -20,6 +20,7 @@ else built from settings — the same seam ``api.indexers`` uses.
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -30,7 +31,7 @@ from foragerr.http import HttpClientFactory
 from foragerr.indexers.schema import schema_for
 from foragerr.keystore import ENC_PREFIX, top_level_secret_field_names
 from foragerr.sources.commands import SOURCE_SYNC_TASK, make_humble_factory
-from foragerr.sources.models import SourceRow
+from foragerr.sources.models import MATCHED_VIA_OPERATOR, SourceRow
 from foragerr.sources.registry import (
     UnknownSourceTypeError,
     get_source_type,
@@ -39,6 +40,7 @@ from foragerr.sources.registry import (
 )
 from foragerr.sources.models import SourceEntitlementRow
 from foragerr.sources.repo import (
+    SourceSettingsUnavailable,
     delete_source,
     get_entitlement,
     get_source,
@@ -47,10 +49,12 @@ from foragerr.sources.repo import (
     load_source_settings,
     public_settings,
     set_auto_sync,
+    update_publisher_rules,
 )
 from foragerr.sources.review import (
     EntitlementActionError,
     add_entitlement,
+    bulk_accept,
     bulk_ignore,
     bulk_match,
     bulk_restore,
@@ -124,11 +128,17 @@ class SourceUpdate(BaseModel):
     """Request body for ``PATCH /sources/{id}`` — mutable source controls
     (FRG-SRC-004). Extensible (more fields may follow) but ``extra="forbid"`` so
     an unknown key is a 400 rather than silently ignored. Every field is optional;
-    a body that sets nothing is rejected."""
+    a body that sets nothing is rejected.
+
+    ``publisher_rules`` is a WHOLE-LIST replace (FRG-SRC-012): the operator's
+    rule editor sends the list it wants, and ``[]`` clears the rules. It rides
+    the source's existing encrypted settings envelope, so no new storage and no
+    new credential surface."""
 
     model_config = ConfigDict(extra="forbid")
 
     auto_sync: bool | None = None
+    publisher_rules: list[str] | None = None
 
 
 class ConnectResponse(BaseModel):
@@ -257,23 +267,62 @@ async def reconnect_source_endpoint(
 async def update_source_endpoint(
     source_id: int, body: SourceUpdate, request: Request
 ) -> SourceResource:
-    """Change a source's mutable controls post-connect (FRG-SRC-004).
+    """Change a source's mutable controls post-connect (FRG-SRC-004/012).
 
-    Today that is the ``auto_sync`` toggle (ships OFF; changeable here). Flipping
-    it ON persists the flag only — it NEVER retroactively auto-accepts existing
-    entitlements; auto-accept fires exclusively on a subsequent sync's confident
-    matches (``sources.enrich``). Returns the source with its PUBLIC settings."""
-    if body.auto_sync is None:
-        raise ApiError(400, "supply auto_sync", field="auto_sync")
+    Two controls today: the ``auto_sync`` toggle (ships OFF; changeable here —
+    flipping it ON persists the flag only, it NEVER retroactively auto-accepts
+    existing entitlements; auto-accept fires exclusively on a subsequent sync's
+    confident matches, ``sources.enrich``) and the ``publisher_rules`` list
+    (ships EMPTY; a whole-list replace that takes effect on the NEXT sync, which
+    reclassifies only rows still in the automatic classifier's hands). Returns
+    the source with its PUBLIC settings."""
+    if body.auto_sync is None and body.publisher_rules is None:
+        raise ApiError(
+            400, "supply auto_sync or publisher_rules", field="auto_sync"
+        )
     db = request.app.state.db
-    row = await set_auto_sync(db, source_id, body.auto_sync)
+    row = await get_source(db, source_id)
     if row is None:
         raise ApiError(404, f"source {source_id} not found")
+    if body.publisher_rules is not None:
+        row = await _write_publisher_rules(db, source_id, body.publisher_rules)
+    if body.auto_sync is not None:
+        row = await set_auto_sync(db, source_id, body.auto_sync)
+        if row is None:
+            raise ApiError(404, f"source {source_id} not found")
     try:
         model = load_source_settings(row.type, row.settings)
     except Exception:  # noqa: BLE001 — a disconnected/blank row loads no secret
         model = None
     return SourceResource.from_row(row, model)
+
+
+async def _write_publisher_rules(db, source_id: int, rules: list[str]) -> SourceRow:
+    """Replace a source's publisher rules (FRG-SRC-012) — HTTP mapping only.
+
+    The read-modify-write itself belongs to
+    :func:`foragerr.sources.repo.update_publisher_rules`, which performs it as a
+    single write transaction that never touches ``connection_state``; doing it
+    here, across three transactions and echoing back a stale connection state,
+    is what let a concurrent ``disconnect`` be silently reversed (credential and
+    all). This function now only translates that call's outcomes into the
+    surface's error shapes: unknown id → 404, no settings envelope to write into
+    (a disconnected source) → 409, a rule list the contract rejects → the
+    uniform field-precise 400."""
+    try:
+        written = await update_publisher_rules(db, source_id, rules)
+    except SourceSettingsUnavailable as exc:
+        raise ApiError(
+            409,
+            f"source {source_id} has no stored settings to update — reconnect "
+            "it before editing its publisher rules",
+            field="publisher_rules",
+        ) from exc
+    except ValidationError as exc:
+        raise _validation_error(exc) from exc
+    if written is None:
+        raise ApiError(404, f"source {source_id} not found")
+    return written
 
 
 @router.post("/{source_id}/disconnect", response_model=SourceResource)
@@ -321,6 +370,26 @@ async def delete_source_endpoint(source_id: int, request: Request) -> None:
 # --- entitlement review surface (FRG-SRC-004/007) ---------------------------
 
 
+def _group_key(human_name: str) -> str:
+    """The review screen's collapse key for a store title (FRG-SRC-011).
+
+    ``stripped_key(query_term(human_name))`` — the store title trimmed to its
+    series-shaped term (the same trim the proposal ranker uses) and then run
+    through the ranker's boilerplate-STRIPPED fold, which itself bottoms out
+    in the ONE shared title fold (FRG-IMP-005). The strip is what makes the
+    collapse real: store fronts name the edition slices of ONE title with
+    per-ordinal idioms ("TITLE Vol. 243", "Title Issues #8", "Title #211"),
+    and every one of those keeps its ordinal through the plain fold
+    ("title vol 243"), so a long single-title run splinters into as many
+    groups as it has ordinals. The stripped fold is precisely the "same
+    title, different edition slice" equivalence the group means. Computed
+    server-side so the client cannot grow a second, subtly different fold.
+    """
+    from foragerr.sources.matching import query_term, stripped_key
+
+    return stripped_key(query_term(human_name))
+
+
 class EntitlementResource(BaseModel):
     """One reviewable entitlement as returned by the surface (FRG-SRC-004)."""
 
@@ -329,6 +398,24 @@ class EntitlementResource(BaseModel):
     machine_name: str
     human_name: str
     publisher: str | None
+    #: The order's bundle display name (FRG-SRC-011) — what "select bundle"
+    #: names. NULL until the row's next sync backfills it (migration 0026).
+    bundle_human_name: str | None
+    #: The SHARED title fold of this row's series-shaped query term
+    #: (``matching_key(query_term(human_name))``) — the key the review screen
+    #: collapses same-title rows by (FRG-SRC-011 / FRG-UI-029). Computed here,
+    #: server-side, from the one folding implementation (FRG-IMP-005) so the UI
+    #: never re-derives a second, drifting fold.
+    #:
+    #: **The empty string is the "ungroupable" signal, deliberately, and it is
+    #: NOT nullable.** A title that folds to nothing (punctuation/symbols only)
+    #: must never collapse with another such title — they share no evidence of
+    #: being the same series — and the client already implements exactly that
+    #: rule as "``''`` never groups". Emitting ``null`` instead would re-key the
+    #: rule off absence and change the wire type for no behavioural gain, so the
+    #: string stays and the invariant is pinned by a test rather than by a
+    #: convention. It is always a ``str``: never ``None``, never omitted.
+    group_key: str
     classification: str
     review_status: str
     download_state: str | None
@@ -356,6 +443,8 @@ class EntitlementResource(BaseModel):
             machine_name=row.machine_name,
             human_name=row.human_name,
             publisher=row.publisher,
+            bundle_human_name=row.bundle_human_name,
+            group_key=_group_key(row.human_name),
             classification=row.classification,
             review_status=row.review_status,
             download_state=row.download_state,
@@ -385,6 +474,14 @@ class AddBody(BaseModel):
 
 
 class BulkBody(BaseModel):
+    """A bulk review action over an id list (FRG-SRC-004/011).
+
+    ``action`` is ``ignore`` | ``restore`` | ``match`` | ``accept``. Only
+    ``match`` carries a ``series_id`` (one shared target, the operator's
+    explicit choice); ``accept`` deliberately carries none — each row applies
+    its OWN stored proposal, which is what makes a heterogeneous selection
+    (some matches, some adds) resolvable in one request."""
+
     action: str
     entitlement_ids: list[int]
     series_id: int | None = None
@@ -426,11 +523,19 @@ async def entitlement_detail_endpoint(
 async def match_entitlement_endpoint(
     entitlement_id: int, body: MatchBody, request: Request
 ) -> EntitlementResource:
-    """Link an entitlement to an existing series and accept it (FRG-SRC-004)."""
+    """Link an entitlement to an existing series and accept it (FRG-SRC-004).
+
+    The provenance stamp is EXPLICIT here (design D7): this endpoint is only
+    reachable by a human review action, and ``match_entitlement`` requires the
+    keyword rather than defaulting it."""
     return await _run_action(
         request,
         lambda db, commands: match_entitlement(
-            db, entitlement_id, series_id=body.series_id, commands=commands
+            db,
+            entitlement_id,
+            series_id=body.series_id,
+            commands=commands,
+            matched_via=MATCHED_VIA_OPERATOR,
         ),
     )
 
@@ -451,6 +556,7 @@ async def add_entitlement_endpoint(
             commands=commands,
             cv_volume_id=body.cv_volume_id,
             root_folder_id=body.root_folder_id,
+            matched_via=MATCHED_VIA_OPERATOR,
         )
     except EntitlementActionError as exc:
         raise ApiError(exc.status, str(exc)) from exc
@@ -475,10 +581,23 @@ async def ignore_entitlement_endpoint(
 async def restore_entitlement_endpoint(
     entitlement_id: int, request: Request
 ) -> EntitlementResource:
-    """Restore an ignored entitlement to ``new`` with a recomputed proposal."""
-    return await _run_action(
-        request, lambda db, commands: restore_entitlement(db, entitlement_id)
-    )
+    """Restore an ignored entitlement to ``new`` with a recomputed proposal.
+
+    The recomputation is ComicVine-backed when a key is configured
+    (FRG-SRC-010): restore is operator-initiated and single-row, so it costs one
+    CV call, and without it the row was stamped with a ``library-fallback``
+    proposal that the review screen renders as a catalog verdict. Ignored-only
+    — any other review state is a 409."""
+    async with _operator_cv_client(request) as (cv_client, cv_configured):
+        return await _run_action(
+            request,
+            lambda db, commands: restore_entitlement(
+                db,
+                entitlement_id,
+                cv_client=cv_client,
+                cv_configured=cv_configured,
+            ),
+        )
 
 
 @router.post(
@@ -503,26 +622,73 @@ async def retry_download_endpoint(
 async def bulk_entitlements_endpoint(
     body: BulkBody, request: Request
 ) -> dict[str, Any]:
-    """Apply one review action to several entitlements (FRG-SRC-004)."""
+    """Apply one review action to several entitlements (FRG-SRC-004/011).
+
+    ``accept`` applies EACH row's own stored proposal (match or add) in its own
+    transaction. A row with no proposal is reported in ``errors`` under its id
+    with a 422-shaped message and the rest of the selection still runs — the
+    request itself is a 200. Making it a global 422 instead would mean one
+    un-proposed row could veto a 500-row accept, which is exactly the at-scale
+    failure this action exists to remove; the per-row report keeps the operator
+    informed without costing them the batch."""
     db = request.app.state.db
     commands = getattr(request.app.state, "commands", None)
     if body.action == "ignore":
         result = await bulk_ignore(db, body.entitlement_ids)
     elif body.action == "restore":
-        result = await bulk_restore(db, body.entitlement_ids)
+        async with _operator_cv_client(request) as (cv_client, cv_configured):
+            result = await bulk_restore(
+                db,
+                body.entitlement_ids,
+                cv_client=cv_client,
+                cv_configured=cv_configured,
+            )
     elif body.action == "match":
         if body.series_id is None:
             raise ApiError(422, "match requires series_id", field="series_id")
         result = await bulk_match(
-            db, body.entitlement_ids, series_id=body.series_id, commands=commands
+            db,
+            body.entitlement_ids,
+            series_id=body.series_id,
+            commands=commands,
+            matched_via=MATCHED_VIA_OPERATOR,
+        )
+    elif body.action == "accept":
+        result = await bulk_accept(
+            db,
+            request.app.state.settings,
+            body.entitlement_ids,
+            commands=commands,
+            matched_via=MATCHED_VIA_OPERATOR,
         )
     else:
         raise ApiError(
             400,
-            f"unknown bulk action {body.action!r}; expected ignore|restore|match",
+            f"unknown bulk action {body.action!r}; "
+            "expected ignore|restore|match|accept",
             field="action",
         )
     return {"applied": result.applied, "skipped": result.skipped, "errors": result.errors}
+
+
+@asynccontextmanager
+async def _operator_cv_client(request: Request):
+    """A ComicVine client for one operator-initiated action, always closed.
+
+    Yields ``(client, configured)``. ``client`` is ``None`` on a deployment with
+    no ComicVine key, and ``configured`` says so explicitly — the two are the
+    same fact today, but the restore path needs the DISTINCTION to refuse
+    persisting a library-fallback proposal on a keyed deployment (FRG-SRC-010),
+    so it is passed rather than re-derived. One client is shared across a bulk
+    restore so the batch honours a single budget/politeness envelope."""
+    from foragerr.sources.enrich import build_cv_client
+
+    client = build_cv_client(request.app.state.settings)
+    try:
+        yield client, client is not None
+    finally:
+        if client is not None:
+            await client.aclose()
 
 
 async def _run_action(request: Request, action) -> EntitlementResource:

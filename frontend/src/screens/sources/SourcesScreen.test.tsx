@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../../test/renderWithProviders';
 import { createQueryClient } from '../../queryClient';
 import { makeCommand, makeSeriesResource } from '../../test/mockData';
+import { SUGGEST_DEBOUNCE_MS } from '../../api/hooks';
 import { ApiRequestError, type Fetcher, type FetcherInit } from '../../api/fetcher';
 import type {
   EntitlementResource,
@@ -12,12 +13,21 @@ import type {
   StoreSourceResource,
 } from '../../api/types';
 import { SourcesScreen } from './SourcesScreen';
+import { STARTER_PUBLISHERS } from './PublisherRules';
 
 /*
  * FRG-UI-029 — the Sources screen: connect flow (masked input, live-validated
  * Connect, honest error), the manage view (count line, filter segments, review
- * actions incl. bulk + shift-range), and the reconcile chip edge rules.
+ * actions incl. bulk + shift-range, virtualized at corpus scale), the per-row
+ * ComicVine search picker (FRG-UI-039), and the reconcile chip edge rules.
  */
+
+/** Real-time wait past the row search's autosuggest debounce (FRG-UI-039). */
+function afterSuggestDebounce() {
+  return act(
+    () => new Promise((resolve) => setTimeout(resolve, SUGGEST_DEBOUNCE_MS + 100)),
+  );
+}
 
 function makeSource(
   o: Partial<StoreSourceResource> & Pick<StoreSourceResource, 'id'>,
@@ -41,6 +51,12 @@ function ent(
     machine_name: `m-${o.id}`,
     human_name: `Item ${o.id}`,
     publisher: 'Image',
+    bundle_human_name: null,
+    // The SERVER computes group_key (matching_key(query_term(human_name))) —
+    // the fixture states it as a LITERAL per row rather than re-implementing
+    // the fold, which is the whole point of it being server-side. The default
+    // is unique per row, so a fixture only groups when it says so.
+    group_key: `item-${o.id}`,
     classification: 'comic',
     review_status: 'new',
     download_state: null,
@@ -68,12 +84,55 @@ interface FetcherState {
   reconnectError?: ApiRequestError;
   /** Error the retry-download endpoint rejects with (e.g. a 409 conflict). */
   retryError?: ApiRequestError;
+  /** Error PATCH /sources/{id} rejects with (e.g. the 409 unloadable envelope). */
+  patchError?: ApiRequestError;
+  /**
+   * Bulk-endpoint result (FRG-SRC-011). Receives the request body so a test can
+   * assert on it and mutate `state.entitlements` to model the rows the server
+   * actually applied; defaults to "everything applied, no per-row errors".
+   */
+  bulkResult?: (body: { action: string; entitlement_ids: number[] }) => unknown;
   /** Library series the match-picker / booktype lookups resolve against;
-   * defaults to a single "Descender" series (booktype null) when omitted. */
+   * defaults to a single "Driftwood" series (booktype null) when omitted. */
   librarySeries?: SeriesResource[];
   /** The command GET /api/v1/command/{id} resolves to for the sync watcher;
    * defaults to a `started` (still-running) command. */
   commandStatus?: ReturnType<typeof makeCommand>;
+  /** Row-search full-lookup resolver (FRG-UI-039); may throw an
+   * `ApiRequestError` to exercise the credential/upstream outcome notes.
+   * Defaults to a clean-empty envelope. */
+  lookup?: (path: string) => unknown;
+  /** Row-search autosuggest resolver; defaults to a quiet empty dropdown so
+   * the debounced accelerator never surfaces an unexpected-path throw. */
+  suggest?: (path: string) => unknown;
+  /** When present, every READ path is recorded here (writes go to `calls`). */
+  reads?: string[];
+}
+
+/** A ComicVine candidate as the lookup/suggest endpoints shape it. */
+function candidate(
+  o: Partial<{
+    cv_volume_id: number;
+    name: string;
+    publisher: string | null;
+    start_year: number | null;
+    count_of_issues: number | null;
+    have_it: boolean;
+  }> & { cv_volume_id: number },
+) {
+  return {
+    name: `Volume ${o.cv_volume_id}`,
+    publisher: 'Image',
+    start_year: 2012,
+    image_url: null,
+    count_of_issues: 54,
+    description: null,
+    name_similarity: 0.9,
+    year_proximity: null,
+    target_issue_plausible: null,
+    have_it: false,
+    ...o,
+  };
 }
 
 function makeFetcher(state: FetcherState): Fetcher {
@@ -116,21 +175,51 @@ function makeFetcher(state: FetcherState): Fetcher {
       if (/\/api\/v1\/sources\/\d+\/sync$/.test(path)) {
         return { command_id: 1, status: 'queued' };
       }
-      // PATCH /sources/{id} — flip a mutable control (auto_sync). Mutate the
-      // in-memory source so the invalidation-driven refetch reflects it.
+      // PATCH /sources/{id} — flip a mutable control (auto_sync) or replace the
+      // publisher rules (FRG-SRC-012). Mutate the in-memory source so the
+      // invalidation-driven refetch reflects it.
       const patchMatch = path.match(/^\/api\/v1\/sources\/(\d+)$/);
       if (patchMatch && init?.method === 'PATCH') {
+        if (state.patchError) throw state.patchError;
         const id = Number(patchMatch[1]);
-        const body = init.body as { auto_sync: boolean };
+        const body = init.body as {
+          auto_sync?: boolean;
+          publisher_rules?: string[];
+        };
         // Replace the array with a fresh one (a new reference) so the
         // invalidation-driven refetch is not short-circuited by identity.
         state.sources = state.sources.map((s) =>
-          s.id === id ? { ...s, auto_sync: body.auto_sync } : s,
+          s.id === id
+            ? {
+                ...s,
+                ...(body.auto_sync !== undefined
+                  ? { auto_sync: body.auto_sync }
+                  : {}),
+                ...(body.publisher_rules !== undefined
+                  ? {
+                      settings: {
+                        ...s.settings,
+                        publisher_rules: body.publisher_rules,
+                      },
+                    }
+                  : {}),
+              }
+            : s,
         );
         return state.sources.find((s) => s.id === id);
       }
       if (path === '/api/v1/sources/entitlements/bulk') {
-        return { applied: 2, skipped: 0, errors: [] };
+        const body = init!.body as {
+          action: string;
+          entitlement_ids: number[];
+        };
+        return (
+          state.bulkResult?.(body) ?? {
+            applied: body.entitlement_ids.length,
+            skipped: 0,
+            errors: {},
+          }
+        );
       }
       // Retry re-queues a failed download: the backend clears the failure, so
       // the in-memory row flips out of `failed` for the refetch that follows.
@@ -159,10 +248,19 @@ function makeFetcher(state: FetcherState): Fetcher {
     }
 
     // --- Reads ---
+    state.reads?.push(path);
+    if (path.startsWith('/api/v1/series/lookup/suggest?term=')) {
+      return state.suggest?.(path) ?? { records: [], complete: true };
+    }
+    if (path.startsWith('/api/v1/series/lookup?term=')) {
+      return (
+        state.lookup?.(path) ?? { records: [], complete: true, truncated: false }
+      );
+    }
     if (path === '/api/v1/sources') return state.sources;
     if (path.startsWith('/api/v1/series?')) {
       const records = state.librarySeries ?? [
-        makeSeriesResource({ id: 1, title: 'Descender' }),
+        makeSeriesResource({ id: 1, title: 'Driftwood' }),
       ];
       return {
         page: 1,
@@ -285,25 +383,25 @@ describe('FRG-UI-029: manage view review', () => {
   const entitlements = [
     ent({
       id: 10,
-      human_name: 'Descender, Vol. 1: Tin Stars',
+      human_name: 'Driftwood, Vol. 1: Ash Stars',
       review_status: 'matched',
       matched_series_id: 1,
     }),
     ent({
       id: 11,
-      human_name: 'Saga, Vol. 1',
+      human_name: 'Vane, Vol. 1',
       review_status: 'new',
       proposed_series_id: 1,
       proposed_match: {
         kind: 'library',
         series_id: 1,
         cv_volume_id: null,
-        title: 'Saga',
+        title: 'Vane',
         year: 2012,
         confidence: 0.93,
       },
     }),
-    ent({ id: 12, human_name: 'Saga, Vol. 1 (Humble Choice copy)', review_status: 'ignored' }),
+    ent({ id: 12, human_name: 'Vane, Vol. 1 (Humble Choice copy)', review_status: 'ignored' }),
     ent({ id: 13, human_name: 'A Prose Novel', classification: 'other', review_status: 'new' }),
   ];
 
@@ -352,7 +450,7 @@ describe('FRG-UI-029: manage view review', () => {
     expect(screen.getByTestId('restore-12')).toBeInTheDocument();
     expect(screen.getByTestId('entitlement-row-12').className).toMatch(/rowIgnored/);
     // The new row offers Match-to-suggestion + Ignore.
-    expect(screen.getByTestId('match-11')).toHaveTextContent('Match to Saga');
+    expect(screen.getByTestId('match-11')).toHaveTextContent('Match to Vane');
     expect(screen.getByTestId('ignore-11')).toBeInTheDocument();
   });
 
@@ -425,7 +523,7 @@ describe('FRG-UI-029: reconcile chip edge rules', () => {
   it('FRG-UI-029 — an owned single is chipped amber and kept; fillable issues are green', async () => {
     const user = userEvent.setup();
     const entitlements = [
-      ent({ id: 20, human_name: 'Descender, Vol. 1', review_status: 'matched', matched_series_id: 1 }),
+      ent({ id: 20, human_name: 'Driftwood, Vol. 1', review_status: 'matched', matched_series_id: 1 }),
     ];
     const details = {
       20: detail(20, [
@@ -480,7 +578,7 @@ describe('FRG-UI-029: reconcile chip edge rules', () => {
 
   it('FRG-UI-029 — a standalone OGN/artbook fabricates no singles', async () => {
     const user = userEvent.setup();
-    const entitlements = [ent({ id: 22, human_name: 'The Art of Saga', review_status: 'matched', matched_series_id: 1 })];
+    const entitlements = [ent({ id: 22, human_name: 'The Art of Vane', review_status: 'matched', matched_series_id: 1 })];
     const details = {
       22: detail(22, [{ trade_issue_id: 902, standalone: true, ranges: [] }]),
     };
@@ -581,7 +679,7 @@ describe('FRG-UI-029: a matched row prefers the linked series booktype over the 
     const entitlements = [
       ent({
         id: 30,
-        human_name: 'Descender, Vol. 1: Tin Stars',
+        human_name: 'Driftwood, Vol. 1: Ash Stars',
         review_status: 'matched',
         matched_series_id: 1,
         preferred_format: 'CBZ',
@@ -591,7 +689,7 @@ describe('FRG-UI-029: a matched row prefers the linked series booktype over the 
       sources: [source],
       entitlements,
       calls: [],
-      librarySeries: [makeSeriesResource({ id: 1, title: 'Descender', booktype: 'tpb' })],
+      librarySeries: [makeSeriesResource({ id: 1, title: 'Driftwood', booktype: 'tpb' })],
     });
 
     const row = await screen.findByTestId('entitlement-row-30');
@@ -608,7 +706,7 @@ describe('FRG-UI-029: a matched row prefers the linked series booktype over the 
     const entitlements = [
       ent({
         id: 31,
-        human_name: 'Saga, Vol. 1',
+        human_name: 'Vane, Vol. 1',
         review_status: 'new',
         preferred_format: 'CBZ',
       }),
@@ -617,7 +715,7 @@ describe('FRG-UI-029: a matched row prefers the linked series booktype over the 
       sources: [source],
       entitlements,
       calls: [],
-      librarySeries: [makeSeriesResource({ id: 1, title: 'Descender', booktype: 'tpb' })],
+      librarySeries: [makeSeriesResource({ id: 1, title: 'Driftwood', booktype: 'tpb' })],
     });
 
     const row = await screen.findByTestId('entitlement-row-31');
@@ -641,7 +739,7 @@ describe('FRG-UI-029: a matched row prefers the linked series booktype over the 
       sources: [source],
       entitlements,
       calls: [],
-      librarySeries: [makeSeriesResource({ id: 1, title: 'Descender', booktype: null })],
+      librarySeries: [makeSeriesResource({ id: 1, title: 'Driftwood', booktype: null })],
     });
 
     const row = await screen.findByTestId('entitlement-row-32');
@@ -738,5 +836,1044 @@ describe('FRG-SRC-009: failed-download retry affordance', () => {
     await screen.findByTestId('entitlement-row-41');
     expect(screen.queryByTestId('retry-41')).toBeNull();
     expect(screen.queryByTestId('retry-42')).toBeNull();
+  });
+});
+
+/*
+ * FRG-UI-039 — the per-row ComicVine search picker: the add-screen lookup
+ * surface (debounced suggest, full search, in-library marking, outcome notes)
+ * mounted on EVERY reviewable row, so "no plausible automatic match" is a
+ * verdict beside a live search rather than a dead end. Picking an in-library
+ * volume matches; picking one that is not adds and matches in one action.
+ */
+describe('FRG-UI-039: per-row ComicVine search', () => {
+  const source = makeSource({ id: 5, connection_state: 'connected' });
+  /**
+   * A row the proposal pass RAN on and could not place — the dead-end case.
+   * The backend stores that as a verdict MARKER (not a null), so the UI can
+   * tell "we looked and nothing fit" apart from "not computed yet".
+   */
+  const orphan = ent({
+    id: 50,
+    human_name: 'Nobody is Guarding the Lighthouse Vol. 8 #3',
+    review_status: 'new',
+    proposed_match: {
+      verdict: 'no-plausible-match',
+      universe: 'comicvine',
+      candidates: [],
+      auto: false,
+    },
+    proposed_series_id: null,
+  });
+  const library = [
+    makeSeriesResource({ id: 1, title: 'Driftwood' }), // cv_volume_id 40500001
+  ];
+
+  it('FRG-UI-039 — a row with no plausible match still offers a search, and typing fires the debounced suggest', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [orphan],
+      calls: [],
+      reads: [],
+      librarySeries: library,
+      suggest: () => ({
+        records: [candidate({ cv_volume_id: 4050_1234, name: 'SIKTC' })],
+        complete: true,
+      }),
+    };
+    renderScreen(state);
+
+    // The automatic verdict is informational — and sits beside the search.
+    expect(await screen.findByTestId('no-match-50')).toHaveTextContent(
+      'No plausible match',
+    );
+    await user.click(screen.getByTestId('search-50'));
+
+    const panel = await screen.findByTestId('row-search-50');
+    expect(within(panel).getByTestId('row-search-note-50')).toHaveTextContent(
+      'No plausible automatic match',
+    );
+    // The seed drops the trailing issue ordinal — a volume search, not an issue.
+    const input = within(panel).getByTestId('row-search-input-50');
+    expect(input).toHaveValue('Nobody is Guarding the Lighthouse Vol. 8');
+
+    await user.clear(input);
+    await user.type(input, 'guarding lighthouse');
+    await afterSuggestDebounce();
+
+    await waitFor(() =>
+      expect(
+        state.reads!.some((p) =>
+          p.startsWith('/api/v1/series/lookup/suggest?term=guarding%20lighthouse'),
+        ),
+      ).toBe(true),
+    );
+    // …and the accelerator's candidates are pickable straight from the dropdown.
+    expect(await screen.findByTestId('cand-50-40501234')).toBeInTheDocument();
+  });
+
+  it('FRG-UI-039 — an in-library result is marked and picking it matches the row, creating nothing', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [orphan],
+      calls: [],
+      librarySeries: library,
+      lookup: () => ({
+        records: [
+          candidate({
+            cv_volume_id: 4050_0001,
+            name: 'Driftwood',
+            have_it: true,
+          }),
+          candidate({ cv_volume_id: 4050_9999, name: 'Some Other Volume' }),
+        ],
+        complete: true,
+        truncated: false,
+      }),
+    };
+    renderScreen(state);
+
+    await user.click(await screen.findByTestId('search-50'));
+    await user.click(within(screen.getByTestId('row-search-50')).getByRole('button', { name: 'Search' }));
+
+    const owned = await screen.findByTestId('cand-50-40500001');
+    // Visibly marked as already in the library.
+    expect(within(owned).getByTestId('cand-50-40500001-have')).toHaveTextContent(
+      'In library',
+    );
+
+    await user.click(owned);
+    await waitFor(() =>
+      expect(
+        state.calls.find((c) => c.path === '/api/v1/sources/entitlements/50/match'),
+      ).toBeTruthy(),
+    );
+    const call = state.calls.find((c) => c.path.endsWith('/50/match'))!;
+    // Linked to the LOCAL series id the owned CV volume maps to — no add.
+    expect((call.init!.body as { series_id: number }).series_id).toBe(1);
+    expect(state.calls.find((c) => c.path.endsWith('/50/add'))).toBeUndefined();
+  });
+
+  it('FRG-UI-039 — picking a result that is not in the library adds and matches it with the explicit cv_volume_id', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [orphan],
+      calls: [],
+      librarySeries: library,
+      lookup: () => ({
+        records: [candidate({ cv_volume_id: 4050_7777, name: 'SIKTC' })],
+        complete: true,
+        truncated: false,
+      }),
+    };
+    renderScreen(state);
+
+    await user.click(await screen.findByTestId('search-50'));
+    await user.click(within(screen.getByTestId('row-search-50')).getByRole('button', { name: 'Search' }));
+    await user.click(await screen.findByTestId('cand-50-40507777'));
+
+    await waitFor(() =>
+      expect(
+        state.calls.find((c) => c.path === '/api/v1/sources/entitlements/50/add'),
+      ).toBeTruthy(),
+    );
+    const call = state.calls.find((c) => c.path.endsWith('/50/add'))!;
+    expect((call.init!.body as { cv_volume_id: number }).cv_volume_id).toBe(
+      4050_7777,
+    );
+  });
+
+  it('FRG-UI-039 — a matched row can Change its match through the same search surface', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [
+        ent({
+          id: 51,
+          human_name: 'Driftwood, Vol. 1',
+          review_status: 'matched',
+          matched_series_id: 1,
+        }),
+      ],
+      calls: [],
+      librarySeries: library,
+      lookup: () => ({
+        records: [candidate({ cv_volume_id: 4050_8888, name: 'Driftwood' })],
+        complete: true,
+        truncated: false,
+      }),
+    };
+    renderScreen(state);
+
+    await user.click(await screen.findByTestId('search-51'));
+    const panel = await screen.findByTestId('row-search-51');
+    expect(within(panel).getByTestId('row-search-note-51')).toHaveTextContent(
+      'Change this match',
+    );
+    await user.click(within(panel).getByRole('button', { name: 'Search' }));
+    await user.click(await screen.findByTestId('cand-51-40508888'));
+
+    await waitFor(() =>
+      expect(state.calls.find((c) => c.path.endsWith('/51/add'))).toBeTruthy(),
+    );
+  });
+
+  it('FRG-UI-039 — a degraded ComicVine walk (the budget-ceiling shape) shows the add screen’s honest note, and the row stays actionable', async () => {
+    const user = userEvent.setup();
+    // A budget/upstream cut-off comes back as a part-way walk that returned
+    // nothing (FRG-API-003 envelope) — classified by the SAME
+    // `lookupOutcomeNote` the add screen uses, so the prose is identical.
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [orphan],
+      calls: [],
+      librarySeries: library,
+      lookup: () => ({ records: [], complete: false, truncated: false }),
+    };
+    renderScreen(state);
+
+    await user.click(await screen.findByTestId('search-50'));
+    await user.click(within(screen.getByTestId('row-search-50')).getByRole('button', { name: 'Search' }));
+
+    expect(
+      await screen.findByText(
+        'ComicVine lookup failed part-way and returned nothing — try again in a moment.',
+      ),
+    ).toBeInTheDocument();
+    // Still actionable later: the search, and the row, are both still there.
+    expect(screen.getByTestId('row-search-input-50')).toBeEnabled();
+    expect(screen.getByTestId('ignore-50')).toBeInTheDocument();
+  });
+
+  it('FRG-UI-039 — a ComicVine credential failure renders the same Settings guidance as the add screen', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [orphan],
+      calls: [],
+      librarySeries: library,
+      lookup: () => {
+        throw new ApiRequestError(
+          503,
+          {
+            message: 'comicvine lookup failed: ComicVine rejected the API key',
+            errors: [
+              {
+                field: 'comicvine_api_key',
+                message: 'ComicVine rejected the API key (missing or invalid)',
+              },
+            ],
+          },
+          '/api/v1/series/lookup?term=x',
+        );
+      },
+    };
+    renderScreen(state);
+
+    await user.click(await screen.findByTestId('search-50'));
+    await user.click(within(screen.getByTestId('row-search-50')).getByRole('button', { name: 'Search' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('ComicVine API key missing or invalid');
+    expect(within(alert).getByRole('link', { name: 'check Settings' })).toHaveAttribute(
+      'href',
+      '/settings/general',
+    );
+  });
+});
+
+/*
+ * FRG-UI-029 (MODIFIED) — thousand-row rendering: the review list virtualizes,
+ * so a first-sync-scale corpus (a few thousand entitlements) puts only a window
+ * of rows in the DOM, and the M4 shift-range selection still spans rows the window has
+ * scrolled past (selection is id/index based over the filtered list, never
+ * DOM-based).
+ */
+describe('FRG-UI-029: virtualized review list at corpus scale', () => {
+  const source = makeSource({ id: 5, connection_state: 'connected' });
+  /** A first-sync-scale corpus: far more rows than any window can hold. */
+  const CORPUS = 1200;
+  const corpus = Array.from({ length: CORPUS }, (_, i) =>
+    ent({ id: 1000 + i, human_name: `Corpus Item ${i}` }),
+  );
+
+  /** Scroll the virtualized viewport to `offset` px and let it re-window. */
+  function scrollTo(offset: number) {
+    const scroller = screen.getByTestId('entitlement-scroller');
+    Object.defineProperty(scroller, 'scrollTop', {
+      value: offset,
+      configurable: true,
+    });
+    fireEvent.scroll(scroller);
+  }
+
+  it('FRG-UI-029 — a 1,200-row queue renders only a window of rows', async () => {
+    renderScreen({ sources: [source], entitlements: corpus, calls: [] });
+
+    const list = await screen.findByTestId('entitlement-list');
+    // Every row is counted (the count line and the scroll height are honest)…
+    expect(list).toHaveAttribute('data-total-rows', String(CORPUS));
+    expect(screen.getByTestId('count-line')).toHaveTextContent(
+      `${CORPUS} items`,
+    );
+    // …but only a window of them is mounted.
+    const rendered = screen.getAllByTestId(/^entitlement-row-/);
+    expect(rendered.length).toBeGreaterThan(0);
+    expect(rendered.length).toBeLessThan(80);
+    // The window is the TOP of the list before any scrolling.
+    expect(screen.getByTestId('entitlement-row-1000')).toBeInTheDocument();
+    expect(screen.queryByTestId('entitlement-row-1300')).toBeNull();
+  });
+
+  it('FRG-UI-029 — shift-range selection spans rows across a scroll of the virtualized list', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: corpus,
+      calls: [],
+    };
+    renderScreen(state);
+
+    // Anchor on the first row, then scroll far enough that it unmounts.
+    await user.click(await screen.findByTestId('select-1000'));
+    scrollTo(3900);
+    await waitFor(() => expect(screen.queryByTestId('select-1000')).toBeNull());
+
+    const target = await screen.findByTestId('select-1050');
+    await user.keyboard('{Shift>}');
+    await user.click(target);
+    await user.keyboard('{/Shift}');
+
+    // Rows 1000..1050 inclusive — the span, not just the two mounted ends.
+    const bar = await screen.findByTestId('bulk-bar');
+    expect(bar).toHaveTextContent('51 selected');
+
+    await user.click(screen.getByTestId('bulk-ignore'));
+    await waitFor(() =>
+      expect(
+        state.calls.find((c) => c.path === '/api/v1/sources/entitlements/bulk'),
+      ).toBeTruthy(),
+    );
+    const body = state.calls.find((c) => c.path.endsWith('/bulk'))!.init!.body as {
+      entitlement_ids: number[];
+    };
+    expect(body.entitlement_ids).toHaveLength(51);
+    expect(body.entitlement_ids).toContain(1000);
+    expect(body.entitlement_ids).toContain(1050);
+  });
+
+  it('FRG-UI-039 — an open row search survives the row scrolling out of the window and back', async () => {
+    const user = userEvent.setup();
+    renderScreen({
+      sources: [source],
+      entitlements: corpus,
+      calls: [],
+      reads: [],
+    });
+
+    // Open the search on a row near the top of the list.
+    await user.click(await screen.findByTestId('search-1000'));
+    expect(await screen.findByTestId('row-search-1000')).toBeInTheDocument();
+
+    // Scroll far enough that the row unmounts — the panel goes with it, since
+    // only the WINDOW is in the DOM…
+    scrollTo(3900);
+    await waitFor(() => expect(screen.queryByTestId('search-1000')).toBeNull());
+    expect(screen.queryByTestId('row-search-1000')).toBeNull();
+
+    // …and scrolling back re-mounts the row with its search STILL OPEN: the
+    // disclosure is list-owned, so scrolling past a row never cancels the task
+    // the operator started on it.
+    scrollTo(0);
+    expect(await screen.findByTestId('row-search-1000')).toBeInTheDocument();
+    expect(screen.getByTestId('search-1000')).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+  });
+});
+
+/*
+ * FRG-UI-029 (MODIFIED) — same-title collapse: a run of rows sharing the
+ * server's group_key folds into ONE expandable group with a count and its
+ * members' status counts. Collapse is presentation, never a state filter:
+ * every member's actions are one expand away, the header selects the whole
+ * group, and a shift-range across a collapsed header still takes its rows.
+ */
+describe('FRG-UI-029: same-title collapse groups', () => {
+  const source = makeSource({ id: 5, connection_state: 'connected' });
+
+  /** Four Ember rows the server folded to one key, plus an unrelated row. */
+  function emberCorpus(): EntitlementResource[] {
+    return [
+      ent({ id: 60, human_name: 'Ember, Vol. 1', group_key: 'ember' }),
+      ent({ id: 61, human_name: 'Ember, Vol. 2', group_key: 'ember' }),
+      ent({
+        id: 62,
+        human_name: 'Ember, Vol. 3',
+        group_key: 'ember',
+        review_status: 'matched',
+        matched_series_id: 1,
+      }),
+      ent({
+        id: 63,
+        human_name: 'Ember, Vol. 4',
+        group_key: 'ember',
+        download_state: 'failed',
+        download_error: 'md5 mismatch',
+      }),
+      ent({ id: 70, human_name: 'Driftwood, Vol. 1' }),
+    ];
+  }
+
+  it('FRG-UI-029 — a run of 3+ same-title rows collapses into one group with a count, and a pair does not', async () => {
+    renderScreen({
+      sources: [source],
+      entitlements: [
+        ...emberCorpus(),
+        // A two-row run stays below the collapse threshold — no header, and
+        // both rows render plainly.
+        ent({ id: 80, human_name: 'Vane, Vol. 1', group_key: 'vane' }),
+        ent({ id: 81, human_name: 'Vane, Vol. 2', group_key: 'vane' }),
+      ],
+      calls: [],
+    });
+
+    const header = await screen.findByTestId('group-header-ember');
+    expect(header).toHaveAttribute('data-collapsed', 'true');
+    expect(screen.getByTestId('group-count-ember')).toHaveTextContent('4 items');
+    // The group's title is the members' shared prefix.
+    expect(within(header).getByText('Ember')).toBeInTheDocument();
+
+    // Collapsed: the member rows are not rendered…
+    expect(screen.queryByTestId('entitlement-row-60')).toBeNull();
+    expect(screen.queryByTestId('entitlement-row-63')).toBeNull();
+    // …while everything outside the group still is, including the sub-threshold
+    // pair and the count line, which counts ROWS, never groups.
+    expect(screen.getByTestId('entitlement-row-70')).toBeInTheDocument();
+    expect(screen.getByTestId('entitlement-row-80')).toBeInTheDocument();
+    expect(screen.getByTestId('entitlement-row-81')).toBeInTheDocument();
+    expect(screen.queryByTestId('group-header-vane')).toBeNull();
+    expect(screen.getByTestId('count-line')).toHaveTextContent('7 items');
+  });
+
+  it('FRG-UI-029 — a mixed-status group surfaces its counts (incl. a failed download) on the header', async () => {
+    renderScreen({ sources: [source], entitlements: emberCorpus(), calls: [] });
+
+    const statuses = await screen.findByTestId('group-statuses-ember');
+    // Three new + one matched, and the failed download is called out — the
+    // collapse hides no actionable state.
+    expect(statuses).toHaveTextContent('3 new');
+    expect(statuses).toHaveTextContent('1 matched');
+    expect(statuses).toHaveTextContent('1 failed download');
+  });
+
+  it('FRG-UI-029 — expanding a group reaches every member row and its full actions', async () => {
+    const user = userEvent.setup();
+    renderScreen({ sources: [source], entitlements: emberCorpus(), calls: [] });
+
+    await user.click(await screen.findByTestId('group-toggle-ember'));
+
+    expect(screen.getByTestId('group-header-ember')).toHaveAttribute(
+      'data-collapsed',
+      'false',
+    );
+    for (const id of [60, 61, 62, 63]) {
+      expect(screen.getByTestId(`entitlement-row-${id}`)).toBeInTheDocument();
+      // The ever-present row search (FRG-UI-039) and the expand caret.
+      expect(screen.getByTestId(`search-${id}`)).toBeInTheDocument();
+      expect(screen.getByTestId(`expand-${id}`)).toBeInTheDocument();
+    }
+    // Per-status actions: the new rows offer Ignore, the matched one Change…,
+    // and the failed one its Retry.
+    expect(screen.getByTestId('ignore-60')).toBeInTheDocument();
+    expect(screen.getByTestId('search-62')).toHaveTextContent('Change…');
+    expect(screen.getByTestId('retry-63')).toBeInTheDocument();
+  });
+
+  it('FRG-UI-029 — the group header checkbox selects the whole group, collapsed and all', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: emberCorpus(),
+      calls: [],
+    };
+    renderScreen(state);
+
+    await user.click(await screen.findByTestId('group-select-ember'));
+    expect(await screen.findByTestId('bulk-bar')).toHaveTextContent('4 selected');
+
+    // It toggles as a unit: a second click clears the whole group…
+    await user.click(screen.getByTestId('group-select-ember'));
+    expect(screen.getByTestId('bulk-bar')).toHaveTextContent('0 selected');
+    await user.click(screen.getByTestId('group-select-ember'));
+    expect(screen.getByTestId('bulk-bar')).toHaveTextContent('4 selected');
+
+    // …and the whole group is what the bulk action then receives.
+    await user.click(screen.getByTestId('bulk-ignore'));
+    await waitFor(() =>
+      expect(state.calls.find((c) => c.path.endsWith('/bulk'))).toBeTruthy(),
+    );
+    const body = state.calls.find((c) => c.path.endsWith('/bulk'))!.init!.body as {
+      entitlement_ids: number[];
+    };
+    expect([...body.entitlement_ids].sort((a, b) => a - b)).toEqual([
+      60, 61, 62, 63,
+    ]);
+  });
+
+  it('FRG-UI-029 — shift-range stays index-coherent across a collapsed group header', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [
+        ent({ id: 59, human_name: 'Before The Group' }),
+        ...emberCorpus().slice(0, 4),
+        ent({ id: 70, human_name: 'Driftwood, Vol. 1' }),
+      ],
+      calls: [],
+    };
+    renderScreen(state);
+
+    // Anchor before the group, shift-click after it: the span crosses the
+    // header, which stands for the four rows folded inside it.
+    await user.click(await screen.findByTestId('select-59'));
+    await user.keyboard('{Shift>}');
+    await user.click(screen.getByTestId('select-70'));
+    await user.keyboard('{/Shift}');
+
+    expect(await screen.findByTestId('bulk-bar')).toHaveTextContent('6 selected');
+
+    await user.click(screen.getByTestId('bulk-ignore'));
+    await waitFor(() =>
+      expect(state.calls.find((c) => c.path.endsWith('/bulk'))).toBeTruthy(),
+    );
+    const body = state.calls.find((c) => c.path.endsWith('/bulk'))!.init!.body as {
+      entitlement_ids: number[];
+    };
+    expect([...body.entitlement_ids].sort((a, b) => a - b)).toEqual([
+      59, 60, 61, 62, 63, 70,
+    ]);
+  });
+
+  it('FRG-UI-025 — collapsing a group re-points an anchor folded inside it at the group header', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [...emberCorpus().slice(0, 4), ent({ id: 70, human_name: 'Driftwood, Vol. 1' })],
+      calls: [],
+    };
+    renderScreen(state);
+
+    // Expand the group and anchor on a row INSIDE it…
+    await user.click(await screen.findByTestId('group-toggle-ember'));
+    await user.click(screen.getByTestId('select-61'));
+    // …then collapse it, folding the anchor row out of the list.
+    await user.click(screen.getByTestId('group-toggle-ember'));
+    expect(screen.queryByTestId('select-61')).toBeNull();
+
+    // The shift-range still draws: the anchor moved to the header, which stands
+    // for the whole group, so the span is header-through-target.
+    await user.keyboard('{Shift>}');
+    await user.click(screen.getByTestId('select-70'));
+    await user.keyboard('{/Shift}');
+
+    expect(await screen.findByTestId('bulk-bar')).toHaveTextContent('5 selected');
+    await user.click(screen.getByTestId('bulk-ignore'));
+    await waitFor(() =>
+      expect(state.calls.find((c) => c.path.endsWith('/bulk'))).toBeTruthy(),
+    );
+    const body = state.calls.find((c) => c.path.endsWith('/bulk'))!.init!.body as {
+      entitlement_ids: number[];
+    };
+    expect([...body.entitlement_ids].sort((a, b) => a - b)).toEqual([
+      60, 61, 62, 63, 70,
+    ]);
+  });
+
+  it('FRG-UI-025 — a shift-click with a vanished anchor selects and re-anchors, never deselects', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [
+        ent({ id: 200, human_name: 'Still New' }),
+        ent({ id: 201, human_name: 'Ignored One', review_status: 'ignored' }),
+        ent({ id: 202, human_name: 'Ignored Two', review_status: 'ignored' }),
+      ],
+      calls: [],
+    };
+    renderScreen(state);
+
+    // Select an ignored row, then a new row — the ANCHOR ends up on the new one.
+    await user.click(await screen.findByTestId('select-202'));
+    await user.click(screen.getByTestId('select-200'));
+    expect(screen.getByTestId('bulk-bar')).toHaveTextContent('2 selected');
+
+    // Filtering to Ignored takes the anchor row out of the list entirely.
+    await user.click(screen.getByTestId('filter-ignored'));
+    expect(screen.queryByTestId('select-200')).toBeNull();
+
+    // A shift-click with no anchor to span from SELECTS the clicked row and
+    // re-anchors there — it must never degrade into a toggle that deselects the
+    // row the operator was reaching towards.
+    await user.keyboard('{Shift>}');
+    await user.click(screen.getByTestId('select-202'));
+    await user.keyboard('{/Shift}');
+    expect(screen.getByTestId('bulk-bar')).toHaveTextContent('2 selected');
+
+    // …and the re-anchor is real: the NEXT shift-click draws a span from it.
+    await user.keyboard('{Shift>}');
+    await user.click(screen.getByTestId('select-201'));
+    await user.keyboard('{/Shift}');
+    expect(screen.getByTestId('bulk-bar')).toHaveTextContent('3 selected');
+
+    await user.click(screen.getByTestId('bulk-restore'));
+    await waitFor(() =>
+      expect(state.calls.find((c) => c.path.endsWith('/bulk'))).toBeTruthy(),
+    );
+    const body = state.calls.find((c) => c.path.endsWith('/bulk'))!.init!.body as {
+      entitlement_ids: number[];
+    };
+    expect([...body.entitlement_ids].sort((a, b) => a - b)).toEqual([
+      200, 201, 202,
+    ]);
+  });
+});
+
+/*
+ * FRG-SRC-011 — bundle identity on the review surface: rows and groups name the
+ * bundle they came from, the bulk bar can select a whole bundle, and "apply the
+ * match to this lot" is ONE server-side bulk accept in which each row
+ * contributes its own proposal (per-row errors, never a vetoed batch).
+ */
+describe('FRG-SRC-011: bundle display, bundle selection, and bulk accept', () => {
+  const source = makeSource({ id: 5, connection_state: 'connected' });
+  const BUNDLE = 'Humble Comics Bundle: Synthetic Firsts';
+
+  const bundled = [
+    ent({ id: 90, human_name: 'Vane, Vol. 1', bundle_human_name: BUNDLE }),
+    ent({ id: 91, human_name: 'Deadly Class, Vol. 1', bundle_human_name: BUNDLE }),
+    // Same bundle, but ignored — invisible under the "New" filter, so a
+    // bundle selection made there must not reach it.
+    ent({
+      id: 92,
+      human_name: 'Nailbiter, Vol. 1',
+      review_status: 'ignored',
+      bundle_human_name: BUNDLE,
+    }),
+    ent({
+      id: 93,
+      human_name: 'Driftwood, Vol. 1',
+      bundle_human_name: 'Humble Comics Bundle: Driftwood',
+    }),
+  ];
+
+  it('FRG-SRC-011 — a row names its bundle, and the group header names a shared one', async () => {
+    renderScreen({
+      sources: [source],
+      entitlements: [
+        ...bundled,
+        ent({ id: 94, human_name: 'Ember, Vol. 1', group_key: 'ember', bundle_human_name: BUNDLE }),
+        ent({ id: 95, human_name: 'Ember, Vol. 2', group_key: 'ember', bundle_human_name: BUNDLE }),
+        ent({ id: 96, human_name: 'Ember, Vol. 3', group_key: 'ember', bundle_human_name: BUNDLE }),
+      ],
+      calls: [],
+    });
+
+    expect(await screen.findByTestId('bundle-90')).toHaveTextContent(BUNDLE);
+    expect(screen.getByTestId('group-header-ember')).toHaveTextContent(BUNDLE);
+  });
+
+  it('FRG-SRC-011 — "Select bundle" selects exactly that bundle\'s VISIBLE rows', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: bundled,
+      calls: [],
+    };
+    renderScreen(state);
+
+    // Scope to New: the ignored row of the same bundle is out of view.
+    await user.click(await screen.findByTestId('filter-new'));
+    await user.click(screen.getByTestId('select-bundle'));
+    await user.click(screen.getByTestId(`bundle-option-${BUNDLE}`));
+
+    expect(await screen.findByTestId('bulk-bar')).toHaveTextContent('2 selected');
+
+    await user.click(screen.getByTestId('bulk-ignore'));
+    await waitFor(() =>
+      expect(state.calls.find((c) => c.path.endsWith('/bulk'))).toBeTruthy(),
+    );
+    const body = state.calls.find((c) => c.path.endsWith('/bulk'))!.init!.body as {
+      entitlement_ids: number[];
+    };
+    // The bundle's two visible rows — not its ignored row, not the other bundle.
+    expect([...body.entitlement_ids].sort((a, b) => a - b)).toEqual([90, 91]);
+  });
+
+  it('FRG-SRC-011 — bulk accept is ONE request carrying the ids, with no shared series_id', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [
+        ent({
+          id: 100,
+          human_name: 'Vane, Vol. 1',
+          proposed_series_id: 1,
+          proposed_match: {
+            kind: 'library',
+            series_id: 1,
+            cv_volume_id: null,
+            title: 'Vane',
+            year: 2012,
+            confidence: 0.93,
+          },
+        }),
+        ent({
+          id: 101,
+          human_name: 'Glasswing, Vol. 1',
+          proposed_match: {
+            kind: 'comicvine',
+            series_id: null,
+            cv_volume_id: 4050_1111,
+            title: 'Glasswing',
+            year: 2015,
+            confidence: 0.88,
+          },
+        }),
+      ],
+      calls: [],
+    };
+    renderScreen(state);
+
+    await user.click(await screen.findByTestId('select-100'));
+    await user.keyboard('{Shift>}');
+    await user.click(screen.getByTestId('select-101'));
+    await user.keyboard('{/Shift}');
+    await user.click(screen.getByTestId('bulk-accept'));
+
+    await waitFor(() =>
+      expect(state.calls.filter((c) => c.path.endsWith('/bulk'))).toHaveLength(1),
+    );
+    const call = state.calls.find((c) => c.path.endsWith('/bulk'))!;
+    const body = call.init!.body as {
+      action: string;
+      entitlement_ids: number[];
+      series_id?: number;
+    };
+    // Heterogeneous rows (one match, one add) in ONE accept — each applies its
+    // own stored proposal, so the body carries no shared series_id.
+    expect(body.action).toBe('accept');
+    expect([...body.entitlement_ids].sort((a, b) => a - b)).toEqual([100, 101]);
+    expect(body.series_id).toBeUndefined();
+    // …and the per-row match endpoint was never touched (no client-side loop).
+    expect(state.calls.some((c) => c.path.endsWith('/match'))).toBe(false);
+  });
+
+  it('FRG-SRC-011 — per-row accept failures are reported by name while the succeeded rows refresh', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [
+        ent({
+          id: 110,
+          human_name: 'Vane, Vol. 1',
+          proposed_series_id: 1,
+          proposed_match: {
+            kind: 'library',
+            series_id: 1,
+            cv_volume_id: null,
+            title: 'Vane',
+            year: 2012,
+            confidence: 0.93,
+          },
+        }),
+        // The row the pass looked at and could not place: the server refuses it
+        // per-row, the batch still applies the rest.
+        ent({
+          id: 111,
+          human_name: 'Mystery Anthology',
+          proposed_match: {
+            verdict: 'no-plausible-match',
+            universe: 'comicvine',
+            candidates: [],
+          },
+        }),
+      ],
+      calls: [],
+      bulkResult: (body) => {
+        if (body.action !== 'accept') {
+          return { applied: body.entitlement_ids.length, skipped: 0, errors: {} };
+        }
+        // The server applied 110 and refused 111 — model both.
+        state.entitlements = state.entitlements.map((e) =>
+          e.id === 110
+            ? { ...e, review_status: 'matched' as const, matched_series_id: 1 }
+            : e,
+        );
+        return {
+          applied: 1,
+          skipped: 1,
+          errors: {
+            '111': 'entitlement 111 has no proposed match to accept',
+          },
+        };
+      },
+    };
+    renderScreen(state);
+
+    await user.click(await screen.findByTestId('select-110'));
+    await user.click(screen.getByTestId('select-111'));
+    await user.click(screen.getByTestId('bulk-accept'));
+
+    // The count of failures, expandable to the row names and the reasons.
+    const toggle = await screen.findByTestId('bulk-errors-toggle');
+    expect(toggle).toHaveTextContent('1 item could not be accepted');
+    await user.click(toggle);
+    const failure = await screen.findByTestId('bulk-error-111');
+    expect(failure).toHaveTextContent('Mystery Anthology');
+    expect(failure).toHaveTextContent('has no proposed match to accept');
+    expect(screen.getByTestId('bulk-bar')).toHaveTextContent('Accepted 1 of 2.');
+
+    // The succeeded row still refreshed — the failures never cost the batch.
+    await waitFor(() =>
+      expect(screen.getByTestId('entitlement-row-110')).toHaveAttribute(
+        'data-status',
+        'matched',
+      ),
+    );
+    // …and the failure stays selected, so it is the operator's to-do list.
+    expect(screen.getByTestId('bulk-bar')).toHaveTextContent('1 selected');
+  });
+
+  it('FRG-SRC-011 — a partial bulk IGNORE reports its per-row failure instead of reading as complete', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [
+        ent({ id: 130, human_name: 'Vane, Vol. 1' }),
+        ent({ id: 131, human_name: 'Vanished Item' }),
+      ],
+      calls: [],
+      bulkResult: (body) => {
+        // The server ignored 130 and could not touch 131 — every action can
+        // half-succeed, not just accept.
+        state.entitlements = state.entitlements.map((e) =>
+          e.id === 130 ? { ...e, review_status: 'ignored' as const } : e,
+        );
+        expect(body.action).toBe('ignore');
+        return {
+          applied: 1,
+          skipped: 1,
+          errors: { '131': 'entitlement 131 no longer exists' },
+        };
+      },
+    };
+    renderScreen(state);
+
+    await user.click(await screen.findByTestId('select-130'));
+    await user.click(screen.getByTestId('select-131'));
+    await user.click(screen.getByTestId('bulk-ignore'));
+
+    // The panel names the row and the reason, in the action's own words.
+    const toggle = await screen.findByTestId('bulk-errors-toggle');
+    expect(toggle).toHaveTextContent('1 item could not be ignored');
+    await user.click(toggle);
+    const failure = await screen.findByTestId('bulk-error-131');
+    expect(failure).toHaveTextContent('Vanished Item');
+    expect(failure).toHaveTextContent('no longer exists');
+    expect(screen.getByTestId('bulk-bar')).toHaveTextContent('Ignored 1 of 2.');
+
+    // The selection is NOT cleared out from under a partial result: the failed
+    // row stays selected as the to-do list, while the succeeded row refreshes.
+    expect(screen.getByTestId('bulk-bar')).toHaveTextContent('1 selected');
+    await waitFor(() =>
+      expect(screen.getByTestId('entitlement-row-130')).toHaveAttribute(
+        'data-status',
+        'ignored',
+      ),
+    );
+  });
+});
+
+/*
+ * FRG-SRC-010 — the three proposal shapes read differently: a candidate, a
+ * stored "we looked and nothing fit" verdict marker, and a NULL (not computed
+ * yet, e.g. deferred on the ComicVine budget ceiling). None of them is a dead
+ * end — the row search is there in every case.
+ */
+describe('FRG-SRC-010: proposal verdict vs not-yet-computed', () => {
+  const source = makeSource({ id: 5, connection_state: 'connected' });
+
+  it('FRG-SRC-010 — a no-plausible-match verdict marker reads as a verdict, not as a proposal', async () => {
+    renderScreen({
+      sources: [source],
+      entitlements: [
+        ent({
+          id: 120,
+          human_name: 'Odd Curio',
+          proposed_match: {
+            verdict: 'no-plausible-match',
+            universe: 'comicvine',
+            candidates: [],
+            auto: false,
+          },
+        }),
+      ],
+      calls: [],
+    });
+
+    const note = await screen.findByTestId('no-match-120');
+    expect(note).toHaveTextContent('No plausible match');
+    expect(note).toHaveAttribute('data-verdict', 'no-plausible-match');
+    // No accept affordance was minted out of the marker…
+    expect(screen.queryByTestId('match-120')).toBeNull();
+    expect(screen.queryByTestId('add-120')).toBeNull();
+    // …and the row is still fully actionable.
+    expect(screen.getByTestId('search-120')).toBeInTheDocument();
+  });
+
+  it('FRG-SRC-010 — a null proposal says the match has not been computed yet', async () => {
+    renderScreen({
+      sources: [source],
+      entitlements: [ent({ id: 121, human_name: 'Deferred Item', proposed_match: null })],
+      calls: [],
+    });
+
+    const note = await screen.findByTestId('no-match-121');
+    expect(note).toHaveTextContent('Match not computed yet');
+    expect(note).toHaveAttribute('data-verdict', 'not-computed');
+    expect(screen.getByTestId('search-121')).toBeInTheDocument();
+  });
+});
+
+/*
+ * FRG-SRC-012 — operator-owned publisher rules: a per-source list of publishers
+ * whose items are always filed as Other. Ships EMPTY; the starter list is
+ * OFFERED (it fills the editor) and only written when the operator saves.
+ */
+describe('FRG-SRC-012: publisher rules editor', () => {
+  const source = makeSource({ id: 5, connection_state: 'connected' });
+
+  async function openRules(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(await screen.findByTestId('publisher-rules-toggle'));
+  }
+
+  it('FRG-SRC-012 — the editor ships empty', async () => {
+    const user = userEvent.setup();
+    renderScreen({ sources: [source], entitlements: [], calls: [] });
+    await openRules(user);
+
+    expect(screen.getByTestId('rules-empty')).toHaveTextContent(
+      'No publisher rules',
+    );
+    expect(screen.queryByTestId('rules-list')).toBeNull();
+  });
+
+  it('FRG-SRC-012 — the suggested starter list MERGES into the editor and saves nothing', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [],
+      calls: [],
+    };
+    renderScreen(state);
+    await openRules(user);
+
+    // Something the operator typed FIRST — the starter list is an offer, so it
+    // must never discard work already in the draft.
+    await user.type(screen.getByTestId('rule-input'), 'Onyx Path');
+    await user.click(screen.getByTestId('rule-add'));
+    // …including one the starter list also carries, which must not double up.
+    await user.type(screen.getByTestId('rule-input'), 'paizo');
+    await user.click(screen.getByTestId('rule-add'));
+
+    await user.click(screen.getByTestId('rules-starter'));
+
+    // The RPG publishers are in the editor, ready to be pruned…
+    expect(screen.getByTestId('rule-Chaosium')).toBeInTheDocument();
+    // …the operator's own entries survived, in their own order first…
+    const items = within(screen.getByTestId('rules-list')).getAllByRole(
+      'listitem',
+    );
+    expect(items[0]).toHaveTextContent('Onyx Path');
+    expect(items[1]).toHaveTextContent('paizo');
+    // …the case-insensitive duplicate was NOT added a second time…
+    expect(screen.queryByTestId('rule-Paizo')).toBeNull();
+    expect(items).toHaveLength(STARTER_PUBLISHERS.length + 1);
+    // …and nothing was written: no PATCH left the screen.
+    expect(
+      state.calls.filter((c) => c.init?.method === 'PATCH'),
+    ).toHaveLength(0);
+  });
+
+  it('FRG-SRC-012 — Save PATCHes the WHOLE list (add + remove, then save)', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [],
+      calls: [],
+    };
+    renderScreen(state);
+    await openRules(user);
+
+    await user.click(screen.getByTestId('rules-starter'));
+    await user.click(screen.getByTestId('rule-remove-Chaosium'));
+    await user.type(screen.getByTestId('rule-input'), 'Onyx Path');
+    await user.click(screen.getByTestId('rule-add'));
+    await user.click(screen.getByTestId('rules-save'));
+
+    await waitFor(() =>
+      expect(
+        state.calls.find(
+          (c) => c.path === '/api/v1/sources/5' && c.init?.method === 'PATCH',
+        ),
+      ).toBeTruthy(),
+    );
+    const body = state.calls.find((c) => c.path === '/api/v1/sources/5')!.init!
+      .body as { publisher_rules: string[]; auto_sync?: boolean };
+    expect(body.publisher_rules).toContain('Paizo');
+    expect(body.publisher_rules).toContain('Onyx Path');
+    expect(body.publisher_rules).not.toContain('Chaosium');
+    // The rules PATCH never rewrites the control it did not touch.
+    expect(body.auto_sync).toBeUndefined();
+    expect(await screen.findByTestId('rules-saved')).toBeInTheDocument();
+    // The saved list re-seeds from the server intact — a multi-word publisher
+    // is ONE rule, not two.
+    expect(screen.getByTestId('rule-Pelgrane Press')).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId('rules-list')).getAllByRole('listitem'),
+    ).toHaveLength(body.publisher_rules.length);
+  });
+
+  it('FRG-SRC-012 — a 409 (no settings envelope to write into) surfaces the reconnect guidance', async () => {
+    const user = userEvent.setup();
+    renderScreen({
+      sources: [source],
+      entitlements: [],
+      calls: [],
+      patchError: new ApiRequestError(
+        409,
+        {
+          message:
+            'source 5 has no stored settings to update — reconnect it before editing its publisher rules',
+          errors: [{ field: 'publisher_rules', message: 'no settings' }],
+        },
+        '/api/v1/sources/5',
+      ),
+    });
+    await openRules(user);
+
+    await user.type(screen.getByTestId('rule-input'), 'Chaosium');
+    await user.click(screen.getByTestId('rule-add'));
+    await user.click(screen.getByTestId('rules-save'));
+
+    const note = await screen.findByTestId('rules-error');
+    expect(note).toHaveTextContent('reconnect it before editing its publisher rules');
+    // The draft survives the failure — nothing the operator typed is lost.
+    expect(screen.getByTestId('rule-Chaosium')).toBeInTheDocument();
   });
 });

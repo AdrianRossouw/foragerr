@@ -1054,6 +1054,25 @@ export interface EntitlementProposedMatch {
   auto?: boolean;
 }
 
+/**
+ * The marker the backend stores when the proposal pass RAN and concluded
+ * nothing was plausible — as opposed to a NULL `proposed_match`, which means
+ * the pass has not run for this row yet (deferred, e.g. on a budget ceiling).
+ * The UI treats a verdict exactly like no proposal for actions, but says the
+ * honest thing about which of the two it is.
+ */
+export interface EntitlementNoMatchVerdict {
+  verdict: string;
+  universe?: string | null;
+  candidates?: unknown[];
+  auto?: boolean;
+}
+
+/** Either a concrete proposed candidate or a "we looked, nothing fit" verdict. */
+export type EntitlementProposal =
+  | EntitlementProposedMatch
+  | EntitlementNoMatchVerdict;
+
 /** One `GET /sources/{id}/entitlements` row (FRG-SRC-004). */
 export interface EntitlementResource {
   id: number;
@@ -1061,6 +1080,21 @@ export interface EntitlementResource {
   machine_name: string;
   human_name: string;
   publisher: string | null;
+  /**
+   * The order's bundle display name (FRG-SRC-011) — what the review screen's
+   * "select bundle" names and what a row/group shows as its provenance. NULL on
+   * rows synced before migration 0026 backfilled it.
+   */
+  bundle_human_name: string | null;
+  /**
+   * The SERVER's fold of this row's series-shaped title
+   * (`matching_key(query_term(human_name))`, FRG-SRC-011): the key same-title
+   * rows collapse by. Computed backend-side from the one shared folding
+   * implementation precisely so the UI never grows a second, drifting fold —
+   * never re-derive this client-side. Empty string when the title folds to
+   * nothing (such a row never groups).
+   */
+  group_key: string;
   classification: EntitlementClassification;
   review_status: EntitlementReviewStatus;
   download_state: string | null;
@@ -1070,7 +1104,7 @@ export interface EntitlementResource {
   filename: string | null;
   proposed_series_id: number | null;
   matched_series_id: number | null;
-  proposed_match: EntitlementProposedMatch | null;
+  proposed_match: EntitlementProposal | null;
 }
 
 /**

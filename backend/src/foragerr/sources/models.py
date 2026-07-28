@@ -97,6 +97,12 @@ class SourceEntitlementRow(Base):
     #: Sanitized display title (FRG-META-014 pattern applied at sync).
     human_name: Mapped[str] = mapped_column(Text, nullable=False)
     publisher: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: The ORDER's bundle display name (``product.human_name``), denormalized
+    #: per row (FRG-SRC-011, migration ``0026_entitlement_bundle_name``): a
+    #: bundle's name is immutable order metadata and every review row needs it
+    #: to group/select by bundle. NULL on a pre-0026 row until its next sync
+    #: backfills it, and on an order that names no bundle.
+    bundle_human_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     #: ``comic`` | ``other`` (FRG-SRC-003). Non-comic items are retained.
     classification: Mapped[str] = mapped_column(Text, nullable=False)
     #: ``new`` | ``matched`` | ``ignored`` — the review axis (design decision 2).
