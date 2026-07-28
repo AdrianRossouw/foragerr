@@ -21,6 +21,14 @@ caps) inside an ``asyncio.gather`` wrapper that maps even an *unexpected* error
 to that provider's failure outcome, so one indexer can never wedge the pool or
 starve the healthy indexers. A row whose settings fail to load is isolated
 earlier still (``select_fleet``) and surfaced as a failed outcome.
+
+Isolation bounds errors; the per-indexer TIME BUDGET (FRG-SRCH-015) bounds
+latency. On the interactive path — the only one with a person and a listener
+request guard waiting on it — each indexer gets ``effective_search_budget``
+seconds; at the deadline the indexers that finished contribute their full
+decisions and the stragglers are cancelled and reported as ``timed_out``
+outcomes (no back-off penalty: a slow indexer is not a failing one). Scheduled
+paths keep the original unbudgeted gather and wait politely.
 """
 
 from __future__ import annotations
@@ -30,7 +38,12 @@ import logging
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 
-from foragerr.config import Settings
+from foragerr.config import (
+    SEARCH_BUDGET_CEILING,
+    SEARCH_BUDGET_FLOOR,
+    SEARCH_BUDGET_LISTENER_MARGIN,
+    Settings,
+)
 from foragerr.db.base import utcnow
 from foragerr.http import HttpClientFactory
 from foragerr.indexers import IndexerRow, IndexerSearchOutcome, search_indexer
@@ -58,6 +71,22 @@ logger = logging.getLogger("foragerr.search_ops.pipeline")
 
 #: One engine instance is stateless and reused across every search.
 _ENGINE = DecisionEngine()
+
+#: The one fetch path that is time-budgeted — and the one that takes precedence
+#: at the per-indexer politeness gate (FRG-SRCH-015): a human is waiting on it
+#: behind the listener's request guard. ``rss``/``auto`` (the scheduled backlog
+#: and automatic searches) stay politeness-first, unbudgeted and unprioritised.
+BUDGETED_PATH = "interactive"
+
+#: How long a cancelled indexer task is given to unwind before the fan-out
+#: returns without it. Cancellation lands at the politeness gate's sleep or at
+#: the httpx read — both are prompt — so this is insurance, not a wait.
+CANCEL_GRACE_SECONDS = 1.0
+
+#: Strong references to cancelled indexer tasks that had not finished unwinding
+#: when the fan-out returned, so the loop never destroys a pending task (each
+#: entry removes itself on completion). Bounded by the fan-out width.
+_STRAGGLERS: set[asyncio.Task] = set()
 
 
 def make_indexer_factory(settings: Settings) -> HttpClientFactory:
@@ -110,6 +139,60 @@ def _query_target(series: SeriesRow, issue: IssueRow | None) -> QueryTarget:
         issue_number=issue.issue_number if issue is not None else None,
         year=series.start_year,
     )
+
+
+def effective_search_budget(settings: Settings | None) -> float | None:
+    """The enforced per-indexer interactive budget: the configured value clamped
+    into the safe range (with a one-line warning when clamping), mirroring
+    :func:`foragerr.metadata.ratelimit.effective_interval` (FRG-SRCH-015).
+
+    The safe range is ``SEARCH_BUDGET_FLOOR`` up to whichever is SMALLER of
+    ``SEARCH_BUDGET_CEILING`` and the deployment's own listener request guard
+    less ``SEARCH_BUDGET_LISTENER_MARGIN``. The absolute ceiling alone is not
+    enough: it is 60 s while the default guard is 30 s, so a configured 31..60
+    would sail past the clamp and silently reinstate the 503 the budget exists
+    to prevent. Deriving the ceiling from the CONFIGURED guard also means a
+    deployment that lowers the guard automatically tightens the budget with it.
+
+    The floor still wins on a pathologically small guard (a 1 s guard would
+    otherwise compute a negative ceiling): a budget below the floor cancels
+    every indexer before its first page, which is never the more useful failure.
+
+    ``None`` settings (the callers that pass no configuration) mean no budget —
+    the unbudgeted fan-out, exactly as before this setting existed."""
+    if settings is None:
+        return None
+    configured = float(settings.indexer_search_time_budget_seconds)
+    guard = float(settings.listener_request_timeout_seconds)
+    ceiling = max(
+        SEARCH_BUDGET_FLOOR,
+        min(SEARCH_BUDGET_CEILING, guard - SEARCH_BUDGET_LISTENER_MARGIN),
+    )
+    clamped = min(max(configured, SEARCH_BUDGET_FLOOR), ceiling)
+    if clamped != configured:
+        logger.warning(
+            "config: indexer_search_time_budget_seconds=%s is outside the safe "
+            "range %s..%s (bounded by listener_request_timeout_seconds=%s); "
+            "clamped to %s",
+            configured,
+            SEARCH_BUDGET_FLOOR,
+            ceiling,
+            guard,
+            clamped,
+        )
+    return clamped
+
+
+def search_budget_for_path(settings: Settings | None, path: str) -> float | None:
+    """The per-indexer time budget for ``path`` — ``None`` when unbudgeted.
+
+    The budget is an INTERACTIVE-path property (design decision D1): a person is
+    waiting behind the listener's request guard, so a slow indexer must not hold
+    the response. Scheduled work (``auto``/``rss``) has no listener and values
+    politeness over latency, so it is never budgeted."""
+    if path != BUDGETED_PATH:
+        return None
+    return effective_search_budget(settings)
 
 
 def _failed_settings_outcome(row: IndexerRow) -> IndexerSearchOutcome:
@@ -193,6 +276,19 @@ async def prepare_series(
     )
 
 
+def _being_cancelled() -> bool:
+    """Whether the running task has a cancellation in flight.
+
+    ``Task.cancelling()`` counts ``cancel()`` calls the task has not yet
+    resolved, so it is true from the moment the budget's cancel is issued right
+    through the unwind — which is the whole window in which an incidental
+    exception must not be mistaken for a provider failure. Outside a task (a
+    direct call in a test or script) there is nothing to be cancelled.
+    """
+    task = asyncio.current_task()
+    return task is not None and task.cancelling() > 0
+
+
 async def _search_one_indexer(
     row: IndexerRow,
     target: QueryTarget,
@@ -202,6 +298,7 @@ async def _search_one_indexer(
     caps_cache,
     retention_days: int | None,
     min_interval: float,
+    interactive: bool = False,
 ) -> IndexerSearchOutcome:
     """Search one indexer, mapping even an unexpected error to a failed outcome.
 
@@ -218,24 +315,41 @@ async def _search_one_indexer(
             caps_cache=caps_cache,
             retention_days=retention_days,
             min_interval=min_interval,
+            interactive=interactive,
         )
     except Exception as exc:  # noqa: BLE001 — last-resort isolation
         logger.exception(
             "indexer search raised unexpectedly; isolating provider",
             extra={"indexer_id": row.id, "indexer_name": row.name},
         )
-        # Penalise the crashing provider on the ladder like any other failure...
-        try:
-            await backoff.record_failure(
-                PROVIDER_INDEXER,
-                row.id,
-                reason=f"unexpected error: {type(exc).__name__}",
+        # Penalise the crashing provider on the ladder like any other failure —
+        # UNLESS this task is already being cancelled. ``CancelledError`` itself
+        # is a ``BaseException`` and passes through untouched, but an ordinary
+        # exception raised while a cancelled task unwinds (a client's cleanup
+        # blowing up on a half-closed socket) lands here looking exactly like a
+        # crash. Recording that would punish a merely SLOW indexer on the
+        # back-off ladder, which is precisely what the timeout design refuses to
+        # do (FRG-SRCH-015) — and the ``await`` below would be cut short by the
+        # pending cancellation anyway. A cancelled context therefore never
+        # touches the ladder.
+        if _being_cancelled():
+            logger.info(
+                "indexer search raised while cancelled; leaving the ladder "
+                "untouched (a slow indexer is not a failing one)",
+                extra={"indexer_id": row.id, "indexer_name": row.name},
             )
-        except Exception:  # noqa: BLE001 — never let recording mask the search
-            logger.exception(
-                "failed to record back-off for crashing indexer",
-                extra={"indexer_id": row.id},
-            )
+        else:
+            try:
+                await backoff.record_failure(
+                    PROVIDER_INDEXER,
+                    row.id,
+                    reason=f"unexpected error: {type(exc).__name__}",
+                )
+            except Exception:  # noqa: BLE001 — never let recording mask the search
+                logger.exception(
+                    "failed to record back-off for crashing indexer",
+                    extra={"indexer_id": row.id},
+                )
         # ...and synthesize an outcome with a NON-None failure naming the class.
         return IndexerSearchOutcome(
             indexer_id=row.id,
@@ -244,6 +358,156 @@ async def _search_one_indexer(
                 f"indexer search crashed: {type(exc).__name__}: {exc}"
             ),
         )
+
+
+def _timed_out_outcome(row: IndexerRow, budget: float) -> IndexerSearchOutcome:
+    """The outcome for an indexer cancelled at the budget (FRG-SRCH-015).
+
+    Carries NO failure and NO candidates: the back-off ladder is untouched (a
+    slow indexer is not a failing one) and a half-read page is never mixed in."""
+    return IndexerSearchOutcome(
+        indexer_id=row.id,
+        indexer_name=row.name,
+        timed_out=True,
+        time_budget_seconds=budget,
+    )
+
+
+def _park_straggler(task: asyncio.Task) -> None:
+    """Hold a reference to a cancelled task still unwinding, so the event loop
+    never garbage-collects a pending task; it drops itself when it finishes.
+
+    Logged, because a task that outlives its grace period is the one thing here
+    that is not self-evidently bounded — a parked straggler is invisible to the
+    operator otherwise, and a recurring one is a real signal about a provider.
+    """
+    _STRAGGLERS.add(task)
+    task.add_done_callback(_STRAGGLERS.discard)
+    logger.info(
+        "cancelled indexer search had not unwound within %.1fs; parked",
+        CANCEL_GRACE_SECONDS,
+        extra={"task": task.get_name(), "parked_total": len(_STRAGGLERS)},
+    )
+
+
+def _rechase_stragglers() -> None:
+    """Re-cancel any straggler still parked from an EARLIER fan-out.
+
+    The residual the grace period cannot close: a task that survives its first
+    cancel (a client swallowing ``CancelledError`` in a cleanup path, say) would
+    otherwise sit in ``_STRAGGLERS`` until the process exits. Re-issuing the
+    cancel at the start of every fan-out bounds that — a straggler is chased
+    again on the next interactive search rather than merely accumulating — while
+    keeping the width bound the set already had: nothing is ever awaited here, so
+    this cannot delay the operator's request.
+    """
+    for task in list(_STRAGGLERS):
+        if not task.done():
+            task.cancel()
+
+
+async def _budgeted_fan(
+    rows: list[IndexerRow],
+    make_search,
+    budget: float,
+) -> list[IndexerSearchOutcome]:
+    """Run each indexer's search as its own task, bounded by ``budget`` seconds.
+
+    Indexers that finished inside the budget contribute their real outcome;
+    still-running ones are cancelled and reported as timed out (FRG-SRCH-015).
+    Cancellation lands where the indexer is actually waiting — the politeness
+    gate's ``asyncio.sleep`` or an httpx read — both of which unwind cleanly:
+    the gate's lock is released by its ``async with`` and its last-request
+    timestamp is only stamped AFTER the sleep, so a cancelled acquire leaves the
+    spacing measured from the last request that really went out (never faster);
+    httpx closes the in-flight response on any ``BaseException`` out of ``send``.
+    ``asyncio.CancelledError`` is a ``BaseException``, so it also passes
+    untouched through the ``except Exception`` isolation in
+    :func:`_search_one_indexer` and in the Newznab client — a timeout can never
+    be mis-recorded as a provider failure on the back-off ladder.
+
+    Entering, it re-cancels any straggler parked by an earlier fan
+    (:func:`_rechase_stragglers`), which is what bounds a task that survived its
+    first cancel. Nothing is awaited there, so it cannot cost the operator."""
+    if not rows:
+        return []  # asyncio.wait() rejects an empty set; nothing to bound
+    _rechase_stragglers()
+    tasks = [
+        asyncio.create_task(make_search(row), name=f"indexer-search-{row.id}")
+        for row in rows
+    ]
+    try:
+        _, pending = await asyncio.wait(tasks, timeout=budget)
+    except BaseException:
+        # The whole request/command was cancelled (shutdown, client hang-up):
+        # take the children down with it rather than orphan live searches — and
+        # PARK each one, exactly as the budget path does. Cancelling and then
+        # dropping the last reference as this frame unwinds is what produces
+        # "Task was destroyed but it is pending!" at shutdown; the park holds the
+        # reference until the child has actually finished unwinding.
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+                _park_straggler(task)
+        raise
+    if pending:
+        for task in pending:
+            task.cancel()
+        # Give cancellation a moment to land so the sockets close before we
+        # return; a straggler beyond that is parked, never awaited into the
+        # operator's request.
+        await asyncio.wait(pending, timeout=CANCEL_GRACE_SECONDS)
+
+    outcomes: list[IndexerSearchOutcome] = []
+    for row, task in zip(rows, tasks, strict=True):
+        if task.cancelled() or not task.done():
+            logger.info(
+                "indexer exceeded the interactive search budget; cancelled",
+                extra={
+                    "indexer_id": row.id,
+                    "indexer_name": row.name,
+                    "budget_seconds": budget,
+                },
+            )
+            if not task.done():
+                _park_straggler(task)
+            outcomes.append(_timed_out_outcome(row, budget))
+        else:
+            # DELIBERATE: a task that finished in the sliver between
+            # ``asyncio.wait`` returning and its cancel being delivered is
+            # ``done()`` and not ``cancelled()``, so it lands here and its FULL
+            # results are reported as ``searched`` even though it technically
+            # missed the deadline by microseconds. Real results in hand beat
+            # discarding them to honour a stopwatch — the budget exists to bound
+            # the operator's WAIT, and that wait already happened. Not a bug;
+            #
+            #
+            # ``result()`` is wrapped because a task can still carry a stored
+            # exception the in-task isolation could not map (an error raised
+            # while it unwound, or a BaseException-derived fault): re-raising
+            # here would abandon the whole fan-out — every remaining indexer's
+            # real results included — over one provider's mess. That is exactly
+            # the wedging FRG-NFR-010 forbids, so it becomes THAT indexer's
+            # failed outcome and the fan completes.
+            try:
+                outcomes.append(task.result())
+            except BaseException as exc:  # noqa: BLE001 — per-provider isolation
+                logger.exception(
+                    "indexer search task ended in an unmapped error; isolating "
+                    "provider",
+                    extra={"indexer_id": row.id, "indexer_name": row.name},
+                )
+                outcomes.append(
+                    IndexerSearchOutcome(
+                        indexer_id=row.id,
+                        indexer_name=row.name,
+                        failure=IndexerUnavailable(
+                            f"indexer search ended unexpectedly: "
+                            f"{type(exc).__name__}: {exc}"
+                        ),
+                    )
+                )
+    return outcomes
 
 
 async def _fan_search(
@@ -255,26 +519,39 @@ async def _fan_search(
     caps_cache,
     retention_days: int | None,
     min_interval: float,
+    time_budget: float | None = None,
+    interactive: bool = False,
 ) -> tuple[list[ReleaseCandidate], list[IndexerSearchOutcome]]:
     """Search every selected indexer concurrently, isolating each so one cannot
     wedge the others (FRG-NFR-010). Outcomes preserve ``rows`` order; the
-    caps-cache and back-off writes are already concurrency-safe."""
-    outcomes = list(
-        await asyncio.gather(
-            *(
-                _search_one_indexer(
-                    row,
-                    target,
-                    factory=factory,
-                    backoff=backoff,
-                    caps_cache=caps_cache,
-                    retention_days=retention_days,
-                    min_interval=min_interval,
-                )
-                for row in rows
-            )
+    caps-cache and back-off writes are already concurrency-safe.
+
+    ``time_budget`` (interactive path only, FRG-SRCH-015) bounds each indexer's
+    share: at the deadline the finished indexers' results are returned and the
+    stragglers are cancelled and reported as timed out. Without it the fan-out
+    is the original unbudgeted gather — scheduled work waits politely.
+
+    ``interactive`` is the same path distinction seen at the politeness gate:
+    these requests take the next slot ahead of background ones queued on the
+    same indexer, so a search issued during an add sweep spends its budget on
+    real pages instead of on the sweep's queue (FRG-SRCH-015)."""
+
+    def make_search(row: IndexerRow):
+        return _search_one_indexer(
+            row,
+            target,
+            factory=factory,
+            backoff=backoff,
+            caps_cache=caps_cache,
+            retention_days=retention_days,
+            min_interval=min_interval,
+            interactive=interactive,
         )
-    )
+
+    if time_budget is None:
+        outcomes = list(await asyncio.gather(*(make_search(row) for row in rows)))
+    else:
+        outcomes = await _budgeted_fan(rows, make_search, time_budget)
     candidates: list[ReleaseCandidate] = []
     for outcome in outcomes:
         candidates.extend(outcome.candidates)
@@ -291,12 +568,25 @@ async def search_prepared(
     caps_cache,
     issue_id: int | None,
     min_interval: float = DEFAULT_MIN_INTERVAL,
+    time_budget: float | None = None,
+    interactive: bool = False,
 ) -> SearchResult | None:
     """Run one issue's search over a prepared series + fleet, and decide.
 
     Returns ``None`` when a requested issue no longer exists (or is not this
     series'). Only the per-issue :class:`SearchTarget` varies from the reusable
-    ``prepared`` context, stamped on with ``dataclasses.replace``."""
+    ``prepared`` context, stamped on with ``dataclasses.replace``.
+
+    ``time_budget`` is opt-in and defaults to unbudgeted, which is exactly what
+    the scheduled backlog/series walks want (they call this directly and never
+    pass one). :func:`run_search` derives it from the fetch path so only the
+    interactive path is bounded (FRG-SRCH-015).
+
+    ``interactive`` likewise defaults to background, so those same walks queue
+    politely; it is a SEPARATE flag from ``time_budget`` rather than
+    ``time_budget is not None`` because the budget is also absent whenever no
+    settings were supplied — a caller with a person waiting would then silently
+    lose its precedence at the gate."""
     series = prepared.series
     issue: IssueRow | None = None
     if issue_id is not None:
@@ -315,6 +605,8 @@ async def search_prepared(
         caps_cache=caps_cache,
         retention_days=fleet.config.retention_days,
         min_interval=min_interval,
+        time_budget=time_budget,
+        interactive=interactive,
     )
     outcomes = outcomes + list(fleet.failed_outcomes)
 
@@ -355,6 +647,12 @@ async def run_search(
     no longer exists. ``issue_id`` set narrows the query to that issue and
     attaches an engine search target so the search-match specification rejects
     wrong-series / wrong-issue hits (FRG-SRCH-006).
+
+    On the ``interactive`` path each indexer is bounded by the configured time
+    budget so a slow provider cannot hold the operator's request past the
+    listener guard; every other path stays unbudgeted (FRG-SRCH-015). That same
+    path also takes precedence at the per-indexer politeness gate, so the budget
+    is spent fetching pages rather than queueing behind a background sweep.
     """
     fleet = await select_fleet(db, settings=settings, path=path)
     prepared = await prepare_series(db, fleet, series_id)
@@ -369,4 +667,6 @@ async def run_search(
         caps_cache=caps_cache,
         issue_id=issue_id,
         min_interval=min_interval,
+        time_budget=search_budget_for_path(settings, path),
+        interactive=path == BUDGETED_PATH,
     )

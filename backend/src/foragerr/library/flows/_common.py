@@ -310,10 +310,22 @@ class RefreshSeriesCommand(BaseCommand):
 
 @register_command
 class ScanSeriesCommand(BaseCommand):
-    """Scan a series' on-disk folder and match files to issues (FRG-SER-005)."""
+    """Scan a series' on-disk folder and match files to issues (FRG-SER-005).
+
+    ``search_after`` carries the add's sweep decision THROUGH the scan
+    (MODIFIED FRG-SER-005, m11-acquisition-responsiveness). The refresh decides
+    whether this add is owed a bounded per-series search, but it must not
+    enqueue one itself: the two commands run on different worker pools, so a
+    sweep enqueued alongside the scan races it and can grab issues the scan is
+    about to satisfy from disk. The scan handler enqueues the sweep once its own
+    matches are committed, which makes the ordering a property of the chain
+    rather than of timing. ``False`` (the default, and every non-add refresh)
+    chains nothing, exactly as before.
+    """
 
     name: Literal["scan-series"] = "scan-series"
     series_id: int
+    search_after: bool = False
 
 
 @register_command

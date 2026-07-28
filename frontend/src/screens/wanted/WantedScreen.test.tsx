@@ -5,7 +5,13 @@ import { renderWithProviders } from '../../test/renderWithProviders';
 import { fakeFetcher } from '../../test/fakeFetcher';
 import { makeFakeSocketFactory } from '../../test/fakeSocket';
 import { WebSocketBridge } from '../../ws/WebSocketBridge';
-import { makeCommand, makeWantedRecord, pageOf } from '../../test/mockData';
+import {
+  makeCommand,
+  makeScheduledTask,
+  makeWantedRecord,
+  pageOf,
+} from '../../test/mockData';
+import { formatDateTime } from '../../lib/format';
 import { WantedScreen } from './WantedScreen';
 
 /**
@@ -91,6 +97,7 @@ describe('FRG-UI-011: wanted screen', () => {
         wantedCalls += 1;
         return pageOf(wantedRecords, { pageSize: 20 });
       }
+      if (path === '/api/v1/system/task') return [];
       throw new Error(`unexpected request: ${path}`);
     });
     const user = userEvent.setup();
@@ -155,7 +162,10 @@ describe('FRG-UI-011: wanted screen', () => {
 
   it('FRG-UI-011 — a wanted WS push invalidates the missing list without manual action', async () => {
     let calls = 0;
-    const { fetcher } = fakeFetcher(() => {
+    const { fetcher } = fakeFetcher((path) => {
+      // The screen also reads the scheduled tasks (FRG-SCHED-012); only the
+      // missing-list fetches are counted here.
+      if (!path.startsWith('/api/v1/wanted/missing')) return [];
       calls += 1;
       return calls === 1
         ? pageOf([wantedRecords[0]], { pageSize: 20 })
@@ -209,5 +219,62 @@ describe('FRG-UI-011: wanted screen', () => {
     await screen.findByTestId('wanted-row-88');
     expect(spy).toHaveBeenCalledWith('/api/v1/wanted/missing?page=2&pageSize=20');
     expect(screen.getByTestId('page-controls-label')).toHaveTextContent('Page 2 of 2');
+  });
+});
+
+/**
+ * FRG-SCHED-012 — "next automatic search" surfaces contextually on Wanted, read
+ * from the SAME scheduled-task resource the Tasks screen uses (no second
+ * endpoint, no second scheduler), and stays silent when there is nothing
+ * truthful to say.
+ */
+describe('FRG-SCHED-012: wanted shows when the machine will look next', () => {
+  const tasksResolver =
+    (tasks: unknown) =>
+    (path: string): unknown => {
+      if (path === '/api/v1/system/task') return tasks;
+      return pageOf(wantedRecords, { pageSize: 20 });
+    };
+
+  it('FRG-SCHED-012 — the backlog-search next-run renders as a quiet next-automatic-search line', async () => {
+    const nextRun = '2026-07-06T03:00:00';
+    const { spy, fetcher } = fakeFetcher(
+      tasksResolver([
+        makeScheduledTask({ name: 'refresh-series', next_run: '2026-07-06T01:00:00' }),
+        makeScheduledTask({
+          name: 'backlog-search',
+          label: 'Backlog Search',
+          next_run: nextRun,
+        }),
+      ]),
+    );
+    renderWithProviders(<WantedScreen />, { fetcher });
+
+    const line = await screen.findByTestId('next-automatic-search');
+    // Read from the scheduler's own next-run data — same source as Tasks.
+    expect(spy).toHaveBeenCalledWith('/api/v1/system/task');
+    expect(line).toHaveTextContent(
+      `Next automatic search at ${formatDateTime(nextRun)}`,
+    );
+  });
+
+  it('FRG-SCHED-012 — no backlog-search task (or no next run) renders no line at all', async () => {
+    const { fetcher } = fakeFetcher(
+      tasksResolver([makeScheduledTask({ name: 'refresh-series' })]),
+    );
+    renderWithProviders(<WantedScreen />, { fetcher });
+
+    await screen.findByTestId('wanted-row-72');
+    expect(screen.queryByTestId('next-automatic-search')).toBeNull();
+
+    const unscheduled = fakeFetcher(
+      tasksResolver([makeScheduledTask({ name: 'backlog-search', next_run: null })]),
+    );
+    renderWithProviders(<WantedScreen />, { fetcher: unscheduled.fetcher });
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId('wanted-row-72').length).toBe(2),
+    );
+    expect(screen.queryByTestId('next-automatic-search')).toBeNull();
   });
 });

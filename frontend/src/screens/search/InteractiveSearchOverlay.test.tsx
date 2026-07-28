@@ -156,3 +156,120 @@ describe('FRG-UI-007: interactive search overlay', () => {
     expect(screen.queryByTestId('grab-error-expired')).toBeNull();
   });
 });
+
+/**
+ * FRG-UI-041 — per-indexer outcomes beside the results: a partial result is
+ * VISIBLY partial (the slow indexer named, with its budget), the all-searched
+ * case stays quiet, and a response without the additive field renders no strip
+ * at all rather than an empty or invented one.
+ */
+describe('FRG-UI-041: per-indexer search outcomes', () => {
+  const enveloped = (indexers: unknown[], releases = mockReleases) => ({
+    releases,
+    indexers,
+  });
+
+  it('FRG-UI-041 — a timed-out indexer is named with its budget, the returned rows still render and grab', async () => {
+    const { spy, fetcher } = fakeFetcher((_path, init) =>
+      init?.method === 'POST'
+        ? { id: 1, name: 'grab-release' }
+        : enveloped([
+            { indexer_id: 3, name: 'DogNZB', outcome: 'searched', budget_seconds: null },
+            { indexer_id: 4, name: 'NZB.su', outcome: 'timed_out', budget_seconds: 20 },
+          ]),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(
+      <InteractiveSearchOverlay issueId={42} onClose={() => {}} />,
+      { fetcher },
+    );
+
+    const strip = await screen.findByTestId('indexer-outcomes');
+    expect(strip).toHaveAttribute('data-state', 'partial');
+    expect(strip).toHaveTextContent('Partial results');
+    // The slow indexer is NAMED, with the budget it hit — never inferred.
+    expect(screen.getByTestId('indexer-outcome-4')).toHaveTextContent(
+      'NZB.su — timed out after 20s',
+    );
+    expect(screen.getByTestId('indexer-outcome-3')).toHaveTextContent(
+      'DogNZB — searched',
+    );
+
+    // The rows that DID come back render and grab exactly as usual.
+    expect(screen.getAllByTestId(/^release-row-/)).toHaveLength(mockReleases.length);
+    await user.click(
+      screen.getByRole('button', { name: 'Grab Saga 041 (2017) (Digital)' }),
+    );
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith(
+        '/api/v1/release',
+        expect.objectContaining({
+          method: 'POST',
+          body: { indexer_id: 3, guid: 'guid-approved-best' },
+        }),
+      ),
+    );
+  });
+
+  it('FRG-UI-041 — every indexer searched renders the quiet form with no warning chrome', async () => {
+    const { fetcher } = fakeFetcher(() =>
+      enveloped([
+        { indexer_id: 3, name: 'DogNZB', outcome: 'searched', budget_seconds: null },
+        { indexer_id: 4, name: 'NZB.su', outcome: 'searched', budget_seconds: null },
+      ]),
+    );
+    renderWithProviders(
+      <InteractiveSearchOverlay issueId={42} onClose={() => {}} />,
+      { fetcher },
+    );
+
+    const strip = await screen.findByTestId('indexer-outcomes');
+    expect(strip).toHaveAttribute('data-state', 'all-searched');
+    expect(strip).toHaveTextContent('Searched 2 indexers: DogNZB, NZB.su');
+    // Quiet: no alarm wording and no per-indexer warning entries.
+    expect(strip.textContent).not.toMatch(/Partial|timed out|failed|backing off/);
+    expect(screen.queryByTestId('indexer-outcome-3')).toBeNull();
+  });
+
+  it('FRG-UI-041 — failed and backing-off indexers are marked, including when nothing came back at all', async () => {
+    const { fetcher } = fakeFetcher(() =>
+      enveloped(
+        [
+          { indexer_id: 3, name: 'DogNZB', outcome: 'failed', budget_seconds: null },
+          { indexer_id: 4, name: 'NZB.su', outcome: 'backing_off', budget_seconds: null },
+        ],
+        [],
+      ),
+    );
+    renderWithProviders(
+      <InteractiveSearchOverlay issueId={42} onClose={() => {}} />,
+      { fetcher },
+    );
+
+    const strip = await screen.findByTestId('indexer-outcomes');
+    expect(strip).toHaveAttribute('data-state', 'partial');
+    expect(screen.getByTestId('indexer-outcome-3')).toHaveTextContent(
+      'DogNZB — failed',
+    );
+    expect(screen.getByTestId('indexer-outcome-4')).toHaveTextContent(
+      'NZB.su — backing off',
+    );
+    // "Nothing found" and "nobody answered" stay distinguishable.
+    expect(
+      screen.getByText('No results from any enabled indexer.'),
+    ).toBeInTheDocument();
+  });
+
+  it('FRG-UI-041 — a response WITHOUT the additive outcomes field renders the rows and no strip', async () => {
+    // The long-standing bare-array shape: an older or cached response.
+    const { fetcher } = fakeFetcher(() => mockReleases);
+    renderWithProviders(
+      <InteractiveSearchOverlay issueId={42} onClose={() => {}} />,
+      { fetcher },
+    );
+
+    await screen.findByTestId('release-row-guid-approved-best');
+    expect(screen.getAllByTestId(/^release-row-/)).toHaveLength(mockReleases.length);
+    expect(screen.queryByTestId('indexer-outcomes')).toBeNull();
+  });
+});

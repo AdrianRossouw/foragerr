@@ -110,11 +110,27 @@ export const downloadClientKind: ProviderKindConfig = {
       'Remove Completed',
       'Remove imported downloads from the download client history.',
     ),
+    {
+      // The client-row priority the API has always accepted (FRG-UI-009) —
+      // same 1..50 semantics as the indexer field. Labelled "Download Client
+      // Priority" so it never collides with an implementation's own queue
+      // priority setting (SABnzbd ships one in its schema).
+      order: 3,
+      name: 'priority',
+      type: 'number',
+      label: 'Download Client Priority',
+      help: 'Priority from 1 (highest) to 50 (lowest). Default: 25.',
+      required: false,
+      secret: false,
+      advanced: true,
+      selectOptions: [],
+    },
   ],
   rowDefaults: {
     name: '',
     enabled: true,
     remove_completed_downloads: true,
+    priority: 25,
   },
   chips: (p: ProviderResource): ProviderChip[] =>
     p.enabled

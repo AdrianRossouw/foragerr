@@ -17,6 +17,9 @@ Components:
   tables and overlaid with :meth:`ProviderBackoff.health` state (a configured
   provider with no back-off row is ``ok``); the checks are owned by those areas
   and only READ here.
+- **completed downloads** — tracked downloads stuck producing no importable
+  files for more consecutive drain cycles than ``import_stall_threshold_cycles``
+  (FRG-DL-015); aggregated into one component with mount/path remediation.
 - **scheduler** — ``scheduler.status()`` succeeding (mirrors the DEP probe).
 - **database** — the in-memory integrity reading (``health.state``) plus the
   age of the newest scheduled backup (a filesystem read — no tracking table).
@@ -38,12 +41,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from foragerr.config import Settings
 from foragerr.db import Database, utcnow
 from foragerr.db.backup import latest_scheduled_backup
-from foragerr.downloads.models import DownloadClientRow
+from foragerr.downloads.models import DownloadClientRow, TrackedDownloadRow
 from foragerr.health.state import current_integrity
 from foragerr.indexers.models import IndexerRow
 from foragerr.keystore import current_keystore, secret_state
@@ -178,6 +181,12 @@ class HealthService:
             component="source-downloads",
             kind="source",
             label="Store source downloads",
+        )
+        components += await self._safe(
+            lambda: self._stalled_imports_component(),
+            component="downloads-stalled",
+            kind="download",
+            label="Completed downloads",
         )
         components += await self._safe(
             lambda: self._scheduler_component(),
@@ -629,8 +638,6 @@ class HealthService:
         lines. The component disappears the moment no failed rows remain (a
         retry that re-queues clears the state), so it needs no explicit reset.
         """
-        from sqlalchemy import func
-
         from foragerr.sources.models import SourceEntitlementRow, SourceRow
 
         async with self._db.read_session() as session:
@@ -678,6 +685,69 @@ class HealthService:
                 )
             )
         return components
+
+    async def _stalled_imports_component(self) -> list[ComponentHealth]:
+        """Completed downloads the importer cannot see, AGGREGATED (FRG-DL-015).
+
+        A download the client reports as finished whose path yields no
+        importable files is re-tried every drain cycle forever — honestly, and
+        silently. ``import_stall_count`` counts those consecutive verdicts (the
+        tracking re-queue deliberately does not clear it), so any row at or past
+        ``import_stall_threshold_cycles`` has been failing for at least that many
+        minutes and is almost certainly a path-visibility problem rather than a
+        bad release.
+
+        ONE component for the whole condition, never one per row — carrying the
+        count and the OLDEST stall, mirroring the store-source downloads
+        precedent. It is derived purely from current rows, so it clears itself
+        the moment the last stalled row imports or is removed; there is no state
+        to reset. Below the threshold nothing is emitted: the queue row already
+        shows the per-cycle truth, and health must not shout about one unlucky
+        cycle.
+        """
+        # Floor of 2 defensively re-applied here as well as on the config field:
+        # a threshold of 1 (or 0) would turn every first blocked cycle — the
+        # normal, self-healing case — into a health warning.
+        threshold = max(2, int(self._settings.import_stall_threshold_cycles))
+        async with self._db.read_session() as session:
+            stalled, oldest, newest = (
+                await session.execute(
+                    select(
+                        func.count(TrackedDownloadRow.id),
+                        func.min(TrackedDownloadRow.first_stalled_at),
+                        func.max(TrackedDownloadRow.updated_at),
+                    ).where(TrackedDownloadRow.import_stall_count >= threshold)
+                )
+            ).one()
+
+        if not stalled:
+            return []
+        oldest_at = _as_datetime(oldest)
+        oldest_note = f"; oldest stalled since {_stamp(oldest_at)}" if oldest_at else ""
+        return [
+            ComponentHealth(
+                component="downloads-stalled",
+                kind="download",
+                label="Completed downloads",
+                state=_STATE_DEGRADED,
+                message=(
+                    f"{stalled} completed download(s) have produced no "
+                    f"importable files for {threshold}+ consecutive import "
+                    f"attempts{oldest_note}"
+                ),
+                remediation=(
+                    "The download client reports these as finished but foragerr "
+                    "finds no files at the path it was given — usually the "
+                    "client and foragerr disagree about where the files are. "
+                    "Check that the client's completed-download folder is "
+                    "mounted into foragerr at the same path, or add a remote "
+                    "path mapping for that client under Settings → Download "
+                    "Clients. The items stay in the queue and import "
+                    "automatically once the path resolves."
+                ),
+                last_failure=_as_datetime(newest),
+            )
+        ]
 
     async def _scheduler_component(self) -> ComponentHealth:
         label = "Scheduler"

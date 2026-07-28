@@ -18,12 +18,15 @@ constructs HTTP clients for indexer traffic.
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, ValidationError
+from sqlalchemy import select, text
 
 from foragerr.api.errors import ApiError
+from foragerr.db.first_run import APP_STATE_TABLE
 from foragerr.http import HttpClientFactory
 from foragerr.keystore import (
     ENC_PREFIX,
@@ -57,7 +60,22 @@ from foragerr.indexers.repo import (
 )
 from foragerr.indexers.schema import schema_for
 
+logger = logging.getLogger("foragerr.api.indexers")
+
 router = APIRouter(prefix="/indexer", tags=["indexer"])
+
+#: ``triggered_by`` stamped on the FRG-SCHED-012 first-enabled-indexer sweep, so
+#: job history distinguishes it from the scheduled tick and a manual run.
+FIRST_INDEXER_TRIGGER = "first-indexer"
+
+#: Persisted one-shot marker recording that this database's first-enabled-indexer
+#: sweep has been claimed (FRG-SCHED-012). Lives in the existing ``app_state``
+#: key/value table beside ``first_run_ddl_seed`` and ``creators_backfill_done``,
+#: which is the established idiom for "this happens once per database, ever" —
+#: no migration needed, and it survives every kind of row churn.
+FIRST_INDEXER_MARKER_KEY = "first_indexer_sweep"
+#: Marker value (presence of the row is what matters; the value is descriptive).
+FIRST_INDEXER_MARKER_VALUE = "done"
 
 
 class IndexerImplementationSchema(BaseModel):
@@ -211,6 +229,11 @@ async def create_indexer_endpoint(
         raise _validation_error(exc) from exc
 
     db = request.app.state.db
+    # Captured BEFORE the write (FRG-SCHED-012): the sweep is owed to the
+    # zero-to-one TRANSITION. Reading it afterwards would make two simultaneous
+    # first creates each see the other's row and conclude the deployment was
+    # already acquiring — losing the one sweep a fresh install actually needs.
+    had_enabled = await _had_enabled_indexer(db)
     row = await create_indexer(
         db,
         name=body.name,
@@ -221,6 +244,9 @@ async def create_indexer_endpoint(
         enable_rss=body.enable_rss,
         enable_auto=body.enable_auto,
         enable_interactive=body.enable_interactive,
+    )
+    await _maybe_first_indexer_sweep(
+        request, enabled=row.enabled, had_enabled_indexer=had_enabled
     )
     return IndexerResource.from_row(row, model)
 
@@ -265,9 +291,20 @@ async def update_indexer_endpoint(
         except ValidationError as exc:
             raise _validation_error(exc) from exc
 
+    # Both captured BEFORE the write: the sweep is owed to the disabled→enabled
+    # TRANSITION on a deployment that had nothing enabled, not to the enabled
+    # state. Re-saving the only enabled indexer (a name or priority edit) is not
+    # a transition and must fire nothing.
+    became_enabled = body.enabled is True and not existing.enabled
+    had_enabled = await _had_enabled_indexer(db) if became_enabled else True
+
     row = await update_indexer(db, indexer_id, **updates)
     # get_indexer already proved the row exists; update runs in one writer txn.
     assert row is not None
+    if became_enabled:
+        await _maybe_first_indexer_sweep(
+            request, enabled=row.enabled, had_enabled_indexer=had_enabled
+        )
     return IndexerResource.from_row(row, _settings_for_response(row))
 
 
@@ -319,6 +356,98 @@ async def indexer_test(body: IndexerTestRequest, request: Request) -> IndexerTes
         categories=caps.categories,
         degraded=caps.degraded,
     )
+
+
+async def _had_enabled_indexer(db) -> bool:
+    """Whether ANY indexer is enabled right now — read BEFORE the write.
+
+    The "was this deployment already acquiring?" question. Taken before the
+    row is created/enabled precisely so two simultaneous first creates both
+    answer ``False`` (see :func:`_maybe_first_indexer_sweep`); read after the
+    write, each would see the other's row and the deployment's very first sweep
+    would be lost.
+    """
+    async with db.read_session() as session:
+        found = await session.scalar(
+            select(IndexerRow.id).where(IndexerRow.enabled.is_(True)).limit(1)
+        )
+    return found is not None
+
+
+async def _claim_first_indexer_sweep(db) -> bool:
+    """Atomically claim the ONE first-indexer sweep this database ever owes.
+
+    A persisted marker row in ``app_state`` — the same one-shot idiom as
+    ``first_run_ddl_seed`` and ``creators_backfill_done`` — is exact where a
+    live row count cannot be: it distinguishes "the first indexer ever" from
+    "the first indexer again after the last one was deleted" regardless of how
+    the rows have churned.
+
+    ``INSERT ... WHERE NOT EXISTS`` inside a single ``write_session`` makes the
+    claim transactional: every write goes through the one writer lock under
+    SQLite's ``BEGIN IMMEDIATE``, so of two concurrent claimants exactly one
+    sees ``rowcount == 1`` and owns the sweep. Returns True for the winner only.
+    """
+    async with db.write_session() as session:
+        result = await session.execute(
+            text(
+                f"INSERT INTO {APP_STATE_TABLE} (key, value) "
+                "SELECT :key, :value "
+                f"WHERE NOT EXISTS (SELECT 1 FROM {APP_STATE_TABLE} WHERE key = :key)"
+            ),
+            {"key": FIRST_INDEXER_MARKER_KEY, "value": FIRST_INDEXER_MARKER_VALUE},
+        )
+        return (result.rowcount or 0) == 1
+
+
+async def _maybe_first_indexer_sweep(
+    request: Request, *, enabled: bool, had_enabled_indexer: bool
+) -> None:
+    """Enqueue ONE backlog search when the first enabled indexer appears
+    (FRG-SCHED-012).
+
+    The fresh-install order is series first, indexers second, so a new install
+    would otherwise download nothing until the six-hour backlog tick. Three
+    conditions, in this order:
+
+    1. this write left an indexer ENABLED (a disabled row acquires nothing);
+    2. the deployment had NO enabled indexer beforehand — the zero-to-one
+       transition, read before the write so concurrent first creates agree;
+    3. the persisted one-shot marker is still unclaimed, and this call wins it.
+
+    (3) is what makes the trigger correct rather than merely plausible: an
+    inference from the live enabled-count could be reopened by later deletes,
+    disables, or re-enables, and could miss two concurrent first creates
+    entirely. The marker gives one sweep per database, ever, no matter how the
+    rows churn.
+
+    Everything downstream is unchanged — the same ``backlog-search`` command the
+    scheduler runs, bounded by its own wanted walk with the usual politeness
+    delay, and collapsed by CommandService's payload dedup (FRG-SCHED-003) if
+    one is already queued or running.
+
+    Best-effort by construction: configuring an indexer must succeed even if the
+    sweep cannot be queued, so a missing command service or an enqueue failure
+    is logged, never surfaced — the scheduled tick remains the backstop. The
+    marker is claimed BEFORE the enqueue deliberately: a failed enqueue must not
+    leave the claim open for a later save to re-fire, since the tick already
+    covers it.
+    """
+    if not enabled or had_enabled_indexer:
+        return
+    commands = getattr(request.app.state, "commands", None)
+    if commands is None:  # pragma: no cover - always wired by create_app
+        return
+    if not await _claim_first_indexer_sweep(request.app.state.db):
+        return  # another request (or an earlier one) already owned this sweep
+    try:
+        await commands.enqueue("backlog-search", triggered_by=FIRST_INDEXER_TRIGGER)
+    except Exception:  # noqa: BLE001 - the indexer is saved; the tick backstops
+        logger.warning(
+            "first-indexer sweep could not be enqueued; the scheduled "
+            "backlog search still covers it",
+            exc_info=True,
+        )
 
 
 def _reject_reserved_secret_prefix(implementation: str, supplied: dict[str, Any]) -> None:

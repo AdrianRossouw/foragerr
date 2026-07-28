@@ -36,6 +36,35 @@
   border-color: var(--color-warning);
 }
 
+/* --- Per-indexer outcome strip (FRG-UI-041) --- */
+
+/* The normal case: quiet muted text, no warning chrome whatsoever. */
+.outcomeStrip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-xs) var(--spacing-sm);
+  align-items: baseline;
+  margin: 0 0 var(--spacing-sm);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+/* Something did not contribute — warn, but stay a strip, not a banner. */
+.outcomeStripWarn {
+  composes: outcomeStrip;
+  color: var(--color-warning);
+}
+
+.outcomeOk {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.outcomeBad {
+  color: var(--color-warning);
+  white-space: nowrap;
+}
+
 /* --- Grab --- */
 
 .grabBtn {

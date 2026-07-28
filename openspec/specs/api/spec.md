@@ -200,7 +200,7 @@ The API SHALL expose a paged `GET /queue` built from tracked downloads (not live
 
 ### Requirement: FRG-API-008 — Release endpoint: interactive search with cached grab
 
-The API SHALL provide `GET /release?issueId=` performing a live interactive search that returns every decision — approved, temporarily rejected, and rejected — each with human-readable rejection reasons, quality/format, score, indexer, size, and age; results SHALL be cached server-side (~30 min, keyed indexerId+guid) so that `POST /release {guid, indexerId}` grabs from cache and returns a clear "search again" error when the cache entry has expired.
+The API SHALL provide `GET /release?issueId=` performing a live interactive search that returns every decision — approved, temporarily rejected, and rejected — each with human-readable rejection reasons, quality/format, score, indexer, size, and age; results SHALL be cached server-side (~30 min, keyed indexerId+guid) so that `POST /release {guid, indexerId}` grabs from cache and returns a clear "search again" error when the cache entry has expired. The response SHALL additionally carry per-indexer outcomes (searched, timed out with the bounding budget, failed, backing off — FRG-SRCH-015) as an additive field, so a partial result is machine-readably partial.
 
 - **Milestone**: M1
 - **Source**: sonarr-architecture.md §7.2 release endpoint semantics ("Copy this exactly"), §2.4 interactive search returning rejected decisions.
@@ -225,6 +225,17 @@ The API SHALL provide `GET /release?issueId=` performing a live interactive sear
 
 - **WHEN** a client calls `POST /api/v1/release {indexerId, guid}` for a key that is absent or whose cache entry has expired
 - **THEN** the endpoint returns a deterministic 404-class response in the uniform error shape and does not silently re-run the search
+
+#### Scenario: Per-indexer outcomes are on the wire
+
+- **WHEN** a search completes with mixed indexer outcomes
+- **THEN** the response envelope carries the decision rows and a
+  per-indexer outcomes list naming each indexer's result (searched /
+  timed out with its budget / failed / backing off, with candidate
+  counts), and a fully successful search reports every indexer as
+  searched. (Pre-1.0 shape change: the former bare decision array
+  became this envelope; the bundled frontend is the sole consumer and
+  moved in lockstep — recorded in the release's upgrade notes.)
 
 ### Requirement: FRG-API-009 — Provider schema and test endpoints
 

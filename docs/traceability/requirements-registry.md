@@ -177,6 +177,7 @@ milestone-to-minor mapping. No id renumbered.
 | FRG-SRCH-012 | Delay profile | srch | approved | B |
 | FRG-SRCH-013 | Pending release queue | srch | approved | B |
 | FRG-SRCH-014 | Interactive search | srch | implemented | M1 |
+| FRG-SRCH-015 | Per-indexer interactive time budget with partial results | srch | implemented | M11 |
 | FRG-DL-001 | Download client abstraction | dl | implemented | M1 |
 | FRG-DL-002 | Client configuration and selection | dl | implemented | M1 |
 | FRG-DL-003 | SABnzbd add via file upload | dl | implemented | M1 |
@@ -191,6 +192,7 @@ milestone-to-minor mapping. No id renumbered.
 | FRG-DL-012 | Blocklist | dl | implemented | M1 |
 | FRG-DL-013 | Automatic re-search after failure | dl | implemented | M1 |
 | FRG-DL-014 | SABnzbd retry passthrough | dl | approved | B |
+| FRG-DL-015 | Import-visibility stall escalation | dl | implemented | M11 |
 | FRG-DDL-001 | DDL client behind the common abstraction | ddl | implemented | M1 |
 | FRG-DDL-002 | GetComics search provider | ddl | implemented | M1 |
 | FRG-DDL-003 | Versioned page adapter with fixtures | ddl | implemented | M1 |
@@ -327,6 +329,7 @@ milestone-to-minor mapping. No id renumbered.
 | FRG-UI-038 | Automated accessibility conformance of core screens | ui | implemented | M9 |
 | FRG-UI-039 | Per-row ComicVine search picker | ui | implemented | M11 |
 | FRG-UI-040 | ComicVine budget meter | ui | implemented | M11 |
+| FRG-UI-041 | Per-indexer search outcomes | ui | implemented | M11 |
 | FRG-SRC-001 | store-source model and connection lifecycle | sources | implemented | M6 |
 | FRG-SRC-002 | Humble session-cookie authentication | sources | implemented | M6 |
 | FRG-SRC-003 | entitlement sync | sources | implemented | M6 |
@@ -400,6 +403,7 @@ milestone-to-minor mapping. No id renumbered.
 | FRG-SCHED-009 | in-process event bus | sched | implemented | M1 |
 | FRG-SCHED-010 | command status push to UI | sched | implemented | M2 |
 | FRG-SCHED-011 | graceful queue drain on shutdown | sched | implemented | M1 |
+| FRG-SCHED-012 | First-indexer sweep and next-search visibility | sched | implemented | M11 |
 | FRG-DEP-001 | Docker image per linuxserver.io conventions | dep | implemented | M1 |
 | FRG-DEP-002 | all persistent state under /config | dep | implemented | M1 |
 | FRG-DEP-003 | configuration via environment variables and config file | dep | implemented | M1 |

@@ -29,7 +29,9 @@ def _no_rate_gate(monkeypatch):
     """Neutralize the per-indexer 2 s spacing gate — the release API path uses
     the production ``DEFAULT_MIN_INTERVAL``, and these transport-stubbed tests
     have no reason to wait it out."""
-    async def _immediate(indexer_id: int, min_interval: float = 0.0) -> None:
+    async def _immediate(
+        indexer_id: int, min_interval: float = 0.0, *, priority: bool = False
+    ) -> None:
         return
 
     monkeypatch.setattr("foragerr.indexers.ratelimit.acquire", _immediate)
@@ -87,7 +89,8 @@ def test_get_release_returns_all_decisions_sorted_with_cache_keys(
 
     resp = client.get("/api/v1/release", params={"issueId": issue_id})
     assert resp.status_code == 200
-    rows = resp.json()
+    body = resp.json()
+    rows = body["releases"]
     assert len(rows) == 2
     # Comparator order: the approved release sorts first.
     assert rows[0]["approved"] is True
@@ -101,6 +104,16 @@ def test_get_release_returns_all_decisions_sorted_with_cache_keys(
     for row in rows:
         assert row["indexer_id"] == indexer_id
         assert row["guid"]
+    # The quiet case: the one indexer searched, nothing timed out.
+    assert body["indexers"] == [
+        {
+            "indexer_id": indexer_id,
+            "name": "DogNZB",
+            "outcome": "searched",
+            "budget_seconds": None,
+            "candidate_count": 2,
+        }
+    ]
 
 
 @pytest.mark.req("FRG-API-008")
@@ -109,7 +122,9 @@ def test_post_release_cache_hit_enqueues_grab_command(client, tmp_path):
     series_id, issue_id, indexer_id = client.portal.call(partial(_setup, db, None))
     _inject_feed(client, tmp_path, feed_handler("Saga 007 (2012)"))
 
-    rows = client.get("/api/v1/release", params={"issueId": issue_id}).json()
+    rows = client.get(
+        "/api/v1/release", params={"issueId": issue_id}
+    ).json()["releases"]
     approved = next(r for r in rows if r["approved"])
 
     resp = client.post(
@@ -143,7 +158,9 @@ def test_post_release_after_expiry_returns_404_never_researches(client, tmp_path
     series_id, issue_id, indexer_id = client.portal.call(partial(_setup, db, None))
     _inject_feed(client, tmp_path, feed_handler("Saga 007 (2012)"))
 
-    rows = client.get("/api/v1/release", params={"issueId": issue_id}).json()
+    rows = client.get(
+        "/api/v1/release", params={"issueId": issue_id}
+    ).json()["releases"]
     approved = next(r for r in rows if r["approved"])
 
     # Force the cached entry to be expired.

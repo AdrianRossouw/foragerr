@@ -308,3 +308,125 @@ def test_put_invalid_merged_settings_is_field_precise_400(client):
     )
     assert resp.status_code == 400
     assert resp.json()["errors"][0]["field"] == "settings.categories"
+
+
+# --- first-enabled-indexer sweep (FRG-SCHED-012) ----------------------------
+#
+# The fresh-install order is series first, indexers second: without this, a new
+# install downloads nothing until the six-hour backlog tick (rig finding #2).
+# The trigger is the enabled COUNT going zero-to-one — never "an indexer was
+# saved" — so a populated deployment stays silent no matter what it edits.
+
+
+async def _settle_commands(db) -> int:
+    """Retire every existing command row and return the id watermark.
+
+    Not a delete (job_history references commands), and not a status filter
+    (a worker may finish the sweep before the assertion runs). Retiring the
+    queue means payload dedup — which only collapses queued/started rows
+    (FRG-SCHED-003) — cannot hide a genuine re-fire, and the watermark means a
+    row from an EARLIER step can never satisfy a later assertion.
+    """
+    from sqlalchemy import func, select, update
+
+    from foragerr.db import CommandRow
+
+    async with db.write_session() as session:
+        await session.execute(update(CommandRow).values(status="completed"))
+        return int(await session.scalar(select(func.max(CommandRow.id))) or 0)
+
+
+async def _sweeps_since(db, watermark: int) -> list[str]:
+    """The ``triggered_by`` of every backlog-search enqueued after ``watermark``."""
+    from sqlalchemy import select
+
+    from foragerr.db import CommandRow
+
+    async with db.read_session() as session:
+        return [
+            row.triggered_by
+            for row in (
+                await session.execute(
+                    select(CommandRow)
+                    .where(
+                        CommandRow.name == "backlog-search",
+                        CommandRow.id > watermark,
+                    )
+                    .order_by(CommandRow.id)
+                )
+            )
+            .scalars()
+            .all()
+        ]
+
+
+@pytest.mark.req("FRG-SCHED-012")
+def test_first_enabled_indexer_enqueues_one_backlog_sweep(client):
+    db = client.app.state.db
+    mark = client.portal.call(_settle_commands, db)
+
+    assert client.post("/api/v1/indexer", json=_create_body()).status_code == 201
+
+    # Exactly one, and stamped so job history distinguishes it from the tick.
+    assert client.portal.call(_sweeps_since, db, mark) == ["first-indexer"]
+
+
+@pytest.mark.req("FRG-SCHED-012")
+def test_a_later_indexer_create_does_not_refire_the_sweep(client):
+    db = client.app.state.db
+    client.post("/api/v1/indexer", json=_create_body())
+    mark = client.portal.call(_settle_commands, db)
+
+    assert (
+        client.post("/api/v1/indexer", json=_create_body(name="NZBsu")).status_code
+        == 201
+    )
+
+    assert client.portal.call(_sweeps_since, db, mark) == []
+
+
+@pytest.mark.req("FRG-SCHED-012")
+def test_creating_a_disabled_indexer_sweeps_nothing_until_it_is_enabled(client):
+    db = client.app.state.db
+    mark = client.portal.call(_settle_commands, db)
+
+    created = client.post("/api/v1/indexer", json=_create_body(enabled=False)).json()
+    assert client.portal.call(_sweeps_since, db, mark) == []
+
+    # The enable transition is the moment the deployment has been waiting for.
+    assert (
+        client.put(
+            f"/api/v1/indexer/{created['id']}", json={"enabled": True}
+        ).status_code
+        == 200
+    )
+    assert client.portal.call(_sweeps_since, db, mark) == ["first-indexer"]
+
+
+@pytest.mark.req("FRG-SCHED-012")
+def test_re_saving_the_only_enabled_indexer_does_not_refire(client):
+    db = client.app.state.db
+    created = client.post("/api/v1/indexer", json=_create_body()).json()
+    mark = client.portal.call(_settle_commands, db)
+
+    # Still exactly one enabled indexer — but no TRANSITION, so nothing is owed.
+    client.put(f"/api/v1/indexer/{created['id']}", json={"name": "DogNZB (renamed)"})
+    client.put(f"/api/v1/indexer/{created['id']}", json={"enabled": True})
+    client.put(f"/api/v1/indexer/{created['id']}", json={"priority": 10})
+
+    assert client.portal.call(_sweeps_since, db, mark) == []
+
+
+@pytest.mark.req("FRG-SCHED-012")
+def test_re_enabling_on_a_populated_deployment_sweeps_nothing(client):
+    """Two enabled indexers, one toggled off and back on: the enabled count
+    never returns to zero, so this is not a first-indexer moment."""
+    db = client.app.state.db
+    client.post("/api/v1/indexer", json=_create_body())
+    second = client.post("/api/v1/indexer", json=_create_body(name="NZBsu")).json()
+    client.put(f"/api/v1/indexer/{second['id']}", json={"enabled": False})
+    mark = client.portal.call(_settle_commands, db)
+
+    client.put(f"/api/v1/indexer/{second['id']}", json={"enabled": True})
+
+    assert client.portal.call(_sweeps_since, db, mark) == []

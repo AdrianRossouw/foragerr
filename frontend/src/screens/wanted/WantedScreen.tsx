@@ -5,10 +5,15 @@ import { Toolbar } from '../../components/Toolbar';
 import { PageControls } from '../../components/PageControls';
 import { PersonIcon, SearchIcon } from '../../components/icons';
 import { InteractiveSearchOverlay } from '../search/InteractiveSearchOverlay';
-import { useRunCommand, useWantedPage, useWatchedCommand } from '../../api/hooks';
+import {
+  useRunCommand,
+  useSystemTasks,
+  useWantedPage,
+  useWatchedCommand,
+} from '../../api/hooks';
 import { queryKeys } from '../../api/queryKeys';
 import type { WantedIssueRecord } from '../../api/types';
-import { formatDate } from '../../lib/format';
+import { formatDate, formatDateTime } from '../../lib/format';
 import styles from './WantedScreen.module.css';
 
 /**
@@ -24,6 +29,28 @@ import styles from './WantedScreen.module.css';
 /** The release date column tolerates whichever date field the backend serves. */
 function releaseDate(record: WantedIssueRecord): string | null {
   return record.store_date ?? record.cover_date ?? null;
+}
+
+const BACKLOG_SEARCH_TASK = 'backlog-search';
+
+/**
+ * "Next automatic search at …" (FRG-SCHED-012) — a READ of the scheduler's own
+ * next-run data (GET /api/v1/system/task, the Tasks screen's source), never a
+ * second scheduler and never a second endpoint. Renders nothing when the task
+ * or its next-run is absent: no invented promise about when the machine looks.
+ */
+function NextAutomaticSearch() {
+  const { data } = useSystemTasks();
+  // Defensive: only ever index into a real array from this shared query.
+  const tasks = Array.isArray(data) ? data : [];
+  const nextRun = tasks.find((t) => t.name === BACKLOG_SEARCH_TASK)?.next_run;
+  if (!nextRun) return null;
+
+  return (
+    <p className={styles.nextSearch} data-testid="next-automatic-search">
+      Next automatic search at {formatDateTime(nextRun)}
+    </p>
+  );
 }
 
 export function WantedScreen() {
@@ -83,6 +110,7 @@ export function WantedScreen() {
         }
       />
       <div>
+        <NextAutomaticSearch />
         {isLoading && <p className={styles.state}>Loading wanted issues…</p>}
         {isError && <p className={styles.state}>Could not load wanted issues.</p>}
         {!isLoading && !isError && records.length === 0 && (

@@ -125,6 +125,39 @@ export interface ReleaseDecision {
   rejections: string[];
 }
 
+/**
+ * How one indexer fared in an interactive search (FRG-API-008 / FRG-SRCH-015,
+ * rendered by FRG-UI-041). `searched` is the normal case; `timed_out` means the
+ * per-indexer time budget lapsed and that indexer's results are NOT in the row
+ * set (`budget_seconds` carries the bound it hit); `failed` and `backing_off`
+ * are the pre-existing IndexerSearchOutcome failure states.
+ */
+export type IndexerOutcomeState =
+  | 'searched'
+  | 'timed_out'
+  | 'failed'
+  | 'backing_off';
+
+/** One per-indexer outcome row on the interactive-search response. */
+export interface IndexerOutcome {
+  indexer_id: number;
+  name: string;
+  outcome: IndexerOutcomeState;
+  /** Present on `timed_out`: the per-indexer budget, in seconds. */
+  budget_seconds: number | null;
+}
+
+/**
+ * The normalized interactive-search result the UI consumes: the comparator-
+ * ordered decisions plus the per-indexer outcomes. The outcomes field is
+ * ADDITIVE on the wire — a response that predates it (or a cached one) simply
+ * yields an empty `indexers` list and the UI renders no strip.
+ */
+export interface ReleaseSearchResult {
+  decisions: ReleaseDecision[];
+  indexers: IndexerOutcome[];
+}
+
 /*
  * ---------------------------------------------------------------------------
  * Backend-true resource shapes (changes 3-5 API surface, snake_case fields —

@@ -23,6 +23,14 @@
   composes: state from '../../components/dataTable.module.css';
 }
 
+/* Quiet contextual scheduler line (FRG-SCHED-012) — information, not alarm. */
+.nextSearch {
+  margin: 0 0 var(--spacing-sm);
+  padding: 0 var(--spacing-md);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
 /* --- Per-screen columns / controls --- */
 
 .actionsCell {

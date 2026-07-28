@@ -81,12 +81,27 @@ keyed by indexer + release guid; grabbing a result from that list uses the cache
 decision. If you try to grab after the cache has expired, you get a clear "search
 again" error rather than a silent, possibly-stale re-search.
 
+Each indexer gets a bounded time budget (`indexer_search_time_budget_seconds`,
+default 20s): when one indexer is slow, the search returns on time with the
+finished indexers' complete results, and an outcome strip above the results
+names each indexer's fate — searched, timed out (with the budget), failed, or
+backing off (`FRG-SRCH-015`, `FRG-UI-041`). A partial result is always visibly
+partial; grabbing from it works exactly like a complete search. Scheduled
+background searches are never time-budgeted — politeness outranks latency when
+nobody is waiting.
+
 ## Automatic search
 
 foragerr runs automatic search as commands, not a background poll you configure
 directly: a single-issue search, a whole-series missing-issues search, and a
-cutoff-unmet search, each triggered after a series is added (if you asked for
-search-on-add), after a failed download, or on demand. An automatic search command
+cutoff-unmet search, each triggered after a series is added — by default for
+any add whose monitoring leaves wanted issues, and always when you checked
+search-on-add — after a failed download, or on demand (`FRG-SER-005`).
+Configuring your first indexer also runs one backlog sweep, so a fresh install
+starts acquiring without waiting for the six-hour tick. That sweep happens once
+per installation: deleting and re-adding indexers, or disabling and re-enabling
+one, never re-runs it. The Wanted screen
+shows when the next automatic search will run (`FRG-SCHED-012`). An automatic search command
 queries every automatic-search-enabled indexer, evaluates results through the same
 decision engine, and grabs the best approved release per issue.
 

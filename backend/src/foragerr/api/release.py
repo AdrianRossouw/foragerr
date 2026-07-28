@@ -4,7 +4,10 @@
 interactive-enabled indexers and returns EVERY decision — approved, temporarily
 rejected, and rejected — each with its verbatim rejection reasons, quality/
 format, indexer, size, age, and an ``indexerId``+``guid`` cache key, ordered by
-the decision comparator (approved best-first). The decision set is cached
+the decision comparator (approved best-first), alongside the additive
+per-indexer ``indexers`` outcomes (searched / timed out with its budget /
+failed / backing off, FRG-SRCH-015) that make a partial result visibly partial.
+The decision set is cached
 server-side (~30 min); ``POST /api/v1/release {indexerId, guid}`` grabs from that
 cache (enqueuing the inert-until-change-5 grab command) and returns a
 deterministic 404-class "search again" error once the entry has expired — never
@@ -53,6 +56,43 @@ class ReleaseDecisionResource(BaseModel):
     rejections: list[str]
 
 
+#: The four honest per-indexer states an interactive search can report
+#: (FRG-API-008 / FRG-SRCH-015). ``timed_out`` additionally carries the budget
+#: that bounded it, so a partial result is visibly — and machine-readably —
+#: partial instead of silently smaller.
+OUTCOME_SEARCHED = "searched"
+OUTCOME_TIMED_OUT = "timed_out"
+OUTCOME_FAILED = "failed"
+OUTCOME_BACKING_OFF = "backing_off"
+
+
+class IndexerOutcomeResource(BaseModel):
+    """How one indexer fared in this search (FRG-API-008 / FRG-SRCH-015)."""
+
+    indexer_id: int
+    name: str
+    #: One of ``searched`` / ``timed_out`` / ``failed`` / ``backing_off``.
+    outcome: str
+    #: The per-indexer time budget (seconds) that cancelled this indexer; set
+    #: only when ``outcome`` is ``timed_out``.
+    budget_seconds: float | None = None
+    #: How many candidates this indexer contributed before decisioning.
+    candidate_count: int = 0
+
+
+class ReleaseSearchResource(BaseModel):
+    """The interactive-search response: decisions plus per-indexer outcomes.
+
+    ``releases`` is the long-standing decision list, comparator-ordered and
+    unchanged. ``indexers`` is the additive FRG-SRCH-015 surface: every indexer
+    the search selected, with its outcome — so a partial result (one indexer
+    timed out) is never mistaken for a complete one.
+    """
+
+    releases: list[ReleaseDecisionResource]
+    indexers: list[IndexerOutcomeResource]
+
+
 class ReleaseGrabRequest(BaseModel):
     """Body for ``POST /api/v1/release``: which cached release to grab."""
 
@@ -98,10 +138,35 @@ def _row(decision: Decision, profile, now) -> ReleaseDecisionResource:
     )
 
 
-@router.get("", response_model=list[ReleaseDecisionResource])
+def _outcome_row(outcome) -> IndexerOutcomeResource:
+    """Map one :class:`IndexerSearchOutcome` onto the wire (FRG-API-008).
+
+    Timed out is checked FIRST and is mutually exclusive with a failure by
+    construction — the pipeline synthesizes a cancelled indexer's outcome with
+    no failure attached, precisely so a slow indexer is never reported (or
+    penalized) as a broken one.
+    """
+    if outcome.timed_out:
+        state = OUTCOME_TIMED_OUT
+    elif outcome.failure is not None:
+        state = OUTCOME_FAILED
+    elif outcome.backing_off:
+        state = OUTCOME_BACKING_OFF
+    else:
+        state = OUTCOME_SEARCHED
+    return IndexerOutcomeResource(
+        indexer_id=outcome.indexer_id,
+        name=outcome.indexer_name,
+        outcome=state,
+        budget_seconds=outcome.time_budget_seconds if outcome.timed_out else None,
+        candidate_count=len(outcome.candidates),
+    )
+
+
+@router.get("", response_model=ReleaseSearchResource)
 async def search_releases(
     request: Request, issueId: int = Query(..., ge=1)
-) -> list[ReleaseDecisionResource]:
+) -> ReleaseSearchResource:
     """Live interactive search for one issue (FRG-API-008 / FRG-SRCH-014)."""
     db = request.app.state.db
     async with db.read_session() as session:
@@ -123,8 +188,13 @@ async def search_releases(
     if result is None:  # the issue/series vanished mid-request
         raise ApiError(404, f"issue {issueId} not found")
 
+    # A partial decision set (one indexer timed out) caches and grabs exactly
+    # like a complete one — the rows that DID come back are fully decided.
     await cache_decisions(db, issueId, result.decisions)
-    return [_row(d, result.profile, result.now) for d in result.decisions]
+    return ReleaseSearchResource(
+        releases=[_row(d, result.profile, result.now) for d in result.decisions],
+        indexers=[_outcome_row(o) for o in result.indexer_outcomes],
+    )
 
 
 @router.post("", status_code=201, response_model=CommandResource)
