@@ -144,8 +144,53 @@ def _collect_archive_files(series_path: str) -> list[tuple[str, int]]:
 # --- command handler --------------------------------------------------------
 
 
+async def scan_and_chain(
+    db: Database,
+    settings: Settings,
+    series_id: int,
+    *,
+    commands=None,
+    offload: OffloadFn | None = None,
+    search_after: bool = False,
+) -> str:
+    """Scan the series, then chain the add's mini-sweep if one is owed.
+
+    The ordering seam for MODIFIED FRG-SER-005: the refresh decides whether an
+    add is owed a bounded per-series search and stamps that on the scan command;
+    the search is enqueued HERE, once :func:`scan_series` has committed the
+    files it matched on disk. So the sweep can only ever look for what is still
+    missing after the disk has been read — an Add pointed at a folder that
+    already holds the issues never grabs them a second time.
+
+    A scan that fails never reaches this point, so no sweep is enqueued: the
+    six-hourly backlog search is the backstop for that, which is strictly safer
+    than searching with an unknown view of the disk. The enqueue itself is
+    best-effort — a chained search that cannot be queued must not fail a scan
+    that already did its job and recorded its matches.
+    """
+    summary = await scan_series(db, settings, series_id, offload=offload)
+    if search_after and commands is not None:
+        try:
+            await commands.enqueue(
+                "series-search", {"series_id": series_id}, triggered_by="scan-series"
+            )
+        except Exception:  # noqa: BLE001 - the scan stands; the tick backstops
+            logger.warning(
+                "scan series %d: the add's search sweep could not be enqueued; "
+                "the scheduled backlog search still covers it",
+                series_id,
+                exc_info=True,
+            )
+    return summary
+
+
 @register_handler("scan-series")
 async def _handle_scan(command: ScanSeriesCommand, ctx: HandlerContext) -> str:
-    return await scan_series(
-        ctx.db, ctx.settings, command.series_id, offload=ctx.offload
+    return await scan_and_chain(
+        ctx.db,
+        ctx.settings,
+        command.series_id,
+        commands=ctx.commands,
+        offload=ctx.offload,
+        search_after=command.search_after,
     )

@@ -287,29 +287,36 @@ async def refresh_series(
     )
 
     # --- chain the next steps onto the persisted backbone ------------------
-    await commands.enqueue(
-        "scan-series", {"series_id": series_id}, triggered_by="refresh-series"
-    )
+    #
     # The mini-sweep (MODIFIED FRG-SER-005, m11-acquisition-responsiveness).
     # An add whose monitoring strategy yields wanted issues gets the SAME
     # bounded per-series search the ``search_on_add`` checkbox always
     # enqueued — the checkbox is no longer what makes acquisition happen, it
     # only guarantees the sweep for an add that wants nothing yet (e.g. a
     # future-only strategy). A no-wanted add with the box unticked (monitor
-    # "none") stays completely quiet. One enqueue either way: the two
-    # conditions share a single call, and CommandService's payload dedup
-    # (FRG-SCHED-003) collapses any command an earlier run already queued.
+    # "none") stays completely quiet.
     # Library Import passes sweep_on_add=False: its series exist to receive
     # files already on disk, and a thousand-group import must never race a
     # thousand searches against its own imports (FRG-SER-005's carve-out).
-    if (
+    sweep = bool(
         applied is not None
         and sweep_on_add
         and (applied.search_on_add or add_wanted_count > 0)
-    ):
-        await commands.enqueue(
-            "series-search", {"series_id": series_id}, triggered_by="refresh-series"
-        )
+    )
+    # ORDERING: the decision rides ON the scan command rather than becoming a
+    # second enqueue here. Scan and search run on different worker pools, so two
+    # sibling enqueues are unordered — an Add pointed at a folder that already
+    # holds files would have the sweep grabbing issues the scan was moments from
+    # satisfying (a real duplicate-download path, not a theoretical one). The
+    # scan handler enqueues the sweep after its matches commit, so "search what
+    # is still missing AFTER we looked at the disk" is guaranteed by the chain.
+    # CommandService's payload dedup (FRG-SCHED-003) still collapses a search an
+    # earlier run already queued.
+    await commands.enqueue(
+        "scan-series",
+        {"series_id": series_id, "search_after": sweep},
+        triggered_by="refresh-series",
+    )
 
     logger.info("refresh series %d: %s", series_id, result.summary())
     return result.summary()

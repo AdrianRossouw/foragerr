@@ -8,7 +8,7 @@ When a series is added, the system SHALL execute a chained sequence: fetch and p
 
 - **Milestone**: M1
 - **Source**: sonarr-architecture.md §1.2 (add lifecycle, AddOptions), §8.
-- **Notes**: Chain runs as events/commands on the backbone (SCHED area owns the command queue). Path validation includes root-folder existence and slug/path uniqueness (AddSeriesValidator analogue). m4-add-new: the optional book-type add-option feeds FRG-SER-018's override/lock mechanics; omitted, derivation behaves exactly as before. m11: the default sweep closes the fresh-install first-sweep gap (a newly added monitored series acquires without waiting for the backlog tick); the sweep is the same per-series bounded SeriesSearchCommand the checkbox path always used, and command dedup collapses the pair when both fire.
+- **Notes**: Chain runs as events/commands on the backbone (SCHED area owns the command queue). Path validation includes root-folder existence and slug/path uniqueness (AddSeriesValidator analogue). m4-add-new: the optional book-type add-option feeds FRG-SER-018's override/lock mechanics; omitted, derivation behaves exactly as before. m11: the default sweep closes the fresh-install first-sweep gap (a newly added monitored series acquires without waiting for the backlog tick); the sweep is the same per-series bounded SeriesSearchCommand the checkbox path always used, and command dedup collapses the pair when both fire. The sweep is chained BY the scan step (the scan carries the add's sweep decision and enqueues the search once its matches commit) rather than queued beside it: scan and search run on different worker pools, so sibling enqueues would leave their order to chance and let an add pointed at a populated folder grab what the scan was about to match.
 
 #### Scenario: Add validates before persisting
 
@@ -29,6 +29,11 @@ When a series is added, the system SHALL execute a chained sequence: fetch and p
 
 - **WHEN** a series is added with a monitoring strategy that yields wanted issues and search-on-add unchecked
 - **THEN** a `SeriesSearchCommand` for that series is enqueued after the scan step, bounded to the series' wanted issues, recorded in job history with real dedup semantics, and observable via the command API
+
+#### Scenario: The sweep never searches for what the scan just matched
+
+- **WHEN** a series is added pointed at a folder that already holds some of its issues
+- **THEN** the search is enqueued only after the scan has committed its file matches, so those issues are no longer wanted when the sweep runs and are never grabbed a second time
 
 #### Scenario: A no-wanted add stays quiet
 

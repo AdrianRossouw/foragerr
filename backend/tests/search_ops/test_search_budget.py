@@ -26,13 +26,19 @@ import asyncio
 import time
 from functools import partial
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
 
 from foragerr.app import create_app
-from foragerr.config import SEARCH_BUDGET_CEILING, SEARCH_BUDGET_FLOOR
+from foragerr.indexers import IndexerSearchOutcome
+from foragerr.config import (
+    SEARCH_BUDGET_CEILING,
+    SEARCH_BUDGET_FLOOR,
+    SEARCH_BUDGET_LISTENER_MARGIN,
+)
 from foragerr.http import HttpClientFactory
 from foragerr.indexers import ratelimit
 from foragerr.indexers.caps import CapsCache
@@ -239,12 +245,70 @@ def test_budget_is_clamped_to_the_documented_range(tmp_path: Path, caplog):
     assert too_low == SEARCH_BUDGET_FLOOR
     assert "indexer_search_time_budget_seconds" in caplog.text
 
+    # The absolute ceiling only bites once the listener guard is wide enough to
+    # allow it — otherwise the guard is the tighter bound (see below).
     assert effective_search_budget(
-        make_settings(tmp_path, indexer_search_time_budget_seconds=600.0)
+        make_settings(
+            tmp_path,
+            indexer_search_time_budget_seconds=600.0,
+            listener_request_timeout_seconds=300,
+        )
     ) == SEARCH_BUDGET_CEILING
     # The default must leave the listener's request guard room to spare.
     default = make_settings(tmp_path)
     assert effective_search_budget(default) < default.listener_request_timeout_seconds
+
+
+@pytest.mark.req("FRG-SRCH-015")
+def test_budget_is_clamped_under_the_listener_request_guard(tmp_path: Path, caplog):
+    """The gap the absolute ceiling left open: it is 60 s while the default
+    listener guard is 30 s, so a configured 31..60 passed the clamp untouched
+    and quietly reinstated the very 503 the budget exists to prevent. The
+    effective ceiling is the CONFIGURED guard less the margin."""
+    with caplog.at_level("WARNING"):
+        clamped = effective_search_budget(
+            make_settings(
+                tmp_path,
+                indexer_search_time_budget_seconds=45.0,
+                listener_request_timeout_seconds=30,
+            )
+        )
+    # 30 s guard - 5 s margin: inside the ceiling, and warned about.
+    assert clamped == 30 - SEARCH_BUDGET_LISTENER_MARGIN == 25.0
+    assert "indexer_search_time_budget_seconds" in caplog.text
+    assert "listener_request_timeout_seconds" in caplog.text
+
+    # It tracks the guard DOWN as well as up — a tightened guard tightens the
+    # budget with it, with no second setting to remember.
+    assert effective_search_budget(
+        make_settings(
+            tmp_path,
+            indexer_search_time_budget_seconds=20.0,
+            listener_request_timeout_seconds=15,
+        )
+    ) == 10.0
+
+    # ...but never below the floor: a pathological 1 s guard would otherwise
+    # compute a negative budget and cancel every indexer before its first page.
+    assert effective_search_budget(
+        make_settings(
+            tmp_path,
+            indexer_search_time_budget_seconds=20.0,
+            listener_request_timeout_seconds=1,
+        )
+    ) == SEARCH_BUDGET_FLOOR
+
+    # The invariant, stated once: whatever is configured, the enforced budget
+    # always leaves the listener's guard room to answer.
+    for budget, guard in ((45.0, 30), (60.0, 20), (5.0, 300), (600.0, 45)):
+        settings = make_settings(
+            tmp_path,
+            indexer_search_time_budget_seconds=budget,
+            listener_request_timeout_seconds=guard,
+        )
+        assert effective_search_budget(settings) <= max(
+            SEARCH_BUDGET_FLOOR, guard - SEARCH_BUDGET_LISTENER_MARGIN
+        )
 
 
 @pytest.mark.req("FRG-SRCH-015")
@@ -455,3 +519,216 @@ def test_backing_off_and_failed_indexers_keep_their_own_outcomes():
     )
     assert timed_out.outcome == "timed_out"
     assert timed_out.budget_seconds == 20.0
+
+
+# --- fan-out hygiene: cancellation, isolation, stragglers -------------------
+#
+# The budget makes the pipeline cancel live work on a human's clock, and every
+# one of these tests is about the debris that leaves behind. They drive
+# ``_budgeted_fan``/``_search_one_indexer`` directly with synthetic searches:
+# the interleavings under test (an outer cancel landing mid-fan, a child that
+# blows up while unwinding, a task that finishes microseconds late) cannot be
+# provoked reliably through a socket.
+
+
+@pytest.fixture
+def _clean_stragglers():
+    """Isolate the module-global straggler set around a test."""
+    pipeline._STRAGGLERS.clear()
+    yield pipeline._STRAGGLERS
+    for task in list(pipeline._STRAGGLERS):
+        task.cancel()
+    pipeline._STRAGGLERS.clear()
+
+
+def _row(indexer_id: int, name: str):
+    """The two attributes ``_budgeted_fan`` reads off an indexer row."""
+    return SimpleNamespace(id=indexer_id, name=name)
+
+
+def _outcome_for(row) -> IndexerSearchOutcome:
+    return IndexerSearchOutcome(indexer_id=row.id, indexer_name=row.name)
+
+
+@pytest.mark.req("FRG-SRCH-015")
+async def test_outer_cancellation_parks_the_children_it_takes_down(
+    _clean_stragglers,
+):
+    """Shutdown (or a client hang-up) cancels the whole fan. The children were
+    cancelled but NOT held, so the last reference to a still-unwinding task died
+    with the frame — the "Task was destroyed but it is pending!" noise at
+    shutdown. They are parked now, exactly as the budget path parks its own."""
+    unwinding = asyncio.Event()
+
+    async def slow(row):
+        try:
+            await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            unwinding.set()
+            await asyncio.sleep(0.05)  # a real unwind is not instantaneous
+            raise
+
+    rows = [_row(1, "A"), _row(2, "B")]
+    outer = asyncio.create_task(pipeline._budgeted_fan(rows, slow, 30.0))
+    await asyncio.sleep(0.05)  # let both children reach their await
+
+    outer.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await outer
+
+    await unwinding.wait()
+    # Held through the unwind: the loop can never collect a pending task.
+    assert len(pipeline._STRAGGLERS) == 2
+    assert all(t.cancelled() or not t.done() for t in pipeline._STRAGGLERS)
+
+    # ...and each drops itself the moment it has actually finished.
+    await asyncio.sleep(0.15)
+    assert not pipeline._STRAGGLERS
+
+
+@pytest.mark.req("FRG-SRCH-015")
+async def test_a_cancelled_indexer_never_penalises_the_backoff_ladder(
+    db, monkeypatch
+):
+    """A timeout must never look like a failure (that is the whole design).
+    ``CancelledError`` passes through the isolation untouched — but an ORDINARY
+    exception raised while the cancelled task unwinds (a client's cleanup
+    tripping over a half-closed socket) lands in the same handler looking
+    exactly like a crash, and used to escalate a merely SLOW indexer on the
+    ladder."""
+
+    async def unwinds_badly(*args, **kwargs):
+        try:
+            await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            raise RuntimeError("cleanup blew up on a half-closed socket") from None
+
+    monkeypatch.setattr(pipeline, "search_indexer", unwinds_badly)
+    backoff = ProviderBackoff(db)
+    row = _row(4242, "Slow")
+
+    task = asyncio.create_task(
+        pipeline._search_one_indexer(
+            row,
+            None,
+            factory=None,
+            backoff=backoff,
+            caps_cache=None,
+            retention_days=None,
+            min_interval=0.0,
+        )
+    )
+    await asyncio.sleep(0.05)
+    task.cancel()
+    outcome = await task
+
+    # Still isolated to one provider (the fan is unharmed)...
+    assert outcome.indexer_id == row.id
+    assert outcome.failure is not None
+    # ...but the ladder is untouched: a slow indexer is not a failing one.
+    status = await backoff.status(PROVIDER_INDEXER, row.id)
+    assert status.failure_count == 0
+    assert status.active is False
+
+
+@pytest.mark.req("FRG-NFR-010")
+async def test_an_unmapped_task_error_isolates_instead_of_aborting_the_fan(
+    _clean_stragglers,
+):
+    """``task.result()`` re-raised whatever the in-task isolation could not map
+    — and that abandoned the WHOLE fan, throwing away every other indexer's real
+    results over one provider's mess. It becomes that provider's failed outcome
+    now, and everyone else still reports."""
+
+    class _Unmappable(BaseException):
+        """Not caught by the in-task ``except Exception`` isolation."""
+
+    async def one_bad_apple(row):
+        if row.name == "Bad":
+            raise _Unmappable("something the isolation cannot see")
+        return _outcome_for(row)
+
+    rows = [_row(1, "Bad"), _row(2, "Good")]
+    outcomes = await pipeline._budgeted_fan(rows, one_bad_apple, 5.0)
+
+    assert [o.indexer_name for o in outcomes] == ["Bad", "Good"]
+    bad, good = outcomes
+    assert bad.failure is not None
+    assert "_Unmappable" in str(bad.failure)
+    assert bad.timed_out is False  # a crash is not a timeout
+    assert good.failure is None  # the healthy indexer still reported
+
+
+@pytest.mark.req("FRG-SRCH-015")
+async def test_a_task_that_finished_at_the_deadline_keeps_its_results(
+    _clean_stragglers, monkeypatch
+):
+    """DELIBERATE, and pinned so it is not "fixed" by accident: a task that
+    completes in the sliver between ``asyncio.wait`` returning and its cancel
+    being delivered is done-but-not-cancelled, so its FULL results are kept and
+    it is reported as searched — despite technically missing the deadline by
+    microseconds. Real results in hand beat discarding them over a stopwatch;
+    the wait the budget exists to bound has already happened.
+
+    The stub reproduces exactly that interleaving: ``wait`` reports a task as
+    pending which has, by the time the caller resumes, already finished."""
+    real_wait = asyncio.wait
+
+    async def wait_reporting_a_late_finisher(tasks, *, timeout=None, **kwargs):
+        await asyncio.sleep(0)  # let the (fast) searches complete...
+        await asyncio.sleep(0)
+        if any(not t.done() for t in tasks):  # the grace wait: behave normally
+            return await real_wait(tasks, timeout=timeout, **kwargs)
+        return set(), set(tasks)  # ...then report them as still pending
+
+    monkeypatch.setattr(pipeline.asyncio, "wait", wait_reporting_a_late_finisher)
+
+    async def finishes_just_late(row):
+        outcome = _outcome_for(row)
+        outcome.skipped_items = 7  # a marker for "its real results survived"
+        return outcome
+
+    rows = [_row(1, "JustLate")]
+    outcomes = await pipeline._budgeted_fan(rows, finishes_just_late, 0.01)
+
+    assert len(outcomes) == 1
+    assert outcomes[0].timed_out is False  # reported as searched, not timed out
+    assert outcomes[0].skipped_items == 7  # ...with its work intact
+    assert not pipeline._STRAGGLERS  # nothing parked: it had already finished
+
+
+@pytest.mark.req("FRG-SRCH-015")
+async def test_a_straggler_that_survived_its_cancel_is_chased_by_the_next_fan(
+    _clean_stragglers,
+):
+    """The residual the grace period cannot close: a task that swallows its
+    first cancel would otherwise sit parked until the process exits. Every fan
+    re-issues the cancel on entry, so a straggler is bounded by the NEXT
+    interactive search rather than accumulating — and nothing is awaited, so
+    chasing it cannot delay the operator."""
+    cancels = 0
+
+    async def stubborn(row):
+        nonlocal cancels
+        while True:
+            try:
+                await asyncio.sleep(30)
+            except asyncio.CancelledError:
+                cancels += 1
+                if cancels > 1:
+                    raise  # gives up on the second ask
+                # ...swallows the first and carries on, which is the whole bug
+
+    await pipeline._budgeted_fan([_row(1, "Stubborn")], stubborn, 0.05)
+    assert cancels == 1
+    assert len(pipeline._STRAGGLERS) == 1  # survived, parked, still running
+
+    # A later interactive search: unrelated indexer, and the straggler is chased.
+    async def quick(row):
+        return _outcome_for(row)
+
+    await pipeline._budgeted_fan([_row(2, "Other")], quick, 5.0)
+    await asyncio.sleep(0.05)
+
+    assert cancels == 2
+    assert not pipeline._STRAGGLERS

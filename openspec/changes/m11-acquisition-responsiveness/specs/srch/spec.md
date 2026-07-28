@@ -12,10 +12,11 @@ cancelled cleanly between politeness-gated requests, and each such
 indexer is reported as an explicit timed-out outcome carrying the
 budget that bounded it. The budget SHALL apply to the interactive path
 only — scheduled backlog searches keep their politeness-first,
-unbudgeted behavior. The default budget SHALL be sized so a full
-interactive search completes within the default listener request guard
-(FRG-NFR-014) — deployment-level listener-timeout workarounds are not
-required for slow indexers.
+unbudgeted behavior. The ENFORCED budget SHALL additionally be bounded
+by the deployment's configured listener request guard (FRG-NFR-014)
+less a margin, so no configured value inside the documented range can
+let an interactive search outlive that guard — deployment-level
+listener-timeout workarounds are not required for slow indexers.
 
 #### Scenario: The slowest indexer no longer holds the search
 
@@ -32,6 +33,14 @@ required for slow indexers.
   page from it is silently mixed in, its failure/backoff bookkeeping is
   not corrupted by the cancellation, and the searched indexers' rows
   grab exactly as before
+
+#### Scenario: The budget can never outlive the listener guard
+
+- **WHEN** a budget inside the documented range is configured above the
+  deployment's listener request guard
+- **THEN** the enforced budget is clamped below that guard with a
+  warning, so the setting cannot reinstate the request-guard failure
+  the budget exists to prevent
 
 #### Scenario: Backlog stays politeness-first
 

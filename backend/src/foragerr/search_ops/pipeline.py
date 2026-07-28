@@ -38,7 +38,12 @@ import logging
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 
-from foragerr.config import SEARCH_BUDGET_CEILING, SEARCH_BUDGET_FLOOR, Settings
+from foragerr.config import (
+    SEARCH_BUDGET_CEILING,
+    SEARCH_BUDGET_FLOOR,
+    SEARCH_BUDGET_LISTENER_MARGIN,
+    Settings,
+)
 from foragerr.db.base import utcnow
 from foragerr.http import HttpClientFactory
 from foragerr.indexers import IndexerRow, IndexerSearchOutcome, search_indexer
@@ -137,23 +142,41 @@ def _query_target(series: SeriesRow, issue: IssueRow | None) -> QueryTarget:
 
 def effective_search_budget(settings: Settings | None) -> float | None:
     """The enforced per-indexer interactive budget: the configured value clamped
-    into the documented ``SEARCH_BUDGET_FLOOR..SEARCH_BUDGET_CEILING`` range
-    (with a one-line warning when clamping), mirroring
+    into the safe range (with a one-line warning when clamping), mirroring
     :func:`foragerr.metadata.ratelimit.effective_interval` (FRG-SRCH-015).
+
+    The safe range is ``SEARCH_BUDGET_FLOOR`` up to whichever is SMALLER of
+    ``SEARCH_BUDGET_CEILING`` and the deployment's own listener request guard
+    less ``SEARCH_BUDGET_LISTENER_MARGIN``. The absolute ceiling alone is not
+    enough: it is 60 s while the default guard is 30 s, so a configured 31..60
+    would sail past the clamp and silently reinstate the 503 the budget exists
+    to prevent. Deriving the ceiling from the CONFIGURED guard also means a
+    deployment that lowers the guard automatically tightens the budget with it.
+
+    The floor still wins on a pathologically small guard (a 1 s guard would
+    otherwise compute a negative ceiling): a budget below the floor cancels
+    every indexer before its first page, which is never the more useful failure.
 
     ``None`` settings (the callers that pass no configuration) mean no budget —
     the unbudgeted fan-out, exactly as before this setting existed."""
     if settings is None:
         return None
     configured = float(settings.indexer_search_time_budget_seconds)
-    clamped = min(max(configured, SEARCH_BUDGET_FLOOR), SEARCH_BUDGET_CEILING)
+    guard = float(settings.listener_request_timeout_seconds)
+    ceiling = max(
+        SEARCH_BUDGET_FLOOR,
+        min(SEARCH_BUDGET_CEILING, guard - SEARCH_BUDGET_LISTENER_MARGIN),
+    )
+    clamped = min(max(configured, SEARCH_BUDGET_FLOOR), ceiling)
     if clamped != configured:
         logger.warning(
             "config: indexer_search_time_budget_seconds=%s is outside the safe "
-            "range %s..%s; clamped to %s",
+            "range %s..%s (bounded by listener_request_timeout_seconds=%s); "
+            "clamped to %s",
             configured,
             SEARCH_BUDGET_FLOOR,
-            SEARCH_BUDGET_CEILING,
+            ceiling,
+            guard,
             clamped,
         )
     return clamped
@@ -252,6 +275,19 @@ async def prepare_series(
     )
 
 
+def _being_cancelled() -> bool:
+    """Whether the running task has a cancellation in flight.
+
+    ``Task.cancelling()`` counts ``cancel()`` calls the task has not yet
+    resolved, so it is true from the moment the budget's cancel is issued right
+    through the unwind — which is the whole window in which an incidental
+    exception must not be mistaken for a provider failure. Outside a task (a
+    direct call in a test or script) there is nothing to be cancelled.
+    """
+    task = asyncio.current_task()
+    return task is not None and task.cancelling() > 0
+
+
 async def _search_one_indexer(
     row: IndexerRow,
     target: QueryTarget,
@@ -283,18 +319,34 @@ async def _search_one_indexer(
             "indexer search raised unexpectedly; isolating provider",
             extra={"indexer_id": row.id, "indexer_name": row.name},
         )
-        # Penalise the crashing provider on the ladder like any other failure...
-        try:
-            await backoff.record_failure(
-                PROVIDER_INDEXER,
-                row.id,
-                reason=f"unexpected error: {type(exc).__name__}",
+        # Penalise the crashing provider on the ladder like any other failure —
+        # UNLESS this task is already being cancelled. ``CancelledError`` itself
+        # is a ``BaseException`` and passes through untouched, but an ordinary
+        # exception raised while a cancelled task unwinds (a client's cleanup
+        # blowing up on a half-closed socket) lands here looking exactly like a
+        # crash. Recording that would punish a merely SLOW indexer on the
+        # back-off ladder, which is precisely what the timeout design refuses to
+        # do (FRG-SRCH-015) — and the ``await`` below would be cut short by the
+        # pending cancellation anyway. A cancelled context therefore never
+        # touches the ladder.
+        if _being_cancelled():
+            logger.info(
+                "indexer search raised while cancelled; leaving the ladder "
+                "untouched (a slow indexer is not a failing one)",
+                extra={"indexer_id": row.id, "indexer_name": row.name},
             )
-        except Exception:  # noqa: BLE001 — never let recording mask the search
-            logger.exception(
-                "failed to record back-off for crashing indexer",
-                extra={"indexer_id": row.id},
-            )
+        else:
+            try:
+                await backoff.record_failure(
+                    PROVIDER_INDEXER,
+                    row.id,
+                    reason=f"unexpected error: {type(exc).__name__}",
+                )
+            except Exception:  # noqa: BLE001 — never let recording mask the search
+                logger.exception(
+                    "failed to record back-off for crashing indexer",
+                    extra={"indexer_id": row.id},
+                )
         # ...and synthesize an outcome with a NON-None failure naming the class.
         return IndexerSearchOutcome(
             indexer_id=row.id,
@@ -320,9 +372,35 @@ def _timed_out_outcome(row: IndexerRow, budget: float) -> IndexerSearchOutcome:
 
 def _park_straggler(task: asyncio.Task) -> None:
     """Hold a reference to a cancelled task still unwinding, so the event loop
-    never garbage-collects a pending task; it drops itself when it finishes."""
+    never garbage-collects a pending task; it drops itself when it finishes.
+
+    Logged, because a task that outlives its grace period is the one thing here
+    that is not self-evidently bounded — a parked straggler is invisible to the
+    operator otherwise, and a recurring one is a real signal about a provider.
+    """
     _STRAGGLERS.add(task)
     task.add_done_callback(_STRAGGLERS.discard)
+    logger.info(
+        "cancelled indexer search had not unwound within %.1fs; parked",
+        CANCEL_GRACE_SECONDS,
+        extra={"task": task.get_name(), "parked_total": len(_STRAGGLERS)},
+    )
+
+
+def _rechase_stragglers() -> None:
+    """Re-cancel any straggler still parked from an EARLIER fan-out.
+
+    The residual the grace period cannot close: a task that survives its first
+    cancel (a client swallowing ``CancelledError`` in a cleanup path, say) would
+    otherwise sit in ``_STRAGGLERS`` until the process exits. Re-issuing the
+    cancel at the start of every fan-out bounds that — a straggler is chased
+    again on the next interactive search rather than merely accumulating — while
+    keeping the width bound the set already had: nothing is ever awaited here, so
+    this cannot delay the operator's request.
+    """
+    for task in list(_STRAGGLERS):
+        if not task.done():
+            task.cancel()
 
 
 async def _budgeted_fan(
@@ -343,9 +421,14 @@ async def _budgeted_fan(
     ``asyncio.CancelledError`` is a ``BaseException``, so it also passes
     untouched through the ``except Exception`` isolation in
     :func:`_search_one_indexer` and in the Newznab client — a timeout can never
-    be mis-recorded as a provider failure on the back-off ladder."""
+    be mis-recorded as a provider failure on the back-off ladder.
+
+    Entering, it re-cancels any straggler parked by an earlier fan
+    (:func:`_rechase_stragglers`), which is what bounds a task that survived its
+    first cancel. Nothing is awaited there, so it cannot cost the operator."""
     if not rows:
         return []  # asyncio.wait() rejects an empty set; nothing to bound
+    _rechase_stragglers()
     tasks = [
         asyncio.create_task(make_search(row), name=f"indexer-search-{row.id}")
         for row in rows
@@ -354,9 +437,15 @@ async def _budgeted_fan(
         _, pending = await asyncio.wait(tasks, timeout=budget)
     except BaseException:
         # The whole request/command was cancelled (shutdown, client hang-up):
-        # take the children down with it rather than orphan live searches.
+        # take the children down with it rather than orphan live searches — and
+        # PARK each one, exactly as the budget path does. Cancelling and then
+        # dropping the last reference as this frame unwinds is what produces
+        # "Task was destroyed but it is pending!" at shutdown; the park holds the
+        # reference until the child has actually finished unwinding.
         for task in tasks:
-            task.cancel()
+            if not task.done():
+                task.cancel()
+                _park_straggler(task)
         raise
     if pending:
         for task in pending:
@@ -381,10 +470,40 @@ async def _budgeted_fan(
                 _park_straggler(task)
             outcomes.append(_timed_out_outcome(row, budget))
         else:
-            # ``result()`` re-raises a stored exception exactly as the
-            # unbudgeted ``gather`` would (isolation already maps every
-            # ordinary error to a failed outcome inside the task).
-            outcomes.append(task.result())
+            # DELIBERATE: a task that finished in the sliver between
+            # ``asyncio.wait`` returning and its cancel being delivered is
+            # ``done()`` and not ``cancelled()``, so it lands here and its FULL
+            # results are reported as ``searched`` even though it technically
+            # missed the deadline by microseconds. Real results in hand beat
+            # discarding them to honour a stopwatch — the budget exists to bound
+            # the operator's WAIT, and that wait already happened. Not a bug;
+            # please do not "fix" it into a timed-out outcome.
+            #
+            # ``result()`` is wrapped because a task can still carry a stored
+            # exception the in-task isolation could not map (an error raised
+            # while it unwound, or a BaseException-derived fault): re-raising
+            # here would abandon the whole fan-out — every remaining indexer's
+            # real results included — over one provider's mess. That is exactly
+            # the wedging FRG-NFR-010 forbids, so it becomes THAT indexer's
+            # failed outcome and the fan completes.
+            try:
+                outcomes.append(task.result())
+            except BaseException as exc:  # noqa: BLE001 — per-provider isolation
+                logger.exception(
+                    "indexer search task ended in an unmapped error; isolating "
+                    "provider",
+                    extra={"indexer_id": row.id, "indexer_name": row.name},
+                )
+                outcomes.append(
+                    IndexerSearchOutcome(
+                        indexer_id=row.id,
+                        indexer_name=row.name,
+                        failure=IndexerUnavailable(
+                            f"indexer search ended unexpectedly: "
+                            f"{type(exc).__name__}: {exc}"
+                        ),
+                    )
+                )
     return outcomes
 
 

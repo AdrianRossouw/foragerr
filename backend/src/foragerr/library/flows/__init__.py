@@ -75,7 +75,7 @@ from foragerr.library.flows.rescan import (
     RescanSeriesCommand,
     rescan_series,
 )
-from foragerr.library.flows.scan import scan_series
+from foragerr.library.flows.scan import scan_and_chain, scan_series
 
 # Import for the handler-registration side effect (``@register_handler``).
 from foragerr.library.flows import search as _search  # noqa: F401
@@ -129,5 +129,6 @@ __all__ = [
     "rename_series",
     "rescan_series",
     "scan_library_root",
+    "scan_and_chain",
     "scan_series",
 ]

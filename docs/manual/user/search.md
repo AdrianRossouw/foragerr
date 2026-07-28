@@ -98,7 +98,9 @@ cutoff-unmet search, each triggered after a series is added — by default for
 any add whose monitoring leaves wanted issues, and always when you checked
 search-on-add — after a failed download, or on demand (`FRG-SER-005`).
 Configuring your first indexer also runs one backlog sweep, so a fresh install
-starts acquiring without waiting for the six-hour tick, and the Wanted screen
+starts acquiring without waiting for the six-hour tick. That sweep happens once
+per installation: deleting and re-adding indexers, or disabling and re-enabling
+one, never re-runs it. The Wanted screen
 shows when the next automatic search will run (`FRG-SCHED-012`). An automatic search command
 queries every automatic-search-enabled indexer, evaluates results through the same
 decision engine, and grabs the best approved release per issue.

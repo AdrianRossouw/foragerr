@@ -33,11 +33,18 @@ TrackDownloadsCommand re-reports the client's still-completed item as
 That retry loop is unbounded by design — but a download whose files the importer
 simply cannot SEE (wrong mount, missing remote path mapping) rides it forever
 with nothing to show for it, since each cycle's state is individually honest.
-FRG-DL-015 adds the memory the loop lacks: every no-importable-files verdict
-increments ``tracked_downloads.import_stall_count`` and stamps
-``first_stalled_at`` once, any outcome that saw real files clears both, and the
-health service escalates a row that stays stalled past a configured number of
-cycles. The retry behaviour itself is untouched.
+FRG-DL-015 adds the memory the loop lacks: every verdict that is a genuine
+path-VISIBILITY failure increments ``tracked_downloads.import_stall_count`` and
+stamps ``first_stalled_at`` once, any outcome that saw real files clears both,
+and the health service escalates a row that stays stalled past a configured
+number of cycles. The retry behaviour itself is untouched.
+
+"Visibility failure" is narrower than "nothing imported" (see
+:func:`is_visibility_stall`): no output path, an untranslatable client path
+(the remote-path-mapping warning), or a path under which not one file was
+seen. A path holding only ``.rar``/``.par2``/``.nfo`` parts imports nothing
+forever but is plainly VISIBLE — it stays an honest per-row ``import_blocked``
+and accrues nothing, because a mount remediation would be the wrong advice.
 
 Post-import client cleanup (FRG-DL-010) runs only after a row reaches ``imported``
 and only when the owning client's ``remove_completed_downloads`` flag is set —
@@ -114,21 +121,60 @@ NO_IMPORTABLE_FILES_MESSAGE = (
 )
 
 
-def is_visibility_stall(
+def _no_importable_files(
     outcomes: list[ImportOutcome], *, no_output: bool = False
 ) -> bool:
-    """Whether this verdict is the no-importable-files shape (FRG-DL-015).
+    """Whether the drain produced no importable candidate at all.
 
-    True when the drain had nothing to work with: no output path at all, or a
-    path it walked without finding a single importable candidate. That is the
-    path-VISIBILITY failure (a wrong mount, a missing remote path mapping) —
-    the machine is looking in a place the files are not.
-
-    False for every outcome that saw real files, including blocked and corrupt
-    ones: those are evidence the path is visible and the problem lies with the
-    release, so they RESET the stall memory rather than extending it.
+    The STATE verdict (``import_blocked`` + :data:`NO_IMPORTABLE_FILES_MESSAGE`),
+    which is honest either way: whether the path was invisible or merely held
+    nothing comic-shaped, there was nothing to import. Distinct from
+    :func:`is_visibility_stall`, which is the narrower DIAGNOSIS.
     """
     return bool(no_output or not outcomes)
+
+
+def is_visibility_stall(
+    outcomes: list[ImportOutcome],
+    *,
+    no_output: bool = False,
+    saw_files: bool = False,
+) -> bool:
+    """Whether this verdict is a path-VISIBILITY failure (FRG-DL-015).
+
+    The stall memory is a diagnosis, not a tally of unhappy cycles: it must only
+    accrue when the machine is looking in a place the files are not (a wrong
+    mount, a missing remote path mapping). Three shapes qualify:
+
+    - **no output path at all** — nowhere to look;
+    - **a mapping warning** — the client handed over a path this deployment
+      cannot translate, so it was never looked at. Detected STRUCTURALLY off
+      :attr:`~foragerr.importer.sources.ImportCandidate.mapping_warning` (the
+      field :data:`~foragerr.downloads.pathmap.CHECK_MAPPING_WARNING` is carried
+      in), never by matching message text. This is the very case the health
+      remediation names, and it yields exactly ONE blocked candidate — so
+      without this arm it could never reach the threshold;
+    - **nothing seen under the path** — walked (or unwalkable) and not a single
+      file was there.
+
+    ``saw_files`` is the discriminator for that last shape and comes from
+    :meth:`~foragerr.importer.sources.CompletedDownloadSource.saw_any_files`. A
+    download that unpacked to ``.rar``/``.par2``/``.nfo`` parts yields zero
+    candidates forever, but the path is plainly visible — that is a release
+    problem, so it stays an honest per-row ``import_blocked`` and accrues NO
+    stall. (Health would otherwise degrade permanently with a mount remediation
+    for a deployment whose mounts are fine.)
+
+    False for every outcome that saw real files, including blocked and corrupt
+    ones: those prove the path is visible, so they RESET the stall memory.
+    """
+    if no_output:
+        return True
+    if any(o.candidate.mapping_warning is not None for o in outcomes):
+        return True
+    if outcomes:
+        return False
+    return not saw_files
 
 
 async def build_import_context(
@@ -324,6 +370,15 @@ async def _process_one(
         if recovered is not None:
             return recovered
 
+    # 2c. Path-visibility probe (FRG-DL-015), ONLY when the intake came back
+    #     empty. ``gather`` filters to comic extensions, so an empty result is
+    #     ambiguous: a path that is not there, or a path that is there holding
+    #     rar/par2/nfo parts. Ask the wider question — did we see ANY file? —
+    #     so only the former accrues a stall and health never diagnoses a mount
+    #     fault for a deployment whose mounts are fine. Costs one short-circuited
+    #     walk, and only on the already-unhappy path.
+    saw_files = source.saw_any_files(ctx) if not candidates else True
+
     # 3. Import every candidate in ONE write session so each issue_files row and
     #    its history event land atomically with the final state transition.
     outcomes: list[ImportOutcome] = []
@@ -346,6 +401,7 @@ async def _process_one(
             download_id=download_id,
             outcomes=outcomes,
             now=ctx.now,
+            saw_files=saw_files,
         )
 
     # 4. Post-commit side-effects — OUTSIDE the write lock so they can open their
@@ -516,7 +572,7 @@ def resolve_terminal_state(
     fold through here, so identical per-file outcomes always yield an identical
     tracked state — there is no second, drifting manual policy.
     """
-    if is_visibility_stall(outcomes, no_output=no_output):
+    if _no_importable_files(outcomes, no_output=no_output):
         return (
             TrackedDownloadState.IMPORT_BLOCKED,
             TRACKED_STATUS_WARNING,
@@ -549,6 +605,7 @@ async def finalize_download_import(
     outcomes: list[ImportOutcome],
     now: dt.datetime,
     no_output: bool = False,
+    saw_files: bool = False,
 ) -> TrackedDownloadState:
     """Apply one download's terminal import verdict inside the caller's txn.
 
@@ -562,6 +619,13 @@ async def finalize_download_import(
 
     Runs entirely in the caller's write session so the tracked state, the
     ``issue_files`` rows and any owned-via-edition fills commit as one.
+
+    ``saw_files`` is the drain's path-visibility probe (FRG-DL-015): it only
+    matters when there are no outcomes, and it is what separates "the path is
+    not there" (a stall) from "the path is there and holds nothing importable"
+    (not a stall). Callers that cannot answer it — the manual-import flow, which
+    imports files the operator PICKED and so never diagnoses a mount — leave it
+    at the conservative default.
     """
     final_state, status, messages = resolve_terminal_state(
         outcomes, no_output=no_output
@@ -573,7 +637,9 @@ async def finalize_download_import(
         status,
         messages,
         now,
-        stalled=is_visibility_stall(outcomes, no_output=no_output),
+        stalled=is_visibility_stall(
+            outcomes, no_output=no_output, saw_files=saw_files
+        ),
     )
     # Store-source hook (FRG-SRC-006/007): mirror the verdict onto the
     # entitlement and, on success, fill owned-via-edition singles for any

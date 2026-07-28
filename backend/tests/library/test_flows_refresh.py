@@ -27,6 +27,7 @@ from foragerr.library.flows import (
     add_series,
     encode_add_options,
     refresh_series,
+    scan_and_chain,
 )
 from foragerr.library.flows import refresh as refresh_mod
 from foragerr.library.models import IssueRow, SeriesRow
@@ -768,6 +769,59 @@ async def _command_names(db) -> list[str]:
         )
 
 
+async def _queued_commands(db, name: str) -> list[tuple[int, dict]]:
+    """``(id, payload)`` for every queued command of ``name``, oldest first."""
+    import json as _json
+
+    async with db.read_session() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(CommandRow)
+                    .where(CommandRow.name == name)
+                    .order_by(CommandRow.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [(row.id, _json.loads(row.payload)) for row in rows]
+
+
+async def _wanted_numbers(db, series_id: int) -> list[str]:
+    """The issue numbers this series WANTS right now, via FRG-SER-004's one
+    selectable — the same set the sweep's search command would walk."""
+    async with db.read_session() as session:
+        rows = (
+            (
+                await session.execute(
+                    repo.wanted_issues().where(IssueRow.series_id == series_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    return sorted(row.issue_number for row in rows)
+
+
+async def _run_chained_scans(db, settings, commands) -> None:
+    """Run every scan-series the refresh chained, exactly as a worker would.
+
+    The sweep is enqueued BY the scan now (MODIFIED FRG-SER-005 ordering fix),
+    so a test that stops at ``refresh_series`` would only ever see half the
+    chain. Driving the real handler entrypoint keeps these tests end-to-end over
+    the mechanism that actually decides.
+    """
+    for _, payload in await _queued_commands(db, "scan-series"):
+        await scan_and_chain(
+            db,
+            settings,
+            payload["series_id"],
+            commands=commands,
+            search_after=payload.get("search_after", False),
+        )
+
+
 async def _refresh_added_series(
     db, settings, commands, root_folder_path, format_profile_id,
     *,
@@ -801,6 +855,7 @@ async def _refresh_added_series(
         factory=build_factory(settings, fake.handler()),
         sweep_on_add=sweep_on_add,
     )
+    await _run_chained_scans(db, settings, commands)
     return series_id
 
 
@@ -878,6 +933,7 @@ async def test_the_checkbox_and_the_default_sweep_never_double_enqueue(
         db, settings, series_id, commands=commands,
         factory=build_factory(settings, fake.handler()),
     )
+    await _run_chained_scans(db, settings, commands)
 
     assert (await _command_names(db)).count("series-search") == 1
 
@@ -910,6 +966,85 @@ async def test_a_routine_refresh_never_sweeps(
     names = await _command_names(db)
     assert "series-search" not in names
     assert "scan-series" in names  # the scan still chains, as it always has
+
+
+@pytest.mark.req("FRG-SER-005")
+async def test_the_sweep_is_chained_behind_the_scan_never_beside_it(
+    db, settings, commands, root_folder_id, root_folder_path, format_profile_id
+):
+    """The race the default sweep introduced: scan and search run on DIFFERENT
+    worker pools, so enqueuing them side by side leaves their order to chance —
+    an Add pointed at a folder that already holds the issues could have the
+    sweep searching (and grabbing) what the scan was moments from satisfying.
+
+    So the refresh does not enqueue a search at all: it stamps the decision on
+    the scan, and the scan enqueues the search once its matches are committed.
+    """
+    series_path = root_folder_path / "series-1"
+    series_path.mkdir(parents=True)
+    (series_path / "Saga 001 (2012).cbz").write_bytes(b"x" * 32)
+    (series_path / "Saga 002 (2012).cbz").write_bytes(b"x" * 32)
+
+    series_id = await _make_series(
+        db, root_folder_path, format_profile_id,
+        add_options=encode_add_options(
+            monitor_strategy="all", monitor_new_items="all", search_on_add=False
+        ),
+    )
+    fake = FakeCV().volume(1).issues(
+        1,
+        [
+            issue(500, "1", cover_date="2001-01-01"),
+            issue(501, "2", cover_date="2001-01-01"),
+        ],
+    )
+    await refresh_series(
+        db, settings, series_id, commands=commands,
+        factory=build_factory(settings, fake.handler()),
+    )
+
+    # Nothing searchable exists yet — the refresh chained the DECISION, not a
+    # command. (Before the fix a series-search was already queued here, racing
+    # a scan that had not run: both issues still looked wanted.)
+    assert "series-search" not in await _command_names(db)
+    scans = await _queued_commands(db, "scan-series")
+    assert [p["search_after"] for _, p in scans] == [True]
+    assert await _wanted_numbers(db, series_id) == ["1", "2"]
+
+    await _run_chained_scans(db, settings, commands)
+
+    # The scan matched both files, so by the time the sweep exists the series
+    # wants nothing: the issues already on disk are never searched for.
+    searches = await _queued_commands(db, "series-search")
+    assert len(searches) == 1
+    assert await _wanted_numbers(db, series_id) == []
+    # ...and the ordering is a property of the chain: the search row cannot
+    # predate the scan that created it.
+    assert searches[0][0] > scans[0][0]
+
+
+@pytest.mark.req("FRG-SER-005")
+async def test_a_failed_scan_chains_no_sweep(
+    db, settings, commands, root_folder_id, root_folder_path, format_profile_id
+):
+    """The other side of chaining: if the disk was never read, searching on a
+    guessed view of it is worse than waiting for the scheduled backlog tick."""
+    from foragerr.library.flows import scan as scan_mod
+
+    async def _boom(*a, **kw):
+        raise OSError("library mount went away mid-scan")
+
+    monkeypatched = pytest.MonkeyPatch()
+    monkeypatched.setattr(scan_mod, "scan_series", _boom)
+    try:
+        with pytest.raises(OSError):
+            await scan_and_chain(
+                db, settings, 1, commands=commands, search_after=True
+            )
+    finally:
+        monkeypatched.undo()
+
+    assert "series-search" not in await _command_names(db)
 
 
 @pytest.mark.req("FRG-SER-005")

@@ -80,7 +80,9 @@ Adding a series runs a fixed sequence:
    queued by default whenever the add's monitoring leaves wanted issues; the
    search-on-add checkbox guarantees the sweep even for an add that wants
    nothing yet (see `search.md`). Importing an existing library never
-   triggers these sweeps.
+   triggers these sweeps. The search is queued by the scan in step 4, not
+   alongside it, so adding a series pointed at a folder that already holds
+   issues never downloads what is already on disk.
 
 Each step runs as a separate, observable command (visible via the command/job-history
 API), and the sequence is restart-safe: if foragerr restarts mid-add, the remaining

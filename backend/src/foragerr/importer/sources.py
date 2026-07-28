@@ -212,6 +212,63 @@ class CompletedDownloadSource:
             for path, size in files
         ]
 
+    def saw_any_files(self, ctx: ImportContext) -> bool:
+        """Whether the mapped output path is READABLE and holds at least one file.
+
+        The path-VISIBILITY probe behind FRG-DL-015's stall memory, deliberately
+        WIDER than :meth:`gather`: ``gather`` only yields comic-shaped archives,
+        so a completed download that unpacked to ``.rar``/``.par2``/``.nfo``
+        parts — or to a single unsupported extension — produces zero candidates
+        while the path is perfectly visible. Counting that as a stall would
+        escalate a release-shaped problem as a mount/mapping fault forever.
+
+        So this asks the narrower question the diagnosis actually needs: did the
+        importer SEE anything at all under the path? Any non-junk file of any
+        extension answers yes (junk is skipped exactly as ``gather`` skips it, so
+        a folder holding only a resource fork is not counted as "seen"). A
+        missing, unreadable, empty, or unmappable path answers no — and only that
+        is a visibility stall.
+
+        Cheap and short-circuiting: it stops at the first file it finds and is
+        only ever called when ``gather`` already came back empty, so the common
+        (successful) drain never pays for it.
+        """
+        # Deferred for the same import-cycle reason as ``gather``'s imports.
+        from foragerr.downloads.pathmap import apply_mappings
+
+        mapped = apply_mappings(self.output_path, list(self.mappings))
+        if mapped.warning is not None:
+            # An unmapped/foreign path was never looked at — the machine cannot
+            # see it by construction, which IS the visibility failure.
+            return False
+        return _holds_any_file(mapped.path, max_depth=ctx.max_walk_depth)
+
+
+def _holds_any_file(root: str, *, max_depth: int | None = None) -> bool:
+    """True when ``root`` is a readable file, or a directory containing at least
+    one non-junk file within ``max_depth`` — regardless of extension.
+
+    Mirrors :func:`foragerr.library.matching.iter_archive_files`' walk bounds and
+    junk-skipping, minus the extension filter, and returns at the first hit. An
+    unreadable directory walks to nothing (``os.walk`` swallows its ``OSError``),
+    which is exactly the "cannot see the path" answer this probe wants.
+    """
+    base = Path(root)
+    if base.is_file():
+        return not matching.is_junk_file(base.name)
+    if not base.is_dir():
+        return False
+    base_depth = str(base).rstrip(os.sep).count(os.sep)
+    for dirpath, dirs, files in os.walk(base):
+        dirs[:] = [d for d in dirs if not matching.is_junk_dir(d)]
+        if max_depth is not None:
+            depth = dirpath.rstrip(os.sep).count(os.sep) - base_depth
+            if depth >= max_depth:
+                dirs[:] = []  # do not descend further
+        if any(not matching.is_junk_file(name) for name in files):
+            return True
+    return False
+
 
 @dataclass(frozen=True, slots=True)
 class RescanSource:

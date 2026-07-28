@@ -13,7 +13,7 @@ whether the memory survives a reset written by a different module.
 from __future__ import annotations
 
 import datetime as dt
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import pytest
 
@@ -24,7 +24,10 @@ from foragerr.downloads.imports import (
     is_visibility_stall,
     process_imports,
 )
+from foragerr.downloads.pathmap import CHECK_MAPPING_WARNING
 from foragerr.downloads.state import TrackedDownloadState
+from foragerr.importer import ImportCandidate, ImportOutcome, ImportStatus
+from foragerr.importer.sources import SOURCE_DOWNLOAD
 from foragerr.downloads.tracking import ClientObservation, decode_messages, reconcile_downloads
 from foragerr.health import HealthService
 
@@ -252,14 +255,124 @@ async def test_the_component_aggregates_rather_than_one_line_per_row(db, tmp_pat
 # --- what does and does not count as a stall --------------------------------
 
 
+def _outcome(*, mapping_warning: str | None = None) -> ImportOutcome:
+    return ImportOutcome(
+        status=ImportStatus.BLOCKED,
+        candidate=ImportCandidate(
+            source_kind=SOURCE_DOWNLOAD,
+            local_path="/downloads/x/Spawn 001.cbz",
+            size=1,
+            file_name="Spawn 001.cbz",
+            mapping_warning=mapping_warning,
+        ),
+    )
+
+
 @pytest.mark.req("FRG-DL-015")
-def test_only_the_no_importable_files_shape_is_a_visibility_stall():
-    """A blocked-with-reasons or corrupt outcome PROVES the path is visible, so
-    it resets the memory rather than extending it."""
-    assert is_visibility_stall([]) is True
+def test_only_a_real_visibility_failure_is_a_stall():
+    """The predicate, exhaustively. A blocked-with-reasons or corrupt outcome
+    PROVES the path is visible, so it resets the memory rather than extending
+    it — and so does an empty result from a path we could plainly READ."""
+    # Nothing to look at, or nowhere to look: the visibility failures.
     assert is_visibility_stall([], no_output=True) is True
-    assert is_visibility_stall(["some-outcome"]) is False  # type: ignore[list-item]
-    assert is_visibility_stall(["some-outcome"], no_output=True) is True  # type: ignore[list-item]
+    assert is_visibility_stall([], saw_files=False) is True
+    # Saw files, none of them comic-shaped: the path is FINE (rar/par2/nfo).
+    assert is_visibility_stall([], saw_files=True) is False
+    # An outcome means real files were processed — never a stall...
+    assert is_visibility_stall([_outcome()]) is False
+    # ...unless the path could not be translated at all, which is a visibility
+    # failure that happens to yield exactly one blocked candidate.
+    assert is_visibility_stall([_outcome(mapping_warning=CHECK_MAPPING_WARNING)]) is True
+    # No output path at all outranks everything.
+    assert is_visibility_stall([_outcome()], no_output=True) is True
+
+
+@pytest.mark.req("FRG-DL-015")
+async def test_a_visible_path_of_non_comic_files_never_stalls(db, tmp_path):
+    """The wrong-diagnosis bug: a download that unpacked to rar/par2/nfo parts
+    yields zero candidates every cycle FOREVER, because ``gather`` filters to
+    comic extensions. Counting that as a stall would degrade health with a mount
+    remediation for a deployment whose mount is demonstrably fine — the files
+    are right there."""
+    series_id, issue_id = await seed_library(db, tmp_path)
+    folder = tmp_path / "downloads" / "Spawn.001.par-set"
+    folder.mkdir(parents=True)
+    (folder / "spawn-001.rar").write_bytes(b"not a comic")
+    (folder / "spawn-001.par2").write_bytes(b"parity")
+    (folder / "spawn-001.nfo").write_text("release notes")
+    await insert_grab_history(
+        db, download_id="rar1", series_id=series_id, issue_id=issue_id, client_id=None
+    )
+    service = _health(db, tmp_path, import_stall_threshold_cycles=2)
+
+    for n in range(6):
+        await _cycle(
+            db,
+            download_id="rar1",
+            output_path=folder,
+            now=_START + dt.timedelta(minutes=n),
+        )
+        row = await tracked_by_download_id(db, "rar1")
+        # Every cycle stays honest about what happened...
+        assert row.state == TrackedDownloadState.IMPORT_BLOCKED.value
+        assert decode_messages(row.status_messages) == [NO_IMPORTABLE_FILES_MESSAGE]
+        # ...and never accrues a diagnosis it has no evidence for.
+        assert row.import_stall_count == 0
+        assert row.first_stalled_at is None
+
+    assert await _stall_component(service) is None
+
+    # The contrast, on the same threshold: a path that really is not there.
+    await insert_grab_history(
+        db, download_id="gone1", series_id=series_id, issue_id=issue_id, client_id=None
+    )
+    for n in range(2):
+        await _cycle(
+            db,
+            download_id="gone1",
+            output_path=tmp_path / "downloads" / "never-mounted",
+            now=_START + dt.timedelta(minutes=10 + n),
+        )
+    assert (await tracked_by_download_id(db, "gone1")).import_stall_count == 2
+    assert (await _stall_component(service)).state == "degraded"
+
+
+@pytest.mark.req("FRG-DL-015")
+async def test_an_unmapped_client_path_accrues_and_degrades(db, tmp_path):
+    """The case the health remediation names OUT LOUD — a misconfigured remote
+    path mapping — used to be the one that could never reach the threshold: it
+    produces a single blocked candidate, so the old "no outcomes" test read it
+    as a release problem forever."""
+    series_id, issue_id = await seed_library(db, tmp_path)
+    await insert_grab_history(
+        db, download_id="map1", series_id=series_id, issue_id=issue_id, client_id=None
+    )
+    service = _health(db, tmp_path, import_stall_threshold_cycles=2)
+
+    # A client reporting its completed folder in a foreign namespace with no
+    # mapping to translate it (FRG-DL-005 scenario 2) — the path is never even
+    # looked at, so this is a visibility failure by construction.
+    for n in range(2):
+        now = _START + dt.timedelta(minutes=n)
+        await _cycle(
+            db,
+            download_id="map1",
+            output_path=PureWindowsPath(r"C:\Downloads\complete\Spawn 001"),
+            now=now,
+        )
+
+    row = await tracked_by_download_id(db, "map1")
+    assert row.state == TrackedDownloadState.IMPORT_BLOCKED.value
+    # The per-row message still names the real, specific fix...
+    assert any(
+        "remote-path mapping" in m for m in decode_messages(row.status_messages)
+    )
+    # ...and the condition now escalates instead of hiding for ever.
+    assert row.import_stall_count == 2
+    component = await _stall_component(service)
+    assert component is not None
+    assert component.state == "degraded"
+    assert "path mapping" in component.remediation
 
 
 @pytest.mark.req("FRG-DL-015")

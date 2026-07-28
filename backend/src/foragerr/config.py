@@ -114,11 +114,21 @@ INTERVAL_RANGES: dict[str, tuple[int, int]] = {
 #: ``foragerr.search_ops.pipeline.effective_search_budget`` (the ``effective_*``
 #: idiom), so an out-of-range value in an old config.yaml warns and is corrected
 #: instead of failing startup. The floor keeps a budget from being set so low
-#: that every indexer is cancelled before its first page; the ceiling keeps the
-#: whole interactive search inside the default listener request guard
-#: (``listener_request_timeout_seconds``, FRG-NFR-014).
+#: that every indexer is cancelled before its first page.
+#:
+#: The ceiling is an ABSOLUTE upper bound, not the whole story: it is above the
+#: default listener request guard (``listener_request_timeout_seconds`` = 30,
+#: FRG-NFR-014), so on its own a 31..60 s budget would silently reinstate the
+#: very 503 the budget exists to prevent. ``effective_search_budget`` therefore
+#: clamps against the CONFIGURED guard minus :data:`SEARCH_BUDGET_LISTENER_MARGIN`
+#: as well, and this constant only caps a deployment whose guard was raised.
 SEARCH_BUDGET_FLOOR = 5.0
 SEARCH_BUDGET_CEILING = 60.0
+
+#: Head-room (seconds) left between the effective per-indexer search budget and
+#: the listener's request guard, so the response still has time to be decided,
+#: serialized and written after the slowest indexer is cut off (FRG-SRCH-015).
+SEARCH_BUDGET_LISTENER_MARGIN = 5.0
 
 #: Range fragments derived from INTERVAL_RANGES so the generated config.yaml
 #: comments (built from Field descriptions) can never drift from the bounds
@@ -504,9 +514,10 @@ class Settings(BaseSettings):
             "indexer's back-off ladder is left untouched. Scheduled backlog "
             "searches are deliberately NOT budgeted (they wait politely). "
             f"Clamped to the documented {SEARCH_BUDGET_FLOOR:g}.."
-            f"{SEARCH_BUDGET_CEILING:g} s range with a warning. Keep this "
-            "below listener_request_timeout_seconds so a slow indexer can "
-            "never trip the listener's request guard."
+            f"{SEARCH_BUDGET_CEILING:g} s range with a warning, and clamped "
+            "further to listener_request_timeout_seconds minus "
+            f"{SEARCH_BUDGET_LISTENER_MARGIN:g} s so a slow indexer can never "
+            "trip the listener's request guard whatever is configured here."
         ),
     )
     comicvine_api_key: SecretStr = Field(
