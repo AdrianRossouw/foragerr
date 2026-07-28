@@ -48,11 +48,11 @@
 - [x] 4.1 Manual: admin configuration (lanes/share/spacing settings),
       sources page (meter, recompute); ratelimit docstring correction
       (FRG-PROC-011)
-- [ ] 4.2 Matrix regen; trace/soup/risk green (FRG-PROC-005)
-- [ ] 4.3 Medium-tier gate (early Codex after first implementation
+- [x] 4.2 Matrix regen; trace/soup/risk green (FRG-PROC-005)
+- [x] 4.3 Medium-tier gate (early Codex after first implementation
       commit + delta at close; concurrency angle on the gate lanes) +
       e2e (FRG-PROC-004)
-- [ ] 4.4 Live rig verification: meter renders real usage, recompute
+- [x] 4.4 Live rig verification: meter renders real usage, recompute
       refreshes a stale pre-v0.11 proposal batch, approaching warning
       at real spend
 - [ ] 4.5 Archive/sync specs, registry flip, release v0.12.0 per

@@ -9,6 +9,65 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.12.0] — 2026-07-28
+
+M11 import-intelligence, change 3: spend the ComicVine budget like it's
+scarce.
+
+### Added
+- **Priority lanes within one key** (`FRG-META-022`): every ComicVine
+  request is batch (background refresh, credits, covers, enrichment,
+  recompute) or interactive (search, add, review-row search, restore).
+  Batch work caps at a configurable share of each path budget
+  (`comicvine_batch_budget_share`, default 70%) so interactive surfaces
+  always keep a reserve. Splitting traffic across multiple keys is a
+  recorded permanent non-goal.
+- **Budget meter** (`FRG-API-025`, `FRG-UI-040`): structured per-path
+  budget numbers on the authenticated health surface; a full meter in
+  Settings → General (usage, ceiling, batch share, resume countdowns)
+  and a quiet-by-default indicator on the Sources review screen.
+  Budget-refused searches now say when they'll resume instead of a
+  generic failure.
+- **Approaching-limit warning** (`FRG-META-016`): health warns when a
+  path crosses the warning fraction — before anything interactive is
+  refused. A batch lane pausing at its share is the designed steady
+  state and does not degrade health (the meter shows it, with its own
+  resume time).
+- **Frugal, convergent enrichment** (`FRG-SRC-013`): nightly proposal
+  computation orders by least-recently-attempted (migration `0027`), so
+  a failing or deferred head can never starve the rest of a large
+  collection; errored rows respect a retry spacing
+  (`comicvine_error_retry_spacing_seconds`, default 12h) on the
+  scheduled path only.
+- **Recompute proposals** (`FRG-SRC-013`): a button on each source
+  refreshes proposals computed by earlier versions (or without a key)
+  through the batch lane — resumable across budget windows, never
+  touching rows you've already decided. Keyless-era proposals and
+  markers become recomputable the moment a key is configured.
+
+### Changed
+- Auto-sync's downloads ride the batch lane end to end — background
+  acquisition can no longer spend the interactive reserve.
+- Scope note, verified at proposal time: ComicVine's API exposes no
+  usage counters (no rate headers, no usage fields), so the pre-design's
+  "calibrate by reading CV's counters" became honest local
+  observability — the meter, the warning, and documented window
+  semantics.
+
+### Security
+- No new attack surface: the meter rides the existing authenticated
+  health surface (the unauthenticated probe carries no numbers —
+  proven); the recompute endpoint sits behind the default-deny
+  perimeter. Full-history secret scan re-run (0 genuine findings).
+
+### Upgrade notes
+- Migration `0027` adds proposal-attempt tracking columns; no data
+  rewrite.
+- After upgrading, press **Recompute proposals** on your source (repeat
+  as budget windows allow) to refresh pre-v0.11 proposals — on the
+  reference 1,318-item collection each pass refreshes ~105 rows and
+  reports the remainder.
+
 ## [v0.11.0] — 2026-07-28
 
 M11 import-intelligence, change 2: the review experience at

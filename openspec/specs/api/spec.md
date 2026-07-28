@@ -581,7 +581,6 @@ so a client can render a group affordance in the flat view without a second call
 - **WHEN** the grouping projection computes roll-up stats
 - **THEN** it does so with a bounded aggregate query rather than the per-series statistics path multiplied per group (no N+1 explosion)
 
-
 ### Requirement: FRG-API-021 — Log records resource
 
 The backend SHALL capture log records emitted at or above the configured
@@ -760,3 +759,31 @@ is a 404; no secret and no unsanitized string is exposed.
 - **WHEN** the bibliography is requested after the TTL has lapsed
 - **THEN** the stale rows are still served (state reflects the refresh in
   flight), and one deduplicated fetch command is enqueued
+
+### Requirement: FRG-API-025 — Structured budget state on the health surface
+
+The system SHALL expose the ComicVine budget's structured state on the
+existing authenticated system-health surface as an additive component
+detail: per path bucket, the used count, the effective ceiling, the
+batch-lane usage against its share, and the seconds until capacity
+returns, plus the degraded and exhausted indicators — the numbers the
+gate already computes, no new endpoint and no new unauthenticated
+disclosure. Buckets below the warning fraction MAY be omitted for
+compactness; the shape SHALL be stable for UI consumption
+(FRG-UI-040).
+
+#### Scenario: The meter's numbers are served, authenticated, additive
+
+- **WHEN** an authenticated client reads system health while a path
+  bucket is above the warning fraction
+- **THEN** the ComicVine component carries the structured budget detail
+  (bucket, used, ceiling, batch share usage, resume seconds) alongside
+  its existing state and message fields, and clients unaware of the new
+  field are unaffected
+
+#### Scenario: No unauthenticated leakage
+
+- **WHEN** the unauthenticated health endpoint is read
+- **THEN** it carries no budget numbers — the slim unauthenticated
+  surface is unchanged
+
