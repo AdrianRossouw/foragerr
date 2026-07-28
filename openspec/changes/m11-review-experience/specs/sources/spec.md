@@ -10,14 +10,21 @@ overlay, not a ranking pool: a proposed ComicVine volume already present
 as a library series is proposed as a direct match to that series, and one
 not present is proposed as an add — either way a single operator action
 resolves the row. Automatic proposals SHALL pass a token-overlap gate
-(a candidate whose folded title shares no token with the folded query is
-never proposed, whatever its character-level similarity) and a minimum
-confidence floor; a row that clears neither carries an explicit
-"no plausible automatic match" verdict that is never terminal — the
-operator search (FRG-UI-039) remains available on every reviewable row.
-Trade-shaped entitlements (collected-edition cues in the store title, via
-the single shared cue vocabulary) SHALL prefer collected-edition-shaped
-ComicVine candidates in ranking — a soft re-rank, never a filter. When no
+and a minimum confidence floor, both computed over titles stripped of
+edition boilerplate (volume/book/part/issue designators, bare ordinals,
+and collected-edition cue words — via the shared vocabularies, never a
+second list): a candidate sharing no substantive token with the query is
+never proposed whatever its character-level similarity, boilerplate
+overlap alone can neither admit a candidate nor lift one over the
+auto-accept threshold, and the floor SHALL NOT discard a candidate whose
+stripped canonical title is contained by the stripped query (a store
+title's subtitle decoration never buries the exact-titled volume). A row
+that clears neither gate nor floor carries an explicit "no plausible
+automatic match" verdict that is never terminal — the operator search
+(FRG-UI-039) remains available on every reviewable row. Trade-shaped
+entitlements (collected-edition cues OR a volume/book-ordinal shape in
+the store title) SHALL prefer collected-edition-shaped ComicVine
+candidates in ranking — a soft re-rank, never a filter. When no
 ComicVine key is configured, proposal computation SHALL degrade to
 library-only ranking and say so. Budget exhaustion SHALL leave affected
 rows un-proposed and retryable exactly as before (deferral semantics
@@ -26,11 +33,29 @@ unchanged, FRG-META-016).
 #### Scenario: Zero-token-overlap titles are never proposed
 
 - **WHEN** proposals are computed for an entitlement whose folded store
-  title shares no token with a candidate's folded title
+  title shares no substantive token with a candidate's folded title
 - **THEN** that candidate is not proposed at any similarity score (the
   "Absolute Green Arrow for Something is Killing the Children" class is
   impossible), and a row with no gated candidate above the floor carries
   the explicit no-plausible-match verdict
+
+#### Scenario: Boilerplate overlap is not identity evidence
+
+- **WHEN** two different series share only edition boilerplate (e.g.
+  "Saga Vol. 1" vs a candidate "Batman Vol. 1", or near-twins like
+  "The Boys Vol. 1" vs "The Bots Vol. 1")
+- **THEN** the boilerplate neither admits the candidate through the gate
+  nor inflates its confidence toward the auto-accept threshold — scoring
+  runs on the stripped titles
+
+#### Scenario: The exact-titled volume survives a decorated store title
+
+- **WHEN** the store title carries edition decoration and a subtitle
+  ("Hellboy Omnibus Volume 1: Seed of Destruction") and ComicVine's
+  candidates include the exact-titled volume ("Hellboy")
+- **THEN** the exact-titled volume is never floored out by
+  length-asymmetric similarity — containment of the stripped canonical
+  title in the stripped query keeps it proposable
 
 #### Scenario: In-library ComicVine candidate proposes a match, not an add
 
