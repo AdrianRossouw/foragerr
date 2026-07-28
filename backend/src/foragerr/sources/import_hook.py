@@ -36,6 +36,12 @@ logger = logging.getLogger("foragerr.sources.import_hook")
 #: The download-id prefix marking a store-grab completed download.
 HUMBLE_DOWNLOAD_PREFIX = "humble:"
 
+#: The ``GrabHistoryRow.source`` value a store grab is recorded under. The
+#: import pipeline's store gate (FRG-PP-021) reads it: only a grab record
+#: carrying this source may confer provenance authority, so an indexer
+#: force-grab that mapped a series but no issue keeps the pre-change rules.
+GRAB_SOURCE_STORE = "store"
+
 
 def entitlement_id_from_download_id(download_id: str) -> int | None:
     """The store entitlement id encoded in a ``humble:<id>`` download id, else None."""

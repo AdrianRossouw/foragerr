@@ -45,6 +45,13 @@ PROV_MANUAL_OVERRIDE = "manual_override"
 #: review/blocked item rather than a silent mis-file (FRG-IMP-024).
 PROV_COMICINFO_CONFLICT = "comicinfo_conflict"
 
+#: Provenance key recorded when the FRG-PP-022 ordinal fallback was REFUSED by
+#: one of its three guards; its value is the refusal code
+#: (:data:`~foragerr.importer.decisions.ORDINAL_REFUSAL_REASONS` keys). The
+#: pipeline turns it into a blocked candidate with the guard's own reason so a
+#: refusal is never mistaken for "the name carried no issue evidence".
+PROV_ORDINAL_REFUSED = "ordinal_refused"
+
 #: High → low confidence order for per-field selection (FRG-PP-004).
 _LAYER_ORDER: tuple[str, ...] = (LAYER_GRAB, LAYER_FILENAME, LAYER_FOLDER, LAYER_CLIENT)
 
@@ -178,6 +185,7 @@ __all__ = [
     "PROV_COMICINFO_CONFLICT",
     "PROV_ISSUE_ID_TAG",
     "PROV_MANUAL_OVERRIDE",
+    "PROV_ORDINAL_REFUSED",
     "Evidence",
     "aggregate",
 ]

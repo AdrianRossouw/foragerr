@@ -26,7 +26,7 @@ from dataclasses import dataclass
 
 from foragerr.db.base import utcnow
 from foragerr.sources.matching import LibrarySeriesLite, compute_proposed_match
-from foragerr.sources.models import SourceEntitlementRow
+from foragerr.sources.models import MATCHED_VIA_OPERATOR, SourceEntitlementRow
 
 logger = logging.getLogger("foragerr.sources.review")
 
@@ -91,13 +91,24 @@ async def _queue_grab(db, entitlement_id: int, commands) -> None:
 
 
 async def match_entitlement(
-    db, entitlement_id: int, *, series_id: int, commands=None
+    db,
+    entitlement_id: int,
+    *,
+    series_id: int,
+    commands=None,
+    matched_via: str = MATCHED_VIA_OPERATOR,
 ) -> SourceEntitlementRow:
     """Link an entitlement to an existing library series and accept it.
 
     The operator's chosen ``series_id`` overrides any server proposal
     (FRG-SRC-004). Sets ``matched_series_id`` + ``review_status = "matched"`` and,
     for a grabbable comic, queues the download. Idempotent.
+
+    ``matched_via`` records WHO chose the series (FRG-PP-022 guard 3): the
+    default is :data:`MATCHED_VIA_OPERATOR` because every caller of this
+    function is a human review action EXCEPT auto-sync's ``_auto_accept``,
+    which passes :data:`MATCHED_VIA_AUTO` explicitly. The import pipeline's
+    ordinal fallback ("Vol. N" → issue N) fires only for an operator match.
 
     The target ``series_id`` must name a real library series (a stale/garbage id
     is a 404), so a match never links an entitlement to a phantom series. When
@@ -128,6 +139,7 @@ async def match_entitlement(
                 session, series_id=prior_series_id
             )
         row.matched_series_id = series_id
+        row.matched_via = matched_via
         row.review_status = "matched"
         row.updated_at = utcnow()
     await _queue_grab(db, entitlement_id, commands)
@@ -143,6 +155,7 @@ async def add_entitlement(
     factory=None,
     root_folder_id: int | None = None,
     cv_volume_id: int | None = None,
+    matched_via: str = MATCHED_VIA_OPERATOR,
 ) -> SourceEntitlementRow:
     """Add a brand-new series for an entitlement via the normal add flow.
 
@@ -162,6 +175,10 @@ async def add_entitlement(
     sibling entitlements whose proposals named the same volume are re-resolved
     (:func:`_reresolve_sibling_proposals`) so their next single action succeeds on
     the first click.
+
+    ``matched_via`` is carried onto every terminal link this function performs
+    (add-then-match, degrade-to-match, and the TOCTOU repair) so an auto-sync
+    add is never recorded as an operator match (FRG-PP-022 guard 3).
 
     The presence pre-check runs in its own read session, so two near-simultaneous
     adds of the same volume can both pass it; the loser's ``add_series`` rejects
@@ -195,6 +212,7 @@ async def add_entitlement(
             cv_volume_id=cvid,
             series_id=existing_series_id,
             commands=commands,
+            matched_via=matched_via,
         )
 
     root_id = root_folder_id
@@ -239,6 +257,7 @@ async def add_entitlement(
                 cv_volume_id=cvid,
                 series_id=raced_series_id,
                 commands=commands,
+                matched_via=matched_via,
             )
         raise EntitlementActionError(
             f"add-series failed for volume {cvid}: {exc}", status=400
@@ -254,7 +273,11 @@ async def add_entitlement(
         exclude_entitlement_id=entitlement_id,
     )
     return await match_entitlement(
-        db, entitlement_id, series_id=result.series.id, commands=commands
+        db,
+        entitlement_id,
+        series_id=result.series.id,
+        commands=commands,
+        matched_via=matched_via,
     )
 
 
@@ -265,6 +288,7 @@ async def _degrade_to_match(
     cv_volume_id: int,
     series_id: int,
     commands=None,
+    matched_via: str = MATCHED_VIA_OPERATOR,
 ) -> SourceEntitlementRow:
     """Resolve an add whose volume is already in the library as a match.
 
@@ -292,7 +316,11 @@ async def _degrade_to_match(
         exclude_entitlement_id=entitlement_id,
     )
     return await match_entitlement(
-        db, entitlement_id, series_id=series_id, commands=commands
+        db,
+        entitlement_id,
+        series_id=series_id,
+        commands=commands,
+        matched_via=matched_via,
     )
 
 
@@ -473,6 +501,9 @@ async def restore_entitlement(
             )
         fresh.review_status = "new"
         fresh.matched_series_id = None
+        # The match target is dropped, so its provenance goes with it — a later
+        # re-match stamps its own ``matched_via`` (FRG-PP-022 guard 3).
+        fresh.matched_via = None
         fresh.proposed_series_id = (
             proposal.proposed_series_id if proposal is not None else None
         )
@@ -501,13 +532,19 @@ async def bulk_restore(
 
 
 async def bulk_match(
-    db, entitlement_ids: list[int], *, series_id: int, commands=None
+    db,
+    entitlement_ids: list[int],
+    *,
+    series_id: int,
+    commands=None,
+    matched_via: str = MATCHED_VIA_OPERATOR,
 ) -> BulkResult:
     return await _bulk(
         db,
         entitlement_ids,
         lambda eid: match_entitlement(
-            db, eid, series_id=series_id, commands=commands
+            db, eid, series_id=series_id, commands=commands,
+            matched_via=matched_via,
         ),
     )
 

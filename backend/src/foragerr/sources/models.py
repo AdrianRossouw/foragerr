@@ -38,6 +38,12 @@ CLASSIFICATIONS = ("comic", "other")
 #: separate axis (the existing-pipeline progress), surfaced in Activity.
 REVIEW_STATUSES = ("new", "matched", "ignored")
 
+#: Match-provenance values for :attr:`SourceEntitlementRow.matched_via`
+#: (FRG-PP-022 guard 3): a human review action vs an auto-sync acceptance.
+MATCHED_VIA_OPERATOR = "operator"
+MATCHED_VIA_AUTO = "auto"
+MATCHED_VIA = (MATCHED_VIA_OPERATOR, MATCHED_VIA_AUTO)
+
 
 class SourceRow(Base):
     """A connected store source (FRG-SRC-001)."""
@@ -127,6 +133,14 @@ class SourceEntitlementRow(Base):
     matched_series_id: Mapped[int | None] = mapped_column(
         StrictInteger, nullable=True
     )
+    #: HOW ``matched_series_id`` was established (FRG-PP-022 guard 3):
+    #: :data:`MATCHED_VIA_OPERATOR` (a human match/add/bulk-match action) or
+    #: :data:`MATCHED_VIA_AUTO` (auto-sync accepted a proposal above the
+    #: confidence threshold — no human chose this series). ``None`` on an
+    #: unmatched row, and on a row matched before this column existed; a legacy
+    #: NULL is treated as NOT operator-made (see migration
+    #: ``0025_entitlement_matched_via`` for why).
+    matched_via: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(StrictDateTime, nullable=False)
     updated_at: Mapped[dt.datetime] = mapped_column(StrictDateTime, nullable=False)
 

@@ -95,6 +95,14 @@ class ImportCandidate:
     #: Reconciliation hints from grab history (FRG-PP-003); may be ``None``.
     grab_series_id: int | None = None
     grab_issue_id: int | None = None
+    #: The store entitlement this download came from (FRG-PP-021) — set ONLY
+    #: when the grab record is a store grab (``source == "store"``) whose
+    #: download id encodes an entitlement id. It is the store gate AND the key
+    #: the pipeline re-reads the entitlement's CURRENT matched series through at
+    #: import time; ``grab_series_id`` is the grab-time snapshot and is NOT
+    #: trusted for a store candidate. ``None`` for every non-store candidate,
+    #: which therefore keeps the pre-FRG-PP-021 resolution rules.
+    store_entitlement_id: int | None = None
     #: Rescan pins the series scope; ``None`` for downloads (open mapping).
     series_scope_id: int | None = None
     #: Non-``None`` when the client path could not be mapped (FRG-PP-008); the
@@ -125,6 +133,15 @@ class CompletedDownloadSource:
         from foragerr.downloads.models import GrabHistoryRow
         from foragerr.downloads.pathmap import apply_mappings
 
+        # Same deferral rationale as the downloads imports above (the sources
+        # package pulls the commands/keystore chain at import time); this is the
+        # ONE store-aware fact the intake carries, and it reuses the existing
+        # `humble:<id>` resolution rather than re-deriving the prefix here.
+        from foragerr.sources.import_hook import (
+            GRAB_SOURCE_STORE,
+            entitlement_id_from_download_id,
+        )
+
         mapped = apply_mappings(self.output_path, list(self.mappings))
         # Reconcile by download id once; the grab title feeds evidence and its
         # series/issue become the candidate's high-confidence hints. A re-grab
@@ -140,6 +157,17 @@ class CompletedDownloadSource:
         grab_title = grab.title if grab is not None else None
         grab_series_id = grab.series_id if grab is not None else None
         grab_issue_id = grab.issue_id if grab is not None else None
+        # Store-ness is read off the grab record itself (`source == "store"`,
+        # written by the store grab command) — never inferred from the download
+        # id alone — and the entitlement id comes from the `humble:<id>` id the
+        # same command minted. Both must be present for the candidate to carry
+        # provenance authority (FRG-PP-021): an indexer force-grab that mapped a
+        # series but no issue is NOT a store grab and stays on the old rules.
+        store_entitlement_id = (
+            entitlement_id_from_download_id(self.download_id)
+            if grab is not None and grab.source == GRAB_SOURCE_STORE
+            else None
+        )
 
         if mapped.warning is not None:
             # Unmapped/foreign path: one blocked candidate naming the fix; the
@@ -157,6 +185,7 @@ class CompletedDownloadSource:
                     grab_title=grab_title,
                     grab_series_id=grab_series_id,
                     grab_issue_id=grab_issue_id,
+                    store_entitlement_id=store_entitlement_id,
                     mapping_warning=mapped.warning,
                 )
             ]
@@ -178,6 +207,7 @@ class CompletedDownloadSource:
                 grab_title=grab_title,
                 grab_series_id=grab_series_id,
                 grab_issue_id=grab_issue_id,
+                store_entitlement_id=store_entitlement_id,
             )
             for path, size in files
         ]

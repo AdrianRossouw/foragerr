@@ -108,6 +108,9 @@ async def test_match_links_series_and_queues_grab(
     )
     assert row.review_status == "matched"
     assert row.matched_series_id == series_id
+    # The match is stamped operator-made (FRG-PP-022 guard 3) — the import
+    # pipeline's ordinal fallback only trusts a human-chosen series.
+    assert row.matched_via == "operator"
     # Accept queues the grab (the accept action IS the download gate).
     assert row.download_state == "queued"
     assert commands.enqueued == [
@@ -205,6 +208,8 @@ async def test_ignore_then_restore_recomputes_proposal(
     restored = await review.restore_entitlement(db, ent.id)
     assert restored.review_status == "new"
     assert restored.matched_series_id is None
+    # The match provenance goes with the dropped match (FRG-PP-022 guard 3).
+    assert restored.matched_via is None
     # Restore recomputes the proposed match (library-first) — a confident one.
     assert restored.proposed_series_id is not None
     assert restored.proposed_match_json is not None
@@ -285,6 +290,9 @@ async def test_auto_sync_accepts_only_confident_matches(
     single = await _comic(db, source.id, "synth_singleissue_01")
     collected = await _comic(db, source.id, "synth_collected_edition_vol1")
     assert single.review_status == "matched"
+    # Auto-sync's acceptance is stamped as such (FRG-PP-022 guard 3): no human
+    # chose this series, so the import pipeline withholds the ordinal fallback.
+    assert single.matched_via == "auto"
     assert single.download_state == "queued"
     assert collected.review_status == "new"
     assert collected.download_state is None

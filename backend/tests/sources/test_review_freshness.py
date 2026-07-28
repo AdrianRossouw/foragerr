@@ -224,6 +224,8 @@ async def test_add_on_in_library_volume_degrades_to_match(
 
     assert row.review_status == "matched"
     assert row.matched_series_id == series_id
+    # The degrade is an operator action like any other match (FRG-PP-022 guard 3).
+    assert row.matched_via == "operator"
     assert row.download_state == "queued"
     assert commands.grabs() == [("source-grab", {"entitlement_id": ent.id}, "accept")]
 
@@ -455,6 +457,31 @@ async def test_retry_requeues_a_failed_download(
     assert row.download_state == "queued"
     assert row.download_error is None
     assert commands.grabs() == [("source-grab", {"entitlement_id": ent.id}, "accept")]
+
+
+@pytest.mark.req("FRG-SRC-009")
+async def test_retry_without_a_grabbable_copy_is_a_conflict(
+    db, config_dir, root_folder_id, format_profile_id
+):
+    """A failed entitlement whose preferred copy vanished on a later re-sync
+    (md5/filename overwritten to nothing) 409s instead of silently no-opping —
+    a retry must never pretend to queue a download it cannot perform."""
+    source = await _synced_source(db, config_dir)
+    ent = await _comic(db, source.id, "synth_singleissue_01")
+    await _mark_failed(db, ent.id, error="md5 mismatch on the downloaded file")
+    async with db.write_session() as session:
+        row = await session.get(SourceEntitlementRow, ent.id)
+        row.md5 = None
+        row.filename = None
+    commands = FakeCommands()
+
+    with pytest.raises(review.EntitlementActionError) as exc:
+        await review.retry_download(db, ent.id, commands=commands)
+    assert exc.value.status == 409
+    assert "no downloadable copy" in str(exc.value)
+    assert commands.enqueued == []
+    after = await repo.get_entitlement(db, ent.id)
+    assert after.download_state == "failed"  # untouched
 
 
 @pytest.mark.req("FRG-SRC-009")

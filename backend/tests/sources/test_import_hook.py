@@ -26,7 +26,7 @@ from foragerr.library import repo as library_repo
 from foragerr.library.containment import RangeInput, replace_issue_collections
 from foragerr.sources import repo
 from foragerr.sources.import_hook import apply_source_import
-from foragerr.sources.models import SourceEntitlementRow
+from foragerr.sources.models import MATCHED_VIA_OPERATOR, SourceEntitlementRow
 from foragerr.sources.registry import TYPE_HUMBLE
 from foragerr.sources.settings import HumbleSettings
 from http_support import make_settings
@@ -71,6 +71,10 @@ async def _entitlement(db, *, matched_series_id, download_state) -> int:
             review_status="matched",
             download_state=download_state,
             matched_series_id=matched_series_id,
+            # The real review action's stamp (FRG-PP-022 guard 3): these
+            # fixtures stand in for an operator-matched entitlement, which is
+            # what unlocks the import pipeline's ordinal fallback.
+            matched_via=MATCHED_VIA_OPERATOR,
             md5="a" * 32,
             file_size=1,
             filename="synthetic.cbz",

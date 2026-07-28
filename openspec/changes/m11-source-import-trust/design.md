@@ -182,9 +182,13 @@ is already terminal, unlike change 4's visibility polling).
 
 ## Migration Plan
 
-No schema migration. Behavior changes are import-time and review-time
-only; existing library rows are untouched. Rollback = revert the
-release tag (no data written in the new shapes beyond normal imports).
+One additive migration (0025): nullable `matched_via` on
+source_entitlements ('operator' | 'auto'; NULL for legacy rows, which
+withhold the ordinal fallback with an honest "predates match tracking"
+reason — one operator re-match restores it). All other behavior changes
+are import-time and review-time only; existing library rows are
+untouched. Rollback = revert the release tag (the column is inert to
+older code).
 
 ## Open Questions
 
