@@ -58,11 +58,11 @@
 - [x] 5.1 Manual: search page (budget/partial/outcomes), library-add
       (default sweep), admin configuration (budget + stall threshold
       settings), downloads (client priority) (FRG-PROC-011)
-- [ ] 5.2 Matrix regen; trace/soup/risk green (FRG-PROC-005)
-- [ ] 5.3 Medium gate: concurrency angle on cancellation + fan-out,
+- [x] 5.2 Matrix regen; trace/soup/risk green (FRG-PROC-005)
+- [x] 5.3 Medium gate: concurrency angle on cancellation + fan-out,
       state angle on stall memory, conformance angle; Codex; simplify
       pass; e2e (FRG-PROC-004)
-- [ ] 5.4 Rig verification: real interactive search returns partial
+- [x] 5.4 Rig verification: real interactive search returns partial
       under the default listener guard (retire the 120s band-aid in
       rig config), stall memory on a synthetic invisible path,
       default sweep on a fresh add

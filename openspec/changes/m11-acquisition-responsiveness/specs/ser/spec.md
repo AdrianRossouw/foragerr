@@ -2,7 +2,7 @@
 
 ## MODIFIED Requirements
 
-### Requirement: FRG-SER-005 — Add flow (add → refresh → scan → search)
+### Requirement: FRG-SER-005 — Add flow (add → refresh → scan → optional search)
 
 When a series is added, the system SHALL execute a chained sequence: fetch and persist metadata and issues from ComicVine, apply user add-options (root folder, format profile, monitoring strategy, search-on-add, and an optional explicit collected-edition book-type per FRG-SER-018), build and validate the series path, scan the path for existing files, and queue a bounded search for the series' missing monitored issues — by default for any add whose monitoring yields wanted issues, and always when search-on-add was requested — with add-options cleared once the chain completes.
 
