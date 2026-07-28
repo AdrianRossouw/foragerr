@@ -9,6 +9,61 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.13.1] — 2026-07-28
+
+Release-record correction: the `v0.13.0` tag was minted without its
+version bump and CHANGELOG entry (a release-script replace failed
+silently against a stale branch). The code at `v0.13.0` is exactly the
+m11-acquisition-responsiveness change described below; `v0.13.1` is the
+corrected, complete release record. Tags are immutable (`FRG-PROC-013`),
+so the record is corrected forward.
+
+## [v0.13.0] — 2026-07-28
+
+M11 import-intelligence, change 4: the machine reacts like a person
+would. (Released at tag `v0.13.0`; record completed in `v0.13.1` — see
+above.)
+
+### Added
+- **Interactive search returns on time, honestly** (`FRG-SRCH-015`,
+  `FRG-UI-041`): each indexer gets a bounded time budget (default 20s,
+  capped under the listener guard); finished indexers' full results
+  return immediately and slow ones are named as timed out in an outcome
+  strip — never a whole-request failure. Interactive requests take
+  precedence at each indexer's politeness gate, so background sweeps
+  can't starve a search you're watching (per-indexer spacing is never
+  violated). Live-verified: a real three-indexer search that previously
+  needed a 120s listener workaround returns in ~20s under the default
+  guard with 91 releases and named timeouts.
+- **A fresh install starts acquiring immediately** (`FRG-SER-005`,
+  `FRG-SCHED-012`): adding a monitored series queues its bounded search
+  by default (after the disk scan, so files you already have are never
+  re-grabbed; importing an existing library never sweeps), configuring
+  your first indexer runs one backlog sweep, and the Wanted screen
+  shows when the next automatic search runs.
+- **Stalled completed downloads escalate** (`FRG-DL-015`, migration
+  `0028`): a download the client reports complete whose files the
+  importer cannot see accrues consecutive-stall memory and degrades
+  health past a threshold with mount/path-mapping guidance. Non-comic
+  content (rar/par2-only downloads) stays an honest per-row block and
+  never false-alarms health.
+- Download-client forms gain the numeric priority field the spec always
+  promised (`FRG-UI-009`).
+
+### Changed
+- The release search response is an envelope `{releases, indexers}`
+  (pre-1.0 shape change; the bundled frontend moved in lockstep).
+
+### Security
+- No new attack surface; full-history secret scan re-run (0 genuine
+  findings).
+
+### Upgrade notes
+- Migration `0028` adds stall-memory columns; no data rewrite.
+- If you raised `listener_request_timeout_seconds` to tolerate slow
+  interactive searches, remove the override — the default guard is
+  sufficient again.
+
 ## [v0.12.2] — 2026-07-28
 
 Patch, live-dogfood fixes: Library Import match posters render again
