@@ -16,7 +16,15 @@ verified (see `downloads.md`). For each one it:
 1. **Reconciles** the finished item back to the grab that produced it, by download
    ID. If that record is missing, it falls back to parsing the release name — and a
    foragerr-generated filename carries an embedded `[__issueid__]` tag that maps the
-   file straight to its issue.
+   file straight to its issue. A download that came from a **store source** (a
+   Humble entitlement you matched to a series) trusts that match outright: the
+   series is settled by your review decision, and only the issue number is read
+   from the file — a chaotic store filename can no longer knock the file into
+   "unknown series". If the name carries only a volume ordinal (`Vol. 243` with
+   no issue number — a common Humble idiom for single issues, and the natural
+   shape for trades), the ordinal is tried as the issue number against that
+   series' real issue list; it lands only when such an issue actually exists,
+   and blocks honestly otherwise.
 2. **Gathers evidence** about what the file is. Every naming layer is parsed by the
    same filename parser used everywhere else: the file name, the folder name, the
    download client's item title, and the original grab record. Layers are merged in
@@ -165,6 +173,13 @@ file's own embedded metadata is badged "from ComicInfo") and import: your
 choices resolve the matching, but the safety checks still apply — a corrupt
 archive, junk-sized file, or full disk stays blocked with its reason no matter
 what you select. There is deliberately no way to force those.
+
+Resolving a blocked download this way also settles its bookkeeping: the queue
+row leaves the import-blocked state through the same path an automatic import
+uses, and if the download came from a store source, the entitlement on the
+Sources screen advances to imported (with collected-edition reconciliation
+applied) exactly as if the automatic import had succeeded — nothing stays
+stale behind a manual rescue.
 
 ## Embedded metadata
 

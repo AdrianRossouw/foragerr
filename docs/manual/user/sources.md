@@ -80,6 +80,14 @@ count and the default view but stays visible under the Ignored filter, and
 **restore** returns it to New with its proposed match recomputed
 (`FRG-SRC-004`).
 
+Proposals stay honest as your library changes underneath them (`FRG-SRC-008`).
+Humble bundles routinely contain many items from the same series, all
+proposing the same "add" — acting on one used to strand the rest. Now, adding
+from one row converts its siblings' proposals into "match to the series you
+just added", so each remaining row is a single successful click; and pressing
+**add** on something that turns out to already be in your library quietly
+becomes a match to the existing series instead of an error.
+
 ### The Auto-sync toggle
 
 Each source has its own **Auto-sync new purchases** toggle, and it **ships
@@ -132,11 +140,21 @@ same import pipeline every other acquisition path uses (`FRG-SRC-006`): the
 download is verified against the checksum Humble's API reports before it's
 imported, so a corrupted or mismatched transfer is caught and never lands in
 your library. A failed or mismatched download is recorded on the
-entitlement's own row on the Sources screen — with the reason and a retry —
-rather than in the indexer/usenet failed-downloads list, because there is
-nothing to blocklist or re-search for content you already own. A successful
-download imports exactly like a completed indexer grab, and the entitlement
-shows as matched with its issues owned.
+entitlement's own row on the Sources screen — with the reason and an explicit
+**Retry** button that re-queues the download (`FRG-SRC-009`) — rather than in
+the indexer/usenet failed-downloads list, because there is nothing to
+blocklist or re-search for content you already own. Failed source downloads
+also surface in application health: a source with failed downloads turns
+amber on System → Health with the failed count and a pointer back to its
+review screen, so a failure can't sit invisible until the next time you open
+Sources. A successful download imports exactly like a completed indexer grab,
+and the entitlement shows as matched with its issues owned.
+
+Because the file arrived from an entitlement you matched yourself, import
+trusts that decision (`FRG-PP-021`): the series is already settled, and only
+the issue number is read from Humble's often-chaotic filenames — including
+the `Vol. N`-that-means-issue-N idiom (`FRG-PP-022`). See `import.md` for the
+details.
 
 See `../admin/secrets.md` for how the Humble cookie is protected at rest, and
 `../admin/configuration.md` for the sync interval and request-spacing
