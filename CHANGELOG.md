@@ -9,6 +9,77 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.11.0] — 2026-07-28
+
+M11 import-intelligence, change 2: the review experience at
+thousand-row scale. ComicVine is the matching universe.
+
+### Added
+- **ComicVine-first honest proposals** (`FRG-SRC-010`): entitlement
+  proposals rank against ComicVine's catalog with your library as a
+  one-action overlay (in-library candidates match; new ones
+  add-and-match). Identity is decided on boilerplate-stripped titles —
+  a token-overlap gate plus a confidence floor with a containment
+  guard, so lookalikes with nothing in common are impossible and an
+  exact-titled volume is never buried by a decorated store title.
+  Trade-shaped purchases prefer the collected-edition volume (a soft
+  re-rank). "No plausible match" is an explicit, never-terminal verdict
+  distinct from "not computed yet".
+- **ComicVine search on every review row** (`FRG-UI-039`): the
+  add-series search surface, per row — picking a result matches or
+  adds-and-matches in one action. The library-only dropdown is retired.
+- **Bundle identity and group actions** (`FRG-SRC-011`): rows carry
+  their bundle's name (backfilled by the next sync); same-title runs
+  collapse into expandable groups; selection works by shift-range,
+  group, and bundle; bulk **accept** applies each row's own proposal
+  server-side with per-row failure reporting.
+- **Publisher classification rules** (`FRG-SRC-012`): per-source rules
+  classify known non-comic publishers as Other at sync. The list ships
+  empty; the suggested starter list only fills the editor. Only
+  unreviewed rows ever reclassify.
+- The review list renders virtualized — thousand-row queues stay
+  responsive (`FRG-UI-029`).
+
+### Changed
+- Accept acts only on rows still in review; restore only on ignored
+  rows — bulk selections can no longer resurrect ignored items or
+  overwrite operator matches. Auto-sync records automatic provenance
+  and re-verifies row state inside the write transaction.
+- Budget exhaustion during proposal computation now defers cleanly:
+  affected rows stay unproposed and retry next sync (never a frozen
+  shelf-local guess, never auto-accepted).
+- Review-state provenance (`matched_via`) is asserted explicitly at
+  every API boundary.
+
+### Fixed
+- Publisher-rules saves are atomic and can no longer race a
+  disconnect/reconnect into resurrecting a deleted session cookie or
+  overwriting connection state.
+- The collapse key strips edition ordinals, so a long mislabeled
+  `"TITLE Vol. NNN"` run groups as one title instead of one group per
+  ordinal.
+- Backend test-suite reliability: deterministic WebSocket teardown,
+  single-event-loop API fixtures, and loop-bound global resets — the
+  parallel suite now runs clean (with pytest-xdist, ~1:15 for the full
+  suite).
+
+### Security
+- No new attack surface: the publisher-rules field rides the existing
+  authenticated source-settings surface; the bundle name is sanitized
+  like every store string. Full-history secret scan re-run (0 genuine
+  findings).
+
+### Upgrade notes
+- Migration `0026` adds `source_entitlements.bundle_human_name`;
+  bundle names appear after the next source sync.
+- Proposals computed before v0.11.0 keep their old (library-ranked)
+  content until recomputed — ignore→restore a row, or use its search,
+  to refresh; a budget-aware bulk recompute is planned with the M11
+  ComicVine-budget change.
+- Test fixtures now use synthetic titles throughout
+  (repository-hygiene policy: no collection-derived titles in the
+  public repo).
+
 ## [v0.10.0] — 2026-07-28
 
 M11 import-intelligence, change 1: source imports trust the operator.

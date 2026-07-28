@@ -64,10 +64,10 @@
       groups, publisher rules); soup register (react-virtual)
       (FRG-PROC-011, FRG-PROC-012)
 - [x] 6.2 Matrix regen; trace/soup/risk green (FRG-PROC-005)
-- [ ] 6.3 Medium-tier gate + Codex (early pass after first
+- [x] 6.3 Medium-tier gate + Codex (early pass after first
       implementation commit + delta pass at close) + e2e (FRG-PROC-004)
-- [ ] 6.4 Live rig verification: the 15-row Batman/Spawn cluster must
+- [x] 6.4 Live rig verification: the 15-row Batman/Spawn cluster must
       propose sanely (token gate), row search resolves a Spawn row,
       bundle collapse on the real 1,318 corpus
-- [ ] 6.5 Sync/archive specs, registry flip, release v0.11.0 per
+- [x] 6.5 Sync/archive specs, registry flip, release v0.11.0 per
       /release (FRG-PROC-013)
