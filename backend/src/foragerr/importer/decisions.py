@@ -64,6 +64,10 @@ class ImportEvaluation:
     size: int
     series_id: int | None = None
     issue_id: int | None = None
+    #: Title of the resolved series, when one resolved — so a series-established
+    #: mapping failure can name it (FRG-PP-021) instead of claiming the series
+    #: itself was unmatchable. Display only; no spec branches on it.
+    series_title: str | None = None
     archive: ArchiveReport | None = None
     existing_file_path: str | None = None
     existing_format: str | None = None
@@ -125,6 +129,25 @@ class MappedToIssueSpec(ImportSpec):
             return None  # the mapping spec already owns this failure
         if ev.series_id is not None and ev.issue_id is not None:
             return None
+        if ev.series_id is not None:
+            # The series IS established (an operator-matched source entitlement,
+            # FRG-PP-021, or a series-scoped import) — only the issue could not
+            # be derived. Saying "could not match … series and issue" here would
+            # be a lie about the half that succeeded, and would send the operator
+            # looking for the wrong fix.
+            label = (
+                f'"{ev.series_title}"'
+                if ev.series_title
+                else f"#{ev.series_id}"
+            )
+            return ImportRejection(
+                reason=(
+                    f"matched this file to series {label} but could not derive "
+                    "an issue number from its name; use manual import to set "
+                    "the issue"
+                ),
+                spec=self.name,
+            )
         return ImportRejection(
             reason="could not match this file to a known series and issue",
             spec=self.name,

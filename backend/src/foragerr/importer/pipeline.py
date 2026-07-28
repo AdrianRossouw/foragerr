@@ -36,6 +36,7 @@ import logging
 import os
 from dataclasses import dataclass, replace
 from enum import Enum
+from fractions import Fraction
 from pathlib import Path
 
 from sqlalchemy import func, select
@@ -81,7 +82,7 @@ from foragerr.metadata.comicinfo import (
     tag_cbz,
 )
 from foragerr.parser import parse
-from foragerr.parser.result import Booktype, IssueClassification
+from foragerr.parser.result import Booktype, Issue, IssueClassification
 from foragerr.quality.models import FormatProfileRow, decode_formats
 from foragerr.security.archives import inspect_archive
 from foragerr.security.paths import safe_join
@@ -199,6 +200,36 @@ async def _match_issue_in_series(
     )
 
 
+async def _derive_issue_in_series(
+    session: AsyncSession, series_id: int, evidence: Evidence, ctx: ImportContext
+) -> int | None:
+    """The issue of a KNOWN series that the parse evidence resolves to, or
+    ``None`` (FRG-PP-021, FRG-PP-022).
+
+    Used only where the target series is already established — a provenance
+    (grab-record) series or a series-scoped rescan — so the series identity is
+    never at stake here, only the issue.
+
+    A parsed issue number is the ONLY evidence consulted when one is present: an
+    issue number that misses the series' index is a real disagreement and must
+    block, never be second-guessed by a weaker signal. Only when the evidence
+    carries no issue at all does an ordinal volume stand in for it (FRG-PP-022):
+    a ``Vol. 243`` file lands as #243 exactly when the known series' index really
+    holds #243 — the index, not the parse, is what makes the fallback safe. The
+    parser's ``issue``/``volume_ordinal`` separation (FRG-IMP-012) is untouched:
+    the reinterpretation happens here, under a series the operator chose, and
+    never globally.
+    """
+    if evidence.issue is not None:
+        return await _match_issue_in_series(session, series_id, evidence.issue, ctx)
+    if evidence.volume_ordinal is None:
+        return None
+    ordinal = Issue(
+        value=Fraction(evidence.volume_ordinal), display=str(evidence.volume_ordinal)
+    )
+    return await _match_issue_in_series(session, series_id, ordinal, ctx)
+
+
 async def _resolve_override(
     session: AsyncSession, candidate: ImportCandidate, override: ManualOverride
 ) -> tuple[int, int] | None:
@@ -300,6 +331,12 @@ async def _filename_series_match(
 _BASE_TAG = "tag"
 _BASE_GRAB = "grab"
 _BASE_FILENAME = "filename"
+#: A grab record that fixed the SERIES only (the store-grab shape, FRG-PP-021):
+#: the series is authoritative, but the ISSUE was derived from the parse (or not
+#: derived at all). Distinct from :data:`_BASE_GRAB` — which resolved BOTH halves
+#: and so outranks the embedded ComicInfo layer outright — because here the
+#: embedded layer may still speak for the issue, confined to that series.
+_BASE_GRAB_SERIES = "grab_series"
 
 
 async def reconcile(
@@ -384,14 +421,31 @@ async def reconcile(
     if base_source not in (_BASE_TAG, _BASE_GRAB):
         issue_row = await _embedded_issue(session, embedded)
         if issue_row is not None:
-            scope_ok = (
-                candidate.series_scope_id is None
-                or issue_row.series_id == candidate.series_scope_id
+            # A provenance series (FRG-PP-021) that could not derive an issue
+            # confines the embedded layer exactly as a scoped rescan does: an
+            # embedded id resolving INSIDE the operator-matched series may still
+            # supply the issue the parse could not, but one resolving outside it
+            # never silently relocates the file — that is a conflict. The
+            # filename's series evidence is not consulted at all in that case
+            # (the operator's match already settled series identity).
+            provenance_series = (
+                base_series if base_source == _BASE_GRAB_SERIES else None
             )
-            filename_series = await _filename_series_match(session, candidate, evidence)
-            filename_conflict = (
-                filename_series is not None and filename_series != issue_row.series_id
+            scope_series = (
+                candidate.series_scope_id
+                if candidate.series_scope_id is not None
+                else provenance_series
             )
+            scope_ok = scope_series is None or issue_row.series_id == scope_series
+            filename_conflict = False
+            if provenance_series is None:
+                filename_series = await _filename_series_match(
+                    session, candidate, evidence
+                )
+                filename_conflict = (
+                    filename_series is not None
+                    and filename_series != issue_row.series_id
+                )
             if scope_ok and not filename_conflict:
                 # Beats the filename heuristic (the only signal below it here).
                 evidence.provenance["series"] = PROV_COMICINFO
@@ -492,21 +546,47 @@ async def _reconcile_base(
                     return issue_row.series_id, issue_row.id, _BASE_TAG
 
     # 2. grab-history reconciliation by download id (survives an unparseable name).
-    if candidate.grab_series_id is not None and candidate.grab_issue_id is not None:
-        return candidate.grab_series_id, candidate.grab_issue_id, _BASE_GRAB
+    if candidate.grab_series_id is not None:
+        if candidate.grab_issue_id is not None:
+            return candidate.grab_series_id, candidate.grab_issue_id, _BASE_GRAB
+        # Series-only hint — the store-grab shape (FRG-PP-021): the operator
+        # matched the entitlement to a series and no specific issue was grabbed.
+        # That match is authoritative for series identity, so the issue is
+        # derived WITHIN the series and control never falls through to step 3's
+        # unscoped filename lookup — falling through would let a
+        # parseable-but-wrong filename relocate the file to another series,
+        # inverting FRG-PP-004's confidence order (a grab record outranks the
+        # filename). With no derivable issue the series still comes back, so the
+        # rejection names it (MappedToIssueSpec) instead of claiming the series
+        # was unmatchable; manual import remains the escape hatch.
+        #
+        # Reported as _BASE_GRAB_SERIES whether or not an issue was derived: the
+        # grab settled the SERIES, so a verified embedded ComicInfo id may still
+        # correct/supply the issue within it (FRG-IMP-024) — only a both-ids grab
+        # (_BASE_GRAB) outranks that layer outright.
+        issue_id = await _derive_issue_in_series(
+            session, candidate.grab_series_id, evidence, ctx
+        )
+        return candidate.grab_series_id, issue_id, _BASE_GRAB_SERIES
 
     # 3. parser heuristic.
-    if evidence.issue is None:
-        return None, None, None
     if candidate.series_scope_id is not None:
         series = await session.get(SeriesRow, candidate.series_scope_id)
         if series is None or not matching.series_title_matches(
             evidence.matching_key, series.matching_key
         ):
             return None, None, None
-        issue_id = await _match_issue_in_series(session, series.id, evidence.issue, ctx)
+        # The scoped series is explicitly known, so the FRG-PP-022 ordinal
+        # fallback applies here too (a `Vol. N` file rescanned inside its own
+        # series folder).
+        issue_id = await _derive_issue_in_series(session, series.id, evidence, ctx)
         return (series.id, issue_id, _BASE_FILENAME) if issue_id is not None else (None, None, None)
 
+    # Unscoped: no known series, so the filename must carry both halves. No
+    # ordinal fallback here — with the series itself in question, a bare
+    # `Vol. N` is not issue evidence.
+    if evidence.issue is None:
+        return None, None, None
     if evidence.matching_key is None:
         return None, None, None
     series = (
@@ -600,11 +680,13 @@ async def build_evaluation(
     existing_format: str | None = None
     existing_size: int | None = None
     existing_fix_revision: int | None = None
+    series_title: str | None = None
     ladder: tuple[str, ...] = ()
     dest_dir = ctx.library_root
     if series_id is not None:
         series = await session.get(SeriesRow, series_id)
         if series is not None:
+            series_title = series.title
             dest_dir = series.path
             profile = await session.get(FormatProfileRow, series.format_profile_id)
             if profile is not None:
@@ -644,6 +726,7 @@ async def build_evaluation(
         size=candidate.size,
         series_id=series_id,
         issue_id=issue_id,
+        series_title=series_title,
         archive=archive,
         existing_file_path=existing_path,
         existing_format=existing_format,
