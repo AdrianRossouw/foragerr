@@ -72,7 +72,7 @@
 
 - [x] 6.1 Full backend suite (xdist) + frontend suite (serialized,
       never concurrent with pytest) green; `tools/soup_check.py` exit 0
-- [ ] 6.2 e2e `bash e2e/run.sh` green (calendar unconfigured-week +
+- [x] 6.2 e2e `bash e2e/run.sh` green (calendar unconfigured-week +
       a11y sweep still pass with the new card layout)
-- [ ] 6.3 Traceability matrix regen picks up the four IDs; commit
+- [x] 6.3 Traceability matrix regen picks up the four IDs; commit
       trailers cite them
