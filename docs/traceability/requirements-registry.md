@@ -335,6 +335,7 @@ milestone-to-minor mapping. No id renumbered.
 | FRG-UI-042 | Calendar covers and enrichment detail | ui | implemented | M11 |
 | FRG-UI-043 | Group-header search/match affordance | ui | implemented | M11 |
 | FRG-UI-044 | Force-grab affordance for rejected releases | ui | implemented | M11 |
+| FRG-UI-046 | Publisher-filtering settings panel | ui | proposed | B |
 | FRG-SRC-001 | store-source model and connection lifecycle | sources | implemented | M6 |
 | FRG-SRC-002 | Humble session-cookie authentication | sources | implemented | M6 |
 | FRG-SRC-003 | entitlement sync | sources | implemented | M6 |
