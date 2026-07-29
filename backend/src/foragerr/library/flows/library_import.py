@@ -906,20 +906,109 @@ async def _import_group(
         created_series_id = series.id
 
     try:
-        return await _import_group_body(
-            db,
-            settings,
-            commands,
-            group,
-            series,
-            format_profile_id=format_profile_id,
-            monitor_strategy=monitor_strategy,
-            search_on_add=search_on_add,
-            offload=offload,
-            factory=factory,
+        # Populate the issue list DETERMINISTICALLY before importing: files can
+        # only match issues that exist. Runs for a just-created series (always
+        # issueless) and for a reused series whose add-enqueued refresh is still
+        # pending — never for a series that already has its issues (no double
+        # fetch/scan).
+        if await _issue_count(db, series.id) == 0:
+            if not await _refresh_before_import(
+                db, settings, commands, group.id, series.id, factory
+            ):
+                return "refresh-failed"
+
+        ctx = ImportContext(
+            library_root=series.path,
+            config_dir=str(settings.config_dir) if settings is not None else ".",
+            reference_year=series.start_year or now.year,
             now=now,
-            in_place=in_place,
+            offload=offload,
+            **media_management_fields(settings),
         )
+        source = LibraryImportSource(
+            series_id=series.id,
+            files=tuple(path for path, _size in decode_group_files(group.files)),
+            container_root=group.folder or None,
+        )
+
+        imported = 0
+        blocked_reasons: list[str] = []
+        all_already_registered = False
+        async with db.write_session() as session:
+            candidates = await gather(source, session, ctx)
+            if not candidates:
+                # Distinguish "everything vanished" from "everything already
+                # imported UNDER THIS SERIES" (the source filters registered
+                # paths): a re-run of a fully-imported group is a success. Scoped
+                # to THIS series — a file registered under ANOTHER series is not
+                # this group's import, so it must not read as "already imported"
+                # and keep an otherwise-empty shell (FRG-IMP-027).
+                staged = [path for path, _size in decode_group_files(group.files)]
+                registered = set(
+                    (
+                        await session.execute(
+                            select(IssueFileRow.path)
+                            .join(IssueRow, IssueFileRow.issue_id == IssueRow.id)
+                            .where(
+                                IssueFileRow.path.in_(staged),
+                                IssueRow.series_id == series.id,
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                all_already_registered = bool(staged) and all(
+                    path in registered for path in staged
+                )
+            for candidate in candidates:
+                outcome = await import_candidate(session, candidate, ctx)
+                if outcome.status is ImportStatus.IMPORTED:
+                    imported += 1
+                else:
+                    blocked_reasons.append(
+                        f"{candidate.file_name}: "
+                        + "; ".join(outcome.reasons or ("blocked",))
+                    )
+
+        if not candidates:
+            if all_already_registered:
+                await _set_group_outcome(
+                    db,
+                    group.id,
+                    state="imported",
+                    message="all staged files are already imported",
+                    rejections=[],
+                )
+                return "imported"
+            await _set_group_outcome(
+                db,
+                group.id,
+                state=None,
+                message="no staged files remain on disk; re-run the scan",
+                rejections=[],
+            )
+            return "empty"
+        if blocked_reasons:
+            await _set_group_outcome(
+                db,
+                group.id,
+                state=None,  # stays confirmed → re-runnable after the user fixes it
+                message=(
+                    f"imported={imported} blocked={len(blocked_reasons)}: "
+                    + _shorten(blocked_reasons)
+                ),
+                rejections=blocked_reasons,
+            )
+            return "partial" if imported else "blocked"
+        await _set_group_outcome(
+            db,
+            group.id,
+            state="imported",
+            message=f"imported={imported}",
+            rejections=[],
+        )
+        return "imported"
     finally:
         # Roll back a series THIS group created that ended up with no files of
         # its own (FRG-IMP-027). The keep/rollback test is GROUND TRUTH — does
@@ -930,18 +1019,20 @@ async def _import_group(
         # registered under THIS series, not another. Runs on the exception
         # path too (the body raised) — the shell is undone and the original
         # error still propagates.
-        if created_series_id is not None and not await _series_has_issue_files(
-            db, created_series_id
-        ):
+        if created_series_id is not None:
+            # The whole rollback — the ground-truth read AND the delete — is
+            # guarded: on the exception path the finally must never let its own
+            # failure (a read or delete error, e.g. the same DB fault that
+            # failed the body) replace the original error still in flight.
             try:
-                # Metadata-only (delete_files False): cascades the shell's own
-                # issue/file rows and its cached cover, never an on-disk library
-                # file. A scan-series the refresh enqueued no-ops on the now-gone
-                # series. Guarded so a concurrent delete can't mask the original
-                # failure that triggered the rollback.
-                await delete_series(
-                    db, created_series_id, delete_files=False, settings=settings
-                )
+                if not await _series_has_issue_files(db, created_series_id):
+                    # Metadata-only (delete_files False): removes the shell's
+                    # issue/file rows and its cached cover, never an on-disk
+                    # library file. A scan-series the refresh enqueued no-ops on
+                    # the now-gone series.
+                    await delete_series(
+                        db, created_series_id, delete_files=False, settings=settings
+                    )
             except Exception:  # noqa: BLE001 - cleanup must not mask the real error
                 logger.warning(
                     "library-import: rollback of shell series %d failed",
@@ -949,129 +1040,6 @@ async def _import_group(
                     exc_info=True,
                 )
 
-
-async def _import_group_body(
-    db: Database,
-    settings: Settings | None,
-    commands: CommandService,
-    group: LibraryImportGroupRow,
-    series,
-    *,
-    format_profile_id: int | None,
-    monitor_strategy: str,
-    search_on_add: bool,
-    offload: OffloadFn | None,
-    factory: HttpClientFactory | None,
-    now: dt.datetime,
-    in_place: bool,
-) -> str:
-    """The refresh + attach steps for one group (FRG-IMP-027 split out so the
-    caller's try/finally can roll back a group-created shell that attaches no
-    file). The keep/rollback decision is the caller's, made from the series'
-    ground-truth file count — this body only imports and annotates."""
-    # Populate the issue list DETERMINISTICALLY before importing: files can
-    # only match issues that exist. Runs for a just-created series (always
-    # issueless) and for a reused series whose add-enqueued refresh is still
-    # pending — never for a series that already has its issues (no double
-    # fetch/scan).
-    if await _issue_count(db, series.id) == 0:
-        if not await _refresh_before_import(
-            db, settings, commands, group.id, series.id, factory
-        ):
-            return "refresh-failed"
-
-    ctx = ImportContext(
-        library_root=series.path,
-        config_dir=str(settings.config_dir) if settings is not None else ".",
-        reference_year=series.start_year or now.year,
-        now=now,
-        offload=offload,
-        **media_management_fields(settings),
-    )
-    source = LibraryImportSource(
-        series_id=series.id,
-        files=tuple(path for path, _size in decode_group_files(group.files)),
-        container_root=group.folder or None,
-    )
-
-    imported = 0
-    blocked_reasons: list[str] = []
-    all_already_registered = False
-    async with db.write_session() as session:
-        candidates = await gather(source, session, ctx)
-        if not candidates:
-            # Distinguish "everything vanished" from "everything already
-            # imported UNDER THIS SERIES" (the source filters registered
-            # paths): a re-run of a fully-imported group is a success. Scoped
-            # to THIS series — a file registered under ANOTHER series is not
-            # this group's import, so it must not read as "already imported"
-            # and keep an otherwise-empty shell (FRG-IMP-027).
-            staged = [path for path, _size in decode_group_files(group.files)]
-            registered = set(
-                (
-                    await session.execute(
-                        select(IssueFileRow.path)
-                        .join(IssueRow, IssueFileRow.issue_id == IssueRow.id)
-                        .where(
-                            IssueFileRow.path.in_(staged),
-                            IssueRow.series_id == series.id,
-                        )
-                    )
-                )
-                .scalars()
-                .all()
-            )
-            all_already_registered = bool(staged) and all(
-                path in registered for path in staged
-            )
-        for candidate in candidates:
-            outcome = await import_candidate(session, candidate, ctx)
-            if outcome.status is ImportStatus.IMPORTED:
-                imported += 1
-            else:
-                blocked_reasons.append(
-                    f"{candidate.file_name}: "
-                    + "; ".join(outcome.reasons or ("blocked",))
-                )
-
-    if not candidates:
-        if all_already_registered:
-            await _set_group_outcome(
-                db,
-                group.id,
-                state="imported",
-                message="all staged files are already imported",
-                rejections=[],
-            )
-            return "imported"
-        await _set_group_outcome(
-            db,
-            group.id,
-            state=None,
-            message="no staged files remain on disk; re-run the scan",
-            rejections=[],
-        )
-        return "empty"
-    if blocked_reasons:
-        await _set_group_outcome(
-            db,
-            group.id,
-            state=None,  # stays confirmed → re-runnable after the user fixes it
-            message=(
-                f"imported={imported} blocked={len(blocked_reasons)}: "
-                + _shorten(blocked_reasons)
-            ),
-            rejections=blocked_reasons,
-        )
-        return "partial" if imported else "blocked"
-    await _set_group_outcome(
-        db,
-        group.id,
-        state="imported",
-        message=f"imported={imported}",
-        rejections=[],
-    )
-    return "imported"
 
 
 #: Execute outcomes that leave a group failed or blocked with a visible reason

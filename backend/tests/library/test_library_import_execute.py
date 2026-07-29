@@ -21,6 +21,7 @@ from foragerr.library import repo
 from foragerr.library.flows import library_import
 from foragerr.library.flows.library_import import (
     decode_rejections,
+    encode_group_files,
     execute_library_import,
     scan_library_root,
 )
@@ -946,3 +947,59 @@ async def test_exception_after_create_rolls_back_and_marks_errored(
     assert "errored" in summary
     assert await _series_count(db, 701) == 0  # finally rolled the shell back
 
+
+
+@pytest.mark.req("FRG-IMP-027")
+async def test_stale_group_whose_file_belongs_to_another_series_rolls_back(
+    db, tmp_path, root_folder_id, root_folder_path
+):
+    """The keep check is scoped to THIS series: a stale staged group whose file
+    is already an issue-file of a DIFFERENT series creates a shell with no files
+    of its own and is rolled back — not kept on a global 'already registered'
+    read (Codex gate finding)."""
+    # Series 801 genuinely imports the file (in-place, default settings).
+    settings = flows_settings(tmp_path / "cfg-ip")
+    path = make_large_cbz(root_folder_path / "Ember (2015)" / "Ember 001 (2015).cbz")
+    cv = (
+        FakeCV()
+        .volume(801, name="Ember", start_year=2015)
+        .issues(801, [issue(9801, "1", cover_date="2015-03-01")])
+        .volume(802, name="Ember Alt", start_year=2016)
+    )
+    factory = build_factory(settings, cv.handler())
+    commands = CommandService(db, settings)
+    await scan_library_root(db, settings, root_folder_id, factory=factory)
+    g1 = (await _groups_by_key(db, root_folder_id))["ember"]
+    await _confirm(db, g1.id, 801)
+    await execute_library_import(db, settings, [g1.id], commands=commands, factory=factory)
+    assert await _series_count(db, 801) == 1
+
+    # Directly stage a STALE group for a DIFFERENT volume (802) pointing at the
+    # SAME file — the file is now registered under 801, so a re-scan would drop
+    # it; the stale row is what a scan-then-register-elsewhere interleave leaves.
+    from foragerr.db import utcnow
+
+    async with db.write_session() as session:
+        session.add(
+            LibraryImportGroupRow(
+                matching_key="ember-stale",
+                root_folder_id=root_folder_id,
+                folder=str(path.parent),
+                files=encode_group_files([(str(path), path.stat().st_size)]),
+                state="confirmed",
+                confirmed_cv_volume_id=802,
+                scanned_at=utcnow(),
+            )
+        )
+    stale = next(
+        g for g in (await _groups_by_key(db, root_folder_id)).values()
+        if g.matching_key == "ember-stale"
+    )
+    # Move mode so 802 gets its own path (no collision with 801's in-place folder).
+    move_settings = flows_settings(tmp_path / "cfg-move", library_import_mode="move")
+    summary = await execute_library_import(
+        db, move_settings, [stale.id], commands=commands, factory=factory
+    )
+    assert await _series_count(db, 802) == 0  # cross-series shell rolled back
+    assert await _series_count(db, 801) == 1  # the real owner untouched
+    assert len(await _issue_file_paths(db, 801)) == 1
