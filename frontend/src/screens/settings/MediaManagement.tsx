@@ -498,6 +498,7 @@ function RootFoldersSection() {
   const deleteRootFolder = useDeleteRootFolder();
 
   const [newPath, setNewPath] = useState('');
+  const [newReadOnly, setNewReadOnly] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
   const [confirmingId, setConfirmingId] = useState<number | null>(null);
   const [removeError, setRemoveError] = useState<{
@@ -508,8 +509,12 @@ function RootFoldersSection() {
   const add = async () => {
     setAddError(null);
     try {
-      await createRootFolder.mutateAsync({ path: newPath.trim() });
+      await createRootFolder.mutateAsync({
+        path: newPath.trim(),
+        read_only: newReadOnly,
+      });
       setNewPath('');
+      setNewReadOnly(false);
     } catch (error) {
       // The fetcher's ApiRequestError carries the backend's uniform-shape
       // message verbatim (the field-precise 400 names the exact problem).
@@ -565,6 +570,14 @@ function RootFoldersSection() {
               data-testid={`root-folder-${folder.id}`}
             >
               <span className={styles.rootFolderPath}>{folder.path}</span>
+              {folder.read_only && (
+                <span
+                  className={styles.rootFolderReadOnlyBadge}
+                  data-testid={`root-folder-read-only-${folder.id}`}
+                >
+                  Read-only
+                </span>
+              )}
               <span className={styles.rootFolderFree}>
                 {folder.free_space !== null
                   ? `${formatBytes(folder.free_space)} free`
@@ -623,6 +636,15 @@ function RootFoldersSection() {
             setAddError(null);
           }}
         />
+        <label className={styles.rootFolderReadOnlyRow}>
+          <input
+            type="checkbox"
+            aria-label="Register as read-only"
+            checked={newReadOnly}
+            onChange={(e) => setNewReadOnly(e.target.checked)}
+          />
+          Read-only
+        </label>
         <button
           type="button"
           className={`${styles.button} ${styles.buttonPrimary}`}
@@ -632,6 +654,13 @@ function RootFoldersSection() {
           {createRootFolder.isPending ? 'Adding…' : 'Add Root Folder'}
         </button>
       </div>
+      {newReadOnly && (
+        <p className={styles.sectionHelp}>
+          A read-only library is a collection foragerr reads and serves but
+          never changes — files are indexed in place, never moved, renamed,
+          or deleted.
+        </p>
+      )}
       {addError && (
         <p className={styles.fieldError} role="alert" data-testid="root-folder-add-error">
           {addError}

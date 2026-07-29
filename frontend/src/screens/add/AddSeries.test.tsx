@@ -326,6 +326,7 @@ describe('FRG-UI-005: add series', () => {
       id: 9,
       path: '/comics',
       free_space: null,
+      read_only: false,
     };
     const { spy, fetcher } = fakeFetcher((path, options) => {
       const method = options?.method ?? 'GET';
