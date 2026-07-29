@@ -47,12 +47,18 @@ class RootFolderResource(BaseModel):
     id: int
     path: str
     free_space: int | None
+    #: A read-only reference library (FRG-SER-021): indexed in place, served,
+    #: never written to. The UI marks it and suppresses write/acquire actions.
+    read_only: bool = False
 
 
 class RootFolderCreate(BaseModel):
     """Request body for ``POST /api/v1/rootfolder`` (FRG-SER-008)."""
 
     path: str
+    #: Register the root read-only (FRG-SER-021) — validated for readability
+    #: rather than writability; its series become browse/serve-only.
+    read_only: bool = False
 
 
 class FormatProfileResource(BaseModel):
@@ -72,7 +78,10 @@ async def list_root_folders_endpoint(request: Request) -> list[RootFolderResourc
         rows = await repo.list_root_folders(session)
     return [
         RootFolderResource(
-            id=row.id, path=row.path, free_space=await _free_space(row.path)
+            id=row.id,
+            path=row.path,
+            free_space=await _free_space(row.path),
+            read_only=row.read_only,
         )
         for row in rows
     ]
@@ -92,10 +101,16 @@ async def create_root_folder_endpoint(
     db = request.app.state.db
     async with db.write_session() as session:
         existing = await repo.list_root_folders(session)
-        await run_in_threadpool(_validate_new_root, body.path, existing)
-        row = await repo.create_root_folder(session, body.path)
-        rid, path = row.id, row.path
-    return RootFolderResource(id=rid, path=path, free_space=await _free_space(path))
+        await run_in_threadpool(
+            _validate_new_root, body.path, existing, read_only=body.read_only
+        )
+        row = await repo.create_root_folder(
+            session, body.path, read_only=body.read_only
+        )
+        rid, path, ro = row.id, row.path, row.read_only
+    return RootFolderResource(
+        id=rid, path=path, free_space=await _free_space(path), read_only=ro
+    )
 
 
 @router.delete("/rootfolder/{root_folder_id}", status_code=204)
@@ -195,18 +210,26 @@ async def _fail_if_import_command_pending(session, root_folder_id: int) -> None:
             )
 
 
-def _validate_new_root(path: str, existing: list) -> None:
+def _validate_new_root(path: str, existing: list, *, read_only: bool = False) -> None:
     """Reject a bad root-folder registration with a field-precise
     :class:`ApiError` (400, ``field="path"``) naming the exact problem.
 
     Runs the blocking ``os.path`` stats in the thread pool (a wedged network
     mount must not freeze the loop). ``existing`` are the already-registered
-    :class:`RootFolderRow`s to compare against for duplicate/nesting."""
+    :class:`RootFolderRow`s to compare against for duplicate/nesting.
+
+    A ``read_only`` root (FRG-SER-021) is validated for **readability** instead
+    of writability — foragerr never writes to it — so a read-only-mounted real
+    collection registers; every other check (absolute, existing directory,
+    duplicate/nesting) is unchanged."""
     if not os.path.isabs(path):
         _reject(f"path {path!r} must be absolute")
     if not os.path.isdir(path):
         _reject(f"path {path!r} is not an existing directory")
-    if not os.access(path, os.W_OK):
+    if read_only:
+        if not os.access(path, os.R_OK):
+            _reject(f"path {path!r} is not readable")
+    elif not os.access(path, os.W_OK):
         _reject(f"path {path!r} is not writable")
 
     candidate = os.path.realpath(path)

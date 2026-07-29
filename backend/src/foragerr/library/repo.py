@@ -33,11 +33,39 @@ from foragerr.parser.normalize import matching_key
 # --- root folders -------------------------------------------------------
 
 
-async def create_root_folder(session: AsyncSession, path: str) -> RootFolderRow:
-    row = RootFolderRow(path=path)
+async def create_root_folder(
+    session: AsyncSession, path: str, *, read_only: bool = False
+) -> RootFolderRow:
+    row = RootFolderRow(path=path, read_only=read_only)
     session.add(row)
     await session.flush()
     return row
+
+
+async def root_is_read_only(session: AsyncSession, root_folder_id: int) -> bool:
+    """Whether a root folder is a read-only reference library (FRG-SER-021).
+    The single truth source for the fail-closed write boundary — every
+    disk-write path consults it (directly or via :func:`series_is_read_only`).
+    An unknown root reads as NOT read-only (a missing root is its own error
+    elsewhere; this predicate never invents a boundary)."""
+    return bool(
+        await session.scalar(
+            select(RootFolderRow.read_only).where(RootFolderRow.id == root_folder_id)
+        )
+    )
+
+
+async def series_is_read_only(session: AsyncSession, series_id: int) -> bool:
+    """Whether a series lives on a read-only root (FRG-SER-021/022) — the
+    guard for both the write boundary and the browse-only acquisition gates.
+    A missing series reads as NOT read-only."""
+    return bool(
+        await session.scalar(
+            select(RootFolderRow.read_only)
+            .join(SeriesRow, SeriesRow.root_folder_id == RootFolderRow.id)
+            .where(SeriesRow.id == series_id)
+        )
+    )
 
 
 async def list_root_folders(session: AsyncSession) -> list[RootFolderRow]:
@@ -453,6 +481,19 @@ def wanted_issues(as_of: dt.date | None = None) -> Select:
         .where(IssueRow.monitored.is_(True))
         .where(released)
         .where(~has_file)
+        .where(~_on_read_only_root())
+    )
+
+
+def _on_read_only_root():
+    """A correlated EXISTS true when ``IssueRow``'s series sits on a read-only
+    reference root (FRG-SER-021/022). Both acquisition projections exclude it:
+    a browse-only series is never wanted, missing, searched, or grabbed."""
+    return (
+        exists()
+        .where(SeriesRow.id == IssueRow.series_id)
+        .where(RootFolderRow.id == SeriesRow.root_folder_id)
+        .where(RootFolderRow.read_only.is_(True))
     )
 
 
@@ -497,7 +538,12 @@ def missing_issues(as_of: dt.date | None = None) -> Select:
         (IssueRow.store_date.is_(None)) & (IssueRow.cover_date.is_(None)),
     )
     has_file = exists().where(IssueFileRow.issue_id == IssueRow.id)
-    return select(IssueRow).where(released).where(~has_file)
+    return (
+        select(IssueRow)
+        .where(released)
+        .where(~has_file)
+        .where(~_on_read_only_root())
+    )
 
 
 # --- statistics (FRG-SER-009) ------------------------------------------------

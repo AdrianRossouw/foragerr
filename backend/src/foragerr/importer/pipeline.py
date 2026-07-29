@@ -95,6 +95,14 @@ from foragerr.security.paths import safe_join
 
 logger = logging.getLogger("foragerr.importer.pipeline")
 
+
+class ReadOnlyRootError(RuntimeError):
+    """A file placement was attempted for a series on a read-only reference
+    root (FRG-SER-021). Raised fail-closed before any byte is written, so the
+    operator's real files are never mutated even if a mutating path is reached
+    by an unexpected route."""
+
+
 # --- outcome types -----------------------------------------------------------
 
 
@@ -1144,6 +1152,16 @@ async def execute(
                 quarantine_path = await _dispose_existing()
             upgraded = True
     else:
+        # Fail-closed write boundary (FRG-SER-021): a series on a read-only
+        # reference root must never have a file moved/placed under it. The
+        # import path forces in-place registration for a read-only root (so
+        # this move branch is unreachable there); this guard is the last line —
+        # any path that reaches an actual place_file for a read-only series is
+        # refused before a byte is written, protecting the operator's files.
+        if await repo.root_is_read_only(session, series.root_folder_id):
+            raise ReadOnlyRootError(
+                f"series {series.id} is on a read-only root; no file is placed"
+            )
         if dest_is_existing and not source_is_existing:
             # The rendered destination IS the existing file's path: the loser
             # leaves (dump/recycle/delete) BEFORE place_file can overwrite it
