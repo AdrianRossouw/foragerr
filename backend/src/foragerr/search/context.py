@@ -96,8 +96,8 @@ class SeriesContext:
 
     ``matching_key`` and every entry of ``aliases`` are already normalized via
     the one shared ``foragerr.parser.normalize.matching_key`` folding — mapping
-    compares normalized-key equality, never substrings, so "Spawn" never
-    swallows "Curse of Spawn".
+    compares normalized-key equality, never substrings, so "Cinder" never
+    swallows "Curse of Cinder".
     """
 
     series_id: int

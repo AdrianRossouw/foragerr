@@ -1,7 +1,7 @@
 """FRG-IMP-026 — bare `Issue`/`Issues` filler stripping.
 
 Store-source filenames introduce the number with a bare filler word
-(`SPAWN Issue # 279`, `Strangelands Issues #8`), which otherwise leaks into
+(`CINDER Issue # 279`, `Duskmarch Issues #8`), which otherwise leaks into
 the series title and defeats matching. The rule is anchored and narrow: the
 word is consumed only when it sits directly on the issue evidence — the
 issue-anchor `#` or the token selected as the issue number. Corpus rows 82-87
@@ -19,22 +19,22 @@ REF = 2026
 
 @pytest.mark.req("FRG-IMP-026")
 def test_filler_before_a_spaced_anchor_is_stripped():
-    r = parse("SPAWN Issue # 279.cbz", reference_year=REF)
-    assert r.series_name == "SPAWN"
+    r = parse("CINDER Issue # 279.cbz", reference_year=REF)
+    assert r.series_name == "CINDER"
     assert r.issue.value == 279
 
 
 @pytest.mark.req("FRG-IMP-026")
 def test_filler_before_a_glued_anchor_is_stripped():
-    r = parse("Strangelands Issues #8.cbz", reference_year=REF)
-    assert r.series_name == "Strangelands"
+    r = parse("Duskmarch Issues #8.cbz", reference_year=REF)
+    assert r.series_name == "Duskmarch"
     assert r.issue.value == 8
 
 
 @pytest.mark.req("FRG-IMP-026")
 def test_filler_before_an_unanchored_issue_number_is_stripped():
-    r = parse("Spawn Issue 211.cbz", reference_year=REF)
-    assert r.series_name == "Spawn"
+    r = parse("Cinder Issue 211.cbz", reference_year=REF)
+    assert r.series_name == "Cinder"
     assert r.issue.value == 211
 
 

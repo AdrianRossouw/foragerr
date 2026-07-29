@@ -320,7 +320,7 @@ async def _ordinal_guards_refuse(
             else ORDINAL_REFUSED_UNPROVEN_MATCH
         )
     # Guard 1: a recognizable trade never lands on a single-issue line
-    # (FRG-SER-019). "Saga Vol 04 TPB" reads as ordinal 4, and a singles Saga
+    # (FRG-SER-019). "Ember Vol 04 TPB" reads as ordinal 4, and a singles Ember
     # holds a #4 — filing it there would put a collected edition on a single's
     # issue and (worse) let it win the duplicate contest against the real single.
     if evidence.booktype in _COLLECTED_BOOKTYPE_EVIDENCE:
