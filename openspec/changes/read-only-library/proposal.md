@@ -94,7 +94,7 @@ None — extensions of the existing library/import/OPDS areas.
 
 ## Approval
 
-Discussed with the owner 2026-07-29 (agreed: the **minimal** shape —
+**Approved by Adrian, 2026-07-29** ("i approve all the active proposals"). Discussed with the owner 2026-07-29 (agreed: the **minimal** shape —
 index + serve, no acquisition — and pulling it forward to run foragerr on
 the real library now, accepting a small 1.0-timeline cost for the
 at-scale dogfood signal). Sequenced AFTER the approved import-atomicity
