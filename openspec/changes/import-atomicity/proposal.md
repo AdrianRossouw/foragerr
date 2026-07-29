@@ -85,7 +85,8 @@ None — extension of the existing library-import flow.
 
 ## Approval
 
-Proposed post-M11, awaiting owner approval (FRG-PROC-009) — the M11
-standing grant covered the milestone's five changes and closed at
-milestone end; this is new work. Written up at the owner's request after
-the 2026-07-29 dogfood repro.
+**Approved by Adrian, 2026-07-29** ("import fix is approved") — after the
+dogfood repro and the written-up root cause. Post-M11, single change;
+implement → tiered gate (medium: the compensating-delete has a rollback
+adversarial angle) → release per the standing process. The rest of the
+parked import-heuristics pre-design stays out of scope.
