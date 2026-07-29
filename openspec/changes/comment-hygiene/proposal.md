@@ -117,3 +117,9 @@ None — this extends the existing `dev-process` capability.
 
 ## Approval
 
+
+Approved by Adrian, 2026-07-29 (in-session): "i approve the comment hygiene",
+with two directives folded into scope: (1) run the retroactive sweep over
+existing comments as part of this change, (2) keep `tools/comment_check.py`
+generic — pattern-class detectors (host:port literals, personal absolute
+paths, provenance phrasing, email addresses), not a list of specific values.
