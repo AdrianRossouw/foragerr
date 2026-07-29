@@ -186,6 +186,25 @@ should pick them up:
    accent-tint treatment of the Add/filter chips beside it; give the
    non-interactive badge a distinct token so it doesn't read as a
    false affordance.
+6. **Shared host-allowlist + hop-check primitive**: `foragerr.covers`,
+   `ddl/download.py` (`AllowList._allows` + `build_hop_check`), and
+   `ddl/links.py` each hand-maintain the dot-boundary host match and the
+   "re-validate every redirect hop" closure. Extract a dependency-free
+   leaf host-match/hop-check helper all three depend on (covers keeps
+   its cover-specific prefix/port/userinfo/ascii guards on top). Cross-
+   cutting — out of this change's scope.
+7. **Strict `public_asset` egress profile**: userinfo-refusal is generic
+   outbound hardening, not cover policy; when a second same-origin asset
+   proxy appears, hoist https-only + no-userinfo + default-port into a
+   strict egress profile and leave `covers` holding only the host/prefix
+   allowlist.
+8. **`useToggleSet<T>()` hook**: CalendarScreen, HistoryScreen, and
+   StoreManage each hand-roll the `new Set(...)` expand/collapse toggle;
+   consolidate into one hook.
+9. **`Poster` runtime-error fallback**: `CardCover` adds an
+   `onError`→spine fallback the shared `Poster` component lacks; fold
+   that capability into `Poster` (fixing the Add-series / library-import
+   no-fallback gap) and make `CardCover` a thin wrapper.
 
 ## Open Questions
 

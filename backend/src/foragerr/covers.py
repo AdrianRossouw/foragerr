@@ -150,10 +150,53 @@ def _allowed_parts(parts: SplitResult) -> bool:
 
 def cover_url_allowed(url: str) -> bool:
     """May foragerr fetch this cover URL? (FRG-META-021) Total — a malformed
-    URL is a refusal, never an exception. The single source of truth shared by
-    the request-time check, the per-hop redirect check, and the pull ingest."""
-    parts = _split(url)
-    return parts is not None and _allowed_parts(parts)
+    URL is a refusal, never an exception. A thin predicate over
+    :func:`canonical_cover_url` so the boolean gate and the stored/fetched
+    form can never disagree."""
+    return canonical_cover_url(url) is not None
+
+
+def cover_hop_allowed(url: object) -> bool:
+    """Is this redirect hop (an ``httpx.URL``) allowed? (FRG-META-021)
+
+    The proxy's per-hop check runs the same rules as the request-time gate, but
+    over the object httpx hands the redirect callback rather than a string — so
+    the wire-form knowledge (``raw_path`` is the un-decoded path; a missing wire
+    path or a malformed port fails CLOSED) lives here, in the source of truth,
+    beside the string path, rather than being hand-reconstructed by the caller.
+    """
+    scheme = getattr(url, "scheme", "") or ""
+    host = getattr(url, "host", "") or ""
+    path = _hop_path(url)
+    if path is None:
+        return False
+    try:
+        port = url.port  # type: ignore[attr-defined]
+    except (ValueError, AttributeError):
+        # A malformed port fails closed, exactly as _split does for a string.
+        return False
+    return target_allowed(
+        scheme,
+        host,
+        path,
+        userinfo_present=bool(
+            getattr(url, "username", "") or getattr(url, "password", "")
+        ),
+        port=port,
+        ascii_host=host.isascii(),
+    )
+
+
+def _hop_path(url: object) -> str | None:
+    """The hop's path as SENT, or ``None`` when no wire form is available.
+    ``httpx.URL.path`` is already decoded once, so reading it would decode
+    twice and blur what the remote receives; ``raw_path`` (path + query, bytes)
+    is the wire form. A missing wire form fails closed."""
+    raw = getattr(url, "raw_path", None)
+    if not raw:
+        return None
+    text = raw.decode("ascii", "replace") if isinstance(raw, bytes) else str(raw)
+    return text.split("?", 1)[0]
 
 
 def canonical_cover_url(url: str) -> str | None:

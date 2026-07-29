@@ -58,7 +58,7 @@ from collections import OrderedDict
 from fastapi import APIRouter, Query, Request, Response
 
 from foragerr.api.errors import ApiError
-from foragerr.covers import canonical_cover_url, cover_url_allowed, target_allowed
+from foragerr.covers import canonical_cover_url, cover_hop_allowed
 from foragerr.http import HttpClientFactory
 
 logger = logging.getLogger("foragerr.api.cover_proxy")
@@ -84,42 +84,15 @@ _IMAGE_MAGICS: tuple[tuple[bytes, str], ...] = (
 _cache: OrderedDict[str, tuple[bytes, str]] = OrderedDict()
 
 
-def _hop_path(url) -> str | None:
-    """The hop's path as SENT, or ``None`` when no wire form is available.
-    ``httpx.URL.path`` is already decoded once, so reading it would decode
-    twice and blur what the remote actually receives; ``raw_path`` (path +
-    query, bytes) is the wire form. A missing wire form fails closed."""
-    raw = getattr(url, "raw_path", None)
-    if raw:
-        text = raw.decode("ascii", "replace") if isinstance(raw, bytes) else str(raw)
-        return text.split("?", 1)[0]
-    return None
-
-
 def _hop_check(url) -> None:
-    """Per-hop validator handed to the factory: every hop of the redirect
-    walk — not just the first URL — is re-evaluated against the same rules,
-    so a hop to another host, to a non-default port, or to a shared-host path
-    outside the required prefix is refused mid-flight."""
-    scheme = getattr(url, "scheme", "")
-    host = getattr(url, "host", "") or ""
-    path = _hop_path(url)
-    try:
-        port = url.port
-    except (ValueError, AttributeError):
-        port = None
-    allowed = path is not None and target_allowed(
-        scheme,
-        host,
-        path,
-        userinfo_present=bool(getattr(url, "username", "") or getattr(url, "password", "")),
-        port=port,
-        ascii_host=host.isascii(),
-    )
-    if not allowed:
-        raise ValueError(
-            f"cover hop {host!r} (scheme {scheme!r}) is outside the cover allowlist"
-        )
+    """Per-hop validator handed to the factory: every hop of the redirect walk
+    — not just the first URL — is re-evaluated against the same rules (in
+    :mod:`foragerr.covers`, which owns the wire-form extraction), so a hop to
+    another host, to a non-default port, or to a shared-host path outside the
+    required prefix is refused mid-flight."""
+    if not cover_hop_allowed(url):
+        host = getattr(url, "host", "") or ""
+        raise ValueError(f"cover hop {host!r} is outside the cover allowlist")
 
 
 def _sniff_image(body: bytes) -> str | None:
@@ -160,20 +133,21 @@ def _semaphore() -> "asyncio.Semaphore":
 @router.get("/cover")
 async def proxy_cover(request: Request, src: str = Query(..., max_length=1024)) -> Response:
     """Fetch one allowlisted cover and serve it same-origin (FRG-META-021)."""
-    # cover_url_allowed is total — a malformed src fails closed to this 400,
-    # never an unguarded urlsplit ValueError / 500.
-    if not cover_url_allowed(src):
+    # canonical_cover_url is total and is both the gate and the cache key: a
+    # malformed or off-allowlist src fails closed to this 400 (never an
+    # unguarded urlsplit ValueError / 500), and the canonical form drops
+    # userinfo, port, query, and fragment so variant spellings of one image
+    # share one cache entry and can't multiply fetches. The path is preserved
+    # byte-for-byte, so the FETCHED url stays the caller's wire form
+    # (decode-once discipline), never a rebuild.
+    cache_key = canonical_cover_url(src)
+    if cache_key is None:
         raise ApiError(
             400,
             "cover src is not an allowed metadata cover target "
             "(host, subdomain, port, or path prefix)",
             field="src",
         )
-    # Canonical cache key: userinfo, port, query, and fragment dropped so
-    # variant spellings of one image share one cache entry and can't multiply
-    # fetches. The path is preserved byte-for-byte, so the FETCHED url stays
-    # the caller's wire form (decode-once discipline), never a rebuild.
-    cache_key = canonical_cover_url(src) or src
 
     cached = _cache.get(cache_key)
     if cached is not None:

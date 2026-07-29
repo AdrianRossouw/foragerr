@@ -21,9 +21,10 @@ This is the change's one new *outbound integration + untrusted-content ingress*
 * **Source-supplied fetch targets.** The payload's cover URLs are prospective
   *fetch targets*, not merely display text (FRG-PULL-011), so ingest is the
   trust boundary for them: each is canonicalized (query and fragment dropped)
-  and validated **fail-closed** through the cover proxy's own allowlist
-  evaluator (:func:`foragerr.api.cover_proxy.cover_url_allowed` — one source of
-  truth, so the two gates can never drift). Anything that fails — the relative
+  and validated **fail-closed** through the shared allowlist evaluator
+  (:func:`foragerr.covers.canonical_cover_url` — one source of truth the cover
+  proxy shares, so the two gates can never drift). Anything that fails — the
+  relative
   no-cover placeholder, ``http://``, an off-host or off-prefix target, a
   traversal — is stored as absent while the entry otherwise stores normally, so
   a hostile URL never even reaches the database.
@@ -306,7 +307,9 @@ def _parse_cover(value: Any) -> str | None:
     if not isinstance(value, list):
         return None
     fallback: str | None = None
-    for item in value:
+    # Examine a bounded prefix — a real entry lists a handful of covers, so a
+    # hostile array cannot force unbounded canonicalization work per poll.
+    for item in value[:MAX_LIST_ENTRIES]:
         if not isinstance(item, dict):
             continue
         url = item.get("url")
@@ -338,9 +341,9 @@ def _parse_people(value: Any, *, with_role: bool) -> str | None:
     if not isinstance(value, list):
         return None
     items: list[dict[str, str | None]] = []
-    for raw in value:
-        if len(items) >= MAX_LIST_ENTRIES:
-            break
+    # Examine a bounded prefix so a hostile all-invalid array cannot force a
+    # full scan — a real credits list is a handful of entries.
+    for raw in value[:MAX_LIST_ENTRIES]:
         if not isinstance(raw, dict):
             continue
         name = _clean_str(raw.get("name"), limit=MAX_NAME_LENGTH, strings_only=True)

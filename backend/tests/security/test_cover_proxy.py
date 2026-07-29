@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from foragerr.api import cover_proxy
 from foragerr.app import create_app
+from foragerr.covers import cover_url_allowed
 from foragerr.config import Settings
 from foragerr.http import HttpClientFactory
 
@@ -267,8 +268,8 @@ def test_virtual_hosted_bucket_subdomains_of_shared_host_refused(app, monkeypatc
 @pytest.mark.req("FRG-META-021")
 def test_evaluator_is_shared_and_agrees_with_the_endpoint():
     """The exported evaluator is the single source of truth both gates use."""
-    assert cover_proxy.cover_url_allowed(S3_COVER)
-    assert cover_proxy.cover_url_allowed(
+    assert cover_url_allowed(S3_COVER)
+    assert cover_url_allowed(
         "https://comicvine.gamespot.com/a/uploads/scale_small/x.png"
     )
     for src in (
@@ -278,7 +279,7 @@ def test_evaluator_is_shared_and_agrees_with_the_endpoint():
         "https://s3.amazonaws.com/comicgeeks/%252e%252e/other/x.jpg",
         "/assets/images/no-cover-lg.jpg",  # relative placeholder
     ):
-        assert not cover_proxy.cover_url_allowed(src), src
+        assert not cover_url_allowed(src), src
 
 
 @pytest.mark.req("FRG-META-021")

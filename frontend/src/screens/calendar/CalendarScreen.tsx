@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { memo, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Toolbar } from '../../components/Toolbar';
@@ -112,7 +112,15 @@ function spineStyle(r: PullEntryRecord): CSSProperties {
  * what the viewport shows. No stored URL — or a fetch that errors — falls back
  * to the publisher-tinted spine, never a broken image.
  */
-function CardCover({ r, name }: { r: PullEntryRecord; name: string }) {
+// Memoized so a single card interaction (expando toggle, want/skip) on the
+// parent doesn't re-render every sibling's cover across a full week's agenda.
+const CardCover = memo(function CardCover({
+  r,
+  name,
+}: {
+  r: PullEntryRecord;
+  name: string;
+}) {
   const [failed, setFailed] = useState(false);
   const src = failed ? null : candidateCoverUrl(r.coverUrl);
   if (src === null) {
@@ -128,7 +136,7 @@ function CardCover({ r, name }: { r: PullEntryRecord; name: string }) {
       onError={() => setFailed(true)}
     />
   );
-}
+});
 
 /** True when an entry has any stored enrichment worth a detail surface. */
 function hasDetail(r: PullEntryRecord): boolean {
@@ -328,10 +336,9 @@ export function CalendarScreen() {
     // never "following" (no matched issue -> no series -> isFollowing false),
     // so this is always 0 in Following scope — the toggle renders only when
     // this is > 0, rather than advertise a count that yields an empty view.
-    const debutCount = scoped.filter((r) => r.matchType === 'new_series').length;
-    const visible = debutsOnly
-      ? scoped.filter((r) => r.matchType === 'new_series')
-      : scoped;
+    const debuts = scoped.filter((r) => r.matchType === 'new_series');
+    const debutCount = debuts.length;
+    const visible = debutsOnly ? debuts : scoped;
     // What is actually rendered once publisher + scope + debutsOnly all
     // compose — the banner's headline figure must match this count, never a
     // pre-debutsOnly-filter total (publisher + scope alone).
