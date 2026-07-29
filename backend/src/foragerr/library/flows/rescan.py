@@ -112,6 +112,13 @@ async def rescan_series(
         if series is None:
             logger.info("rescan series %d: series gone; skipped", series_id)
             return RescanReport(series_id, (), (), 0, 0, 0)
+        if await repo.root_is_read_only(session, series.root_folder_id):
+            # A read-only reference series (FRG-SER-021) is indexed in place and
+            # never rescan-managed — rescan would try to move untracked files
+            # into it (refused by the pipeline). Skip cleanly; the scan-series
+            # the import chained thus no-ops rather than erroring.
+            logger.info("rescan series %d: read-only root; skipped", series_id)
+            return RescanReport(series_id, (), (), 0, 0, 0)
         walk_path = path_override or series.path
         reference_year = series.start_year or now.year
         # Existing issue-files for this series, for the vanished-file scan

@@ -83,6 +83,7 @@ from foragerr.importer.evidence import aggregate
 from foragerr.importer.context import DEFAULT_MAX_WALK_DEPTH
 from foragerr.library import matching
 from foragerr.library.flows import reconcile
+from foragerr.library.repo import root_is_read_only
 from foragerr.library.flows._common import SeriesValidationError, comicvine_factory
 from foragerr.library.flows.add import add_series
 from foragerr.library.flows.edit_delete import delete_series
@@ -827,9 +828,18 @@ async def _import_group(
     (FRG-IMP-023).
     """
     assert group.confirmed_cv_volume_id is not None
+    async with db.read_session() as session:
+        read_only_root = await root_is_read_only(session, group.root_folder_id)
     in_place = (
         getattr(settings, "library_import_mode", "in_place") if settings else "in_place"
     ) != "move"
+    # A read-only reference root (FRG-IMP-028) is indexed IN PLACE with no
+    # rename/move, regardless of the global mode/rename settings — the files are
+    # the operator's originals and must not be touched. Forcing both here means
+    # the placement step is a pure register (the pipeline's in-place branch);
+    # the pipeline's fail-closed guard refuses any move that slips through.
+    if read_only_root:
+        in_place = True
 
     # Safety rail: a group whose folder IS the root folder (loose files at the
     # root, groups spanning sibling folders) must never become a series whose
@@ -917,13 +927,20 @@ async def _import_group(
             ):
                 return "refresh-failed"
 
+        mm_fields = media_management_fields(settings)
+        if read_only_root:
+            # Force in-place register + no rename for a read-only root, so the
+            # pipeline never renders a move even if the global settings enable
+            # renaming or move mode (FRG-IMP-028).
+            mm_fields["rename_enabled"] = False
+            mm_fields["library_import_mode"] = "in_place"
         ctx = ImportContext(
             library_root=series.path,
             config_dir=str(settings.config_dir) if settings is not None else ".",
             reference_year=series.start_year or now.year,
             now=now,
             offload=offload,
-            **media_management_fields(settings),
+            **mm_fields,
         )
         source = LibraryImportSource(
             series_id=series.id,
