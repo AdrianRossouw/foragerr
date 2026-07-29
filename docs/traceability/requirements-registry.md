@@ -136,7 +136,7 @@ milestone-to-minor mapping. No id renumbered.
 | FRG-PULL-008 | New-series surfacing (no auto-add) | pull | implemented | M4 |
 | FRG-PULL-009 | Future/solicited releases | pull | implemented | M4 |
 | FRG-PULL-010 | First-run backfill window | pull | implemented | M10 |
-| FRG-PULL-011 | Pull payload enrichment ingestion | pull | approved | M11 |
+| FRG-PULL-011 | Pull payload enrichment ingestion | pull | implemented | M11 |
 | FRG-CRTR-001 | Per-issue creator credits ingest | crtr | implemented | M5 |
 | FRG-CRTR-002 | Creator and credit storage/reconciliation | crtr | implemented | M5 |
 | FRG-CRTR-003 | One-time credits backfill | crtr | implemented | M5 |
@@ -290,7 +290,7 @@ milestone-to-minor mapping. No id renumbered.
 | FRG-API-023 | Creators resource and follow toggle | api | implemented | M5 |
 | FRG-API-024 | Creator bibliography resource | api | implemented | M5 |
 | FRG-API-025 | Structured budget state on the health surface | api | implemented | M11 |
-| FRG-API-026 | ComicVine lookup by volume id | api | approved | M11 |
+| FRG-API-026 | ComicVine lookup by volume id | api | implemented | M11 |
 | FRG-UI-001 | SPA architecture: server state via React Query + WS invalidation | ui | implemented | M1 |
 | FRG-UI-002 | Design token layer with ant/foraging theme | ui | implemented | M1 |
 | FRG-UI-003 | Library index screen | ui | implemented | M1 |
@@ -332,7 +332,7 @@ milestone-to-minor mapping. No id renumbered.
 | FRG-UI-039 | Per-row ComicVine search picker | ui | implemented | M11 |
 | FRG-UI-040 | ComicVine budget meter | ui | implemented | M11 |
 | FRG-UI-041 | Per-indexer search outcomes | ui | implemented | M11 |
-| FRG-UI-042 | Calendar covers and enrichment detail | ui | approved | M11 |
+| FRG-UI-042 | Calendar covers and enrichment detail | ui | implemented | M11 |
 | FRG-SRC-001 | store-source model and connection lifecycle | sources | implemented | M6 |
 | FRG-SRC-002 | Humble session-cookie authentication | sources | implemented | M6 |
 | FRG-SRC-003 | entitlement sync | sources | implemented | M6 |
