@@ -760,6 +760,21 @@ async def _issue_count(db: Database, series_id: int) -> int:
     return int(count or 0)
 
 
+async def _series_has_issue_files(db: Database, series_id: int) -> bool:
+    """Whether a series holds at least one imported issue file — the
+    ground-truth keep/rollback test for FRG-IMP-027. Counts files however they
+    attached (this import, or the scan-series the refresh chained), so a series
+    with a real file is never rolled back and an empty shell always is."""
+    async with db.read_session() as session:
+        found = await session.scalar(
+            select(IssueFileRow.id)
+            .join(IssueRow, IssueFileRow.issue_id == IssueRow.id)
+            .where(IssueRow.series_id == series_id)
+            .limit(1)
+        )
+    return found is not None
+
+
 async def _refresh_before_import(
     db: Database,
     settings: Settings | None,
@@ -890,7 +905,6 @@ async def _import_group(
         # A reused / pre-existing series is never rolled back (created stays 0).
         created_series_id = series.id
 
-    attached_flag = [False]
     try:
         return await _import_group_body(
             db,
@@ -905,17 +919,35 @@ async def _import_group(
             factory=factory,
             now=now,
             in_place=in_place,
-            mark_attached=lambda: attached_flag.__setitem__(0, True),
         )
     finally:
-        if created_series_id is not None and not attached_flag[0]:
-            # Metadata-only delete: cascades the shell's issue/file rows and
-            # cached cover, leaves any on-disk files untouched (delete_files
-            # False). A scan-series the refresh may have enqueued no-ops on the
-            # now-missing series.
-            await delete_series(
-                db, created_series_id, delete_files=False, settings=settings
-            )
+        # Roll back a series THIS group created that ended up with no files of
+        # its own (FRG-IMP-027). The keep/rollback test is GROUND TRUTH — does
+        # the series actually hold an issue file now — not the body's imported
+        # counter: a file may have been attached by the scan-series the refresh
+        # chained (so the counter is 0 but the series is real → keep), and a
+        # "files already registered" verdict is only a keep when they are
+        # registered under THIS series, not another. Runs on the exception
+        # path too (the body raised) — the shell is undone and the original
+        # error still propagates.
+        if created_series_id is not None and not await _series_has_issue_files(
+            db, created_series_id
+        ):
+            try:
+                # Metadata-only (delete_files False): cascades the shell's own
+                # issue/file rows and its cached cover, never an on-disk library
+                # file. A scan-series the refresh enqueued no-ops on the now-gone
+                # series. Guarded so a concurrent delete can't mask the original
+                # failure that triggered the rollback.
+                await delete_series(
+                    db, created_series_id, delete_files=False, settings=settings
+                )
+            except Exception:  # noqa: BLE001 - cleanup must not mask the real error
+                logger.warning(
+                    "library-import: rollback of shell series %d failed",
+                    created_series_id,
+                    exc_info=True,
+                )
 
 
 async def _import_group_body(
@@ -932,13 +964,11 @@ async def _import_group_body(
     factory: HttpClientFactory | None,
     now: dt.datetime,
     in_place: bool,
-    mark_attached,
 ) -> str:
     """The refresh + attach steps for one group (FRG-IMP-027 split out so the
     caller's try/finally can roll back a group-created shell that attaches no
-    file). ``mark_attached`` is called once at least one file is imported (or
-    the group's files are already fully registered), pinning the series to
-    keep it; otherwise the caller rolls it back."""
+    file). The keep/rollback decision is the caller's, made from the series'
+    ground-truth file count — this body only imports and annotates."""
     # Populate the issue list DETERMINISTICALLY before importing: files can
     # only match issues that exist. Runs for a just-created series (always
     # issueless) and for a reused series whose add-enqueued refresh is still
@@ -971,14 +1001,20 @@ async def _import_group_body(
         candidates = await gather(source, session, ctx)
         if not candidates:
             # Distinguish "everything vanished" from "everything already
-            # imported" (the source filters registered paths): a re-run of a
-            # fully-imported group is a success, not a scan problem.
+            # imported UNDER THIS SERIES" (the source filters registered
+            # paths): a re-run of a fully-imported group is a success. Scoped
+            # to THIS series — a file registered under ANOTHER series is not
+            # this group's import, so it must not read as "already imported"
+            # and keep an otherwise-empty shell (FRG-IMP-027).
             staged = [path for path, _size in decode_group_files(group.files)]
             registered = set(
                 (
                     await session.execute(
-                        select(IssueFileRow.path).where(
-                            IssueFileRow.path.in_(staged)
+                        select(IssueFileRow.path)
+                        .join(IssueRow, IssueFileRow.issue_id == IssueRow.id)
+                        .where(
+                            IssueFileRow.path.in_(staged),
+                            IssueRow.series_id == series.id,
                         )
                     )
                 )
@@ -1000,7 +1036,6 @@ async def _import_group_body(
 
     if not candidates:
         if all_already_registered:
-            mark_attached()  # files already registered — a real, populated series
             await _set_group_outcome(
                 db,
                 group.id,
@@ -1018,8 +1053,6 @@ async def _import_group_body(
         )
         return "empty"
     if blocked_reasons:
-        if imported:
-            mark_attached()  # at least one file landed — keep the series
         await _set_group_outcome(
             db,
             group.id,
@@ -1031,7 +1064,6 @@ async def _import_group_body(
             rejections=blocked_reasons,
         )
         return "partial" if imported else "blocked"
-    mark_attached()
     await _set_group_outcome(
         db,
         group.id,

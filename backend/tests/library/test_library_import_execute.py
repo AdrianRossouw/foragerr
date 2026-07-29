@@ -945,3 +945,4 @@ async def test_exception_after_create_rolls_back_and_marks_errored(
     )
     assert "errored" in summary
     assert await _series_count(db, 701) == 0  # finally rolled the shell back
+
