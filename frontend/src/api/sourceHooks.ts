@@ -394,27 +394,54 @@ export interface BulkEntitlementResult {
 }
 
 /**
+ * The bulk request shapes (FRG-SRC-011 / FRG-UI-043). `ignore` / `restore` /
+ * `accept` are id-only; `apply_to_group` (the group-header search/match,
+ * FRG-UI-043) carries EXACTLY ONE resolved target for the whole id list — a
+ * `seriesId` for a candidate already in the library (match every member) or a
+ * `cvVolumeId` for a candidate not yet added (the server adds it once and
+ * leaves the rest as swept proposals). The two `apply_to_group` variants are a
+ * discriminated union so a caller cannot send both targets or neither.
+ */
+export type BulkEntitlementInput =
+  | { action: 'ignore' | 'restore' | 'accept'; entitlementIds: number[] }
+  | { action: 'apply_to_group'; entitlementIds: number[]; seriesId: number }
+  | { action: 'apply_to_group'; entitlementIds: number[]; cvVolumeId: number };
+
+/**
  * POST /sources/entitlements/bulk — one review action over several rows.
  * `ignore` / `restore` / `accept` are id-only; `accept` (FRG-SRC-011) applies
  * EACH row's OWN stored proposal server-side in a per-row transaction, which is
  * what makes "apply to a whole group/bundle" one request instead of the old
- * client-side loop. (`match` is deliberately absent from this union: it needs
- * one shared series_id, which cannot be right across heterogeneous rows —
- * per-row Match / Add stays row-scoped.)
+ * client-side loop. `apply_to_group` (FRG-UI-043) instead applies ONE shared
+ * target — a library series id, or a ComicVine volume id the server adds once —
+ * across every id in the group, which is what makes resolving a whole same-title
+ * run one action rather than one pick per row. (Per-row `match` stays row-scoped:
+ * a single series id cannot be right across heterogeneous rows, but a group is
+ * homogeneous by construction, which is exactly what makes it safe here.)
  */
 export function useBulkEntitlements(): UseMutationResult<
   BulkEntitlementResult,
   Error,
-  { action: 'ignore' | 'restore' | 'accept'; entitlementIds: number[] }
+  BulkEntitlementInput
 > {
   const fetcher = useFetcher();
   const invalidate = useInvalidateSources();
   return useMutation({
-    mutationFn: ({ action, entitlementIds }) =>
-      fetcher<BulkEntitlementResult>('/api/v1/sources/entitlements/bulk', {
+    mutationFn: (input) => {
+      const body: Record<string, unknown> = {
+        action: input.action,
+        entitlement_ids: input.entitlementIds,
+      };
+      // Exactly one target for apply_to_group; the id-only actions send neither.
+      if (input.action === 'apply_to_group') {
+        if ('seriesId' in input) body.series_id = input.seriesId;
+        else body.cv_volume_id = input.cvVolumeId;
+      }
+      return fetcher<BulkEntitlementResult>('/api/v1/sources/entitlements/bulk', {
         method: 'POST',
-        body: { action, entitlement_ids: entitlementIds },
-      }),
+        body,
+      });
+    },
     onSuccess: invalidate,
   });
 }

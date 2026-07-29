@@ -21,7 +21,7 @@ from foragerr.app import create_app
 from foragerr.indexers.models import ReleaseCacheRow
 from http_support import make_settings
 from indexers_support import make_factory  # noqa: F401
-from .support import feed_handler, make_indexer, make_issue, make_series
+from .support import feed_handler, grab_rows, make_indexer, make_issue, make_series
 
 
 @pytest.fixture(autouse=True)
@@ -136,6 +136,99 @@ def test_post_release_cache_hit_enqueues_grab_command(client, tmp_path):
     assert body["name"] == "grab-release"
     assert body["payload"]["guid"] == approved["guid"]
     assert body["payload"]["issue_id"] == issue_id
+    # An approved grab is a plain interactive grab (not a forced override).
+    assert body["triggered_by"] == "interactive"
+
+
+@pytest.mark.req("FRG-API-008")
+def test_post_release_rejected_is_refused_409_and_enqueues_nothing(client, tmp_path):
+    """A cached release whose decision was NOT approved is refused without force,
+    and NO grab command is enqueued (the server gate, not a client trick)."""
+    db = client.app.state.db
+    series_id, issue_id, indexer_id = client.portal.call(partial(_setup, db, None))
+    # A wrong-series release is decided REJECTED and cached not-approved.
+    _inject_feed(
+        client, tmp_path, feed_handler("Saga 007 (2012)", "Batman 007 (2012)")
+    )
+
+    rows = client.get(
+        "/api/v1/release", params={"issueId": issue_id}
+    ).json()["releases"]
+    rejected = next(r for r in rows if not r["approved"])
+
+    resp = client.post(
+        "/api/v1/release",
+        json={"indexer_id": rejected["indexer_id"], "guid": rejected["guid"]},
+    )
+    assert resp.status_code == 409
+    body = resp.json()
+    assert set(body) == {"message", "errors"}  # uniform error shape
+    assert "quality" in body["message"].lower()
+    assert "force" in body["message"].lower()
+    # The gate enqueued nothing.
+    assert client.portal.call(partial(grab_rows, db)) == []
+
+
+@pytest.mark.req("FRG-API-008")
+def test_post_release_rejected_with_force_grabs_as_interactive_forced(client, tmp_path):
+    """``force: true`` overrides the gate: the SAME grab hand-off is enqueued,
+    recorded as ``triggered_by="interactive-forced"``."""
+    db = client.app.state.db
+    series_id, issue_id, indexer_id = client.portal.call(partial(_setup, db, None))
+    _inject_feed(
+        client, tmp_path, feed_handler("Saga 007 (2012)", "Batman 007 (2012)")
+    )
+
+    rows = client.get(
+        "/api/v1/release", params={"issueId": issue_id}
+    ).json()["releases"]
+    rejected = next(r for r in rows if not r["approved"])
+
+    resp = client.post(
+        "/api/v1/release",
+        json={
+            "indexer_id": rejected["indexer_id"],
+            "guid": rejected["guid"],
+            "force": True,
+        },
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["name"] == "grab-release"
+    assert body["payload"]["guid"] == rejected["guid"]
+    assert body["triggered_by"] == "interactive-forced"
+    # Exactly one grab command, carrying the forced stamp on the persisted row.
+    enqueued = client.portal.call(partial(grab_rows, db))
+    assert [r.triggered_by for r in enqueued] == ["interactive-forced"]
+
+
+@pytest.mark.req("FRG-API-008")
+def test_post_release_null_approved_is_fail_safe_refused(client, tmp_path):
+    """A cache row with NULL ``approved`` (a pre-0030 row) is treated as NOT
+    approved: refused without force, fail-safe rather than fail-open."""
+    db = client.app.state.db
+    series_id, issue_id, indexer_id = client.portal.call(partial(_setup, db, None))
+    _inject_feed(client, tmp_path, feed_handler("Saga 007 (2012)"))
+
+    rows = client.get(
+        "/api/v1/release", params={"issueId": issue_id}
+    ).json()["releases"]
+    approved = next(r for r in rows if r["approved"])
+
+    # Simulate a pre-0030 cache row: null out the recorded verdict.
+    async def _null_approved(db):
+        async with db.write_session() as session:
+            await session.execute(update(ReleaseCacheRow).values(approved=None))
+
+    client.portal.call(partial(_null_approved, db))
+
+    resp = client.post(
+        "/api/v1/release",
+        json={"indexer_id": approved["indexer_id"], "guid": approved["guid"]},
+    )
+    assert resp.status_code == 409
+    assert "force" in resp.json()["message"].lower()
+    assert client.portal.call(partial(grab_rows, db)) == []
 
 
 @pytest.mark.req("FRG-API-008")
@@ -150,6 +243,22 @@ def test_post_release_cache_miss_is_a_uniform_404(client, tmp_path):
     body = resp.json()
     assert set(body) == {"message", "errors"}  # uniform error shape
     assert "search" in body["message"].lower()
+
+
+@pytest.mark.req("FRG-API-008")
+def test_post_release_cache_miss_is_404_even_with_force(client, tmp_path):
+    """A cache miss is a 404 regardless of ``force`` — force overrides the
+    approval gate, never the "search again" contract."""
+    db = client.app.state.db
+    series_id, issue_id, indexer_id = client.portal.call(partial(_setup, db, None))
+
+    resp = client.post(
+        "/api/v1/release",
+        json={"indexer_id": indexer_id, "guid": "never-cached", "force": True},
+    )
+    assert resp.status_code == 404
+    assert "search" in resp.json()["message"].lower()
+    assert client.portal.call(partial(grab_rows, db)) == []
 
 
 @pytest.mark.req("FRG-SRCH-014")

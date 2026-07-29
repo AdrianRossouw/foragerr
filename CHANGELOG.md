@@ -9,6 +9,41 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.15.0] — 2026-07-29
+
+M11 import-intelligence, review refinements: acting on a whole group, and
+on a search that rejected everything. From live dogfood — matching a
+145-row group one row at a time, and a wanted release the quality rules
+turned away with no way through.
+
+### Added
+- **Match a whole group at once** (`FRG-UI-043`, `FRG-SRC-014`): the
+  collapsed review group header offers a search/match picker — pick an
+  in-library series and every still-in-review member matches; pick a new
+  series and it is added once with the rest proposed for a single accept.
+- **Picking one row fills in its siblings** (`FRG-SRC-014`): matching or
+  adding a series for a review row now proposes that series for the row's
+  same-title siblings (proposals only — nothing is accepted until you
+  accept it), so the next row is right on the first click.
+- **Grab anyway** (`FRG-UI-044`, `FRG-API-008`): when an interactive
+  search returns releases the quality rules all rejected, each rejected
+  release offers a confirm-gated "Grab anyway" that downloads it despite
+  the rules (the rejection reasons stay visible). Approved releases keep
+  their one-click Grab.
+
+### Security
+- **Grab now enforces the quality decision server-side** (`FRG-API-008`,
+  migration `0030`): previously the frontend was the only thing stopping a
+  rejected release from being grabbed. The interactive-search cache now
+  records each release's approved verdict; the grab endpoint refuses a
+  rejected release unless an explicit, confirm-gated force override is
+  passed, and a forced grab is recorded distinctly in history.
+
+### Fixed
+- Applying a series to a group never reverses a decision you already made:
+  members already matched or ignored are left untouched, so a group action
+  can never silently un-ignore a withdrawn item and re-download it.
+
 ## [v0.14.0] — 2026-07-29
 
 M11 import-intelligence, change 5 (final pre-designed change): the

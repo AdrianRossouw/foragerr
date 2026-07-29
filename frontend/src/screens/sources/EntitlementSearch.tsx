@@ -105,14 +105,20 @@ function CandidateButton({
  * reviewable row regardless of what the automatic proposal concluded.
  */
 export function EntitlementSearch({
-  entitlementId,
+  instanceId,
   seedTerm,
   busy,
   noteText,
   onPick,
   onCancel,
 }: {
-  entitlementId: number;
+  /**
+   * DOM-id namespace for this picker instance (testids, ARIA). A single row
+   * passes its entitlement id; the group header (FRG-UI-043) passes a
+   * group-scoped string — the picker itself is identical either way, it only
+   * differs in the id space it stamps and the `onPick` the parent supplies.
+   */
+  instanceId: string | number;
   seedTerm: string;
   busy: boolean;
   /** The automatic verdict shown BESIDE the search, never instead of it. */
@@ -166,16 +172,16 @@ export function EntitlementSearch({
   };
 
   return (
-    <div className={styles.rowSearch} data-testid={`row-search-${entitlementId}`}>
+    <div className={styles.rowSearch} data-testid={`row-search-${instanceId}`}>
       <div className={styles.rowSearchHead}>
-        <span className={styles.rowSearchNote} data-testid={`row-search-note-${entitlementId}`}>
+        <span className={styles.rowSearchNote} data-testid={`row-search-note-${instanceId}`}>
           {noteText}
         </span>
         <button
           type="button"
           className={styles.mutedBtn}
           onClick={onCancel}
-          data-testid={`row-search-cancel-${entitlementId}`}
+          data-testid={`row-search-cancel-${instanceId}`}
         >
           Cancel
         </button>
@@ -189,7 +195,7 @@ export function EntitlementSearch({
           placeholder="Series name, or a ComicVine volume URL / 4050-XXXX id"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          data-testid={`row-search-input-${entitlementId}`}
+          data-testid={`row-search-input-${instanceId}`}
         />
         <button type="submit" className={styles.linkBtn}>
           Search
@@ -210,7 +216,7 @@ export function EntitlementSearch({
       {note?.tone === 'plain' && <p className={styles.searchState}>{note.text}</p>}
 
       {hiddenByIgnore > 0 && !showIgnored && (
-        <p className={styles.searchState} data-testid={`row-ignored-hidden-${entitlementId}`}>
+        <p className={styles.searchState} data-testid={`row-ignored-hidden-${instanceId}`}>
           {hiddenByIgnore} result{hiddenByIgnore === 1 ? '' : 's'} hidden by your
           publisher ignore list —{' '}
           <button
@@ -240,7 +246,7 @@ export function EntitlementSearch({
             <CandidateButton
               key={candidate.cv_volume_id}
               candidate={candidate}
-              testId={`cand-${entitlementId}-${candidate.cv_volume_id}`}
+              testId={`cand-${instanceId}-${candidate.cv_volume_id}`}
               busy={busy}
               onPick={() => onPick(candidate)}
             />

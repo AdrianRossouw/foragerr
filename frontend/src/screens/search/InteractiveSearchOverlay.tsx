@@ -116,17 +116,20 @@ export function InteractiveSearchOverlay({
   const [grabError, setGrabError] = useState<GrabError | null>(null);
   const [grabbedKeys, setGrabbedKeys] = useState<ReadonlySet<string>>(new Set());
   const [pendingKey, setPendingKey] = useState<string | null>(null);
+  // The rejected release awaiting an explicit confirm before a force-grab
+  // (FRG-UI-044). Null when no confirm is open.
+  const [confirmForce, setConfirmForce] = useState<ReleaseDecision | null>(null);
 
   const decisions = data?.decisions ?? [];
   const keyOf = (d: ReleaseDecision) => `${d.indexer_id}:${d.guid}`;
   const expired = grabError?.status === 404;
 
-  const onGrab = (decision: ReleaseDecision) => {
+  const onGrab = (decision: ReleaseDecision, force = false) => {
     const key = keyOf(decision);
     setGrabError(null);
     setPendingKey(key);
     grab.mutate(
-      { indexer_id: decision.indexer_id, guid: decision.guid },
+      { indexer_id: decision.indexer_id, guid: decision.guid, force },
       {
         onSuccess: () => setGrabbedKeys((prev) => new Set(prev).add(key)),
         onError: (err) =>
@@ -209,10 +212,57 @@ export function InteractiveSearchOverlay({
                 grabbed={grabbedKeys.has(keyOf(decision))}
                 pending={pendingKey === keyOf(decision)}
                 onGrab={() => onGrab(decision)}
+                onForceGrab={() => setConfirmForce(decision)}
               />
             ))}
           </tbody>
         </table>
+      )}
+
+      {/* Force-grab confirm (FRG-UI-044): overriding the quality rules is a
+          deliberate step, so it goes through the app's Modal confirm idiom
+          (footer Cancel / danger action). The reasons being overridden are
+          restated here AND stay visible on the row itself. */}
+      {confirmForce && (
+        <Modal
+          title="Grab anyway?"
+          label={`Grab ${confirmForce.title} anyway`}
+          onClose={() => setConfirmForce(null)}
+          footer={
+            <>
+              <button
+                type="button"
+                className={styles.grabBtn}
+                onClick={() => setConfirmForce(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className={styles.forceGrabBtn}
+                onClick={() => {
+                  onGrab(confirmForce, true);
+                  setConfirmForce(null);
+                }}
+              >
+                Grab anyway
+              </button>
+            </>
+          }
+        >
+          <p className={styles.confirmBody}>
+            <strong>{confirmForce.title}</strong> was{' '}
+            {OUTCOME_LABEL[confirmForce.outcome].toLowerCase()} by the quality
+            rules. Grabbing it anyway overrides them.
+          </p>
+          {confirmForce.rejections.length > 0 && (
+            <ul className={styles.confirmReasons} data-testid="confirm-force-reasons">
+              {confirmForce.rejections.map((reason, i) => (
+                <li key={i}>{reason}</li>
+              ))}
+            </ul>
+          )}
+        </Modal>
       )}
     </Modal>
   );
@@ -223,11 +273,14 @@ function DecisionRow({
   grabbed,
   pending,
   onGrab,
+  onForceGrab,
 }: {
   decision: ReleaseDecision;
   grabbed: boolean;
   pending: boolean;
   onGrab: () => void;
+  /** Open the force-grab confirm (rejected / temporarily-rejected rows only). */
+  onForceGrab: () => void;
 }) {
   const chipClass = `${styles.chip} ${OUTCOME_CHIP[decision.outcome]}`;
   const label = OUTCOME_LABEL[decision.outcome];
@@ -254,20 +307,31 @@ function DecisionRow({
       <td className={styles.muted}>{decision.format ?? '—'}</td>
       <td className={styles.numeric}>{decision.score}</td>
       <td>
-        {decision.approved &&
-          (grabbed ? (
-            <span className={styles.grabbed}>Grabbed</span>
-          ) : (
-            <button
-              type="button"
-              className={styles.grabBtn}
-              disabled={pending}
-              aria-label={`Grab ${decision.title}`}
-              onClick={onGrab}
-            >
-              {pending ? 'Grabbing…' : 'Grab'}
-            </button>
-          ))}
+        {grabbed ? (
+          <span className={styles.grabbed}>Grabbed</span>
+        ) : decision.approved ? (
+          <button
+            type="button"
+            className={styles.grabBtn}
+            disabled={pending}
+            aria-label={`Grab ${decision.title}`}
+            onClick={onGrab}
+          >
+            {pending ? 'Grabbing…' : 'Grab'}
+          </button>
+        ) : (
+          // A rejected / temporarily-rejected row keeps its reasons chip (left
+          // column) AND offers a distinct, confirm-gated override (FRG-UI-044).
+          <button
+            type="button"
+            className={styles.forceGrabBtn}
+            disabled={pending}
+            aria-label={`Grab ${decision.title} anyway`}
+            onClick={onForceGrab}
+          >
+            {pending ? 'Grabbing…' : 'Grab anyway'}
+          </button>
+        )}
       </td>
     </tr>
   );

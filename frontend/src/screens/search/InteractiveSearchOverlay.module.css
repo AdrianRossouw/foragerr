@@ -95,10 +95,40 @@
   outline-offset: 1px;
 }
 
+/* Force-grab override (FRG-UI-044): warning-toned so it reads as deliberate,
+   distinct from the accent one-click Grab on approved rows. */
+.forceGrabBtn {
+  composes: grabBtn;
+  border-color: var(--color-warning);
+  color: var(--color-warning);
+}
+
+.forceGrabBtn:hover:not(:disabled) {
+  background: var(--color-warning);
+  color: var(--text-on-accent);
+}
+
+.forceGrabBtn:focus-visible {
+  outline: 2px solid var(--color-warning);
+  outline-offset: 1px;
+}
+
 .grabbed {
   color: var(--color-success);
   font-size: var(--font-size-sm);
   white-space: nowrap;
+}
+
+/* Force-grab confirm body (FRG-UI-044). */
+.confirmBody {
+  margin: 0 0 var(--spacing-sm);
+}
+
+.confirmReasons {
+  margin: 0;
+  padding-left: var(--spacing-lg);
+  color: var(--color-warning);
+  font-size: var(--font-size-sm);
 }
 
 /* --- Banners / states (base shared with ManualImportOverlay) --- */

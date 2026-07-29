@@ -2005,3 +2005,148 @@ describe('FRG-SRC-013: bulk proposal recompute trigger', () => {
     expect(note).toHaveAttribute('role', 'alert');
   });
 });
+
+/**
+ * FRG-UI-043 — the group-header search/match affordance: a collapsed group's
+ * header offers a picker seeded with the group title, an in-library pick
+ * matches the WHOLE group in one apply_to_group (series_id + every member id),
+ * a new pick sends cv_volume_id (server adds once, proposes the rest), and the
+ * list re-derives after so the swept proposals + matches render.
+ */
+describe('FRG-UI-043: group-header search/match', () => {
+  const source = makeSource({ id: 5, connection_state: 'connected' });
+
+  /** Three rows the server folded to one key — a collapsed group by default. */
+  function widgetGroup(): EntitlementResource[] {
+    return [
+      ent({ id: 60, human_name: 'Widget Chronicles, Vol. 1', group_key: 'widget' }),
+      ent({ id: 61, human_name: 'Widget Chronicles, Vol. 2', group_key: 'widget' }),
+      ent({ id: 62, human_name: 'Widget Chronicles, Vol. 3', group_key: 'widget' }),
+    ];
+  }
+
+  it('FRG-UI-043 — the collapsed group header offers a search/match picker seeded with the group title', async () => {
+    renderScreen({ sources: [source], entitlements: widgetGroup(), calls: [] });
+
+    const header = await screen.findByTestId('group-header-widget');
+    expect(header).toHaveAttribute('data-collapsed', 'true');
+    // The affordance sits on the header, beside select-all and the collapse toggle.
+    const user = userEvent.setup();
+    await user.click(within(header).getByTestId('group-search-widget'));
+
+    const panel = await screen.findByTestId('row-search-group-widget');
+    // Seeded with the group's server fold (the same term the ranker uses).
+    expect(within(panel).getByTestId('row-search-input-group-widget')).toHaveValue(
+      'widget',
+    );
+  });
+
+  it('FRG-UI-043 — picking an in-library candidate applies_to_group with series_id + every member id, then the list re-derives', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: widgetGroup(),
+      calls: [],
+      // The library holds the picked volume (series id 1 -> cv_volume_id 40500001).
+      librarySeries: [makeSeriesResource({ id: 1, title: 'Widget Chronicles' })],
+      lookup: () => ({
+        records: [candidate({ cv_volume_id: 4050_0001, name: 'Widget Chronicles', have_it: true })],
+        complete: true,
+        truncated: false,
+      }),
+      // Model the server matching every member so the post-invalidation refetch
+      // shows the group as fully matched — proving the list re-derived.
+      bulkResult: (body) => {
+        state.entitlements = state.entitlements.map((e) =>
+          body.entitlement_ids.includes(e.id)
+            ? { ...e, review_status: 'matched' as const, matched_series_id: 1 }
+            : e,
+        );
+        return { applied: body.entitlement_ids.length, skipped: 0, errors: {} };
+      },
+    };
+    renderScreen(state);
+
+    await user.click(await screen.findByTestId('group-search-widget'));
+    await user.click(
+      within(screen.getByTestId('row-search-group-widget')).getByRole('button', {
+        name: 'Search',
+      }),
+    );
+    await user.click(await screen.findByTestId('cand-group-widget-40500001'));
+
+    await waitFor(() =>
+      expect(state.calls.find((c) => c.path.endsWith('/bulk'))).toBeTruthy(),
+    );
+    const body = state.calls.find((c) => c.path.endsWith('/bulk'))!.init!.body as {
+      action: string;
+      entitlement_ids: number[];
+      series_id?: number;
+      cv_volume_id?: number;
+    };
+    expect(body.action).toBe('apply_to_group');
+    expect(body.series_id).toBe(1);
+    expect(body.cv_volume_id).toBeUndefined();
+    expect([...body.entitlement_ids].sort((a, b) => a - b)).toEqual([60, 61, 62]);
+
+    // The success invalidation re-derived the list: the group now reads matched.
+    await waitFor(() =>
+      expect(screen.getByTestId('group-statuses-widget')).toHaveTextContent(
+        '3 matched',
+      ),
+    );
+  });
+
+  it('FRG-UI-043 — picking a new candidate applies_to_group with cv_volume_id (server adds once, proposes the rest)', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: widgetGroup(),
+      calls: [],
+      reads: [],
+      librarySeries: [makeSeriesResource({ id: 1, title: 'Unrelated Series' })],
+      lookup: () => ({
+        // Not in the library — a brand-new ComicVine volume.
+        records: [candidate({ cv_volume_id: 4050_7777, name: 'Widget Chronicles', have_it: false })],
+        complete: true,
+        truncated: false,
+      }),
+    };
+    renderScreen(state);
+
+    const entReads = () =>
+      state.reads!.filter((p) => /\/sources\/5\/entitlements$/.test(p)).length;
+    await screen.findByTestId('group-header-widget');
+    const before = entReads();
+
+    await user.click(screen.getByTestId('group-search-widget'));
+    await user.click(
+      within(screen.getByTestId('row-search-group-widget')).getByRole('button', {
+        name: 'Search',
+      }),
+    );
+    await user.click(await screen.findByTestId('cand-group-widget-40507777'));
+
+    await waitFor(() =>
+      expect(state.calls.find((c) => c.path.endsWith('/bulk'))).toBeTruthy(),
+    );
+    const body = state.calls.find((c) => c.path.endsWith('/bulk'))!.init!.body as {
+      action: string;
+      entitlement_ids: number[];
+      series_id?: number;
+      cv_volume_id?: number;
+    };
+    expect(body.action).toBe('apply_to_group');
+    expect(body.cv_volume_id).toBe(4050_7777);
+    expect(body.series_id).toBeUndefined();
+    expect([...body.entitlement_ids].sort((a, b) => a - b)).toEqual([60, 61, 62]);
+
+    // The bulk hook's success invalidation re-fetched the entitlements so the
+    // swept proposals render.
+    await waitFor(() => expect(entReads()).toBeGreaterThan(before));
+    // The picker closes on a successful group apply.
+    await waitFor(() =>
+      expect(screen.queryByTestId('row-search-group-widget')).toBeNull(),
+    );
+  });
+});

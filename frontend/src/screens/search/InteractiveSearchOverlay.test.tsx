@@ -5,6 +5,7 @@ import { renderWithProviders } from '../../test/renderWithProviders';
 import { fakeFetcher } from '../../test/fakeFetcher';
 import { mockReleases } from '../../test/mockData';
 import { ApiRequestError, type Fetcher, type FetcherInit } from '../../api/fetcher';
+import type { ReleaseDecision } from '../../api/types';
 import { InteractiveSearchOverlay } from './InteractiveSearchOverlay';
 
 const EXPIRED_MESSAGE =
@@ -83,8 +84,14 @@ describe('FRG-UI-007: interactive search overlay', () => {
     );
 
     const rejectedRow = await screen.findByTestId('release-row-guid-rejected');
-    // Rejected rows never expose a grab button.
-    expect(within(rejectedRow).queryByRole('button', { name: /^Grab / })).toBeNull();
+    // A rejected row never exposes the plain one-click Grab — its override
+    // (FRG-UI-044) is the distinct, confirm-gated "Grab anyway".
+    expect(
+      within(rejectedRow).queryByRole('button', { name: 'Grab Saga 041 scanned' }),
+    ).toBeNull();
+    expect(
+      within(rejectedRow).getByRole('button', { name: 'Grab Saga 041 scanned anyway' }),
+    ).toBeInTheDocument();
 
     await user.click(
       screen.getByRole('button', { name: 'Grab Saga 041 (2017) (Digital)' }),
@@ -271,5 +278,140 @@ describe('FRG-UI-041: per-indexer search outcomes', () => {
     await screen.findByTestId('release-row-guid-approved-best');
     expect(screen.getAllByTestId(/^release-row-/)).toHaveLength(mockReleases.length);
     expect(screen.queryByTestId('indexer-outcomes')).toBeNull();
+  });
+});
+
+/**
+ * FRG-UI-044 — force-grab: rejected AND temporarily-rejected releases offer a
+ * distinct, confirm-gated "Grab anyway" that grabs with force:true, while
+ * approved releases keep their plain one-click Grab with no confirm and no
+ * force flag. Synthetic titles only.
+ */
+describe('FRG-UI-044: force-grab of rejected releases', () => {
+  const allRejected: ReleaseDecision[] = [
+    {
+      indexer_id: 7,
+      guid: 'r1',
+      indexer_name: 'IndexerOne',
+      title: 'Widget Chronicles 001',
+      format: null,
+      size_bytes: 1_000_000,
+      age_seconds: 86_400,
+      score: -3,
+      outcome: 'rejected',
+      approved: false,
+      rejections: ['Below minimum size', 'Wrong format'],
+    },
+    {
+      indexer_id: 7,
+      guid: 'r2',
+      indexer_name: 'IndexerOne',
+      title: 'Widget Chronicles 001 alt',
+      format: 'cbz',
+      size_bytes: 2_000_000,
+      age_seconds: 3_600,
+      score: -1,
+      outcome: 'temporarily-rejected',
+      approved: false,
+      rejections: ['Release too new'],
+    },
+  ];
+
+  const oneApproved: ReleaseDecision[] = [
+    {
+      indexer_id: 8,
+      guid: 'a1',
+      indexer_name: 'IndexerTwo',
+      title: 'Gadget Tales 002',
+      format: 'cbz',
+      size_bytes: 40_000_000,
+      age_seconds: 3 * 86_400,
+      score: 100,
+      outcome: 'approved',
+      approved: true,
+      rejections: [],
+    },
+  ];
+
+  it('FRG-UI-044 — an all-rejected search offers a confirm-gated Grab anyway that grabs with force, reasons staying visible', async () => {
+    const { spy, fetcher } = fakeFetcher((_path, init) =>
+      init?.method === 'POST' ? { id: 1, name: 'grab-release' } : allRejected,
+    );
+    const user = userEvent.setup();
+    renderWithProviders(
+      <InteractiveSearchOverlay issueId={7} onClose={() => {}} />,
+      { fetcher },
+    );
+
+    // Every row is rejected/temporarily-rejected -> each offers "Grab anyway",
+    // and NONE offers the plain approved one-click Grab.
+    await screen.findByTestId('release-row-r1');
+    expect(
+      screen.queryByRole('button', { name: 'Grab Widget Chronicles 001' }),
+    ).toBeNull();
+    expect(
+      screen.getByRole('button', { name: 'Grab Widget Chronicles 001 alt anyway' }),
+    ).toBeInTheDocument();
+    const anyway = screen.getByRole('button', {
+      name: 'Grab Widget Chronicles 001 anyway',
+    });
+
+    // Activating it does NOT grab immediately — it interposes an explicit confirm.
+    await user.click(anyway);
+    expect(spy).not.toHaveBeenCalledWith(
+      '/api/v1/release',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    const confirm = screen.getByRole('dialog', {
+      name: 'Grab Widget Chronicles 001 anyway',
+    });
+    // The reasons being overridden are restated in the confirm...
+    expect(within(confirm).getByTestId('confirm-force-reasons')).toHaveTextContent(
+      'Below minimum size',
+    );
+    // ...and the row keeps its verbatim rejection reasons chip visible.
+    const row = screen.getByTestId('release-row-r1');
+    expect(
+      within(row).getByRole('button', { name: 'Rejected — show reasons' }),
+    ).toBeInTheDocument();
+
+    // Confirming sends the grab WITH force: true.
+    await user.click(within(confirm).getByRole('button', { name: 'Grab anyway' }));
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith(
+        '/api/v1/release',
+        expect.objectContaining({
+          method: 'POST',
+          body: { indexer_id: 7, guid: 'r1', force: true },
+        }),
+      ),
+    );
+  });
+
+  it('FRG-UI-044 — an approved release keeps its one-click Grab with no confirm and no force flag', async () => {
+    const { spy, fetcher } = fakeFetcher((_path, init) =>
+      init?.method === 'POST' ? { id: 1, name: 'grab-release' } : oneApproved,
+    );
+    const user = userEvent.setup();
+    renderWithProviders(
+      <InteractiveSearchOverlay issueId={8} onClose={() => {}} />,
+      { fetcher },
+    );
+
+    await screen.findByTestId('release-row-a1');
+    await user.click(screen.getByRole('button', { name: 'Grab Gadget Tales 002' }));
+
+    // Straight to the grab — the body carries NO force flag...
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith(
+        '/api/v1/release',
+        expect.objectContaining({
+          method: 'POST',
+          body: { indexer_id: 8, guid: 'a1' },
+        }),
+      ),
+    );
+    // ...and no confirm dialog was ever interposed.
+    expect(screen.queryByRole('dialog', { name: /anyway/ })).toBeNull();
   });
 });

@@ -444,7 +444,7 @@ export function EntitlementRow({
       </div>
       {searchOpen && (
         <EntitlementSearch
-          entitlementId={entitlement.id}
+          instanceId={entitlement.id}
           seedTerm={searchSeedTerm(entitlement.human_name, entitlement.group_key)}
           busy={busy}
           noteText={searchNote}

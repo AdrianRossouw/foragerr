@@ -94,10 +94,17 @@ class ReleaseSearchResource(BaseModel):
 
 
 class ReleaseGrabRequest(BaseModel):
-    """Body for ``POST /api/v1/release``: which cached release to grab."""
+    """Body for ``POST /api/v1/release``: which cached release to grab.
+
+    ``force`` is the sole bypass of the server-side approval gate (FRG-API-008):
+    a cached release whose decision was NOT approved is refused unless the
+    request deliberately carries ``force: true``, in which case the grab is
+    recorded as an operator-forced override.
+    """
 
     indexer_id: int
     guid: str
+    force: bool = False
 
 
 def _factory(request: Request):
@@ -201,19 +208,37 @@ async def search_releases(
 async def grab_release(body: ReleaseGrabRequest, request: Request) -> CommandResource:
     """Grab a cached release by ``(indexerId, guid)`` (FRG-API-008).
 
-    Cache hit → enqueue the (inert) grab command and return it. Cache miss or
-    expiry → a deterministic 404-class "search again" error, never a silent
-    re-search.
+    Cache miss or expiry → a deterministic 404-class "search again" error,
+    never a silent re-search, whether or not ``force`` was supplied. On a cache
+    hit the server enforces the decision's approved verdict:
+
+    - approved → enqueue the grab (``triggered_by="interactive"``);
+    - NOT approved + ``force=False`` → refuse with a typed 409 naming the
+      quality-rule constraint, enqueuing nothing;
+    - NOT approved + ``force=True`` → enqueue the SAME grab hand-off, recorded
+      as an operator-forced override (``triggered_by="interactive-forced"``).
     """
     db = request.app.state.db
-    handoff = await get_cached(db, body.indexer_id, body.guid)
-    if handoff is None:
+    cached = await get_cached(db, body.indexer_id, body.guid)
+    if cached is None:
         raise ApiError(
             404,
             "release is no longer cached; run the interactive search again "
             "before grabbing",
         )
+    if cached.approved:
+        triggered_by = "interactive"
+    elif body.force:
+        triggered_by = "interactive-forced"
+    else:
+        raise ApiError(
+            409,
+            "release was rejected by the quality rules and cannot be grabbed; "
+            "re-send with force to override",
+        )
     record = await request.app.state.commands.enqueue(
-        "grab-release", handoff.model_dump(mode="json"), triggered_by="interactive"
+        "grab-release",
+        cached.handoff.model_dump(mode="json"),
+        triggered_by=triggered_by,
     )
     return CommandResource.from_record(record)

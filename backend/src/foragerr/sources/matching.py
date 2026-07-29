@@ -388,6 +388,24 @@ def stripped_key(text: str | None) -> str:
     return " ".join(stripped_tokens(text))
 
 
+def group_key(human_name: str) -> str:
+    """The review screen's collapse key for a store title (FRG-SRC-011/014).
+
+    ``stripped_key(query_term(human_name))`` — the store title trimmed to its
+    series-shaped term (the same trim the proposal ranker uses) and then run
+    through the ranker's boilerplate-STRIPPED fold, which bottoms out in the ONE
+    shared title fold (FRG-IMP-005). The strip is what makes the collapse real:
+    store fronts name the edition slices of ONE title with per-ordinal idioms
+    ("TITLE Vol. 243", "Title Issues #8", "Title #211"), each of which keeps its
+    ordinal through the plain fold, so a long single-title run would otherwise
+    splinter into as many groups as it has ordinals. The empty string is the
+    "ungroupable" signal and never collapses with anything. The one shared fold
+    is used by both the read surface (grouping) and the write surface (the
+    FRG-SRC-014 sibling sweep) so the two can never diverge.
+    """
+    return stripped_key(query_term(human_name))
+
+
 def _contains_run(haystack: tuple[str, ...], needle: tuple[str, ...]) -> bool:
     """Whether ``needle`` occurs as a contiguous token run inside ``haystack``."""
     n = len(needle)
@@ -822,6 +840,7 @@ __all__ = [
     "MatchCandidate",
     "ProposedMatch",
     "compute_proposed_match",
+    "group_key",
     "query_term",
     "rank_library",
     "shares_token",

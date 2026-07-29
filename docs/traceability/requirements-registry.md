@@ -333,6 +333,8 @@ milestone-to-minor mapping. No id renumbered.
 | FRG-UI-040 | ComicVine budget meter | ui | implemented | M11 |
 | FRG-UI-041 | Per-indexer search outcomes | ui | implemented | M11 |
 | FRG-UI-042 | Calendar covers and enrichment detail | ui | implemented | M11 |
+| FRG-UI-043 | Group-header search/match affordance | ui | approved | M11 |
+| FRG-UI-044 | Force-grab affordance for rejected releases | ui | approved | M11 |
 | FRG-SRC-001 | store-source model and connection lifecycle | sources | implemented | M6 |
 | FRG-SRC-002 | Humble session-cookie authentication | sources | implemented | M6 |
 | FRG-SRC-003 | entitlement sync | sources | implemented | M6 |
@@ -346,6 +348,7 @@ milestone-to-minor mapping. No id renumbered.
 | FRG-SRC-011 | Bundle identity, group actions, and accept-in-bulk | sources | implemented | M11 |
 | FRG-SRC-012 | Publisher classification rules | sources | implemented | M11 |
 | FRG-SRC-013 | Frugal, convergent proposal enrichment | sources | implemented | M11 |
+| FRG-SRC-014 | Group-key sibling proposal sweep on operator pick | sources | approved | M11 |
 | FRG-EXT-001 | Explicit-action cookie-to-clipboard copy | extension | implemented | 0.9.x |
 | FRG-EXT-002 | Least-privilege, no-network permission surface | extension | implemented | 0.9.x |
 | FRG-EXT-003 | Cross-browser parity and reproducible self-distributed build | extension | implemented | 0.9.x |

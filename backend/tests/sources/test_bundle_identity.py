@@ -16,7 +16,7 @@ import pytest
 from sqlalchemy import select
 
 from conftest import running_app
-from foragerr.api.sources import _group_key
+from foragerr.sources.matching import group_key as _group_key
 from foragerr.parser.normalize import matching_key
 from foragerr.sources import ratelimit, repo
 from foragerr.sources.humble import parse_order

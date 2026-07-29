@@ -97,6 +97,11 @@ class ReleaseCacheRow(Base):
     issue_id: Mapped[int | None] = mapped_column(StrictInteger, nullable=True)
     #: Serialized decided candidate (ReleaseCandidate + decision) as JSON.
     payload: Mapped[str] = mapped_column(Text, nullable=False)
+    #: The decision's approved verdict, recorded so a grab can enforce the
+    #: quality gate without re-searching (FRG-API-008). Nullable and fail-safe:
+    #: NULL (a pre-0030 row, or an unrecorded verdict) is treated as NOT
+    #: approved — refused, force-overridable, never silently grabbed.
+    approved: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(StrictDateTime, nullable=False)
     expires_at: Mapped[dt.datetime] = mapped_column(StrictDateTime, nullable=False)
 

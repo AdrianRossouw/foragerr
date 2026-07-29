@@ -76,10 +76,10 @@ async def test_grab_carries_decision_mapped_identity_across_re_search(
 
     # The cached hand-off carries the release's true identity (#7), not the
     # last searched issue (#8) — the (indexer, guid) key stays sound.
-    handoff = await get_cached(db, grab.candidate.indexer_id, guid)
-    assert handoff is not None
-    assert handoff.issue_id == id7
-    assert handoff.series_id == series_id
+    cached = await get_cached(db, grab.candidate.indexer_id, guid)
+    assert cached is not None
+    assert cached.handoff.issue_id == id7
+    assert cached.handoff.series_id == series_id
 
 
 @pytest.mark.req("FRG-NFR-010")

@@ -90,6 +90,16 @@ partial; grabbing from it works exactly like a complete search. Scheduled
 background searches are never time-budgeted — politeness outranks latency when
 nobody is waiting.
 
+Grabbing works differently depending on the row's decision. An approved
+release keeps the ordinary one-click **Grab** — no confirmation step. A
+rejected or temporarily rejected release instead offers **Grab anyway**: a
+confirm step (because it bypasses the quality rules you'd otherwise rely on)
+after which it downloads exactly like an approved grab, and its rejection
+reasons stay visible throughout — you always see what you're choosing to
+override. This covers the all-rejected case: when every candidate a search
+turns up fails the decision rules but you know you want one of them, Grab
+anyway gets it without waiting for a later automatic pass.
+
 ## Automatic search
 
 foragerr runs automatic search as commands, not a background poll you configure

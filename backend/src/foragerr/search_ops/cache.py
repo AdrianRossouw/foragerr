@@ -17,6 +17,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+from dataclasses import dataclass
 from typing import ClassVar, Literal
 
 from sqlalchemy import delete, select
@@ -34,6 +35,19 @@ logger = logging.getLogger("foragerr.search_ops.cache")
 
 #: Server-side cache lifetime for an interactive-search result set.
 CACHE_TTL_MINUTES = 30
+
+
+@dataclass(frozen=True, slots=True)
+class CachedGrab:
+    """A live cache entry: the grab hand-off plus the decision's approved verdict.
+
+    ``approved`` is the recorded verdict at cache time (FRG-API-008). A stored
+    NULL — a pre-0030 row, or any row whose verdict was never recorded — reads
+    as ``False`` here, so an unrecorded verdict is fail-safe NOT approved.
+    """
+
+    handoff: GrabReleaseCommand
+    approved: bool
 
 
 async def cache_decisions(
@@ -60,6 +74,9 @@ async def cache_decisions(
                 "guid": handoff.guid,
                 "issue_id": issue_id,
                 "payload": json.dumps(handoff.model_dump(mode="json")),
+                # The decision's approved verdict, recorded so grab enforces the
+                # quality gate without re-searching (FRG-API-008).
+                "approved": decision.approved,
                 "created_at": now,
                 "expires_at": expires_at,
             }
@@ -75,6 +92,7 @@ async def cache_decisions(
         set_={
             "issue_id": stmt.excluded.issue_id,
             "payload": stmt.excluded.payload,
+            "approved": stmt.excluded.approved,
             "created_at": stmt.excluded.created_at,
             "expires_at": stmt.excluded.expires_at,
         },
@@ -85,8 +103,8 @@ async def cache_decisions(
 
 async def get_cached(
     db, indexer_id: int, guid: str, *, now: dt.datetime | None = None
-) -> GrabReleaseCommand | None:
-    """Return the cached grab hand-off for a live entry, or ``None``.
+) -> CachedGrab | None:
+    """Return the cached grab hand-off + approved verdict for a live entry, or ``None``.
 
     ``None`` covers both a cache miss and an expired entry — the caller maps
     either to the same deterministic 404-class "search again" error, and never
@@ -106,7 +124,11 @@ async def get_cached(
         return None
     # The stored payload is a GrabReleaseCommand ``model_dump`` — it round-trips
     # including the redundant ``name`` key, which the model simply re-validates.
-    return GrabReleaseCommand(**json.loads(row.payload))
+    # A NULL ``approved`` (a pre-0030 row) is fail-safe NOT approved.
+    return CachedGrab(
+        handoff=GrabReleaseCommand(**json.loads(row.payload)),
+        approved=bool(row.approved),
+    )
 
 
 async def prune_expired(db, *, now: dt.datetime | None = None) -> int:

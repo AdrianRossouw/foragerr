@@ -105,7 +105,12 @@ proportional (`FRG-SRC-011`):
   when its rows differ (including a failed-download callout), its checkbox
   selects the whole group, a shift-range across a collapsed group includes
   the rows folded inside it, and expanding always reaches every row's full
-  actions — collapse is presentation, never a filter.
+  actions — collapse is presentation, never a filter. The header also
+  carries its own search/match picker, seeded with the group's title, so
+  you can resolve the whole group without expanding it: picking a
+  candidate already in your library matches every row in the group in one
+  action, and picking one that isn't in your library yet adds it once and
+  leaves the rest as proposals for a single bulk accept.
 - **Bundles**: every row remembers which Humble bundle it came from, and
   the bulk bar can select a whole bundle at once — the natural unit for
   "this was an RPG bundle, ignore all of it".
@@ -147,6 +152,14 @@ from one row converts its siblings' proposals into "match to the series you
 just added", so each remaining row is a single successful click; and pressing
 **add** on something that turns out to already be in your library quietly
 becomes a match to the existing series instead of an error.
+
+That sweep isn't limited to the add path. Picking a series for one row — a
+plain match to an in-library series works just as well as an add — now
+re-proposes its still-`New` same-group siblings within that source to the
+series you picked (`FRG-SRC-014`), so a single search-and-pick on one row
+fills in the rest of its group instead of leaving them stale. It writes
+proposals only: a swept sibling still shows as New and needs its own accept,
+and anything you've already matched or ignored is left exactly as it was.
 
 ### The Auto-sync toggle
 

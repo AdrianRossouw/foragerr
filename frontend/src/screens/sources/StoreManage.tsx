@@ -7,8 +7,14 @@ import { Toggle } from '../../components/Toggle';
 import { ComicVineBudgetChip } from '../../components/ComicVineBudget';
 import { EntitlementRow } from './EntitlementRow';
 import { EntitlementGroupHeader } from './EntitlementGroupHeader';
+import type { PickedCandidate } from './EntitlementSearch';
 import { PublisherRules } from './PublisherRules';
-import { bundlesInView, buildReviewItems, itemIds } from './reviewGroups';
+import {
+  bundlesInView,
+  buildReviewItems,
+  itemIds,
+  type ReviewGroup,
+} from './reviewGroups';
 import { useSeriesIndex, useWatchedCommand } from '../../api/hooks';
 import {
   useBulkEntitlements,
@@ -100,6 +106,12 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
   // destroyed by scrolling past it. Owned by the list, it survives and the row
   // re-mounts with its panel still open.
   const [searchOpen, setSearchOpen] = useState<ReadonlySet<number>>(new Set());
+  // Which GROUP headers have their search/match picker open (FRG-UI-043), keyed
+  // by group_key. List-owned for the same reason the per-row set is: a collapsed
+  // header scrolled out of the virtual window would otherwise lose it.
+  const [groupSearchOpen, setGroupSearchOpen] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
   const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<string>>(
     new Set(),
   );
@@ -287,6 +299,15 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
     });
   };
 
+  const setGroupSearch = (key: string, open: boolean) => {
+    setGroupSearchOpen((prev) => {
+      const next = new Set(prev);
+      if (open) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  };
+
   const selectedIds = [...selected];
   const bulkBusy = bulk.isPending;
 
@@ -347,6 +368,49 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
         onError: (err) => setBulkNote(err.message),
       },
     );
+  };
+
+  /**
+   * Resolve a WHOLE same-title group to one picked candidate (FRG-UI-043): the
+   * group-header search's `onPick`. A candidate already in the library
+   * (`have_it`) is resolved to its local series id and every member is matched
+   * to it; one not yet in the library carries only its cv_volume_id, and the
+   * server adds it ONCE and leaves the rest as swept proposals for a single
+   * bulk accept. A `have_it` candidate the fetched index cannot name (added
+   * since the index loaded) falls through to the cv_volume_id path, where the
+   * backend degrades the add to a match (FRG-SRC-008) — so no member is lost.
+   * The bulk hook's own success invalidation re-derives the list, so the fresh
+   * matches and swept proposals render without a hand-rolled refetch.
+   */
+  const applyGroupMatch = (group: ReviewGroup, candidate: PickedCandidate) => {
+    if (bulkBusy) return;
+    const ids = group.rows.map((r) => r.id);
+    const owned = candidate.have_it
+      ? librarySeries.find((s) => s.cv_volume_id === candidate.cv_volume_id)
+      : undefined;
+    const input = owned
+      ? {
+          action: 'apply_to_group' as const,
+          entitlementIds: ids,
+          seriesId: owned.id,
+        }
+      : {
+          action: 'apply_to_group' as const,
+          entitlementIds: ids,
+          cvVolumeId: candidate.cv_volume_id,
+        };
+    resetBulkFeedback();
+    bulk.mutate(input, {
+      onSuccess: () => {
+        setGroupSearch(group.key, false);
+        setBulkNote(
+          owned
+            ? `Matched all ${ids.length} items in ${group.title}.`
+            : `Added ${candidate.name ?? group.title}; the rest are proposed for one bulk accept.`,
+        );
+      },
+      onError: (err) => setBulkNote(err.message),
+    });
   };
 
   return (
@@ -673,8 +737,16 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
                         partiallySelected={item.group.rows.some((r) =>
                           selected.has(r.id),
                         )}
+                        searchOpen={groupSearchOpen.has(item.group.key)}
+                        searchBusy={bulkBusy}
                         onSelectRow={selectRow}
                         onToggleCollapse={() => toggleGroup(item.group.key)}
+                        onSetSearchOpen={(open) =>
+                          setGroupSearch(item.group.key, open)
+                        }
+                        onPick={(candidate) =>
+                          applyGroupMatch(item.group, candidate)
+                        }
                       />
                     ) : (
                       <EntitlementRow
