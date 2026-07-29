@@ -32,6 +32,11 @@ function makeRow(id: number, over: Partial<PullEntryRecord> = {}): PullEntryReco
     state: 'missing_wanted',
     series: { id, title: `Series ${id}` },
     issue: { id, issueNumber: '1', title: null },
+    coverUrl: null,
+    description: null,
+    upc: null,
+    creators: [],
+    characters: [],
     ...over,
   };
 }

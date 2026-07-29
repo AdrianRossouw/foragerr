@@ -18,6 +18,16 @@ This is the change's one new *outbound integration + untrusted-content ingress*
   source-outage outcome; a single malformed *entry* is skipped (bounded log),
   never crashing the run. An entry-count cap bounds a hostile "millions of rows"
   payload.
+* **Source-supplied fetch targets.** The payload's cover URLs are prospective
+  *fetch targets*, not merely display text (FRG-PULL-011), so ingest is the
+  trust boundary for them: each is canonicalized (query and fragment dropped)
+  and validated **fail-closed** through the shared allowlist evaluator
+  (:func:`foragerr.covers.canonical_cover_url` — one source of truth the cover
+  proxy shares, so the two gates can never drift). Anything that fails — the
+  relative
+  no-cover placeholder, ``http://``, an off-host or off-prefix target, a
+  traversal — is stored as absent while the entry otherwise stores normally, so
+  a hostile URL never even reaches the database.
 * **Error mapping.** The source's documented non-standard HTTP codes are mapped
   explicitly (mirroring the house convention of typed, transport-free errors,
   cf. :mod:`foragerr.metadata.comicvine`): **619** bad-date → skip *only* that
@@ -48,6 +58,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Sequence
 
+from foragerr.covers import canonical_cover_url
 from foragerr.db.migrations import app_version
 from foragerr.http import EgressPolicyError, HttpClientFactory, OutboundHttpError
 from foragerr.metadata.sanitize import _BIDI_INVISIBLE_RE
@@ -84,6 +95,20 @@ MAX_PULL_ENTRIES = 10_000
 #: or junk and is truncated.
 MAX_FIELD_LENGTH = 300
 
+#: Per-field caps for the display-only enrichment (FRG-PULL-011). A blurb is a
+#: paragraph or two, a UPC is a short digit string, a person/character name is
+#: short, a credit role is a word or two — anything longer is junk or hostile
+#: and is truncated rather than refused (the entry is still worth storing).
+MAX_DESCRIPTION_LENGTH = 4000
+MAX_UPC_LENGTH = 64
+MAX_NAME_LENGTH = 256
+MAX_ROLE_LENGTH = 64
+
+#: Count cap per enrichment list — a real book credits a handful of people and
+#: names a handful of characters; a hostile payload could otherwise inflate one
+#: row's stored JSON without exceeding the whole-body byte cap.
+MAX_LIST_ENTRIES = 64
+
 #: Upper bound on an accepted ComicVine id — ids well past ComicVine's real
 #: id space are treated as junk and dropped to ``None`` (they are *candidates*
 #: only anyway, FRG-PULL-002 Notes). Keeps a hostile huge integer out of the
@@ -98,6 +123,10 @@ _MAX_CV_ID = 2_000_000_000
 # no duplication) so a hostile pull-source string cannot Trojan-Source-spoof
 # the rendered value either (RISK-011/014, FRG-NFR-012).
 _ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b[@-Z\\-_]")
+#: Lone UTF-16 surrogates — ``json.loads`` yields them from ``\uD800``-form
+#: escapes, and the SQLite driver raises ``UnicodeEncodeError`` on bind, which
+#: would roll back the whole multi-week write. Stripped so ingest never aborts.
+_SURROGATE_RE = re.compile(r"[\ud800-\udfff]")
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 _WS_RE = re.compile(r"\s+")
 
@@ -184,27 +213,41 @@ class PullFetchOutcome:
 # --- untrusted-JSON parsing (FRG-NFR-012) -----------------------------------
 
 
-def _clean_str(value: Any) -> str | None:
+def _clean_str(
+    value: Any, *, limit: int = MAX_FIELD_LENGTH, strings_only: bool = False
+) -> str | None:
     """Reduce one untrusted source scalar to bounded, control-free plain text.
 
     Non-strings are coerced via ``str`` (the source occasionally sends a bare
-    number for a field); ANSI escapes and C0/DEL control chars (including CR/LF)
+    number for a legacy field like ``issue``); ``strings_only`` refuses that
+    coercion, so an enrichment field never stores a Python repr of a stray
+    ``dict``/``list``. ANSI escapes and C0/DEL control chars (including CR/LF)
     are stripped so nothing can forge a log line or smuggle control codes into
-    storage; Unicode bidi-override / zero-width / invisible-format characters
-    are stripped (shared with ``metadata.sanitize``) so the value cannot
-    visually spoof its rendering (Trojan-Source, RISK-011/014); whitespace is
-    collapsed; the result is length-capped. Returns ``None`` when nothing
-    printable remains. Never raises.
+    storage; lone surrogates (which ``json`` produces from ``\\uD800`` escapes
+    and which the DB driver cannot encode) are stripped so one hostile string
+    cannot abort the whole write; Unicode bidi-override / zero-width /
+    invisible-format characters are stripped (shared with ``metadata.sanitize``)
+    so the value cannot visually spoof its rendering (Trojan-Source,
+    RISK-011/014); whitespace is collapsed; the result is length-capped.
+    Returns ``None`` when nothing printable remains. Never raises.
+
+    ``limit`` lets the enrichment fields (FRG-PULL-011) carry their own caps —
+    a description is allowed far more room than a series name — without any
+    field escaping this one sanitization path.
     """
     if value is None:
         return None
-    text = value if isinstance(value, str) else str(value)
-    text = _ANSI_RE.sub("", text)
+    if not isinstance(value, str):
+        if strings_only:
+            return None
+        value = str(value)
+    text = _ANSI_RE.sub("", value)
     text = _CONTROL_RE.sub("", text)
+    text = _SURROGATE_RE.sub("", text)
     text = _BIDI_INVISIBLE_RE.sub("", text)
     text = _WS_RE.sub(" ", text).strip()
-    if len(text) > MAX_FIELD_LENGTH:
-        text = text[:MAX_FIELD_LENGTH].rstrip()
+    if len(text) > limit:
+        text = text[:limit].rstrip()
     return text or None
 
 
@@ -248,10 +291,86 @@ def _parse_date(value: Any) -> dt.date | None:
         return None
 
 
+def _parse_cover(value: Any) -> str | None:
+    """The entry's one stored cover URL, or ``None`` (FRG-PULL-011).
+
+    Prefers the cover flagged primary, but only among covers that pass the
+    allowlist — the same evaluator (and canonical, control-free, capped form)
+    the proxy enforces at request and redirect-hop time. A hostile ``primary``
+    URL therefore cannot suppress a valid sibling: the first *valid* cover is
+    used when no valid primary exists. ``is_primary`` must be exactly ``True``
+    (not merely truthy). Everything invalid — the relative no-cover
+    placeholder, ``http://``, an off-host/off-prefix/ported/userinfo target, a
+    traversal — is skipped; if nothing survives, the entry stores without a
+    cover rather than persisting a URL nothing may fetch. Never raises.
+    """
+    if not isinstance(value, list):
+        return None
+    fallback: str | None = None
+    # Examine a bounded prefix — a real entry lists a handful of covers, so a
+    # hostile array cannot force unbounded canonicalization work per poll.
+    for item in value[:MAX_LIST_ENTRIES]:
+        if not isinstance(item, dict):
+            continue
+        url = item.get("url")
+        if not isinstance(url, str):
+            continue
+        canonical = canonical_cover_url(url)
+        if canonical is None:
+            continue
+        if item.get("is_primary") is True:
+            return canonical
+        if fallback is None:
+            fallback = canonical
+    return fallback
+
+
+def _parse_people(value: Any, *, with_role: bool) -> str | None:
+    """One enrichment list — creators (``{"role", "name"}``) or characters
+    (``{"name"}``) — as a compact JSON array, or ``None`` when the source
+    supplied nothing usable.
+
+    Names and roles pass the same sanitization as every other source string
+    under their own caps; an item with no usable name is dropped (a role
+    without anyone attached to it says nothing); the list is capped at
+    :data:`MAX_LIST_ENTRIES`. The source's own creator/character ids are
+    deliberately not carried — nothing links to them. Serialization is
+    key-ordered by construction, so the same payload always yields byte-identical
+    JSON (idempotent storage). Never raises.
+    """
+    if not isinstance(value, list):
+        return None
+    items: list[dict[str, str | None]] = []
+    # Examine a bounded prefix so a hostile all-invalid array cannot force a
+    # full scan — a real credits list is a handful of entries.
+    for raw in value[:MAX_LIST_ENTRIES]:
+        if not isinstance(raw, dict):
+            continue
+        name = _clean_str(raw.get("name"), limit=MAX_NAME_LENGTH, strings_only=True)
+        if name is None:
+            continue
+        if with_role:
+            items.append(
+                {
+                    "role": _clean_str(
+                        raw.get("role"), limit=MAX_ROLE_LENGTH, strings_only=True
+                    ),
+                    "name": name,
+                }
+            )
+        else:
+            items.append({"name": name})
+    if not items:
+        return None
+    return json.dumps(items, separators=(",", ":"), ensure_ascii=False)
+
+
 def _parse_entry(raw: Any) -> ParsedPullEntry | None:
     """Map one raw source object to a :class:`ParsedPullEntry`, or ``None`` to
     skip it. Every field is bounded/sanitised; a missing/malformed required
-    field (series, issue, ship date) drops the whole entry. Never raises."""
+    field (series, issue, ship date) drops the whole entry. No *enrichment*
+    field (FRG-PULL-011) is ever required — each degrades to ``None`` on its
+    own, never taking the entry with it. Never raises."""
     if not isinstance(raw, dict):
         return None
     series = _clean_str(raw.get("series"))
@@ -266,6 +385,13 @@ def _parse_entry(raw: Any) -> ParsedPullEntry | None:
         publisher=_clean_str(raw.get("publisher")),
         cv_series_id=_coerce_cv_id(raw.get("comicid")),
         cv_issue_id=_coerce_cv_id(raw.get("issueid")),
+        cover_url=_parse_cover(raw.get("covers")),
+        description=_clean_str(
+            raw.get("description"), limit=MAX_DESCRIPTION_LENGTH, strings_only=True
+        ),
+        upc=_clean_str(raw.get("upc"), limit=MAX_UPC_LENGTH, strings_only=True),
+        creators=_parse_people(raw.get("creators"), with_role=True),
+        characters=_parse_people(raw.get("characters"), with_role=False),
     )
 
 
@@ -284,7 +410,10 @@ def parse_pull_payload(
     """
     try:
         data = json.loads(content)
-    except ValueError as exc:
+    except (ValueError, RecursionError) as exc:
+        # RecursionError: a deeply-nested hostile body. Degrade to a source
+        # outage like any other malformed payload rather than propagating past
+        # the outage handlers and failing the run with the source still healthy.
         raise PullSourceOutage(
             "pull source returned a non-JSON body", reason="malformed"
         ) from exc
@@ -520,8 +649,13 @@ __all__ = [
     "CODE_BACKEND_DOWN",
     "CODE_BAD_DATE",
     "CODE_UPDATE_REQUIRED",
+    "MAX_DESCRIPTION_LENGTH",
     "MAX_FIELD_LENGTH",
+    "MAX_LIST_ENTRIES",
+    "MAX_NAME_LENGTH",
     "MAX_PULL_ENTRIES",
+    "MAX_ROLE_LENGTH",
+    "MAX_UPC_LENGTH",
     "PULL_JSON_MAX_BYTES",
     "ParsedPullEntry",
     "PullBadDate",

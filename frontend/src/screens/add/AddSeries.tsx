@@ -13,6 +13,7 @@ import {
   useCreateRootFolder,
   useFormatProfiles,
   useLookup,
+  useLookupVolume,
   useRootFolders,
   useSuggest,
 } from '../../api/hooks';
@@ -37,6 +38,13 @@ import styles from './AddSeries.module.css';
  * collect-as segmented, search-on-add) -> POST /api/v1/series -> navigate to
  * the new detail route carrying the queued refresh command id so it renders
  * live there.
+ *
+ * A caller that already knows the ComicVine volume id (the Calendar's add
+ * affordance, FRG-PULL-008) navigates with `prefillCvVolumeId`: the screen
+ * resolves that one id (FRG-API-026) into the single, preselected candidate
+ * with its add panel open, no term needed. An id ComicVine does not recognize
+ * — or an upstream failure — degrades to the `prefillTerm` search it also
+ * carries, with a notice saying so.
  */
 
 /**
@@ -531,9 +539,22 @@ export function AddSeries() {
   // Per-search reveal of publisher-ignore-list volumes (FRG-UI-032); reset on
   // every new search so a fresh term always starts with them hidden.
   const [showIgnored, setShowIgnored] = useState(false);
+  // A known ComicVine volume id handed over by a caller (FRG-PULL-008); null
+  // for every ordinary, term-driven visit to this screen.
+  const [volumeId, setVolumeId] = useState<number | null>(null);
   const lookup = useLookup(term, showIgnored);
-  const suggest = useSuggest(input);
+  const volume = useLookupVolume(volumeId);
   const addSeries = useAddSeries();
+  const volumeError = volumeId !== null && volume.isError;
+  const volumeAuthError = volumeError && isComicVineAuthError(volume.error);
+  // A 404-class or transport failure degrades to the name search the caller
+  // also handed over; a credential failure does not — the same key would fail
+  // that search too, so the actionable Settings guidance stands alone.
+  const volumeDegraded = volumeError && !volumeAuthError;
+  // While one id is resolving (or resolved) the passive autosuggest stays off:
+  // an id-first hand-off spends exactly one interactive ComicVine acquisition,
+  // and the resolved candidate is already the answer the dropdown would offer.
+  const suggest = useSuggest(volumeId !== null && !volumeDegraded ? '' : input);
 
   // Consume a prefilled term (FRG-UI-019 -> FRG-UI-005) via an effect rather
   // than a mount-time initializer: a SECOND navigation to the already-mounted
@@ -543,19 +564,33 @@ export function AddSeries() {
   // strip the consumed navigation state (replace) so browser Back/refresh does
   // not re-seed a stale prefill over the user's since-edited term.
   useEffect(() => {
-    const prefill = (location.state as AddSeriesNavigationState | null)
-      ?.prefillTerm;
-    if (!prefill) return;
-    setInput(prefill);
+    const state = location.state as AddSeriesNavigationState | null;
+    const prefill = state?.prefillTerm;
+    const prefillId = state?.prefillCvVolumeId;
+    if (!prefill && prefillId == null) return;
+    // The name seeds the input even on an id hand-off: it is the fallback
+    // search term if the id fails to resolve, and it keeps the search box
+    // showing what the operator is looking at.
+    setInput(prefill ?? '');
     setTerm('');
-    setSelectedId(null);
+    // An id hand-off preselects its candidate up front, so the resolved volume
+    // arrives with its add-options panel already open (FRG-PULL-008).
+    setSelectedId(prefillId ?? null);
     setSelectedSuggestionId(null);
     setShowIgnored(false);
+    setVolumeId(prefillId ?? null);
     navigate(`${location.pathname}${location.search}`, {
       replace: true,
       state: null,
     });
   }, [location, navigate]);
+
+  // A failed resolution leaves no candidate to keep selected — dropping the
+  // preselection is what re-opens the ordinary term/suggest surface beneath
+  // the notice.
+  useEffect(() => {
+    if (volumeError) setSelectedId(null);
+  }, [volumeError]);
 
   // A lookup error must never leak stale candidates from a previous outcome:
   // the results list and the outcome note both derive from this one value.
@@ -610,8 +645,30 @@ export function AddSeries() {
   const suggestCandidates =
     showSuggest && !suggest.isError ? suggest.data?.records ?? [] : [];
 
+  /**
+   * The one note an id hand-off can raise (FRG-PULL-008): a credential failure
+   * reads exactly as the term lookup's does — same structural discriminator,
+   * same Settings guidance — while an unrecognized id or an upstream failure
+   * says plainly that the search below is the fallback.
+   */
+  // The resolved single candidate, while an id hand-off is the live surface.
+  const volumeCandidate = volumeId !== null ? volume.data : undefined;
+
+  const volumeNote = !volumeError
+    ? null
+    : volumeAuthError
+      ? lookupOutcomeNote(true, volume.error, undefined, input)
+      : {
+          tone: 'status' as const,
+          text:
+            'That release’s ComicVine volume could not be resolved — ' +
+            'searching by name instead.',
+        };
+
   const submit = (e: FormEvent) => {
     e.preventDefault();
+    // A typed search supersedes any handed-over id (and its notice).
+    setVolumeId(null);
     setSelectedId(null);
     setSelectedSuggestionId(null);
     setShowIgnored(false);
@@ -718,6 +775,22 @@ export function AddSeries() {
           </div>
         )}
 
+        {volumeId !== null && volume.isLoading && (
+          <p className={styles.stateNote} data-testid="volume-resolving">
+            Looking up this release on ComicVine…
+          </p>
+        )}
+        {volumeNote?.tone === 'error' && (
+          <p className={styles.errorNote} role="alert" data-testid="volume-note">
+            <OutcomeErrorText error={volume.error} text={volumeNote.text} />
+          </p>
+        )}
+        {volumeNote?.tone === 'status' && (
+          <p className={styles.stateNote} role="status" data-testid="volume-note">
+            {volumeNote.text}
+          </p>
+        )}
+
         {lookup.isLoading && <p className={styles.stateNote}>Searching ComicVine…</p>}
         {note?.tone === 'error' && (
           <p className={styles.errorNote} role="alert">
@@ -760,6 +833,31 @@ export function AddSeries() {
         )}
 
         <div className={styles.results}>
+          {volumeCandidate && (
+            <CandidateCard
+              candidate={volumeCandidate}
+              testId={`candidate-${volumeCandidate.cv_volume_id}`}
+              selectLabel={`Select ${volumeCandidate.name ?? 'unnamed volume'}`}
+              selected={selectedId === volumeCandidate.cv_volume_id}
+              onToggle={() => {
+                setSelectedSuggestionId(null);
+                setSelectedId(
+                  selectedId === volumeCandidate.cv_volume_id
+                    ? null
+                    : volumeCandidate.cv_volume_id,
+                );
+              }}
+              panel={
+                <AddOptionsPanel
+                  candidate={volumeCandidate}
+                  busy={addSeries.isPending}
+                  error={addSeries.error ? addSeries.error.message : null}
+                  onAdd={(options) => add(volumeCandidate, options)}
+                  onCancel={() => setSelectedId(null)}
+                />
+              }
+            />
+          )}
           {results?.records.map((candidate) => (
             <CandidateCard
               key={candidate.cv_volume_id}

@@ -70,6 +70,13 @@ class ParsedPullEntry:
     module beyond the shape itself. `cv_series_id` / `cv_issue_id` are
     source-supplied *candidates* only (FRG-PULL-002 Notes) — they are not
     trusted as match authority; the matcher (area C) still guards them.
+
+    The trailing five fields are the display-only payload enrichment
+    (FRG-PULL-011): all optional, none of them ever feeds matching. They
+    arrive already bounded — `cover_url` canonicalized and allowlist-validated
+    fail-closed, the text fields sanitized and length-capped, the two list
+    fields already serialized to compact JSON (or `None` when the source
+    supplied nothing usable) — so nothing downstream re-derives them.
     """
 
     series_name: str
@@ -78,6 +85,11 @@ class ParsedPullEntry:
     publisher: str | None = None
     cv_series_id: int | None = None
     cv_issue_id: int | None = None
+    cover_url: str | None = None
+    description: str | None = None
+    upc: str | None = None
+    creators: str | None = None  # JSON array of {"role", "name"}
+    characters: str | None = None  # JSON array of {"name"}
 
 
 def entry_key(entry: ParsedPullEntry) -> str:
@@ -137,6 +149,19 @@ class PullEntryRow(Base):
     )
     match_type: Mapped[str] = mapped_column(Text, nullable=False, default=UNMATCHED)
     fetched_at: Mapped[dt.datetime] = mapped_column(StrictDateTime, nullable=False)
+    #: Display-only payload enrichment (FRG-PULL-011, migration 0029) — five
+    #: nullable columns, none of them status-shaped (D4 holds) and none of them
+    #: consulted by matching. `cover_url` is stored ONLY when it passed the
+    #: cover allowlist at ingest (fail-closed), canonicalized without query or
+    #: fragment so a re-fetch of the same week stores the identical value
+    #: despite the source's volatile cache-buster; plain `Text` because it is a
+    #: validated value, not free text. `creators` / `characters` are compact
+    #: JSON arrays serialized at ingest, so also plain `Text`.
+    cover_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(SentinelFreeText, nullable=True)
+    upc: Mapped[str | None] = mapped_column(SentinelFreeText, nullable=True)
+    creators: Mapped[str | None] = mapped_column(Text, nullable=True)
+    characters: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("week", "entry_key", name="uq_pull_entries_week_entry_key"),

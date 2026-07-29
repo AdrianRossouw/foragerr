@@ -44,7 +44,11 @@ CALLER_SUPPLIED = "<caller-supplied>"
 EXPECTED_SITES = {
     "api/config_resources.py": [LANE_INTERACTIVE],  # the Test button
     "api/library_import.py": [LANE_INTERACTIVE],  # import volume override
-    "api/series.py": [LANE_INTERACTIVE, LANE_INTERACTIVE],  # lookup + suggest
+    "api/series.py": [
+        LANE_INTERACTIVE,
+        LANE_INTERACTIVE,
+        LANE_INTERACTIVE,
+    ],  # lookup + suggest + lookup-by-volume-id (all operator-initiated)
     "creators/bibliography.py": [LANE_BATCH],  # background creator walk
     "library/flows/add.py": [CALLER_SUPPLIED],  # operator add OR auto-sync
     "library/flows/library_import.py": [LANE_INTERACTIVE],  # import scan

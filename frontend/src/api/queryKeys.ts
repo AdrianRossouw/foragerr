@@ -164,6 +164,10 @@ export const queryKeys = {
     // so a term that has both a full-lookup and a suggest entry never
     // collides or cross-invalidates.
     suggest: (term: string) => ['lookup', 'suggest', term] as const,
+    // A single ComicVine volume resolved by id (FRG-API-026) — its own family
+    // under the same ['lookup'] prefix (so an ignore-list save sweeps it too),
+    // keyed by the id rather than a term: there is no term involved.
+    volume: (cvVolumeId: number) => ['lookup', 'volume', cvVolumeId] as const,
   },
   // System area (FRG-UI-016 / FRG-API-014 / FRG-NFR-011), mirroring
   // GET /api/v1/system/{status,health,task}.

@@ -92,11 +92,16 @@ def test_entry_key_name_fallback_distinguishes_different_logical_rows():
 
 
 @pytest.mark.req("FRG-PULL-003")
+@pytest.mark.req("FRG-PULL-011")
 async def test_no_wanted_or_status_column_exists_on_pull_entries(db):
     """Schema-inventory guard mirroring `library.models`' `wanted` guard: the
     D4 invariant is that pull entries carry only a link (`matched_issue_id`)
     + `match_type` discriminator, never a wanted/downloaded/skipped status of
-    their own."""
+    their own.
+
+    The FRG-PULL-011 enrichment columns are inventoried here too: they must be
+    present (migration 0029 ran) AND must not have smuggled a status field in
+    alongside them — they are display-only."""
 
     def _column_names(sync_conn) -> set[str]:
         inspector = inspect(sync_conn)
@@ -108,6 +113,7 @@ async def test_no_wanted_or_status_column_exists_on_pull_entries(db):
     forbidden = {"wanted", "is_wanted", "wanted_status", "status", "downloaded", "skipped"}
     assert not (names & forbidden), f"pull_entries exposes a status-shaped column: {names}"
     assert {"matched_issue_id", "match_type"} <= names
+    assert {"cover_url", "description", "upc", "creators", "characters"} <= names
 
 
 @pytest.mark.req("FRG-PULL-003")

@@ -25,8 +25,7 @@ def test_stall_memory_columns_are_present_with_the_right_nullability(tmp_path):
     db_path = cfg / DB_FILENAME
 
     assert "0028_tracked_download_stall_memory" in result.applied
-    # Single head: 0028 is the newest revision and the DB is stamped at it.
-    assert result.head_revision == "0028_tracked_download_stall_memory"
+    # Single head: the chain runs to one head and the DB is stamped at it.
     assert current_revision(db_path) == result.head_revision
 
     with sqlite3.connect(db_path) as conn:

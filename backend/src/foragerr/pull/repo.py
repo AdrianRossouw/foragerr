@@ -73,6 +73,14 @@ async def replace_week(
             cv_series_id=entry.cv_series_id,
             cv_issue_id=entry.cv_issue_id,
             release_date=entry.release_date,
+            # Display-only enrichment (FRG-PULL-011) — stored verbatim as the
+            # parse already bounded/validated it, so two stores of the same
+            # payload write byte-identical rows.
+            cover_url=entry.cover_url,
+            description=entry.description,
+            upc=entry.upc,
+            creators=entry.creators,
+            characters=entry.characters,
             matched_issue_id=None,
             match_type=UNMATCHED,
             fetched_at=stamp,

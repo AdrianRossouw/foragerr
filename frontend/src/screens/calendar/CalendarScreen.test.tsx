@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { renderWithProviders } from '../../test/renderWithProviders';
@@ -20,10 +20,13 @@ import { addWeeks, currentIsoWeek, isoDateKey, weekDates, weekRangeLabel } from 
 import { CalendarScreen } from './CalendarScreen';
 
 /**
- * FRG-UI-018 / FRG-PULL-007..009 — the Calendar screen: a date-grouped agenda
- * over the weekly pull projection, All-releases-scoped by default (discovery
- * first — owner decision 2026-07-11), with per-entry want/skip/search (linked
- * rows only), a new-series strip, and future-week "not yet released" marking.
+ * FRG-UI-018 / FRG-PULL-007..009 / FRG-UI-042 — the Calendar screen: a
+ * date-grouped agenda over the weekly pull projection, All-releases-scoped by
+ * default (discovery first — owner decision 2026-07-11), with per-entry
+ * want/skip/search (linked rows only), an add affordance on every unlinked
+ * entry whose series is not already in the library, inline "New" debut badges
+ * behind a debuts-only filter, stored covers + enrichment detail, and
+ * future-week "not yet released" marking.
  */
 
 function makePullRecord(
@@ -42,6 +45,11 @@ function makePullRecord(
     state: null,
     series: null,
     issue: null,
+    coverUrl: null,
+    description: null,
+    upc: null,
+    creators: [],
+    characters: [],
     ...overrides,
   };
 }
@@ -284,32 +292,41 @@ describe('FRG-PULL-007: Calendar per-entry actions', () => {
     renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
 
     // The lone unmatched row shows in the default All-releases scope; assert its
-    // card offers no action buttons.
+    // card offers none of the linked-row issue actions. (Its add hand-off — an
+    // unlinked-row affordance, FRG-PULL-008 — is asserted separately.)
     const card = await screen.findByTestId('calendar-card-999');
-    expect(within(card).queryAllByRole('button')).toHaveLength(0);
+    expect(
+      within(card).queryByRole('button', { name: /^(Want|Skip) / }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(card).queryByRole('button', { name: /^Search for / }),
+    ).not.toBeInTheDocument();
   });
 });
 
-describe('FRG-PULL-008: New-series strip', () => {
-  it('FRG-PULL-008 — a new-series debut renders once in the strip (not the agenda) with an add hand-off', async () => {
-    const records = [
-      linkedRow('Saga', '2026-07-01'),
-      makePullRecord({
-        id: 1001,
-        seriesName: 'Absolute Batman',
-        publisher: 'DC',
-        issueNumber: '1',
-        releaseDate: '2026-07-01',
-        matchType: 'new_series',
-      }),
-    ];
-    const { fetcher } = fakeFetcher(() => pageOf(records, { pageSize: 200 }));
+/**
+ * The Add hand-off's navigation state, read back at the /add route: the shape
+ * the Calendar emits is the contract the Add screen's id-first resolution
+ * consumes (FRG-PULL-008 / FRG-API-026).
+ */
+function AddProbe() {
+  const state = useLocation().state as AddSeriesNavigationState | null;
+  return (
+    <div data-testid="add-probe">
+      <span data-testid="probe-term">{state?.prefillTerm ?? ''}</span>
+      <span data-testid="probe-cv-id">
+        {state?.prefillCvVolumeId === undefined
+          ? 'none'
+          : String(state.prefillCvVolumeId)}
+      </span>
+    </div>
+  );
+}
 
-    function AddProbe() {
-      const state = useLocation().state as AddSeriesNavigationState | null;
-      return <div data-testid="add-probe">{state?.prefillTerm}</div>;
-    }
-    const user = userEvent.setup();
+describe('FRG-PULL-008: add-from-anywhere hand-off', () => {
+  /** Mounts the Calendar with a real /add route so the navigation state is
+   *  observable exactly as the Add screen would receive it. */
+  function renderWithAddProbe(fetcher: ReturnType<typeof fakeFetcher>['fetcher']) {
     renderWithProviders(
       <MemoryRouter initialEntries={['/calendar?week=2026-W27']}>
         <Routes>
@@ -319,54 +336,93 @@ describe('FRG-PULL-008: New-series strip', () => {
       </MemoryRouter>,
       { fetcher, withRouter: false },
     );
+  }
 
-    const strip = await screen.findByTestId('new-this-week');
-    expect(within(strip).getByText('Absolute Batman')).toBeInTheDocument();
-    // Exactly once — surfaced in the strip, excluded from the day agenda.
-    expect(screen.getAllByText('Absolute Batman')).toHaveLength(1);
-
-    await user.click(screen.getByRole('button', { name: 'Add Absolute Batman' }));
-    expect(await screen.findByTestId('add-probe')).toHaveTextContent('Absolute Batman');
-  });
-
-  it('FRG-PULL-008 — no new-series entries means no strip at all', async () => {
-    const records = [linkedRow('Saga', '2026-07-01')];
-    const { fetcher } = fakeFetcher(() => pageOf(records, { pageSize: 200 }));
-    renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
-
-    await screen.findByText('Saga');
-    expect(screen.queryByTestId('new-this-week')).not.toBeInTheDocument();
-  });
-});
-
-describe('FRG-PULL-008: strip suppresses already-added series', () => {
-  it('FRG-PULL-008 — a debut whose title is already in the cached library index is not rendered in the strip', async () => {
+  it('FRG-PULL-008 — a mid-run unmatched entry for an unknown series offers Add and hands over its ComicVine series id', async () => {
     const records = [
-      linkedRow('Saga', '2026-07-01'),
+      linkedRow('Nocturne Atlas', '2026-07-01'),
       makePullRecord({
-        id: 1001,
-        seriesName: 'Absolute Batman',
-        publisher: 'DC',
+        id: 2001,
+        seriesName: 'Tidewrack',
+        publisher: 'Umbral Press',
+        // Mid-run, not a debut — the widened affordance's whole point.
+        issueNumber: '14',
         releaseDate: '2026-07-01',
-        matchType: 'new_series',
+        matchType: 'unmatched',
+        cvSeriesId: 154217,
+      }),
+    ];
+    const { spy, fetcher } = fakeFetcher(() => pageOf(records, { pageSize: 200 }));
+    const user = userEvent.setup();
+    renderWithAddProbe(fetcher);
+
+    await screen.findByText('Tidewrack');
+    await user.click(screen.getByRole('button', { name: 'Add Tidewrack' }));
+
+    const probe = await screen.findByTestId('add-probe');
+    expect(within(probe).getByTestId('probe-cv-id')).toHaveTextContent('154217');
+    expect(within(probe).getByTestId('probe-term')).toHaveTextContent('Tidewrack');
+    // Navigation only — the Calendar never writes (no auto-add, FRG-PULL-008).
+    const mutating = spy.mock.calls.filter(
+      ([, init]) => init?.method && init.method !== 'GET',
+    );
+    expect(mutating).toHaveLength(0);
+  });
+
+  it('FRG-PULL-008 — an entry without a ComicVine series id hands over the name alone', async () => {
+    const records = [
+      makePullRecord({
+        id: 2002,
+        seriesName: 'Hollow Signal',
+        publisher: 'Umbral Press',
+        issueNumber: '7',
+        releaseDate: '2026-07-01',
+        matchType: 'unmatched',
+        cvSeriesId: null,
+      }),
+    ];
+    const { fetcher } = fakeFetcher(() => pageOf(records, { pageSize: 200 }));
+    const user = userEvent.setup();
+    renderWithAddProbe(fetcher);
+
+    await screen.findByText('Hollow Signal');
+    await user.click(screen.getByRole('button', { name: 'Add Hollow Signal' }));
+
+    const probe = await screen.findByTestId('add-probe');
+    expect(within(probe).getByTestId('probe-cv-id')).toHaveTextContent('none');
+    expect(within(probe).getByTestId('probe-term')).toHaveTextContent(
+      'Hollow Signal',
+    );
+  });
+
+  it('FRG-PULL-008 — an unlinked entry whose series is already in the library offers no Add', async () => {
+    const records = [
+      makePullRecord({
+        id: 2003,
+        seriesName: 'Tidewrack',
+        publisher: 'Umbral Press',
+        issueNumber: '14',
+        releaseDate: '2026-07-01',
+        matchType: 'unmatched',
       }),
       makePullRecord({
-        id: 1002,
-        seriesName: 'Fresh Debut',
-        publisher: 'Image',
+        id: 2004,
+        seriesName: 'Hollow Signal',
+        publisher: 'Umbral Press',
+        issueNumber: '1',
         releaseDate: '2026-07-01',
         matchType: 'new_series',
       }),
     ];
     // Seed the shared ['series'] index (as HeaderQuickSearch's useSeriesIndex
-    // populates it) with a library series matching one debut, casefolded.
+    // populates it) with a library series matching one entry, casefolded.
     const client = createQueryClient();
     client.setQueryData(queryKeys.series.all(), [
-      makeSeriesResource({ id: 7, title: 'absolute batman' }),
+      makeSeriesResource({ id: 7, title: 'tidewrack' }),
     ]);
     const { fetcher } = fakeFetcher((path) =>
       path.startsWith('/api/v1/series')
-        ? pageOf([makeSeriesResource({ id: 7, title: 'absolute batman' })])
+        ? pageOf([makeSeriesResource({ id: 7, title: 'tidewrack' })])
         : pageOf(records, { pageSize: 200 }),
     );
     renderWithProviders(<CalendarScreen />, {
@@ -375,14 +431,398 @@ describe('FRG-PULL-008: strip suppresses already-added series', () => {
       route: '/calendar?week=2026-W27',
     });
 
-    const strip = await screen.findByTestId('new-this-week');
-    // The not-yet-added debut still surfaces…
-    expect(within(strip).getByText('Fresh Debut')).toBeInTheDocument();
-    // …but the one already in the library is suppressed (stale "Add" gone).
-    expect(screen.queryByText('Absolute Batman')).not.toBeInTheDocument();
+    // Both entries still render in the agenda…
+    expect(await screen.findByText('Tidewrack')).toBeInTheDocument();
+    expect(screen.getByText('Hollow Signal')).toBeInTheDocument();
+    // …but only the one the library does not already carry offers Add.
     expect(
-      screen.queryByRole('button', { name: 'Add Absolute Batman' }),
+      screen.getByRole('button', { name: 'Add Hollow Signal' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Add Tidewrack' }),
     ).not.toBeInTheDocument();
+  });
+
+  it('FRG-PULL-008 — a linked entry offers no Add, only its issue actions', async () => {
+    const records = [linkedRow('Nocturne Atlas', '2026-07-01')];
+    const { fetcher } = fakeFetcher(() => pageOf(records, { pageSize: 200 }));
+    renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
+
+    await screen.findByText('Nocturne Atlas');
+    expect(
+      screen.queryByRole('button', { name: 'Add Nocturne Atlas' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Search for Nocturne Atlas' }),
+    ).toBeInTheDocument();
+  });
+});
+
+describe('FRG-PULL-008: inline debuts + debut filter', () => {
+  const records = [
+    linkedRow('Nocturne Atlas', '2026-07-01'),
+    makePullRecord({
+      id: 2101,
+      seriesName: 'Hollow Signal',
+      publisher: 'Umbral Press',
+      issueNumber: '1',
+      releaseDate: '2026-07-01',
+      matchType: 'new_series',
+      cvSeriesId: 90210,
+    }),
+  ];
+
+  it('FRG-PULL-008 — a debut renders inline in the day agenda with a New badge and no separate strip', async () => {
+    const { fetcher } = fakeFetcher(() => pageOf(records, { pageSize: 200 }));
+    renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
+
+    const agenda = await screen.findByTestId('calendar-agenda');
+    // In date position inside the agenda — exactly once, never a second stack.
+    expect(within(agenda).getByText('Hollow Signal')).toBeInTheDocument();
+    expect(screen.getAllByText('Hollow Signal')).toHaveLength(1);
+    expect(screen.queryByTestId('new-this-week')).not.toBeInTheDocument();
+    expect(screen.queryByText('New this week')).not.toBeInTheDocument();
+    // Badged as a debut, and addable like any other unlinked entry.
+    expect(screen.getByTestId('calendar-new-badge-2101')).toHaveTextContent('New');
+    expect(
+      screen.getByRole('button', { name: 'Add Hollow Signal' }),
+    ).toBeInTheDocument();
+    // The linked, non-debut row carries no badge — the debut's is the only one.
+    expect(screen.getAllByText('New')).toHaveLength(1);
+  });
+
+  it('FRG-PULL-008 — the debut filter narrows the agenda to badge-carrying entries and back', async () => {
+    const { fetcher } = fakeFetcher(() => pageOf(records, { pageSize: 200 }));
+    const user = userEvent.setup();
+    renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
+
+    await screen.findByText('Hollow Signal');
+    expect(screen.getByText('Nocturne Atlas')).toBeInTheDocument();
+
+    const toggle = screen.getByRole('button', { name: /New series only/ });
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    await user.click(toggle);
+
+    await waitFor(() =>
+      expect(screen.queryByText('Nocturne Atlas')).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText('Hollow Signal')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /New series only/ })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+
+    await user.click(screen.getByRole('button', { name: /New series only/ }));
+    expect(await screen.findByText('Nocturne Atlas')).toBeInTheDocument();
+  });
+
+  it('FRG-PULL-008 — the banner headline count matches the rendered cards once debutsOnly is active', async () => {
+    const { fetcher } = fakeFetcher(() => pageOf(records, { pageSize: 200 }));
+    const user = userEvent.setup();
+    renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
+
+    await screen.findByText('Hollow Signal');
+    // Before the toggle: both cards render, and the banner's headline (2)
+    // matches them.
+    expect(
+      screen.getByText(/Showing all 2 single issues shipping this week/),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /New series only/ }));
+    await waitFor(() =>
+      expect(screen.queryByText('Nocturne Atlas')).not.toBeInTheDocument(),
+    );
+    // Only one card renders now (the debut) — the banner headline must track
+    // that rendered count, not the pre-debutsOnly-filter week total of 2.
+    const agenda = screen.getByTestId('calendar-agenda');
+    expect(within(agenda).getAllByTestId(/^calendar-card-/)).toHaveLength(1);
+    expect(
+      screen.getByText(/Showing all 1 single issue shipping this week/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Showing all 2 single issues shipping this week/),
+    ).not.toBeInTheDocument();
+  });
+
+  it('FRG-PULL-008 — the debuts-only toggle reflects debuts in the CURRENT scope, not the whole week', async () => {
+    const { fetcher } = fakeFetcher(() => pageOf(records, { pageSize: 200 }));
+    const user = userEvent.setup();
+    renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
+
+    await screen.findByText('Hollow Signal');
+    // All-releases scope: one debut in scope, so the toggle advertises it.
+    expect(screen.getByRole('button', { name: /New series only/ })).toHaveTextContent(
+      '1',
+    );
+
+    // A `new_series` entry is never "following" (no matched issue -> no
+    // series -> isFollowing false), so Following scope has zero debuts in
+    // scope — the toggle must not offer a filter that would yield the empty
+    // state, so it disappears rather than advertise a phantom count.
+    await user.click(screen.getByRole('radio', { name: 'Following' }));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: /New series only/ }),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
+  it('FRG-PULL-008 — a debut-free week offers no debuts-only toggle at all', async () => {
+    const noDebutRecords = [linkedRow('Nocturne Atlas', '2026-07-01')];
+    const { fetcher } = fakeFetcher(() => pageOf(noDebutRecords, { pageSize: 200 }));
+    renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
+
+    await screen.findByText('Nocturne Atlas');
+    expect(
+      screen.queryByRole('button', { name: /New series only/ }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe('FRG-UI-042: Calendar covers and enrichment detail', () => {
+  const COVER_URL =
+    'https://s3.amazonaws.com/comicgeeks/comics/covers/large-24680.jpg';
+
+  const enriched = makePullRecord({
+    id: 3001,
+    seriesName: 'Tidewrack',
+    publisher: 'Umbral Press',
+    issueNumber: '14',
+    releaseDate: '2026-07-01',
+    matchType: 'unmatched',
+    coverUrl: COVER_URL,
+    description: 'A dredging crew hauls up something that remembers them.',
+    creators: [
+      { role: 'Writer', name: 'A. Marlowe' },
+      { role: 'Artist', name: 'R. Vance' },
+    ],
+    characters: [{ name: 'Sable Quill' }],
+    upc: '76194138888801411',
+  });
+
+  it('FRG-UI-042 — a stored cover renders lazily through the same-origin cover proxy', async () => {
+    const { fetcher } = fakeFetcher(() => pageOf([enriched], { pageSize: 200 }));
+    renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
+
+    await screen.findByText('Tidewrack');
+    const img = screen.getByRole('img', { name: 'Tidewrack cover' });
+    expect(img).toHaveAttribute(
+      'src',
+      `/api/v1/metadata/cover?src=${encodeURIComponent(COVER_URL)}`,
+    );
+    expect(img).toHaveAttribute('loading', 'lazy');
+  });
+
+  it('FRG-UI-042 — an entry with no stored cover renders the publisher spine, never a broken image', async () => {
+    const records = [
+      makePullRecord({
+        id: 3002,
+        seriesName: 'Hollow Signal',
+        publisher: 'Umbral Press',
+        releaseDate: '2026-07-01',
+        matchType: 'unmatched',
+        coverUrl: null,
+      }),
+    ];
+    const { fetcher } = fakeFetcher(() => pageOf(records, { pageSize: 200 }));
+    renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
+
+    await screen.findByText('Hollow Signal');
+    const card = screen.getByTestId('calendar-card-3002');
+    expect(within(card).queryByRole('img')).not.toBeInTheDocument();
+    expect(card.querySelector('img')).toBeNull();
+  });
+
+  it('FRG-UI-042 — a cover whose proxy fetch errors falls back to the spine in place', async () => {
+    const { fetcher } = fakeFetcher(() => pageOf([enriched], { pageSize: 200 }));
+    renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
+
+    await screen.findByText('Tidewrack');
+    const img = screen.getByRole('img', { name: 'Tidewrack cover' });
+    fireEvent.error(img);
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('img', { name: 'Tidewrack cover' }),
+      ).not.toBeInTheDocument(),
+    );
+    // The row itself is untouched — only its imagery degraded.
+    expect(screen.getByText('Tidewrack')).toBeInTheDocument();
+  });
+
+  it('FRG-UI-042 — the detail surface exposes description, creators, characters and UPC', async () => {
+    const { fetcher } = fakeFetcher(() => pageOf([enriched], { pageSize: 200 }));
+    const user = userEvent.setup();
+    renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
+
+    await screen.findByText('Tidewrack');
+    expect(screen.queryByTestId('calendar-detail-3001')).not.toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole('button', { name: 'Show details for Tidewrack' }),
+    );
+    const detail = await screen.findByTestId('calendar-detail-3001');
+    expect(detail).toHaveTextContent(
+      'A dredging crew hauls up something that remembers them.',
+    );
+    expect(detail).toHaveTextContent('A. Marlowe (Writer)');
+    expect(detail).toHaveTextContent('R. Vance (Artist)');
+    expect(detail).toHaveTextContent('Sable Quill');
+    expect(detail).toHaveTextContent('76194138888801411');
+
+    await user.click(
+      screen.getByRole('button', { name: 'Hide details for Tidewrack' }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByTestId('calendar-detail-3001')).not.toBeInTheDocument(),
+    );
+  });
+
+  it('FRG-UI-042 — absent enrichment fields are omitted rather than rendered empty', async () => {
+    const records = [
+      makePullRecord({
+        id: 3003,
+        seriesName: 'Hollow Signal',
+        publisher: 'Umbral Press',
+        releaseDate: '2026-07-01',
+        matchType: 'unmatched',
+        description: 'A radio mast answers back.',
+        creators: [{ role: 'Writer', name: 'A. Marlowe' }],
+        // No characters, no UPC — those rows must not render at all.
+        characters: [],
+        upc: null,
+      }),
+      // Nothing stored at all: the entry offers no detail affordance.
+      makePullRecord({
+        id: 3004,
+        seriesName: 'Nocturne Atlas',
+        publisher: 'Umbral Press',
+        releaseDate: '2026-07-01',
+        matchType: 'unmatched',
+      }),
+    ];
+    const { fetcher } = fakeFetcher(() => pageOf(records, { pageSize: 200 }));
+    const user = userEvent.setup();
+    renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
+
+    await screen.findByText('Hollow Signal');
+    await user.click(
+      screen.getByRole('button', { name: 'Show details for Hollow Signal' }),
+    );
+    const detail = await screen.findByTestId('calendar-detail-3003');
+    expect(detail).toHaveTextContent('A radio mast answers back.');
+    expect(detail).toHaveTextContent('A. Marlowe (Writer)');
+    expect(detail).not.toHaveTextContent('Characters');
+    expect(detail).not.toHaveTextContent('UPC');
+
+    expect(
+      screen.queryByRole('button', { name: 'Show details for Nocturne Atlas' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('FRG-UI-042 — rendering covers and enrichment issues no ComicVine lookup', async () => {
+    const { spy, fetcher } = fakeFetcher((path) =>
+      path.startsWith('/api/v1/series')
+        ? pageOf([])
+        : pageOf([enriched], { pageSize: 200 }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
+
+    await screen.findByText('Tidewrack');
+    await user.click(
+      screen.getByRole('button', { name: 'Show details for Tidewrack' }),
+    );
+    await screen.findByTestId('calendar-detail-3001');
+
+    // The week's imagery and enrichment come from the pull row itself — no
+    // ComicVine-backed request is issued on their behalf (FRG-META-022 lanes
+    // are not involved).
+    const cvCalls = spy.mock.calls.filter(
+      ([path]) =>
+        path.includes('comicvine') || path.startsWith('/api/v1/series/lookup'),
+    );
+    expect(cvCalls).toHaveLength(0);
+  });
+
+  it('FRG-UI-042 — the detail description is stripped of markup and visually clamped', async () => {
+    // Untrusted ComicVine deck text (same as the Add-series candidate card) —
+    // residual markup must never reach the DOM, and a maximal (backend-capped
+    // at 4000 chars) description must not blow out the card past a 2-line clamp.
+    const description = '<b>x</b>' + ' filler word'.repeat(200);
+    const records = [
+      makePullRecord({
+        id: 4001,
+        seriesName: 'Marrow Line',
+        publisher: 'Umbral Press',
+        releaseDate: '2026-07-01',
+        matchType: 'unmatched',
+        description,
+      }),
+    ];
+    const { fetcher } = fakeFetcher(() => pageOf(records, { pageSize: 200 }));
+    const user = userEvent.setup();
+    renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
+
+    await screen.findByText('Marrow Line');
+    await user.click(
+      screen.getByRole('button', { name: 'Show details for Marrow Line' }),
+    );
+    const detail = await screen.findByTestId('calendar-detail-4001');
+
+    const deck = detail.querySelector('p');
+    expect(deck).not.toBeNull();
+    // stripHtml (the exact helper AddSeries' candidate card uses) reduces the
+    // markup to plain text — no literal tag reaches the DOM.
+    expect(deck!.innerHTML).not.toContain('<b>');
+    expect(deck!.textContent?.startsWith('x filler word')).toBe(true);
+    // The same 2-line clamp idiom as AddSeries' `.deck` bounds a maximal
+    // description's visual height.
+    expect(deck!.className).toMatch(/detailDeck/);
+  });
+
+  it('FRG-UI-042 — a repaired coverUrl on the same row id remounts and retries rather than staying stuck on the spine', async () => {
+    const brokenUrl = 'https://s3.amazonaws.com/comicgeeks/comics/covers/broken.jpg';
+    const fixedUrl = 'https://s3.amazonaws.com/comicgeeks/comics/covers/fixed.jpg';
+    let coverUrl = brokenUrl;
+    const records = () => [
+      makePullRecord({
+        id: 5001,
+        seriesName: 'Marrow Line',
+        publisher: 'Umbral Press',
+        releaseDate: '2026-07-01',
+        matchType: 'unmatched',
+        coverUrl,
+      }),
+    ];
+    const { fetcher } = fakeFetcher(() => pageOf(records(), { pageSize: 200 }));
+    const client = createQueryClient();
+    renderWithProviders(<CalendarScreen />, {
+      fetcher,
+      client,
+      route: '/calendar?week=2026-W27',
+    });
+
+    await screen.findByText('Marrow Line');
+    const brokenImg = screen.getByRole('img', { name: 'Marrow Line cover' });
+    fireEvent.error(brokenImg);
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('img', { name: 'Marrow Line cover' }),
+      ).not.toBeInTheDocument(),
+    );
+
+    // The same row id refetches with a repaired coverUrl — the sticky
+    // `failed` flag must not keep forcing the spine now that the URL differs.
+    coverUrl = fixedUrl;
+    await client.invalidateQueries({ queryKey: queryKeys.pull.all() });
+    const repairedImg = await screen.findByRole('img', {
+      name: 'Marrow Line cover',
+    });
+    expect(repairedImg).toHaveAttribute(
+      'src',
+      `/api/v1/metadata/cover?src=${encodeURIComponent(fixedUrl)}`,
+    );
   });
 });
 

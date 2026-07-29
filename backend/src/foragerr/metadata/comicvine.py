@@ -35,6 +35,7 @@ from foragerr.metadata.errors import (
     ComicVineBudgetExhausted,
     ComicVineError,
     ComicVineMalformedResponse,
+    ComicVineObjectNotFound,
     ComicVineRateLimited,
     ComicVineUnavailable,
 )
@@ -648,6 +649,13 @@ class ComicVineClient:
             gate().note_auth_failed()
             raise ComicVineAuthError(
                 "comicvine rejected the API key (status_code 100)"
+            )
+        if status == 101:
+            # "Object Not Found" — a genuinely unknown id, distinct from a
+            # transport failure so callers (FRG-API-026) can return a 404.
+            gate().note_auth_ok()
+            raise ComicVineObjectNotFound(
+                "comicvine returned error status_code 101"
             )
         raise ComicVineMalformedResponse(
             f"comicvine returned error status_code {status}"
