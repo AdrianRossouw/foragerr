@@ -892,3 +892,56 @@ async def test_rolled_back_group_reimports_cleanly_as_a_first_run(
     assert "imported" in second
     assert await _series_count(db, 701) == 1
     assert len(await _issue_file_paths(db, 701)) == 1
+
+
+@pytest.mark.req("FRG-IMP-027")
+async def test_all_files_blocked_rolls_back_the_created_series(
+    db, settings, root_folder_id, root_folder_path
+):
+    """Refresh succeeds and issues are created, but every file blocks (its
+    issue number is absent from the volume) so nothing attaches — the created
+    series is still rolled back (no attach => no shell)."""
+    make_large_cbz(root_folder_path / "Ember (2015)" / "Ember 001 (2015).cbz")
+    # The volume has only issue #5, so the #1 file matches nothing and blocks.
+    cv = (
+        FakeCV()
+        .volume(701, name="Ember", start_year=2015)
+        .issues(701, [issue(9705, "5", cover_date="2015-07-01")])
+    )
+    factory = build_factory(settings, cv.handler())
+    commands = CommandService(db, settings)
+    await scan_library_root(db, settings, root_folder_id, factory=factory)
+    group = (await _groups_by_key(db, root_folder_id))["ember"]
+    await _confirm(db, group.id, 701)
+
+    summary = await execute_library_import(
+        db, settings, [group.id], commands=commands, factory=factory
+    )
+    assert "blocked" in summary
+    assert await _series_count(db, 701) == 0  # nothing attached => no shell
+    assert await _issue_file_paths(db, 701) == []
+
+
+@pytest.mark.req("FRG-IMP-027")
+async def test_exception_after_create_rolls_back_and_marks_errored(
+    db, settings, root_folder_id, root_folder_path, monkeypatch
+):
+    """An unexpected error after series creation still rolls the shell back (the
+    finally runs) and the group is marked errored — never a surviving shell."""
+    make_large_cbz(root_folder_path / "Ember (2015)" / "Ember 001 (2015).cbz")
+    cv = FakeCV().volume(701, name="Ember", start_year=2015)
+    factory = build_factory(settings, cv.handler())
+    commands = CommandService(db, settings)
+    await scan_library_root(db, settings, root_folder_id, factory=factory)
+    group = (await _groups_by_key(db, root_folder_id))["ember"]
+    await _confirm(db, group.id, 701)
+
+    async def _boom(*a, **k):
+        raise RuntimeError("boom after create")
+
+    monkeypatch.setattr(library_import, "_refresh_before_import", _boom)
+    summary = await execute_library_import(
+        db, settings, [group.id], commands=commands, factory=factory
+    )
+    assert "errored" in summary
+    assert await _series_count(db, 701) == 0  # finally rolled the shell back
