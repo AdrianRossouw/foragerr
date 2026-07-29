@@ -91,7 +91,7 @@ None — extensions of existing areas.
 
 ## Approval
 
-Owner-directed 2026-07-29 ("merged into settings, and defaults that
+**Approved by Adrian, 2026-07-29** ("i approve all the active proposals"). Owner-directed 2026-07-29 ("merged into settings, and defaults that
 exclude most non-comic things by default … otherwise it just creates
 setup tasks"). Awaiting formal approval (FRG-PROC-009) — this reverses
 FRG-SRC-012's "ship empty / suggestions opt-in" stance, so it wants an
