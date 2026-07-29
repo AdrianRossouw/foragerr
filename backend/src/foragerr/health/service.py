@@ -853,10 +853,14 @@ class HealthService:
             )
         components: list[ComponentHealth] = []
         for row in rows:
-            components.append(await self._root_folder_component(row.id, row.path))
+            components.append(
+                await self._root_folder_component(row.id, row.path, row.read_only)
+            )
         return components
 
-    async def _root_folder_component(self, rid: int, path: str) -> ComponentHealth:
+    async def _root_folder_component(
+        self, rid: int, path: str, read_only: bool = False
+    ) -> ComponentHealth:
         component = f"root-folder:{rid}"
         label = f"Root folder: {path}"
         try:
@@ -883,7 +887,11 @@ class HealthService:
                 message=f"Root folder '{path}' is missing or unreadable",
                 remediation="Check the volume mount and permissions for this path.",
             )
-        if not writable:
+        if not writable and not read_only:
+            # A read-only reference library (FRG-SER-021) is not-writable by
+            # design — foragerr never writes to it — so unwritability is the
+            # expected state, not an error. Existence/readability above still
+            # apply (it must be reachable to serve from).
             return ComponentHealth(
                 component=component,
                 kind="root_folder",
