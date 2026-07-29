@@ -89,7 +89,7 @@ _TRADE_BOOKTYPES = (Booktype.TPB, Booktype.GN, Booktype.HC)
 
 #: Bare filler words that introduce the issue number and are never series
 #: title content when they sit directly on the issue evidence (FRG-IMP-026):
-#: `Strangelands Issues #8`, `SPAWN Issue # 279`.
+#: `Duskmarch Issues #8`, `CINDER Issue # 279`.
 _ISSUE_FILLER_WORDS = frozenset({"issue", "issues"})
 
 #: `Part`/`Pt` cue words that introduce the issue/chapter number and are

@@ -3,7 +3,7 @@
 Given the parsed structure of a release title, resolve which tracked series it
 belongs to (via the shared normalized matching key plus user-editable
 per-series aliases) and then which concrete issue. Mapping is exact-key, never
-substring, so "Spawn" never captures "Curse of Spawn"; when several volumes
+substring, so "Cinder" never captures "Curse of Cinder"; when several volumes
 share a key, a year on the release disambiguates.
 
 This is a pure function; it produces a :class:`Mapping` describing what was

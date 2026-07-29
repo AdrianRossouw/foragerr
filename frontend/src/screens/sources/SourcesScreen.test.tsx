@@ -902,7 +902,7 @@ describe('FRG-UI-039: per-row ComicVine search', () => {
       reads: [],
       librarySeries: library,
       suggest: () => ({
-        records: [candidate({ cv_volume_id: 4050_1234, name: 'SIKTC' })],
+        records: [candidate({ cv_volume_id: 4050_1234, name: 'WDTG' })],
         complete: true,
       }),
     };
@@ -989,7 +989,7 @@ describe('FRG-UI-039: per-row ComicVine search', () => {
       calls: [],
       librarySeries: library,
       lookup: () => ({
-        records: [candidate({ cv_volume_id: 4050_7777, name: 'SIKTC' })],
+        records: [candidate({ cv_volume_id: 4050_7777, name: 'WDTG' })],
         complete: true,
         truncated: false,
       }),

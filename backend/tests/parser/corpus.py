@@ -302,23 +302,27 @@ CORPUS: tuple[Row, ...] = (
         issue="404", display="404", year=1987,
         annotations_contain=(("generic", "f1"),)),
     # 82-87: store-source naming idioms met on the test rig (FRG-IMP-026).
+    # Titles are synthetic, shape-preserving stand-ins for the real store
+    # idioms (a caps-variant one-word series, a bare-`Issue(s)`-filler series,
+    # a multi-word `X Verb the Y` series) — the parser behaviour each row pins
+    # is identical, and no real library content lives in the corpus.
     # 82/86: `Vol. N` with no issue — pinned UNCHANGED. The parser reports an
     # ordinal volume and no issue (FRG-IMP-012 field separation); resolving
     # such a file to an issue is the import pipeline's job (FRG-PP-022).
-    Row(82, "SPAWN Vol. 243.cbz", "SPAWN", ("FRG-IMP-026", "FRG-IMP-012"),
+    Row(82, "CINDER Vol. 243.cbz", "CINDER", ("FRG-IMP-026", "FRG-IMP-012"),
         vol=243),
     # 83: the plain anchored shape the filler rule must not disturb.
-    Row(83, "Spawn #211.cbz", "Spawn", ("FRG-IMP-026",),
+    Row(83, "Cinder #211.cbz", "Cinder", ("FRG-IMP-026",),
         issue="211", display="211"),
     # 84/85: a bare `Issue`/`Issues` sitting on the issue evidence is filler,
     # not title — both the spaced anchor (`Issue # 279`) and the glued one
     # (`Issues #8`, where the anchor rides the number token).
-    Row(84, "SPAWN Issue # 279.cbz", "SPAWN", ("FRG-IMP-026",),
+    Row(84, "CINDER Issue # 279.cbz", "CINDER", ("FRG-IMP-026",),
         issue="279", display="279"),
-    Row(85, "Strangelands Issues #8.cbz", "Strangelands", ("FRG-IMP-026",),
+    Row(85, "Duskmarch Issues #8.cbz", "Duskmarch", ("FRG-IMP-026",),
         issue="8", display="8"),
-    Row(86, "Something is Killing the Children Vol. 8.cbz",
-        "Something is Killing the Children", ("FRG-IMP-026", "FRG-IMP-012"),
+    Row(86, "Whatever Devours the Garden Vol. 8.cbz",
+        "Whatever Devours the Garden", ("FRG-IMP-026", "FRG-IMP-012"),
         vol=8),
     # 87: mid-title preservation (constructed probe) — `Issue` is followed by
     # title words, not by the issue evidence, so the strip rule never fires.
