@@ -914,6 +914,15 @@ export function useRemoveQueueItem(): UseMutationResult<
 export interface GrabReleaseInput {
   indexer_id: number;
   guid: string;
+  /**
+   * Override the approval gate (FRG-UI-044 / FRG-API-008). Sent ONLY for a
+   * deliberate, confirmed force-grab of a rejected or temporarily-rejected
+   * release; an approved grab omits it entirely so its request body is
+   * byte-identical to the historical one-click path. The server still enforces
+   * the gate — a rejected release without `force` answers 409, so this is an
+   * audited override, never a client-only bypass.
+   */
+  force?: boolean;
 }
 
 /**
@@ -925,8 +934,13 @@ export function useGrabRelease(): UseMutationResult<unknown, Error, GrabReleaseI
   const fetcher = useFetcher();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (key: GrabReleaseInput) =>
-      fetcher('/api/v1/release', { method: 'POST', body: key }),
+    mutationFn: ({ indexer_id, guid, force }: GrabReleaseInput) =>
+      fetcher('/api/v1/release', {
+        method: 'POST',
+        // `force` rides along only when set, so an approved grab's body stays
+        // exactly `{ indexer_id, guid }`.
+        body: force ? { indexer_id, guid, force: true } : { indexer_id, guid },
+      }),
     onSuccess: () =>
       // The grab enqueues a tracked download; the queue view is now stale.
       queryClient.invalidateQueries({ queryKey: queryKeys.queue.all() }),

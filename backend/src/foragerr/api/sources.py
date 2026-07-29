@@ -61,6 +61,7 @@ from foragerr.sources.review import (
     EntitlementActionError,
     add_entitlement,
     bulk_accept,
+    bulk_apply_to_group,
     bulk_ignore,
     bulk_match,
     bulk_restore,
@@ -541,17 +542,24 @@ class AddBody(BaseModel):
 
 
 class BulkBody(BaseModel):
-    """A bulk review action over an id list (FRG-SRC-004/011).
+    """A bulk review action over an id list (FRG-SRC-004/011/014).
 
-    ``action`` is ``ignore`` | ``restore`` | ``match`` | ``accept``. Only
-    ``match`` carries a ``series_id`` (one shared target, the operator's
-    explicit choice); ``accept`` deliberately carries none — each row applies
-    its OWN stored proposal, which is what makes a heterogeneous selection
-    (some matches, some adds) resolvable in one request."""
+    ``action`` is ``ignore`` | ``restore`` | ``match`` | ``accept`` |
+    ``apply_to_group``. ``match`` carries a ``series_id`` (one shared target, the
+    operator's explicit choice); ``accept`` deliberately carries none — each row
+    applies its OWN stored proposal, which is what makes a heterogeneous
+    selection (some matches, some adds) resolvable in one request.
+
+    ``apply_to_group`` (FRG-SRC-014) resolves one operator-picked series across a
+    review group: an in-library pick carries ``series_id`` (bulk-matches every
+    listed member), a not-yet-added pick carries ``cv_volume_id`` (adds the
+    series once and leaves the rest as swept proposals). Exactly one of the two
+    is supplied."""
 
     action: str
     entitlement_ids: list[int]
     series_id: int | None = None
+    cv_volume_id: int | None = None
 
 
 @router.get("/{source_id}/entitlements", response_model=list[EntitlementResource])
@@ -728,11 +736,31 @@ async def bulk_entitlements_endpoint(
             commands=commands,
             matched_via=MATCHED_VIA_OPERATOR,
         )
+    elif body.action == "apply_to_group":
+        if body.series_id is None and body.cv_volume_id is None:
+            raise ApiError(
+                422,
+                "apply_to_group requires series_id (in-library) or cv_volume_id "
+                "(add)",
+                field="series_id",
+            )
+        try:
+            result = await bulk_apply_to_group(
+                db,
+                request.app.state.settings,
+                body.entitlement_ids,
+                series_id=body.series_id,
+                cv_volume_id=body.cv_volume_id,
+                commands=commands,
+                matched_via=MATCHED_VIA_OPERATOR,
+            )
+        except EntitlementActionError as exc:
+            raise ApiError(exc.status, str(exc)) from exc
     else:
         raise ApiError(
             400,
             f"unknown bulk action {body.action!r}; "
-            "expected ignore|restore|match|accept",
+            "expected ignore|restore|match|accept|apply_to_group",
             field="action",
         )
     return {"applied": result.applied, "skipped": result.skipped, "errors": result.errors}

@@ -96,6 +96,14 @@ async def _set_proposal(db, entitlement_id: int, payload: str) -> None:
         row.updated_at = utcnow()
 
 
+async def _set_name(db, entitlement_id: int, human_name: str) -> None:
+    """Rename a row so its computed ``group_key`` is under the test's control."""
+    async with db.write_session() as session:
+        row = await session.get(SourceEntitlementRow, entitlement_id)
+        row.human_name = human_name
+        row.updated_at = utcnow()
+
+
 async def _mark_failed(db, entitlement_id: int, *, error: str = "checksum mismatch"):
     async with db.write_session() as session:
         row = await session.get(SourceEntitlementRow, entitlement_id)
@@ -710,3 +718,194 @@ async def test_no_failed_downloads_is_not_a_health_warning(db, config_dir, tmp_p
         for w in await service.warnings()
         if w.source.startswith("source-downloads:")
     ]
+
+
+# --- FRG-SRC-014: group-key sibling proposal sweep --------------------------
+
+
+async def _new_comics(db, source_id):
+    """The source's ``new`` comic rows in a stable order for group scenarios."""
+    return await repo.list_entitlements(
+        db, source_id, classification="comic", review_status="new"
+    )
+
+
+@pytest.mark.req("FRG-SRC-014")
+async def test_match_to_existing_sweeps_same_group_siblings(
+    db, config_dir, root_folder_id, format_profile_id
+):
+    """Matching one row to an in-library series rewrites its same-``group_key``
+    siblings into library proposals for that series — the case that swept nothing
+    before. The swept sibling stays ``new`` (the operator's to accept) with
+    ``auto = False``, and a decided (ignored) sibling is never touched."""
+    source = await _synced_source(db, config_dir)
+    series_id = await _mk_series(
+        db, root_folder_id, format_profile_id, cvid=700, title="Synthetic Hero"
+    )
+    acting, sib_new, sib_ignored = await _new_comics(db, source.id)
+    await _set_name(db, acting.id, "Synthetic Hero #1")
+    await _set_name(db, sib_new.id, "Synthetic Hero #2")
+    await _set_name(db, sib_ignored.id, "Synthetic Hero #3")
+    # The sibling's own prior proposal names a DIFFERENT volume.
+    await _set_proposal(db, sib_new.id, _cv_proposal(999))
+    await _set_proposal(db, sib_ignored.id, _cv_proposal(999))
+    await review.ignore_entitlement(db, sib_ignored.id)
+    await _set_proposal(db, sib_ignored.id, _cv_proposal(999))
+    ignored_before = (await repo.get_entitlement(db, sib_ignored.id)).proposed_match_json
+
+    await review.match_entitlement(
+        db, acting.id, series_id=series_id, commands=FakeCommands(),
+        matched_via=MATCHED_VIA_OPERATOR,
+    )
+
+    swept = await repo.get_entitlement(db, sib_new.id)
+    assert swept.review_status == "new"  # a proposal, never a commit
+    assert swept.proposed_series_id == series_id
+    proposal = json.loads(swept.proposed_match_json)
+    assert proposal["kind"] == "library"
+    assert proposal["series_id"] == series_id
+    assert proposal["auto"] is False
+
+    still_ignored = await repo.get_entitlement(db, sib_ignored.id)
+    assert still_ignored.review_status == "ignored"
+    assert still_ignored.proposed_match_json == ignored_before
+
+
+@pytest.mark.req("FRG-SRC-014")
+async def test_add_sweeps_by_group_not_only_prior_proposal(
+    db, config_dir, root_folder_id, format_profile_id
+):
+    """An add sweeps by ``group_key``, so a same-group sibling whose prior
+    proposal named a DIFFERENT volume is still re-proposed to the added series —
+    the volume-keyed sweep alone would miss it. A row in another group is left
+    alone."""
+    source = await _synced_source(db, config_dir)
+    settings = flows_settings(config_dir)
+    factory = build_factory(
+        settings, FakeCV().volume(700, name="Synthetic Hero").handler()
+    )
+    acting, sib, stranger = await _new_comics(db, source.id)
+    await _set_name(db, acting.id, "Synthetic Hero #1")
+    await _set_name(db, sib.id, "Synthetic Hero #2")
+    await _set_name(db, stranger.id, "Different Saga #1")
+    await _set_proposal(db, acting.id, _cv_proposal(700))
+    await _set_proposal(db, sib.id, _cv_proposal(999))  # a DIFFERENT volume
+    await _set_proposal(db, stranger.id, _cv_proposal(999))
+    stranger_before = (await repo.get_entitlement(db, stranger.id)).proposed_match_json
+
+    added = await review.add_entitlement(
+        db, settings, acting.id, commands=FakeCommands(), factory=factory,
+        matched_via=MATCHED_VIA_OPERATOR,
+    )
+
+    swept = await repo.get_entitlement(db, sib.id)
+    assert swept.review_status == "new"
+    assert swept.proposed_series_id == added.matched_series_id
+    assert json.loads(swept.proposed_match_json)["kind"] == "library"
+
+    untouched = await repo.get_entitlement(db, stranger.id)
+    assert untouched.proposed_match_json == stranger_before  # another group
+
+
+@pytest.mark.req("FRG-SRC-014")
+async def test_group_sweep_never_crosses_source_id(
+    db, config_dir, root_folder_id, format_profile_id
+):
+    """Two sources hold rows folding to the same ``group_key``; a match in one
+    rewrites only that source's siblings."""
+    source_a = await _synced_source(db, config_dir)
+    source_b = await _synced_source(db, config_dir)
+    series_id = await _mk_series(
+        db, root_folder_id, format_profile_id, cvid=701, title="Synthetic Hero"
+    )
+    acting = (await _new_comics(db, source_a.id))[0]
+    other = (await _new_comics(db, source_b.id))[0]
+    await _set_name(db, acting.id, "Synthetic Hero #1")
+    await _set_name(db, other.id, "Synthetic Hero #2")
+    await _set_proposal(db, other.id, _cv_proposal(999))
+    other_before = (await repo.get_entitlement(db, other.id)).proposed_match_json
+
+    await review.match_entitlement(
+        db, acting.id, series_id=series_id, commands=FakeCommands(),
+        matched_via=MATCHED_VIA_OPERATOR,
+    )
+
+    untouched = await repo.get_entitlement(db, other.id)
+    assert untouched.review_status == "new"
+    assert untouched.proposed_match_json == other_before
+
+
+@pytest.mark.req("FRG-SRC-014")
+async def test_bulk_apply_to_group_in_library_matches_all(
+    db, config_dir, root_folder_id, format_profile_id
+):
+    """The in-library branch bulk-matches every listed member — each committed
+    and, being grabbable, its download queued."""
+    source = await _synced_source(db, config_dir)
+    series_id = await _mk_series(
+        db, root_folder_id, format_profile_id, cvid=702, title="Synthetic Hero"
+    )
+    comics = await _new_comics(db, source.id)
+    for i, e in enumerate(comics, start=1):
+        await _set_name(db, e.id, f"Synthetic Hero #{i}")
+    ids = [e.id for e in comics]
+
+    result = await review.bulk_apply_to_group(
+        db, make_settings(config_dir), ids, series_id=series_id,
+        commands=FakeCommands(), matched_via=MATCHED_VIA_OPERATOR,
+    )
+
+    assert result.applied == len(ids)
+    assert result.errors == {}
+    for eid in ids:
+        row = await repo.get_entitlement(db, eid)
+        assert row.review_status == "matched"
+        assert row.matched_series_id == series_id
+
+
+@pytest.mark.req("FRG-SRC-014")
+async def test_bulk_apply_to_group_add_adds_once_and_proposes_rest(
+    db, config_dir, root_folder_id, format_profile_id
+):
+    """The not-in-library branch adds the series ONCE (first member matched) and
+    leaves the rest as swept proposals — still ``new``, nothing else committed."""
+    source = await _synced_source(db, config_dir)
+    settings = flows_settings(config_dir)
+    factory = build_factory(
+        settings, FakeCV().volume(703, name="Synthetic Hero").handler()
+    )
+    comics = await _new_comics(db, source.id)
+    for i, e in enumerate(comics, start=1):
+        await _set_name(db, e.id, f"Synthetic Hero #{i}")
+    ids = [e.id for e in comics]
+
+    result = await review.bulk_apply_to_group(
+        db, settings, ids, cv_volume_id=703, commands=FakeCommands(),
+        factory=factory, root_folder_id=root_folder_id,
+        matched_via=MATCHED_VIA_OPERATOR,
+    )
+
+    assert result.applied == 1  # the single add
+    assert result.errors == {}
+    first = await repo.get_entitlement(db, ids[0])
+    assert first.review_status == "matched"
+    added_series_id = first.matched_series_id
+    for eid in ids[1:]:
+        row = await repo.get_entitlement(db, eid)
+        assert row.review_status == "new"  # a swept proposal, never committed
+        assert row.proposed_series_id == added_series_id
+        assert json.loads(row.proposed_match_json)["auto"] is False
+
+
+@pytest.mark.req("FRG-SRC-014")
+async def test_bulk_apply_to_group_needs_a_target(db, config_dir):
+    """Neither an in-library series nor a volume to add is a 422 — there is
+    nothing to apply."""
+    source = await _synced_source(db, config_dir)
+    ids = [e.id for e in await _new_comics(db, source.id)]
+    with pytest.raises(review.EntitlementActionError) as exc:
+        await review.bulk_apply_to_group(
+            db, make_settings(config_dir), ids,
+            commands=FakeCommands(), matched_via=MATCHED_VIA_OPERATOR,
+        )
+    assert exc.value.status == 422

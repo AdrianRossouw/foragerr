@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from foragerr.search_ops.cache import (
     CACHE_TTL_MINUTES,
+    CachedGrab,
     PruneReleaseCacheCommand,
     cache_decisions,
     get_cached,
@@ -49,6 +50,7 @@ __all__ = [
     "BACKLOG_MIN_DELAY_SECONDS",
     "BacklogSearchCommand",
     "CACHE_TTL_MINUTES",
+    "CachedGrab",
     "GrabReleaseCommand",
     "IssueSearchCommand",
     "PruneReleaseCacheCommand",

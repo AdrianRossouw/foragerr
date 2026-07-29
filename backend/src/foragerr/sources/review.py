@@ -194,7 +194,8 @@ async def match_entitlement(
             refusal = _accept_precondition_error(entitlement_id, row.review_status)
             if refusal is not None:
                 raise refusal
-        if await session.get(SeriesRow, series_id) is None:
+        series = await session.get(SeriesRow, series_id)
+        if series is None:
             raise EntitlementActionError(
                 f"series {series_id} does not exist", status=404
             )
@@ -211,6 +212,23 @@ async def match_entitlement(
         row.matched_via = matched_via
         row.review_status = "matched"
         row.updated_at = utcnow()
+        source_id = row.source_id
+        group_key = _group_key(row.human_name)
+        series_title = series.title
+    # Propagate the pick to this row's same-``group_key`` siblings in the same
+    # source as PROPOSALS only (FRG-SRC-014): matching one row of an operator-
+    # visible group rewrites its still-``new`` siblings' proposals onto the same
+    # series so their next single action is first-click correct — never a commit,
+    # never a touch on a matched / ignored row. This is the case that swept
+    # nothing before; the add/degrade tail reaches it through this same call.
+    await _reresolve_sibling_proposals_by_group(
+        db,
+        source_id=source_id,
+        group_key=group_key,
+        series_id=series_id,
+        series_title=series_title,
+        exclude_entitlement_id=entitlement_id,
+    )
     await _queue_grab(db, entitlement_id, commands)
     return await _reload(db, entitlement_id)
 
@@ -854,6 +872,71 @@ async def bulk_accept(
     )
 
 
+async def bulk_apply_to_group(
+    db,
+    settings,
+    entitlement_ids: list[int],
+    *,
+    series_id: int | None = None,
+    cv_volume_id: int | None = None,
+    commands=None,
+    factory=None,
+    root_folder_id: int | None = None,
+    matched_via: str,
+) -> BulkResult:
+    """Resolve an operator-picked series across a whole review group (FRG-SRC-014).
+
+    One action for the group header's "pick a series for this group":
+
+    * an **in-library** pick (``series_id`` given) bulk-MATCHES every listed
+      member — the existing :func:`bulk_match`, so each member is committed and,
+      per row, its download queued;
+    * a **not-yet-added** pick (``cv_volume_id`` given, no ``series_id``) ADDS the
+      series once for the first member through the ordinary add path, whose
+      group-key sweep re-proposes the remaining members. Only the added member is
+      committed here; the rest stay ``new`` with swept proposals for a single
+      follow-up bulk accept — nothing else downloads without a further operator
+      action.
+
+    Returns the shared :class:`BulkResult` per-id outcome shape either way. A
+    caller that supplies neither target is a per-request 422 at the API layer.
+    """
+    if series_id is not None:
+        return await bulk_match(
+            db,
+            entitlement_ids,
+            series_id=series_id,
+            commands=commands,
+            matched_via=matched_via,
+        )
+    if cv_volume_id is None:
+        raise EntitlementActionError(
+            "apply-to-group needs either a series_id (in-library) or a "
+            "cv_volume_id (add)",
+            status=422,
+        )
+    if not entitlement_ids:
+        return BulkResult(applied=0, skipped=0, errors={})
+    first = entitlement_ids[0]
+    errors: dict[int, str] = {}
+    try:
+        await add_entitlement(
+            db,
+            settings,
+            first,
+            commands=commands,
+            factory=factory,
+            root_folder_id=root_folder_id,
+            cv_volume_id=cv_volume_id,
+            matched_via=matched_via,
+        )
+    except EntitlementActionError as exc:
+        errors[first] = str(exc)
+    return BulkResult(
+        applied=0 if errors else 1, skipped=len(errors), errors=errors
+    )
+
+
 async def _bulk(db, entitlement_ids: list[int], action) -> BulkResult:
     applied = 0
     errors: dict[int, str] = {}
@@ -983,6 +1066,113 @@ async def _reresolve_sibling_proposals(
     return rewritten
 
 
+def _group_key(human_name: str) -> str:
+    """The review screen's collapse key for a store title (FRG-SRC-014).
+
+    ``stripped_key(query_term(human_name))`` — the same fold the read surface
+    (``api.sources._group_key``) uses to collapse "same title, different edition
+    slice" rows into one operator-visible group. Reuses the shared matching
+    helpers rather than a second fold, so the sweep keys on exactly the grouping
+    the operator sees. The empty string is the "ungroupable" signal (a title that
+    folds to nothing) and never collapses with anything — the sweep honours that
+    by refusing to run on it.
+    """
+    from foragerr.sources.matching import query_term, stripped_key
+
+    return stripped_key(query_term(human_name))
+
+
+async def _reresolve_sibling_proposals_by_group(
+    db,
+    *,
+    source_id: int,
+    group_key: str,
+    series_id: int,
+    series_title: str | None,
+    exclude_entitlement_id: int,
+) -> int:
+    """Point same-``group_key`` siblings' proposals at the resolved series.
+
+    The group-key-scoped companion to :func:`_reresolve_sibling_proposals`
+    (FRG-SRC-014). Where that sweep keys on the sibling's own prior
+    ``cv_volume_id`` (so it catches a same-volume run regardless of title), this
+    one keys on ``group_key`` (so it catches the whole operator-visible group
+    regardless of what each sibling proposed before — a different volume, or
+    nothing plausible). The two are complementary and the add path runs both.
+
+    Scope and guard, identical in spirit to the volume sweep:
+
+    * bounded to the acting ``source_id`` — a pick in one source never rewrites
+      another source's rows even when they fold to the same key;
+    * only ``review_status = "new"`` rows are touched — a matched or ignored row
+      is an operator decision and is never overwritten;
+    * the acting entitlement is excluded (its own link is written by its match);
+    * ``auto`` is forced ``False`` — a rewrite is a convenience, never a licence
+      for the auto-sync path to accept without review;
+    * an empty ``group_key`` sweeps nothing (an ungroupable title shares no
+      evidence of being the same series as any other).
+
+    ``group_key`` has no stored column, so the fold is recomputed in Python over
+    this one source's ``new`` rows — a source-scoped scan, so the cost is bounded
+    by the source's open review queue rather than the whole table.
+
+    Runs as ONE write transaction and returns the number of rows rewritten.
+    """
+    import json
+
+    from sqlalchemy import select
+
+    if not group_key:
+        return 0
+    rewritten = 0
+    async with db.write_session() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(SourceEntitlementRow).where(
+                        SourceEntitlementRow.source_id == source_id,
+                        SourceEntitlementRow.review_status == "new",
+                        SourceEntitlementRow.id != exclude_entitlement_id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        now = utcnow()
+        for row in rows:
+            if _group_key(row.human_name) != group_key:
+                continue
+            data = _loads_proposal(row.proposed_match_json) or {}
+            if data.get("kind") == "library" and data.get("series_id") == series_id:
+                continue  # already resolved (a re-run) — leave it alone
+            data.update(
+                {
+                    "kind": "library",
+                    "series_id": series_id,
+                    "title": series_title or data.get("title"),
+                    "auto": False,
+                }
+            )
+            # A prior "nothing plausible" marker is now a match; drop it so the
+            # proposal reads consistently as a library match.
+            data.pop("verdict", None)
+            row.proposed_match_json = json.dumps(data, sort_keys=True)
+            row.proposed_series_id = series_id
+            row.updated_at = now
+            rewritten += 1
+    if rewritten:
+        logger.info(
+            "sources.review: re-resolved %d sibling proposal(s) in group %r "
+            "(source %d) onto series %d",
+            rewritten,
+            group_key,
+            source_id,
+            series_id,
+        )
+    return rewritten
+
+
 def _loads_proposal(raw: str | None) -> dict | None:
     """A stored proposal as a dict, or ``None`` when absent/unparseable."""
     import json
@@ -1043,6 +1233,7 @@ __all__ = [
     "accept_entitlement",
     "add_entitlement",
     "bulk_accept",
+    "bulk_apply_to_group",
     "bulk_ignore",
     "bulk_match",
     "bulk_restore",

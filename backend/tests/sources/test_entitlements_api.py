@@ -366,6 +366,51 @@ async def test_bulk_match_requires_series_id(app_client):
     assert resp.status_code == 422
 
 
+@pytest.mark.req("FRG-SRC-014")
+async def test_bulk_apply_to_group_in_library_endpoint(app_client):
+    """The apply_to_group action with a ``series_id`` bulk-matches every listed
+    member through the surface (FRG-SRC-014)."""
+    app = app_client.app
+    source_id = await _populate(app)
+    series_id = await _series_with_cv(app, cv_volume_id=7014, title="Synthetic Hero")
+    comics = await repo.list_entitlements(
+        app.state.db, source_id, classification="comic", review_status="new"
+    )
+    ids = [c.id for c in comics]
+
+    resp = await app_client.post(
+        "/api/v1/sources/entitlements/bulk",
+        json={
+            "action": "apply_to_group",
+            "entitlement_ids": ids,
+            "series_id": series_id,
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["applied"] == len(ids)
+
+    remaining = (
+        await app_client.get(
+            f"/api/v1/sources/{source_id}"
+            "/entitlements?review_status=new&classification=comic"
+        )
+    ).json()
+    assert remaining == []
+
+
+@pytest.mark.req("FRG-SRC-014")
+async def test_bulk_apply_to_group_requires_a_target(app_client):
+    """apply_to_group with neither a series_id nor a cv_volume_id is a 422."""
+    app = app_client.app
+    source_id = await _populate(app)
+    comics = await repo.list_entitlements(app.state.db, source_id, classification="comic")
+    resp = await app_client.post(
+        "/api/v1/sources/entitlements/bulk",
+        json={"action": "apply_to_group", "entitlement_ids": [comics[0].id]},
+    )
+    assert resp.status_code == 422
+
+
 @pytest.mark.req("FRG-SRC-004")
 async def test_patch_auto_sync_flips_on_then_off_and_persists(app_client):
     """The auto-sync toggle ships OFF and is changeable post-connect via

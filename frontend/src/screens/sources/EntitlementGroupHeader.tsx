@@ -1,3 +1,8 @@
+import {
+  EntitlementSearch,
+  searchSeedTerm,
+  type PickedCandidate,
+} from './EntitlementSearch';
 import type { ReviewGroup } from './reviewGroups';
 import styles from './sources.module.css';
 
@@ -10,6 +15,14 @@ import styles from './sources.module.css';
  * index-based `onSelectRow` the rows use, so shift-range spans headers and
  * rows coherently); the caret expands in place, and expanding reaches every
  * member's full actions.
+ *
+ * It also carries the group-level search/match affordance (FRG-UI-043): one
+ * pick resolves the WHOLE group — an in-library candidate matches every member,
+ * a new candidate is added once and leaves the rest as swept proposals — reusing
+ * the identical per-row picker (FRG-UI-039), differing only in that its `onPick`
+ * (supplied by the list) applies to the group's members rather than one row.
+ * Like the per-row panel, its open state is LIST-OWNED, so a collapsed header
+ * scrolled out of the virtual window keeps it.
  */
 export function EntitlementGroupHeader({
   group,
@@ -17,8 +30,12 @@ export function EntitlementGroupHeader({
   collapsed,
   selected,
   partiallySelected,
+  searchOpen,
+  searchBusy,
   onSelectRow,
   onToggleCollapse,
+  onSetSearchOpen,
+  onPick,
 }: {
   group: ReviewGroup;
   /** Index in the FLAT review-item array (shared with the rows). */
@@ -28,8 +45,15 @@ export function EntitlementGroupHeader({
   selected: boolean;
   /** Some but not all members selected. */
   partiallySelected: boolean;
+  /** Whether this group's search/match picker is open (list-owned state). */
+  searchOpen: boolean;
+  /** A group apply is in flight — disable the picker's candidates. */
+  searchBusy: boolean;
   onSelectRow: (index: number, shiftKey: boolean) => void;
   onToggleCollapse: () => void;
+  onSetSearchOpen: (open: boolean) => void;
+  /** Resolve the whole group to the picked candidate (list-owned bulk apply). */
+  onPick: (candidate: PickedCandidate) => void;
 }) {
   const { counts } = group;
   const statusBits = [
@@ -39,6 +63,7 @@ export function EntitlementGroupHeader({
   ].filter(Boolean) as string[];
 
   return (
+    <>
     <div
       className={styles.groupHeader}
       data-testid={`group-header-${group.key}`}
@@ -85,6 +110,15 @@ export function EntitlementGroupHeader({
       <button
         type="button"
         className={styles.linkBtn}
+        aria-expanded={searchOpen}
+        onClick={() => onSetSearchOpen(!searchOpen)}
+        data-testid={`group-search-${group.key}`}
+      >
+        Match all…
+      </button>
+      <button
+        type="button"
+        className={styles.linkBtn}
         aria-expanded={!collapsed}
         onClick={onToggleCollapse}
         data-testid={`group-toggle-${group.key}`}
@@ -102,5 +136,16 @@ export function EntitlementGroupHeader({
         <i className={`fa-solid ${collapsed ? 'fa-chevron-down' : 'fa-chevron-up'}`} />
       </button>
     </div>
+    {searchOpen && (
+      <EntitlementSearch
+        instanceId={`group-${group.key}`}
+        seedTerm={searchSeedTerm(group.title, group.key)}
+        busy={searchBusy}
+        noteText={`Match all ${group.rows.length} items in ${group.title} to one ComicVine volume — an in-library volume matches every member, a new one is added once and proposes the rest.`}
+        onPick={onPick}
+        onCancel={() => onSetSearchOpen(false)}
+      />
+    )}
+    </>
   );
 }
