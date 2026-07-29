@@ -26,4 +26,4 @@
 
 - [x] 3.1 `docs/manual/user/import.md` — a failed group leaves nothing
       half-added
-- [ ] 3.2 Full backend suite green; soup 0; trace picks up FRG-IMP-027
+- [x] 3.2 Full backend suite green; soup 0; trace picks up FRG-IMP-027
