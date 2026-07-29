@@ -9,6 +9,20 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.15.1] — 2026-07-29
+
+### Fixed
+- **A failed library import no longer leaves a half-added series**
+  (`FRG-IMP-027`): if importing a group could not attach any of its files
+  — a metadata fetch that failed, or every file blocked — foragerr now
+  rolls back the series it had created, instead of leaving an empty,
+  monitored series that quietly started searching for issues on its own
+  (the behavior behind an import that "showed an error but then completed
+  behind the scenes"). A group that imports at least one file keeps its
+  series, and a series that already existed is never removed by a failed
+  import — only one this import created and could not populate. The files
+  on disk are never touched by the rollback.
+
 ## [v0.15.0] — 2026-07-29
 
 M11 import-intelligence, review refinements: acting on a whole group, and
