@@ -201,6 +201,7 @@ export function makeSeriesResource(
     aliases: [],
     series_group_id: null,
     booktype: null,
+    read_only: false,
     statistics: makeStats(),
     ...overrides,
   };
@@ -380,8 +381,8 @@ export const mockSuggestCandidates: SuggestCandidate[] = [
 
 /** `GET /api/v1/rootfolder` rows; null free_space = unreadable path. */
 export const mockRootFolders: RootFolderResource[] = [
-  { id: 1, path: '/comics', free_space: 250_000_000_000 },
-  { id: 2, path: '/mnt/archive/comics', free_space: null },
+  { id: 1, path: '/comics', free_space: 250_000_000_000, read_only: false },
+  { id: 2, path: '/mnt/archive/comics', free_space: null, read_only: false },
 ];
 
 /** `GET /api/v1/formatprofile` rows (id 1 is the seeded default). */

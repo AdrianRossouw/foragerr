@@ -1491,3 +1491,124 @@ describe('FRG-UI-026: collections trade branch + containment edit', () => {
     );
   });
 });
+
+describe('FRG-UI-045: read-only series offers no acquisition or file actions', () => {
+  it('FRG-UI-045 — a read-only series still renders (browsable) with a read-only marker', async () => {
+    renderDetail({ series: { ...mockSeriesResource, read_only: true, monitored: false } });
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Invincible' })).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId('series-read-only-badge')).toHaveTextContent(
+      'Read-only library',
+    );
+    // Reading is unaffected: issues still list.
+    expect(screen.getByTestId('issue-row-71')).toBeInTheDocument();
+  });
+
+  it('FRG-UI-045 — a read-only series renders no series monitor toggle', async () => {
+    renderDetail({ series: { ...mockSeriesResource, read_only: true, monitored: false } });
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Invincible' })).toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByRole('button', { name: 'Monitor series' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Unmonitor series' }),
+    ).not.toBeInTheDocument();
+    // The plain status label still reads, honestly, as text only.
+    expect(screen.getByText('Unmonitored')).toBeInTheDocument();
+  });
+
+  it('FRG-UI-045 — a read-only series offers no series-level search', async () => {
+    renderDetail({ series: { ...mockSeriesResource, read_only: true } });
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Invincible' })).toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByRole('button', { name: 'Search Monitored' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Search All' }),
+    ).not.toBeInTheDocument();
+    // Refresh (metadata only) is unaffected.
+    expect(screen.getByRole('button', { name: 'Refresh' })).toBeInTheDocument();
+  });
+
+  it('FRG-UI-045 — a read-only series offers no per-issue monitor toggle, search, or delete-file affordance', async () => {
+    renderDetail({ series: { ...mockSeriesResource, read_only: true } });
+
+    const row = await screen.findByTestId('issue-row-71');
+    expect(
+      within(row).queryByRole('button', { name: /monitor issue 1$/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(row).queryByRole('button', { name: 'Automatic search for issue 1' }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(row).queryByRole('button', { name: 'Interactive search for issue 1' }),
+    ).not.toBeInTheDocument();
+    // Issue 71 HAS a file (mockIssues) — the delete-file affordance is still
+    // suppressed rather than offered-then-refused.
+    expect(
+      within(row).queryByRole('button', { name: 'Delete file for issue 1' }),
+    ).not.toBeInTheDocument();
+    // No bulk-selection checkbox either — nothing it could drive is offered.
+    expect(
+      within(row).queryByRole('checkbox', { name: 'Select issue 1' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('FRG-UI-045 — a read-only series offers no Rename Files overflow item', async () => {
+    renderDetail({ series: { ...mockSeriesResource, read_only: true } });
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Invincible' })).toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole('button', { name: 'More' }));
+    expect(screen.getByTestId('series-overflow-menu')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('menuitem', { name: 'Rename Files' }),
+    ).not.toBeInTheDocument();
+    // Rescan (index-in-place, not a move) is unaffected.
+    expect(screen.getByRole('menuitem', { name: 'Rescan' })).toBeInTheDocument();
+  });
+
+  it('FRG-UI-045 — deleting a read-only series offers no delete-files option', async () => {
+    renderDetail({ series: { ...mockSeriesResource, read_only: true } });
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Invincible' })).toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Delete Invincible' });
+
+    expect(
+      within(dialog).queryByRole('checkbox', { name: /delete files from disk/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(dialog).getByText(/files on disk are never touched/i),
+    ).toBeInTheDocument();
+  });
+
+  it('FRG-UI-045 — a normal (non read-only) series is unaffected: monitor toggle, search, and rename all render', async () => {
+    renderDetail();
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Invincible' })).toBeInTheDocument(),
+    );
+    expect(screen.queryByTestId('series-read-only-badge')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Unmonitor series' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Search Monitored' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Search All' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'More' }));
+    expect(screen.getByRole('menuitem', { name: 'Rename Files' })).toBeInTheDocument();
+  });
+});
