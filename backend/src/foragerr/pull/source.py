@@ -56,9 +56,8 @@ import re
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Sequence
-from urllib.parse import urlsplit, urlunsplit
 
-from foragerr.api.cover_proxy import cover_url_allowed
+from foragerr.covers import canonical_cover_url
 from foragerr.db.migrations import app_version
 from foragerr.http import EgressPolicyError, HttpClientFactory, OutboundHttpError
 from foragerr.metadata.sanitize import _BIDI_INVISIBLE_RE
@@ -123,6 +122,10 @@ _MAX_CV_ID = 2_000_000_000
 # no duplication) so a hostile pull-source string cannot Trojan-Source-spoof
 # the rendered value either (RISK-011/014, FRG-NFR-012).
 _ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b[@-Z\\-_]")
+#: Lone UTF-16 surrogates — ``json.loads`` yields them from ``\uD800``-form
+#: escapes, and the SQLite driver raises ``UnicodeEncodeError`` on bind, which
+#: would roll back the whole multi-week write. Stripped so ingest never aborts.
+_SURROGATE_RE = re.compile(r"[\ud800-\udfff]")
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 _WS_RE = re.compile(r"\s+")
 
@@ -209,17 +212,23 @@ class PullFetchOutcome:
 # --- untrusted-JSON parsing (FRG-NFR-012) -----------------------------------
 
 
-def _clean_str(value: Any, *, limit: int = MAX_FIELD_LENGTH) -> str | None:
+def _clean_str(
+    value: Any, *, limit: int = MAX_FIELD_LENGTH, strings_only: bool = False
+) -> str | None:
     """Reduce one untrusted source scalar to bounded, control-free plain text.
 
     Non-strings are coerced via ``str`` (the source occasionally sends a bare
-    number for a field); ANSI escapes and C0/DEL control chars (including CR/LF)
+    number for a legacy field like ``issue``); ``strings_only`` refuses that
+    coercion, so an enrichment field never stores a Python repr of a stray
+    ``dict``/``list``. ANSI escapes and C0/DEL control chars (including CR/LF)
     are stripped so nothing can forge a log line or smuggle control codes into
-    storage; Unicode bidi-override / zero-width / invisible-format characters
-    are stripped (shared with ``metadata.sanitize``) so the value cannot
-    visually spoof its rendering (Trojan-Source, RISK-011/014); whitespace is
-    collapsed; the result is length-capped. Returns ``None`` when nothing
-    printable remains. Never raises.
+    storage; lone surrogates (which ``json`` produces from ``\\uD800`` escapes
+    and which the DB driver cannot encode) are stripped so one hostile string
+    cannot abort the whole write; Unicode bidi-override / zero-width /
+    invisible-format characters are stripped (shared with ``metadata.sanitize``)
+    so the value cannot visually spoof its rendering (Trojan-Source,
+    RISK-011/014); whitespace is collapsed; the result is length-capped.
+    Returns ``None`` when nothing printable remains. Never raises.
 
     ``limit`` lets the enrichment fields (FRG-PULL-011) carry their own caps —
     a description is allowed far more room than a series name — without any
@@ -227,9 +236,13 @@ def _clean_str(value: Any, *, limit: int = MAX_FIELD_LENGTH) -> str | None:
     """
     if value is None:
         return None
-    text = value if isinstance(value, str) else str(value)
-    text = _ANSI_RE.sub("", text)
+    if not isinstance(value, str):
+        if strings_only:
+            return None
+        value = str(value)
+    text = _ANSI_RE.sub("", value)
     text = _CONTROL_RE.sub("", text)
+    text = _SURROGATE_RE.sub("", text)
     text = _BIDI_INVISIBLE_RE.sub("", text)
     text = _WS_RE.sub(" ", text).strip()
     if len(text) > limit:
@@ -277,53 +290,36 @@ def _parse_date(value: Any) -> dt.date | None:
         return None
 
 
-def _canonical_cover_url(url: str) -> str | None:
-    """The stored form of a source cover URL: query and fragment dropped.
-
-    The source appends a cache-buster query that changes between fetches, so
-    keeping it would make an otherwise-unchanged week store a different value
-    on every refresh (breaking FRG-PULL-003 idempotency) and would multiply
-    proxy cache keys for one image. Returns ``None`` for anything that will not
-    even split (a malformed authority/port) — unparseable is refused, never
-    guessed at.
-    """
-    try:
-        parts = urlsplit(url.strip())
-        return urlunsplit((parts.scheme, parts.netloc, parts.path, "", "")) or None
-    except ValueError:
-        return None
-
-
 def _parse_cover(value: Any) -> str | None:
     """The entry's one stored cover URL, or ``None`` (FRG-PULL-011).
 
-    Picks the cover flagged primary, else the first usable one, canonicalizes
-    it, and returns it ONLY if it satisfies the cover allowlist — same
-    evaluator the proxy enforces at request and redirect-hop time. Everything
-    else (the relative no-cover placeholder, ``http://``, an off-host or
-    off-prefix target, a traversal) yields ``None``: the entry stores without a
+    Prefers the cover flagged primary, but only among covers that pass the
+    allowlist — the same evaluator (and canonical, control-free, capped form)
+    the proxy enforces at request and redirect-hop time. A hostile ``primary``
+    URL therefore cannot suppress a valid sibling: the first *valid* cover is
+    used when no valid primary exists. ``is_primary`` must be exactly ``True``
+    (not merely truthy). Everything invalid — the relative no-cover
+    placeholder, ``http://``, an off-host/off-prefix/ported/userinfo target, a
+    traversal — is skipped; if nothing survives, the entry stores without a
     cover rather than persisting a URL nothing may fetch. Never raises.
     """
     if not isinstance(value, list):
         return None
-    chosen: str | None = None
+    fallback: str | None = None
     for item in value:
         if not isinstance(item, dict):
             continue
         url = item.get("url")
-        if not isinstance(url, str) or not url.strip():
+        if not isinstance(url, str):
             continue
-        if chosen is None:
-            chosen = url
-        if item.get("is_primary"):
-            chosen = url
-            break
-    if chosen is None:
-        return None
-    canonical = _canonical_cover_url(chosen)
-    if canonical is None or not cover_url_allowed(canonical):
-        return None
-    return canonical
+        canonical = canonical_cover_url(url)
+        if canonical is None:
+            continue
+        if item.get("is_primary") is True:
+            return canonical
+        if fallback is None:
+            fallback = canonical
+    return fallback
 
 
 def _parse_people(value: Any, *, with_role: bool) -> str | None:
@@ -347,12 +343,17 @@ def _parse_people(value: Any, *, with_role: bool) -> str | None:
             break
         if not isinstance(raw, dict):
             continue
-        name = _clean_str(raw.get("name"), limit=MAX_NAME_LENGTH)
+        name = _clean_str(raw.get("name"), limit=MAX_NAME_LENGTH, strings_only=True)
         if name is None:
             continue
         if with_role:
             items.append(
-                {"role": _clean_str(raw.get("role"), limit=MAX_ROLE_LENGTH), "name": name}
+                {
+                    "role": _clean_str(
+                        raw.get("role"), limit=MAX_ROLE_LENGTH, strings_only=True
+                    ),
+                    "name": name,
+                }
             )
         else:
             items.append({"name": name})
@@ -382,8 +383,10 @@ def _parse_entry(raw: Any) -> ParsedPullEntry | None:
         cv_series_id=_coerce_cv_id(raw.get("comicid")),
         cv_issue_id=_coerce_cv_id(raw.get("issueid")),
         cover_url=_parse_cover(raw.get("covers")),
-        description=_clean_str(raw.get("description"), limit=MAX_DESCRIPTION_LENGTH),
-        upc=_clean_str(raw.get("upc"), limit=MAX_UPC_LENGTH),
+        description=_clean_str(
+            raw.get("description"), limit=MAX_DESCRIPTION_LENGTH, strings_only=True
+        ),
+        upc=_clean_str(raw.get("upc"), limit=MAX_UPC_LENGTH, strings_only=True),
         creators=_parse_people(raw.get("creators"), with_role=True),
         characters=_parse_people(raw.get("characters"), with_role=False),
     )
@@ -404,7 +407,10 @@ def parse_pull_payload(
     """
     try:
         data = json.loads(content)
-    except ValueError as exc:
+    except (ValueError, RecursionError) as exc:
+        # RecursionError: a deeply-nested hostile body. Degrade to a source
+        # outage like any other malformed payload rather than propagating past
+        # the outage handlers and failing the run with the source still healthy.
         raise PullSourceOutage(
             "pull source returned a non-JSON body", reason="malformed"
         ) from exc

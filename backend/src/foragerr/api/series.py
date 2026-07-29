@@ -57,7 +57,7 @@ from foragerr.metadata import (
     ComicVineBudgetExhausted,
     ComicVineClient,
     ComicVineError,
-    ComicVineMalformedResponse,
+    ComicVineObjectNotFound,
     sanitize_cv_text,
     sort_by_relevance,
 )
@@ -519,31 +519,14 @@ _GROUP_SORT_KEYS = ("title", "issue_count", "owned_count", "series_count")
 # --- routes -------------------------------------------------------------------
 
 
-#: ComicVine's own JSON-envelope signal that a single-object id (e.g. a
-#: volume) is unrecognized: envelope ``status_code`` 101, "Object Not Found" —
-#: distinct from the OK (1/absent) and auth-failure (100) codes
-#: ``ComicVineClient._raise_for_cv_error`` already special-cases. Every other
-#: envelope status falls through that method's catch-all as a
-#: ``ComicVineMalformedResponse`` whose message embeds the numeric code
-#: verbatim (``f"comicvine returned error status_code {status}"``); for a
-#: single-volume fetch, 101 is the only value that catch-all can plausibly
-#: carry, so this exact string is the volume-lookup route's only vantage
-#: point on the client's current typed errors — there is no dedicated
-#: ``ComicVineNotFound`` type to catch instead (FRG-API-026).
-_CV_OBJECT_NOT_FOUND_MESSAGE = "comicvine returned error status_code 101"
-
-
 def _is_cv_volume_not_found(exc: ComicVineError) -> bool:
     """True when a ``get_volume`` failure means ComicVine does not recognize
-    the id (see :data:`_CV_OBJECT_NOT_FOUND_MESSAGE`), as opposed to any
-    other upstream failure (rate limit, malformed body, 5xx, egress refusal)
-    — all of which stay on the standard :func:`_comicvine_error_to_api_error`
-    mapping, so a transport failure is never misreported as "this id does
-    not exist" (FRG-API-026)."""
-    return (
-        isinstance(exc, ComicVineMalformedResponse)
-        and str(exc) == _CV_OBJECT_NOT_FOUND_MESSAGE
-    )
+    the id (the typed :class:`ComicVineObjectNotFound`, envelope status 101),
+    as opposed to any other upstream failure (rate limit, malformed body, 5xx,
+    egress refusal) — all of which stay on the standard
+    :func:`_comicvine_error_to_api_error` mapping, so a transport failure is
+    never misreported as "this id does not exist" (FRG-API-026)."""
+    return isinstance(exc, ComicVineObjectNotFound)
 
 
 def _comicvine_error_to_api_error(exc: ComicVineError) -> ApiError:
@@ -898,6 +881,10 @@ async def lookup_volume(cv_volume_id: int, request: Request) -> LookupCandidateR
     fields carry "not applicable" values rather than being omitted, keeping
     one Pydantic type both lookup routes render through.
     """
+    if cv_volume_id <= 0:
+        # A non-positive id is invalid locally — refuse it here rather than
+        # spend an interactive ComicVine attempt formatting a bad request.
+        raise ApiError(400, "cv_volume_id must be a positive integer", field="cv_volume_id")
     settings = request.app.state.settings
     factory = comicvine_factory(settings)
     try:

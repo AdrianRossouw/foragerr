@@ -158,6 +158,35 @@ Existing stored weeks show no covers until their next refresh
 repopulates them (scheduled refresh handles it; no backfill command).
 Rollback = revert the release tag; columns are inert.
 
+## Deferred follow-ups (recorded at the security gate)
+
+Real but judged not worth churning the gated branch; a later cleanup
+should pick them up:
+
+1. **Ingest list-cap iteration bound**: the creators/characters caps
+   count *accepted* items, so a hostile list of all-invalid entries is
+   iterated in full (bounded only by the 4 MB body cap). Break on items
+   examined, not accepted.
+2. **List-projection payload trimming**: the week endpoint ships every
+   enrichment field on every row regardless of whether the card is
+   expanded; a hostile maximal week inflates the transfer. Consider
+   dropping `description`/`characters` from the list projection and
+   serving them from a per-entry detail fetch.
+3. **AddSeries autosuggest lapse**: after a CV-id resolve, editing the
+   search box suppresses autosuggest until Search is pressed; the
+   suppression should lapse once the input diverges from the prefill
+   term.
+4. **`normalizeTitle` vs `fuzzyMatch`**: the Calendar's in-library
+   suppression uses trim+lower, weaker than `lib/fuzzyMatch`'s
+   whitespace-collapsing normalization, so a doubled-space library
+   title errs toward *offering* Add (harmless — the add flow's own
+   `have_it` guard blocks a duplicate — but inconsistent with the
+   design's "errs toward suppressing" note). Align them.
+5. **Status badge vs interactive chip**: the "New" badge shares the
+   accent-tint treatment of the Add/filter chips beside it; give the
+   non-interactive badge a distinct token so it doesn't read as a
+   false affordance.
+
 ## Open Questions
 
 None blocking. The detail surface's exact form (popover vs expando) is

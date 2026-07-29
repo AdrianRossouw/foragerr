@@ -276,3 +276,64 @@ def test_lookup_volume_unauthenticated_is_401_before_any_fetch(client, monkeypat
     response = client.get("/api/v1/series/lookup/volume/101")
     assert response.status_code == 401
     assert transport.requests == []
+
+
+@pytest.mark.req("FRG-API-026")
+def test_lookup_volume_zero_id_is_400_field_cv_volume_id_before_any_fetch(
+    client, monkeypatch
+):
+    """``cv_volume_id`` 0 is invalid locally — refused with a 400 naming the
+    field, and ComicVine is never contacted (no interactive attempt is spent
+    formatting a request that can only fail)."""
+    factory, transport = _volume_factory(
+        client.app.state.settings,
+        _volume_handler({101: {"id": 101, "name": "Saga", "start_year": "2012"}}),
+    )
+    monkeypatch.setattr("foragerr.api.series.comicvine_factory", lambda _settings: factory)
+
+    response = client.get("/api/v1/series/lookup/volume/0")
+    assert response.status_code == 400
+    body = response.json()
+    assert body["errors"][0]["field"] == "cv_volume_id"
+    assert transport.requests == []  # no upstream fetch
+
+
+@pytest.mark.req("FRG-API-026")
+async def test_lookup_volume_non_positive_id_refused_before_touching_comicvine():
+    """The ``cv_volume_id <= 0`` guard fires before the handler reaches the
+    request, the factory, or ComicVine — proven by passing ``request=None`` and
+    still getting the 400 (a negative id, which the integer path converter would
+    not even route, is covered here for completeness)."""
+    from foragerr.api.errors import ApiError
+    from foragerr.api.series import lookup_volume
+
+    for bad_id in (0, -1, -999):
+        with pytest.raises(ApiError) as excinfo:
+            await lookup_volume(bad_id, request=None)  # never dereferenced
+        assert excinfo.value.status_code == 400
+        assert excinfo.value.field == "cv_volume_id"
+
+
+@pytest.mark.req("FRG-API-026")
+def test_object_not_found_101_does_not_trip_the_auth_failure_health_dimension(
+    client, monkeypatch
+):
+    """An "Object Not Found" (status_code 101) envelope is a VALID response that
+    proves the key works — it clears the auth-failure health dimension rather
+    than tripping it, so a stale/bad id never masquerades as a credential
+    problem in the health surface (FRG-META-019)."""
+    from foragerr.metadata import ratelimit
+
+    # Pretend a prior request tripped the auth-failure dimension.
+    ratelimit.gate().note_auth_failed()
+    assert ratelimit.gate().is_auth_failed() is True
+
+    factory, _transport = _volume_factory(
+        client.app.state.settings, _volume_handler(not_found=True)
+    )
+    monkeypatch.setattr("foragerr.api.series.comicvine_factory", lambda _settings: factory)
+
+    response = client.get("/api/v1/series/lookup/volume/999999")
+    assert response.status_code == 404
+    # The 101 response cleared the auth-failure flag — it is not an auth failure.
+    assert ratelimit.gate().is_auth_failed() is False

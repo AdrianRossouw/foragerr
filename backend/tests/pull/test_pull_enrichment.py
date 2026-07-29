@@ -18,6 +18,7 @@ from pathlib import Path
 import httpx
 import pytest
 
+from foragerr.api.pull import _characters, _creators, _decode_list
 from foragerr.http import HttpClientFactory
 from foragerr.pull import repo
 from foragerr.pull.source import (
@@ -26,6 +27,7 @@ from foragerr.pull.source import (
     MAX_NAME_LENGTH,
     MAX_UPC_LENGTH,
     PullSourceClient,
+    PullSourceOutage,
     parse_pull_payload,
 )
 from http_support import PUBLIC_V4, StubResolver, make_settings
@@ -102,10 +104,20 @@ def _payload_entry(*, cache_buster: str = "1780169968", **overrides) -> dict:
 async def _fetch(tmp_path: Path, payload: list[dict]):
     """Fetch one week through the real client over a stubbed transport — the
     ingest path end to end, no real DNS or I/O."""
+    return await _fetch_body(
+        tmp_path, json.dumps(payload).encode()
+    )
+
+
+async def _fetch_body(tmp_path: Path, body: bytes):
+    """Like :func:`_fetch`, but the transport serves an exact byte body — so a
+    field carrying a lone surrogate (``\\uD800``, a valid JSON escape) reaches
+    the parser as the source really sends it, rather than failing at response
+    construction the way ``httpx``'s ``json=`` encoder would."""
     factory = HttpClientFactory(
         make_settings(tmp_path),
         resolver=StubResolver({SOURCE_HOST: [PUBLIC_V4]}),
-        transport=httpx.MockTransport(lambda r: httpx.Response(200, json=payload)),
+        transport=httpx.MockTransport(lambda r: httpx.Response(200, content=body)),
     )
     client = PullSourceClient(factory, SOURCE_URL)
     async with client:
@@ -201,6 +213,9 @@ async def test_absent_enrichment_stores_as_null_not_empty_string(db, tmp_path):
         "https://comicgeeks.s3.amazonaws.com/comics/covers/large-1.jpg",
         "https://s3.amazonaws.com/comicgeeks/../other-bucket/large-1.jpg",  # traversal
         "https://s3.amazonaws.com/comicgeeks/%2e%2e/other-bucket/x.jpg",  # encoded
+        "https://u:p@s3.amazonaws.com/comicgeeks/large-1.jpg",  # userinfo
+        "https://s3.amazonaws.com:8443/comicgeeks/large-1.jpg",  # non-default port
+        "https://s3.amazonaws.com/comicgeeks/a\x01b.jpg",  # control char in path
     ],
 )
 async def test_hostile_or_placeholder_cover_stores_null_entry_otherwise_intact(
@@ -293,3 +308,154 @@ def test_creator_without_a_usable_name_is_dropped_role_may_be_absent():
         ).encode()
     )
     assert json.loads(entry.creators) == [{"role": None, "name": "K. Adeyemi"}]
+
+
+# --- lone-surrogate robustness (write path must never abort the run) ---------
+
+
+@pytest.mark.req("FRG-PULL-011")
+async def test_lone_surrogate_in_text_fields_stores_successfully(db, tmp_path):
+    """A lone UTF-16 surrogate (``\\uD800``) in a text field — which the DB
+    driver cannot bind and which would otherwise roll back the whole multi-week
+    write — is stripped at ingest so the row persists intact."""
+    entries = await _fetch(
+        tmp_path,
+        [
+            _payload_entry(
+                description="Ink \ud800 blot",
+                upc="12\ud80034",
+                creators=[{"role": "Writer", "name": "R. \ud800 Halloway"}],
+            )
+        ],
+    )
+    (row,) = await _store_and_read(db, entries)  # must not raise UnicodeEncodeError
+
+    assert row.series_name == "Hollow Lantern"  # the row actually persisted
+    assert "\ud800" not in row.description
+    assert row.description == "Ink blot"
+    assert row.upc == "1234"
+    assert "\ud800" not in row.creators
+    assert json.loads(row.creators) == [{"role": "Writer", "name": "R. Halloway"}]
+
+
+# --- primary/sibling cover selection ----------------------------------------
+
+
+@pytest.mark.req("FRG-PULL-011")
+async def test_off_allowlist_primary_does_not_suppress_a_valid_sibling(db, tmp_path):
+    """A hostile URL flagged primary is skipped (it fails the allowlist), and
+    the first VALID sibling is stored — a bad primary cannot deny a good cover."""
+    entries = await _fetch(
+        tmp_path,
+        [
+            _payload_entry(
+                covers=[
+                    {"url": "https://evil.example/x.jpg", "is_primary": True},
+                    {"url": f"{PRIMARY_COVER}?9", "is_primary": False},
+                ]
+            )
+        ],
+    )
+    (row,) = await _store_and_read(db, entries)
+    assert row.cover_url == PRIMARY_COVER
+
+
+@pytest.mark.req("FRG-PULL-011")
+async def test_is_primary_must_be_exactly_true_not_merely_truthy(db, tmp_path):
+    """``is_primary`` forces selection only when it is exactly ``True`` — a
+    truthy ``1`` or the string ``"false"`` does not, so the first valid cover in
+    order is used."""
+    entries = await _fetch(
+        tmp_path,
+        [
+            _payload_entry(
+                covers=[
+                    {"url": f"{ALT_COVER}?9", "is_primary": 1},
+                    {"url": f"{PRIMARY_COVER}?9", "is_primary": "false"},
+                ]
+            )
+        ],
+    )
+    (row,) = await _store_and_read(db, entries)
+    assert row.cover_url == ALT_COVER  # first valid, since neither is exactly True
+
+
+# --- non-string scalars store as absent, never a Python repr ----------------
+
+
+@pytest.mark.req("FRG-PULL-011")
+@pytest.mark.parametrize("junk", [{"nested": "obj"}, [1, 2, 3], True])
+def test_non_string_scalar_enrichment_stores_absent(junk):
+    """A non-string description / upc / name is dropped (``strings_only``),
+    never coerced to ``str(...)`` and stored as a Python repr."""
+    (entry,) = parse_pull_payload(
+        json.dumps(
+            [
+                _payload_entry(
+                    description=junk,
+                    upc=junk,
+                    creators=[{"role": "Writer", "name": junk}],
+                    characters=[{"name": junk}],
+                )
+            ]
+        ).encode()
+    )
+    assert entry.description is None
+    assert entry.upc is None
+    assert entry.creators is None  # the sole creator had no usable name
+    assert entry.characters is None
+
+
+# --- deeply-nested body degrades to an outage, never RecursionError ----------
+
+
+@pytest.mark.req("FRG-PULL-011")
+def test_deeply_nested_body_degrades_to_outage_not_recursionerror():
+    """A hostile deeply-nested JSON body blows Python's recursion limit inside
+    ``json.loads``; the parser catches it and degrades to a source outage
+    (``reason='malformed'``) rather than letting a ``RecursionError`` escape and
+    fail the run with the source still marked healthy."""
+    body = b"[" * 100_000 + b"]" * 100_000
+    with pytest.raises(PullSourceOutage) as excinfo:
+        parse_pull_payload(body)
+    assert excinfo.value.reason == "malformed"
+
+
+# --- read-path robustness: a malformed stored blob decodes to [] -------------
+
+
+@pytest.mark.req("FRG-PULL-011")
+async def test_read_path_decodes_malformed_enrichment_blob_as_empty(db, tmp_path):
+    """A row whose ``creators``/``characters`` column holds a hand-written
+    malformed JSON blob (non-JSON, an object, a bare array, deeply nested) reads
+    back through the API decode as an empty list — never a 500."""
+    import datetime as dt
+
+    from foragerr.pull.models import ParsedPullEntry
+
+    blobs = (
+        "not-json-at-all",
+        "{}",
+        "[1,2,3]",
+        "[" * 5000 + "]" * 5000,  # deeply nested — decode must not recurse-crash
+    )
+    entries = [
+        ParsedPullEntry(
+            series_name=f"Corrupt Ledger {i}",
+            issue_number=str(i),
+            release_date=dt.date(2026, 7, 29),
+            creators=blob,
+            characters=blob,
+        )
+        for i, blob in enumerate(blobs)
+    ]
+    rows = await _store_and_read(db, entries)
+
+    assert len(rows) == len(blobs)
+    for row in rows:
+        # The malformed blob round-tripped through storage unchanged...
+        assert row.creators in blobs
+        # ...and the read path degrades it to [] rather than raising.
+        assert _creators(row.creators) == []
+        assert _characters(row.characters) == []
+        assert _decode_list(row.creators) == []

@@ -27,13 +27,17 @@ the most abuse-prone endpoint shape there is):
      which would sidestep any path constraint) plus a required prefix
      matched on a directory boundary.
 
-   One evaluator, :func:`cover_url_allowed`, is the single source of truth:
-   the request-time check, the per-hop redirect check, and the pull ingest's
-   fail-closed cover validation all run the same rules.
-3. **Path handling**: the path is percent-decoded ONCE for the prefix test
-   and refused outright if a dot-segment or backslash survives — traversal
-   is never normalized away, and the URL fetched is always the caller's
-   original (canonicalized) one, never a decoded rebuild.
+   One evaluator, :func:`foragerr.covers.cover_url_allowed`, is the single
+   source of truth: the request-time check, the per-hop redirect check, and
+   the pull ingest's fail-closed cover validation all run the same rules. It
+   is total — a malformed URL fails closed to a refusal, never a 500.
+3. **Path & authority handling** (:mod:`foragerr.covers`): the path is
+   percent-decoded ONCE for the prefix test and refused outright if a
+   dot-segment, ``..``-prefixed segment, backslash, or control/bidi character
+   survives — traversal is never normalized away. Userinfo, a non-default
+   port, and a non-ASCII host are refused too, so no caller can multiply
+   fetches or dial an arbitrary port through the allowlist, and the fetched
+   path is always the caller's wire form, never a decoded rebuild.
 4. **Egress validation**: the fetch uses the hardened outbound factory's
    ``external`` profile — per-hop SSRF checks (loopback/private/link-local
    refused even via DNS tricks), TLS verified, bounded redirects with the
@@ -50,46 +54,17 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import OrderedDict
-from dataclasses import dataclass
-from urllib.parse import unquote, urlsplit
 
 from fastapi import APIRouter, Query, Request, Response
 
 from foragerr.api.errors import ApiError
+from foragerr.covers import canonical_cover_url, cover_url_allowed, target_allowed
 from foragerr.http import HttpClientFactory
 
 logger = logging.getLogger("foragerr.api.cover_proxy")
 
 router = APIRouter(prefix="/metadata", tags=["metadata"])
 
-
-@dataclass(frozen=True)
-class CoverHostRule:
-    """One allowlist entry: which host, whether its subdomains count, and the
-    path prefix (directory-boundary) a target on that host must sit under."""
-
-    host: str
-    allow_subdomains: bool
-    required_prefix: str | None = None
-
-
-#: Hosts covers may be fetched from. Grows per-host by change, never by
-#: config. A shared/multi-tenant endpoint MUST be exact-host with a required
-#: prefix — host alone would authorize every tenant on it.
-COVER_HOST_RULES: tuple[CoverHostRule, ...] = (
-    CoverHostRule("comicvine.gamespot.com", allow_subdomains=True),
-    CoverHostRule("comicvine.com", allow_subdomains=True),
-    CoverHostRule(
-        "s3.amazonaws.com", allow_subdomains=False, required_prefix="/comicgeeks/"
-    ),
-)
-
-#: Encoding layers peeled when testing a segment for traversal. Peeling is
-#: refusal-only — extra layers can only make the test stricter, never let
-#: through a path a single decode would have rejected.
-_MAX_DECODE_PEELS = 4
-
-_DOT_SEGMENTS = (".", "..")
 
 #: Streaming byte cap — CV covers are tens to a few hundred KiB; 2 MiB is
 #: generous headroom, never a whole-archive accident.
@@ -109,75 +84,39 @@ _IMAGE_MAGICS: tuple[tuple[bytes, str], ...] = (
 _cache: OrderedDict[str, tuple[bytes, str]] = OrderedDict()
 
 
-def _path_is_clean(path: str) -> bool:
-    """False if any segment is a dot-segment or carries a backslash, at any
-    encoding depth. Such a path is refused outright rather than normalized:
-    what it would have resolved to upstream never enters the decision."""
-    for segment in path.split("/"):
-        candidate = segment
-        for _ in range(_MAX_DECODE_PEELS):
-            if candidate in _DOT_SEGMENTS or "\\" in candidate:
-                return False
-            peeled = unquote(candidate)
-            if peeled == candidate:
-                break
-            candidate = peeled
-    return True
-
-
-def _target_allowed(scheme: str, host: str, path: str) -> bool:
-    """Rule evaluation over already-split parts. ``path`` is the path as sent
-    (still percent-encoded); it is decoded exactly once here."""
-    if scheme != "https" or not host:
-        return False
-    host = host.lower()
-    decoded = unquote(path) or "/"
-    if not decoded.startswith("/") or not _path_is_clean(decoded):
-        return False
-    for rule in COVER_HOST_RULES:
-        if host != rule.host and not (
-            rule.allow_subdomains and host.endswith("." + rule.host)
-        ):
-            continue
-        if rule.required_prefix and not decoded.startswith(rule.required_prefix):
-            continue
-        return True
-    return False
-
-
-def cover_url_allowed(url: str) -> bool:
-    """May foragerr fetch this cover URL? (FRG-META-021)
-
-    The single source of truth for the allowlist rules, shared by the
-    request-time check, the per-hop redirect check, and the pull ingest's
-    fail-closed validation of source-supplied cover URLs. HTTPS-only; host
-    must satisfy a :data:`COVER_HOST_RULES` entry including its subdomain
-    policy and required path prefix; the query string is not consulted.
-    """
-    parts = urlsplit(url)
-    return _target_allowed(parts.scheme, parts.hostname or "", parts.path)
-
-
-def _hop_path(url) -> str:
-    """The hop's path as SENT. ``httpx.URL.path`` is already decoded once, so
-    reading it would decode twice and blur what the remote actually receives;
-    ``raw_path`` (path + query, bytes) is the wire form."""
+def _hop_path(url) -> str | None:
+    """The hop's path as SENT, or ``None`` when no wire form is available.
+    ``httpx.URL.path`` is already decoded once, so reading it would decode
+    twice and blur what the remote actually receives; ``raw_path`` (path +
+    query, bytes) is the wire form. A missing wire form fails closed."""
     raw = getattr(url, "raw_path", None)
     if raw:
         text = raw.decode("ascii", "replace") if isinstance(raw, bytes) else str(raw)
         return text.split("?", 1)[0]
-    # No wire form available: "/" satisfies no prefix-constrained rule.
-    return getattr(url, "path", "") or "/"
+    return None
 
 
 def _hop_check(url) -> None:
     """Per-hop validator handed to the factory: every hop of the redirect
     walk — not just the first URL — is re-evaluated against the same rules,
-    so a hop to another host, or to a shared-host path outside the required
-    prefix, is refused mid-flight."""
+    so a hop to another host, to a non-default port, or to a shared-host path
+    outside the required prefix is refused mid-flight."""
     scheme = getattr(url, "scheme", "")
     host = getattr(url, "host", "") or ""
-    if not _target_allowed(scheme, host, _hop_path(url)):
+    path = _hop_path(url)
+    try:
+        port = url.port
+    except (ValueError, AttributeError):
+        port = None
+    allowed = path is not None and target_allowed(
+        scheme,
+        host,
+        path,
+        userinfo_present=bool(getattr(url, "username", "") or getattr(url, "password", "")),
+        port=port,
+        ascii_host=host.isascii(),
+    )
+    if not allowed:
         raise ValueError(
             f"cover hop {host!r} (scheme {scheme!r}) is outside the cover allowlist"
         )
@@ -221,27 +160,24 @@ def _semaphore() -> "asyncio.Semaphore":
 @router.get("/cover")
 async def proxy_cover(request: Request, src: str = Query(..., max_length=1024)) -> Response:
     """Fetch one allowlisted cover and serve it same-origin (FRG-META-021)."""
-    parts = urlsplit(src)
-    if parts.scheme != "https":
-        raise ApiError(400, "cover src must be https", field="src")
+    # cover_url_allowed is total — a malformed src fails closed to this 400,
+    # never an unguarded urlsplit ValueError / 500.
     if not cover_url_allowed(src):
         raise ApiError(
             400,
             "cover src is not an allowed metadata cover target "
-            "(host, subdomain, or path prefix)",
+            "(host, subdomain, port, or path prefix)",
             field="src",
         )
-    # Canonical cache/fetch key: case-normalized scheme+host, fragment
-    # dropped, PATH LEFT AS SENT — variant spellings of one URL share one
-    # cache entry and can't multiply fetches, and the fetched path is the
-    # caller's, never a decoded rebuild of it.
-    src = parts._replace(
-        scheme="https", netloc=(parts.netloc or "").lower(), fragment=""
-    ).geturl()
+    # Canonical cache key: userinfo, port, query, and fragment dropped so
+    # variant spellings of one image share one cache entry and can't multiply
+    # fetches. The path is preserved byte-for-byte, so the FETCHED url stays
+    # the caller's wire form (decode-once discipline), never a rebuild.
+    cache_key = canonical_cover_url(src) or src
 
-    cached = _cache.get(src)
+    cached = _cache.get(cache_key)
     if cached is not None:
-        _cache.move_to_end(src)
+        _cache.move_to_end(cache_key)
         body, content_type = cached
     else:
         client = HttpClientFactory(request.app.state.settings).external()
@@ -258,7 +194,7 @@ async def proxy_cover(request: Request, src: str = Query(..., max_length=1024)) 
                     src, max_bytes=MAX_COVER_BYTES, hop_check=_hop_check
                 )
         except Exception as exc:  # noqa: BLE001 - upstream fetch boundary
-            logger.info("cover proxy fetch failed for %s: %s", parts.hostname, exc)
+            logger.info("cover proxy fetch failed: %s", exc)
             raise ApiError(502, "cover fetch failed") from exc
         finally:
             await client.aclose()
@@ -268,7 +204,7 @@ async def proxy_cover(request: Request, src: str = Query(..., max_length=1024)) 
         content_type = _sniff_image(body) or ""
         if not content_type:
             raise ApiError(502, "cover response is not an image")
-        _cache_put(src, body, content_type)
+        _cache_put(cache_key, body, content_type)
 
     return Response(
         content=body,

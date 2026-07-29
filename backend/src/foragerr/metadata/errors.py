@@ -99,6 +99,14 @@ class ComicVineMalformedResponse(ComicVineError):
     top-level type, or an unexpected CV error status)."""
 
 
+class ComicVineObjectNotFound(ComicVineMalformedResponse):
+    """ComicVine reported the requested object does not exist (envelope
+    ``status_code`` 101 — "Object Not Found"). A subclass of
+    :class:`ComicVineMalformedResponse` so existing catch-alls still handle it,
+    but a distinct type callers can catch to distinguish a genuinely unknown id
+    from a transport failure (FRG-API-026)."""
+
+
 class ComicVineUnavailable(ComicVineError):
     """ComicVine could not be reached or returned a server/transport error
     (timeout, 5xx, egress refusal, oversize body)."""

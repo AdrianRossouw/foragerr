@@ -140,7 +140,9 @@ def _decode_list(stored: str | None) -> list[dict[str, Any]]:
         return []
     try:
         decoded = json.loads(stored)
-    except ValueError:
+    except (ValueError, RecursionError):
+        # RecursionError guards a pathologically-nested blob written by some
+        # other path — the ingest only ever stores shallow objects.
         return []
     if not isinstance(decoded, list):
         return []

@@ -515,6 +515,68 @@ describe('FRG-PULL-008: inline debuts + debut filter', () => {
     await user.click(screen.getByRole('button', { name: /New series only/ }));
     expect(await screen.findByText('Nocturne Atlas')).toBeInTheDocument();
   });
+
+  it('FRG-PULL-008 — the banner headline count matches the rendered cards once debutsOnly is active', async () => {
+    const { fetcher } = fakeFetcher(() => pageOf(records, { pageSize: 200 }));
+    const user = userEvent.setup();
+    renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
+
+    await screen.findByText('Hollow Signal');
+    // Before the toggle: both cards render, and the banner's headline (2)
+    // matches them.
+    expect(
+      screen.getByText(/Showing all 2 single issues shipping this week/),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /New series only/ }));
+    await waitFor(() =>
+      expect(screen.queryByText('Nocturne Atlas')).not.toBeInTheDocument(),
+    );
+    // Only one card renders now (the debut) — the banner headline must track
+    // that rendered count, not the pre-debutsOnly-filter week total of 2.
+    const agenda = screen.getByTestId('calendar-agenda');
+    expect(within(agenda).getAllByTestId(/^calendar-card-/)).toHaveLength(1);
+    expect(
+      screen.getByText(/Showing all 1 single issue shipping this week/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Showing all 2 single issues shipping this week/),
+    ).not.toBeInTheDocument();
+  });
+
+  it('FRG-PULL-008 — the debuts-only toggle reflects debuts in the CURRENT scope, not the whole week', async () => {
+    const { fetcher } = fakeFetcher(() => pageOf(records, { pageSize: 200 }));
+    const user = userEvent.setup();
+    renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
+
+    await screen.findByText('Hollow Signal');
+    // All-releases scope: one debut in scope, so the toggle advertises it.
+    expect(screen.getByRole('button', { name: /New series only/ })).toHaveTextContent(
+      '1',
+    );
+
+    // A `new_series` entry is never "following" (no matched issue -> no
+    // series -> isFollowing false), so Following scope has zero debuts in
+    // scope — the toggle must not offer a filter that would yield the empty
+    // state, so it disappears rather than advertise a phantom count.
+    await user.click(screen.getByRole('radio', { name: 'Following' }));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: /New series only/ }),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
+  it('FRG-PULL-008 — a debut-free week offers no debuts-only toggle at all', async () => {
+    const noDebutRecords = [linkedRow('Nocturne Atlas', '2026-07-01')];
+    const { fetcher } = fakeFetcher(() => pageOf(noDebutRecords, { pageSize: 200 }));
+    renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
+
+    await screen.findByText('Nocturne Atlas');
+    expect(
+      screen.queryByRole('button', { name: /New series only/ }),
+    ).not.toBeInTheDocument();
+  });
 });
 
 describe('FRG-UI-042: Calendar covers and enrichment detail', () => {
@@ -681,6 +743,86 @@ describe('FRG-UI-042: Calendar covers and enrichment detail', () => {
         path.includes('comicvine') || path.startsWith('/api/v1/series/lookup'),
     );
     expect(cvCalls).toHaveLength(0);
+  });
+
+  it('FRG-UI-042 — the detail description is stripped of markup and visually clamped', async () => {
+    // Untrusted ComicVine deck text (same as the Add-series candidate card) —
+    // residual markup must never reach the DOM, and a maximal (backend-capped
+    // at 4000 chars) description must not blow out the card past a 2-line clamp.
+    const description = '<b>x</b>' + ' filler word'.repeat(200);
+    const records = [
+      makePullRecord({
+        id: 4001,
+        seriesName: 'Marrow Line',
+        publisher: 'Umbral Press',
+        releaseDate: '2026-07-01',
+        matchType: 'unmatched',
+        description,
+      }),
+    ];
+    const { fetcher } = fakeFetcher(() => pageOf(records, { pageSize: 200 }));
+    const user = userEvent.setup();
+    renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
+
+    await screen.findByText('Marrow Line');
+    await user.click(
+      screen.getByRole('button', { name: 'Show details for Marrow Line' }),
+    );
+    const detail = await screen.findByTestId('calendar-detail-4001');
+
+    const deck = detail.querySelector('p');
+    expect(deck).not.toBeNull();
+    // stripHtml (the exact helper AddSeries' candidate card uses) reduces the
+    // markup to plain text — no literal tag reaches the DOM.
+    expect(deck!.innerHTML).not.toContain('<b>');
+    expect(deck!.textContent?.startsWith('x filler word')).toBe(true);
+    // The same 2-line clamp idiom as AddSeries' `.deck` bounds a maximal
+    // description's visual height.
+    expect(deck!.className).toMatch(/detailDeck/);
+  });
+
+  it('FRG-UI-042 — a repaired coverUrl on the same row id remounts and retries rather than staying stuck on the spine', async () => {
+    const brokenUrl = 'https://s3.amazonaws.com/comicgeeks/comics/covers/broken.jpg';
+    const fixedUrl = 'https://s3.amazonaws.com/comicgeeks/comics/covers/fixed.jpg';
+    let coverUrl = brokenUrl;
+    const records = () => [
+      makePullRecord({
+        id: 5001,
+        seriesName: 'Marrow Line',
+        publisher: 'Umbral Press',
+        releaseDate: '2026-07-01',
+        matchType: 'unmatched',
+        coverUrl,
+      }),
+    ];
+    const { fetcher } = fakeFetcher(() => pageOf(records(), { pageSize: 200 }));
+    const client = createQueryClient();
+    renderWithProviders(<CalendarScreen />, {
+      fetcher,
+      client,
+      route: '/calendar?week=2026-W27',
+    });
+
+    await screen.findByText('Marrow Line');
+    const brokenImg = screen.getByRole('img', { name: 'Marrow Line cover' });
+    fireEvent.error(brokenImg);
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('img', { name: 'Marrow Line cover' }),
+      ).not.toBeInTheDocument(),
+    );
+
+    // The same row id refetches with a repaired coverUrl — the sticky
+    // `failed` flag must not keep forcing the spine now that the URL differs.
+    coverUrl = fixedUrl;
+    await client.invalidateQueries({ queryKey: queryKeys.pull.all() });
+    const repairedImg = await screen.findByRole('img', {
+      name: 'Marrow Line cover',
+    });
+    expect(repairedImg).toHaveAttribute(
+      'src',
+      `/api/v1/metadata/cover?src=${encodeURIComponent(fixedUrl)}`,
+    );
   });
 });
 

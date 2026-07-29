@@ -466,8 +466,16 @@
   line-height: 1.5;
 }
 
+/* Same clamp idiom as AddSeries' `.deck` (AddSeries.module.css) — the backend
+ * caps this description at 4000 chars, so without a clamp a maximal payload
+ * would blow out the agenda card's rhythm. */
 .detailDeck {
   margin: 0 0 var(--spacing-sm);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .detailRow {
@@ -485,9 +493,15 @@
   font-weight: var(--font-weight-bold);
 }
 
+/* The backend caps creators/characters at 64 entries each — bound the value's
+ * visual height too (scrollable within the box) so a maximal list can't blow
+ * out the card the same way an unclamped description would. */
 .detailValue {
+  display: block;
   min-width: 0;
   overflow-wrap: anywhere;
+  max-height: 4.5em;
+  overflow-y: auto;
 }
 
 /* --- Derived-state tones (projection of `state`, never a stored value) --- */

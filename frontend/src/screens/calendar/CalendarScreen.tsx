@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Toolbar } from '../../components/Toolbar';
 import { SegmentedControl } from '../../components/SegmentedControl';
+import { stripHtml } from '../add/AddSeries';
 import {
   BookmarkIcon,
   CheckIcon,
@@ -143,14 +144,17 @@ function hasDetail(r: PullEntryRecord): boolean {
  * The expanded entry detail (FRG-UI-042) — the enrichment stored at ingest
  * (FRG-PULL-011), rendered as text (never HTML) with absent fields omitted
  * entirely rather than shown empty. Reads nothing but the pull row, so opening
- * it issues no request at all, ComicVine or otherwise.
+ * it issues no request at all, ComicVine or otherwise. The description is the
+ * same untrusted ComicVine deck the Add-series candidate card renders, so it
+ * runs through the identical `stripHtml` before display (never dangerouslySet).
  */
 function EntryDetail({ r, testId }: { r: PullEntryRecord; testId: string }) {
   const creators = r.creators ?? [];
   const characters = r.characters ?? [];
+  const description = r.description ? stripHtml(r.description) : '';
   return (
     <div className={styles.detail} data-testid={testId}>
-      {r.description && <p className={styles.detailDeck}>{r.description}</p>}
+      {description && <p className={styles.detailDeck}>{description}</p>}
       {creators.length > 0 && (
         <div className={styles.detailRow}>
           <span className={styles.detailLabel}>Creators</span>
@@ -314,13 +318,24 @@ export function CalendarScreen() {
     // equals a day key), so it must not inflate the week/day counts either.
     const agenda = pubFiltered.filter((r) => r.releaseDate != null);
 
+    // Whole-week totals (publisher-filtered, but ignoring scope/debutsOnly) —
+    // these back the "N more titles ship" / "N from series you follow" side of
+    // the banner, which is about the scope toggle, not the debuts filter.
     const weekAll = agenda.length;
     const weekFollowed = agenda.filter(isFollowing).length;
-    const debutCount = agenda.filter((r) => r.matchType === 'new_series').length;
     const scoped = scope === 'following' ? agenda.filter(isFollowing) : agenda;
+    // Debuts in the CURRENT scope, not the whole week: a `new_series` entry is
+    // never "following" (no matched issue -> no series -> isFollowing false),
+    // so this is always 0 in Following scope — the toggle renders only when
+    // this is > 0, rather than advertise a count that yields an empty view.
+    const debutCount = scoped.filter((r) => r.matchType === 'new_series').length;
     const visible = debutsOnly
       ? scoped.filter((r) => r.matchType === 'new_series')
       : scoped;
+    // What is actually rendered once publisher + scope + debutsOnly all
+    // compose — the banner's headline figure must match this count, never a
+    // pre-debutsOnly-filter total (publisher + scope alone).
+    const renderedCount = visible.length;
 
     const days = weekDates(week)
       .map((date) => {
@@ -346,7 +361,7 @@ export function CalendarScreen() {
       })
       .filter((d) => d.count > 0);
 
-    return { publishers, debutCount, weekAll, weekFollowed, days };
+    return { publishers, debutCount, weekAll, weekFollowed, renderedCount, days };
   }, [records, publisher, scope, debutsOnly, week, todayKey]);
 
   // The "across every publisher" scope only holds with no publisher filter; when
@@ -354,12 +369,15 @@ export function CalendarScreen() {
   // suffix) rather than claim a breadth that no longer applies.
   const publisherScope =
     publisher === 'all' ? 'across every publisher' : `from ${publisher}`;
+  // The headline figure is `renderedCount` — what publisher + scope + debutsOnly
+  // together actually put on screen — never the pre-debutsOnly-filter total, so
+  // the banner never claims a count larger than what's rendered underneath it.
   const banner =
     scope === 'following'
-      ? `Comics ship in one big weekly drop. You're seeing the ${view.weekFollowed} ` +
-        `issue${view.weekFollowed === 1 ? '' : 's'} from series you follow — ` +
+      ? `Comics ship in one big weekly drop. You're seeing the ${view.renderedCount} ` +
+        `issue${view.renderedCount === 1 ? '' : 's'} from series you follow — ` +
         `${view.weekAll - view.weekFollowed} more titles ship this week ${publisherScope}.`
-      : `Showing all ${view.weekAll} single issue${view.weekAll === 1 ? '' : 's'} ` +
+      : `Showing all ${view.renderedCount} single issue${view.renderedCount === 1 ? '' : 's'} ` +
         `shipping this week${publisher === 'all' ? '' : ` from ${publisher}`} — ` +
         `${view.weekFollowed} from series you already follow.`;
 
@@ -439,7 +457,12 @@ export function CalendarScreen() {
         data-future={isFuture}
       >
         <div className={styles.cardRow}>
-          <CardCover r={r} name={name} />
+          {/* Keyed on the cover URL, not just cardKey: the row's `failed` flag
+              lives inside CardCover's own state, so a refetch that repairs a
+              previously-broken cover under the SAME row id needs a changed key
+              here to remount the component and reset `failed` — otherwise the
+              stale flag keeps forcing the spine even once the URL is good. */}
+          <CardCover key={r.coverUrl ?? 'none'} r={r} name={name} />
           <div className={styles.cardBody}>
             <div className={styles.cardTitle}>
               <span className={styles.cardTitleText}>{name}</span>
@@ -529,19 +552,23 @@ export function CalendarScreen() {
                 {commandLabel}: {command.status}
               </span>
             )}
-            <button
-              type="button"
-              className={styles.filterToggle}
-              data-active={debutsOnly}
-              aria-pressed={debutsOnly}
-              title="Show only this week's new-series debuts"
-              onClick={() => setDebutsOnly((v) => !v)}
-            >
-              New series only
-              {view.debutCount > 0 && (
+            {/* A debut-free scope must not offer a filter that yields the empty
+                state (restores the retired "no new-series -> no strip"
+                behavior at the toggle level): only render it when the CURRENT
+                scope actually has a debut to narrow to. */}
+            {view.debutCount > 0 && (
+              <button
+                type="button"
+                className={styles.filterToggle}
+                data-active={debutsOnly}
+                aria-pressed={debutsOnly}
+                title="Show only this week's new-series debuts"
+                onClick={() => setDebutsOnly((v) => !v)}
+              >
+                New series only
                 <span className={styles.filterCount}>{view.debutCount}</span>
-              )}
-            </button>
+              </button>
+            )}
             <select
               className={styles.pubSelect}
               aria-label="Filter by publisher"

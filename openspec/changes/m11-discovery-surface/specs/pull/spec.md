@@ -130,6 +130,14 @@ and dismissing or ignoring any entry has no side effects.
   unmatched and new-series entries without completing any add flow
 - **THEN** no series record is created and no pull-side state changes
 
+#### Scenario: A debut-free week offers no debut filter
+
+- **WHEN** the viewed week's projection contains no `new_series`
+  entries in the current scope (none tagged, or all filtered out)
+- **THEN** no "New" badge and no debut-filter affordance render — the
+  surface never offers a filter that would resolve to an empty view
+  (the successor to the retired "no new-series, no strip" behavior)
+
 ## ADDED Requirements
 
 ### Requirement: FRG-PULL-011 — Pull payload enrichment ingestion
