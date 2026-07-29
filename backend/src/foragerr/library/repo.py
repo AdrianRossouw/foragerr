@@ -481,6 +481,19 @@ def wanted_issues(as_of: dt.date | None = None) -> Select:
         .where(IssueRow.monitored.is_(True))
         .where(released)
         .where(~has_file)
+        .where(~_on_read_only_root())
+    )
+
+
+def _on_read_only_root():
+    """A correlated EXISTS true when ``IssueRow``'s series sits on a read-only
+    reference root (FRG-SER-021/022). Both acquisition projections exclude it:
+    a browse-only series is never wanted, missing, searched, or grabbed."""
+    return (
+        exists()
+        .where(SeriesRow.id == IssueRow.series_id)
+        .where(RootFolderRow.id == SeriesRow.root_folder_id)
+        .where(RootFolderRow.read_only.is_(True))
     )
 
 
@@ -525,7 +538,12 @@ def missing_issues(as_of: dt.date | None = None) -> Select:
         (IssueRow.store_date.is_(None)) & (IssueRow.cover_date.is_(None)),
     )
     has_file = exists().where(IssueFileRow.issue_id == IssueRow.id)
-    return select(IssueRow).where(released).where(~has_file)
+    return (
+        select(IssueRow)
+        .where(released)
+        .where(~has_file)
+        .where(~_on_read_only_root())
+    )
 
 
 # --- statistics (FRG-SER-009) ------------------------------------------------
