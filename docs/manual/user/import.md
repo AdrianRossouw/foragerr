@@ -231,6 +231,14 @@ through the normal placement/renaming path. Re-running the scan re-checks the
 root: confirmed and skipped decisions carry forward, and files that imported
 are never staged again.
 
+**Importing under a read-only root** (see `library.md` §Read-only / reference
+libraries) always behaves as in-place, and renaming is force-disabled for that
+series, regardless of your `library_import_mode` and `rename_enabled`
+settings — files are indexed at their existing paths and never renamed,
+moved, or copied. The series this creates is browse-only: metadata still
+refreshes and the series still serves over OPDS, but it is never monitored,
+searched, or downloaded into.
+
 If importing a group fails before any of its files are attached — a metadata
 fetch that could not complete, or every file blocked — foragerr leaves nothing
 half-added: the series it would have created is rolled back, so the library

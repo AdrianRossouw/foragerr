@@ -1878,6 +1878,80 @@ proxy gains a second untrusted party's bytes behind a narrower rule
 than the first, and the pull-source trust boundary tightens (ingest-time
 fail-closed validation) rather than loosens.
 
+### 2026-07-29 — read-only-library
+
+New surface and its disposition (COMP 9 — file mover, plus the
+acquisition entry points in COMP 1/12 it must now refuse against): a
+library root can be registered **read-only** (FRG-SER-021), so foragerr
+can index and serve an existing, already-organized collection (rig
+finding #4 — a real read-only-mounted library was refused outright
+because every root previously had to be writable) without ever
+reorganizing, renaming, moving, downloading into, or deleting from it.
+This is the inverse of most entries in this document: rather than
+defending the process against a hostile input, it defends the
+**operator's own real files** against foragerr's own write paths — a
+software-defect or wrong-assumption class of tampering, not an external
+attacker, but tampering all the same if a write path is missed.
+
+- **Registration validates readability, not writability**: a read-only
+  root's path check swaps the existing `os.W_OK` requirement (FRG-SER-008)
+  for `os.R_OK` — an existing, readable directory registers; a missing or
+  unreadable path, a duplicate, or a nested path is still refused with
+  the same structured 400 as any other root. The read-only flag is a
+  persisted, additive column on the root-folder row — no schema rewrite,
+  existing (non-read-only) roots unaffected.
+- **The write boundary is fail-closed at every disk-write path, not just
+  behind the endpoints that normally reach them**: import placement,
+  per-series rescan moves, the download/import writer, and delete/
+  recycle-bin all gate on a single guard — `root_is_read_only()` /
+  `series_is_read_only()` — checked in the **flow body**, not only at the
+  API route. This placement matters because `POST /api/v1/command` can
+  enqueue any registered command by name (FRG-SCHED, COMP 12): a
+  per-endpoint check on the ordinary rescan/delete routes would not stop
+  the same operation reaching a read-only series through the generic
+  command surface. One guard, checked where the write actually happens,
+  covers both paths by construction rather than by remembering to add
+  the check twice. A write reaching any of these paths for a read-only
+  series is refused with a clear reason; no bytes are written to the
+  read-only root by any route.
+- **Index-in-place import (FRG-IMP-028)**: importing a Library Import
+  group under a read-only root reuses the existing scan → match →
+  register pipeline with the placement step made a no-op — the series
+  and its `issue_files` register at the files' real, existing paths.
+  This is enforced by forcing the effective import behavior to
+  `library_import_mode: in_place` and `rename_enabled: false` for a
+  read-only root's series regardless of the operator's global settings,
+  so a library-wide rename-on / move-mode configuration can never
+  reach into a read-only root through the ordinary import path. Metadata
+  fetch and cover caching write to the database and the config-dir cover
+  cache exactly as for any other series — never the root — so this
+  needed no new code, only confirming the existing write targets.
+- **A read-only series is acquisition-inert by construction
+  (FRG-SER-022)**: created unmonitored, and the monitor/search/grab/
+  delete-files entry points refuse it with a clear reason rather than a
+  silent no-op; the derived wanted-issues/calendar projections exclude
+  read-only series from the acquisition surfaces at the query level, so
+  there is no monitored-but-suppressed state to drift out of sync. This
+  mirrors the FRG-SER-019/020 pattern of proving an invariant by
+  exclusion at the projection rather than scattering a conditional
+  through the wanted/search machinery.
+- **UI marking is convenience, not the boundary (FRG-UI-045)**: read-only
+  roots and their series are marked read-only and the monitor toggle,
+  search/grab, and file-mutating actions are hidden or disabled — so the
+  operator is never offered an action the backend will refuse — but the
+  backend guard above is what actually enforces the boundary; a UI bug
+  or a direct API call is still caught fail-closed.
+
+No new STRIDE category: this entry **tightens** an existing one (COMP 9
+Tampering — move/delete safety) by adding a write-refusal boundary over a
+class of root the write paths previously assumed didn't exist. No new
+listener, no new egress target, no new parser of untrusted input, no new
+credential, no new dependency, no migration beyond the additive
+`read_only` column. RISK-010/019/032 (archive safety, path confinement,
+crash-safe writes) are unchanged — they still govern every write that
+*is* permitted; this entry is about writes that must now never be
+attempted at all. See RISK-054.
+
 ## Coverage summary
 
 - **Well covered by the five drafts** (mitigation named, no new requirement needed): OPDS
