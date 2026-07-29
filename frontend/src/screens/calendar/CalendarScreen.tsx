@@ -6,6 +6,7 @@ import { SegmentedControl } from '../../components/SegmentedControl';
 import {
   BookmarkIcon,
   CheckIcon,
+  MoreIcon,
   PlusIcon,
   RefreshIcon,
   SearchIcon,
@@ -24,6 +25,7 @@ import type {
   AddSeriesNavigationState,
   PullEntryRecord,
 } from '../../api/types';
+import { candidateCoverUrl } from '../../api/urls';
 import { publisherAccent, publisherTint } from '../../theme/palettes';
 import {
   addWeeks,
@@ -44,8 +46,12 @@ import styles from './CalendarScreen.module.css';
  * (Following/All) and the publisher filter are client-side view state over the
  * whole loaded week (the hook aggregates every page — design decisions 1 & 4).
  * Per-entry want/skip/search actions (FRG-PULL-007) delegate to the canonical
- * issue operations; the pull endpoint stays read-only (D4). New-series debuts
- * surface in a distinct strip with a prefilled add hand-off (FRG-PULL-008).
+ * issue operations; the pull endpoint stays read-only (D4). Every unlinked
+ * entry whose series is not already in the library offers an add hand-off —
+ * carrying the entry's ComicVine series id when the source supplied one —
+ * and new-series debuts render inline with a "New" badge behind an optional
+ * debuts-only filter (FRG-PULL-008). Stored covers and enrichment render from
+ * the pull row itself, spending no ComicVine budget (FRG-UI-042).
  */
 
 type Scope = 'following' | 'all';
@@ -97,6 +103,80 @@ function spineStyle(r: PullEntryRecord): CSSProperties {
     backgroundColor: publisherTint(r.publisher),
     borderLeft: `2px solid ${publisherAccent(r.publisher)}`,
   };
+}
+
+/**
+ * The card's cover: the entry's stored cover served same-origin through the
+ * authenticated proxy (FRG-UI-042), lazily so a ~70-entry week only fetches
+ * what the viewport shows. No stored URL — or a fetch that errors — falls back
+ * to the publisher-tinted spine, never a broken image.
+ */
+function CardCover({ r, name }: { r: PullEntryRecord; name: string }) {
+  const [failed, setFailed] = useState(false);
+  const src = failed ? null : candidateCoverUrl(r.coverUrl);
+  if (src === null) {
+    return <div className={styles.spine} style={spineStyle(r)} aria-hidden />;
+  }
+  return (
+    <img
+      className={styles.cover}
+      src={src}
+      alt={`${name} cover`}
+      loading="lazy"
+      style={spineStyle(r)}
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+/** True when an entry has any stored enrichment worth a detail surface. */
+function hasDetail(r: PullEntryRecord): boolean {
+  return Boolean(
+    r.description ||
+      r.upc ||
+      (r.creators?.length ?? 0) > 0 ||
+      (r.characters?.length ?? 0) > 0,
+  );
+}
+
+/**
+ * The expanded entry detail (FRG-UI-042) — the enrichment stored at ingest
+ * (FRG-PULL-011), rendered as text (never HTML) with absent fields omitted
+ * entirely rather than shown empty. Reads nothing but the pull row, so opening
+ * it issues no request at all, ComicVine or otherwise.
+ */
+function EntryDetail({ r, testId }: { r: PullEntryRecord; testId: string }) {
+  const creators = r.creators ?? [];
+  const characters = r.characters ?? [];
+  return (
+    <div className={styles.detail} data-testid={testId}>
+      {r.description && <p className={styles.detailDeck}>{r.description}</p>}
+      {creators.length > 0 && (
+        <div className={styles.detailRow}>
+          <span className={styles.detailLabel}>Creators</span>
+          <span className={styles.detailValue}>
+            {creators
+              .map((c) => (c.role ? `${c.name} (${c.role})` : c.name))
+              .join(', ')}
+          </span>
+        </div>
+      )}
+      {characters.length > 0 && (
+        <div className={styles.detailRow}>
+          <span className={styles.detailLabel}>Characters</span>
+          <span className={styles.detailValue}>
+            {characters.map((c) => c.name).join(', ')}
+          </span>
+        </div>
+      )}
+      {r.upc && (
+        <div className={styles.detailRow}>
+          <span className={styles.detailLabel}>UPC</span>
+          <span className={styles.detailValue}>{r.upc}</span>
+        </div>
+      )}
+    </div>
+  );
 }
 
 /** The derived-state glyph shown on a card (a projection of `state`, D4). */
@@ -156,6 +236,11 @@ export function CalendarScreen() {
 
   const [scope, setScope] = useState<Scope>('all');
   const [publisher, setPublisher] = useState<string>('all');
+  // Debuts-only view (FRG-PULL-008): narrows the agenda to the badge-carrying
+  // `new_series` entries; off by default, so the week reads whole.
+  const [debutsOnly, setDebutsOnly] = useState(false);
+  // Cards whose enrichment detail is expanded, keyed by the card key.
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
 
   const { data, isLoading, isError } = useWeeklyPull(week);
   const records = useMemo(() => data ?? [], [data]);
@@ -174,10 +259,11 @@ export function CalendarScreen() {
   );
 
   // Reuse the cached library index (['series'], shared with HeaderQuickSearch)
-  // to suppress a new-series strip row once its series is in the library: after
-  // adding via the strip, the add flow invalidates ['series'], so returning to
-  // the Calendar hides the row without waiting for the next pull-refresh to
-  // rematch it (FRG-PULL-008). Exact casefolded-title match only.
+  // to suppress a card's add affordance once its series is in the library:
+  // after adding, the add flow invalidates ['series'], so returning to the
+  // Calendar drops the stale "Add" without waiting for the next pull-refresh
+  // to rematch the row (FRG-PULL-008). Exact casefolded-title match only — the
+  // imprecision errs toward suppressing an affordance, never toward adding.
   const seriesIndex = useSeriesIndex();
   const libraryTitles = useMemo(() => {
     const titles = new Set<string>();
@@ -222,24 +308,19 @@ export function CalendarScreen() {
         ? records
         : records.filter((r) => r.publisher === publisher);
 
-    // New-series debuts render in their own strip and are excluded from the
-    // agenda so a row is never double-counted (design decision 6). A debut whose
-    // series is already in the library (exact casefolded title) is dropped from
-    // the strip — the stale "Add" affordance would otherwise linger until the
-    // next pull-refresh rematched the row (FRG-PULL-008).
-    const newSeries = pubFiltered
-      .filter((r) => r.matchType === 'new_series')
-      .filter((r) => !libraryTitles.has(normalizeTitle(r.seriesName)));
+    // Debuts live in the day agenda in date position, badged (FRG-PULL-008) —
+    // there is no separate strip to double-count them against.
     // Defensive: a dateless agenda row renders in no day (its releaseDate never
     // equals a day key), so it must not inflate the week/day counts either.
-    const agenda = pubFiltered.filter(
-      (r) => r.matchType !== 'new_series' && r.releaseDate != null,
-    );
+    const agenda = pubFiltered.filter((r) => r.releaseDate != null);
 
     const weekAll = agenda.length;
     const weekFollowed = agenda.filter(isFollowing).length;
-    const visible =
-      scope === 'following' ? agenda.filter(isFollowing) : agenda;
+    const debutCount = agenda.filter((r) => r.matchType === 'new_series').length;
+    const scoped = scope === 'following' ? agenda.filter(isFollowing) : agenda;
+    const visible = debutsOnly
+      ? scoped.filter((r) => r.matchType === 'new_series')
+      : scoped;
 
     const days = weekDates(week)
       .map((date) => {
@@ -265,8 +346,8 @@ export function CalendarScreen() {
       })
       .filter((d) => d.count > 0);
 
-    return { publishers, newSeries, weekAll, weekFollowed, days };
-  }, [records, publisher, scope, week, todayKey, libraryTitles]);
+    return { publishers, debutCount, weekAll, weekFollowed, days };
+  }, [records, publisher, scope, debutsOnly, week, todayKey]);
 
   // The "across every publisher" scope only holds with no publisher filter; when
   // one is active the count is already scoped to it, so name it (or drop the
@@ -297,18 +378,51 @@ export function CalendarScreen() {
     );
   };
 
-  const addNewSeries = (r: PullEntryRecord) => {
-    const state: AddSeriesNavigationState = { prefillTerm: r.seriesName };
+  /**
+   * Hand an entry off to the standard Add flow (FRG-PULL-008). The source's
+   * ComicVine series id rides along when the payload carried one, so the Add
+   * screen resolves the exact volume instead of asking the operator to redo a
+   * search; the name stays as the fallback for an entry without an id — and
+   * for an id ComicVine no longer knows. Navigation only: nothing is created
+   * until the user completes the add flow.
+   */
+  const addFromEntry = (r: PullEntryRecord) => {
+    const state: AddSeriesNavigationState = {
+      prefillCvVolumeId: r.cvSeriesId ?? undefined,
+      prefillTerm: r.seriesName,
+    };
     navigate('/add', { state });
   };
 
-  /** One release card. Linked rows (matchedIssueId set) expose want/skip +
-   * search; unlinked rows expose only their derived-state glyph (FRG-PULL-007). */
+  const toggleDetail = (cardKey: string) => {
+    const next = new Set(expanded);
+    if (next.has(cardKey)) next.delete(cardKey);
+    else next.add(cardKey);
+    setExpanded(next);
+  };
+
+  /**
+   * One release card. Linked rows (matchedIssueId set) expose want/skip +
+   * search; unlinked rows show their derived-state glyph (FRG-PULL-007) and,
+   * when nothing links them to the library and their title is not already
+   * there, the add affordance (FRG-PULL-008). Any entry carrying stored
+   * enrichment also offers the detail expando (FRG-UI-042).
+   */
   const renderCard = (r: PullEntryRecord, isFuture: boolean) => {
     const linked = r.matchedIssueId != null;
     const monitored = r.state !== 'unmonitored';
     const name = rowName(r);
-    const cardKey = r.id ?? `${r.seriesName}-${r.issueNumber}-${r.matchedIssueId}`;
+    const cardKey = String(
+      r.id ?? `${r.seriesName}-${r.issueNumber}-${r.matchedIssueId}`,
+    );
+    const isDebut = r.matchType === 'new_series';
+    // Guard-failed rows for a series already in the library self-heal on the
+    // next refresh — offering "Add" there would invite duplicates.
+    const canAdd =
+      !linked &&
+      (r.matchType === 'unmatched' || isDebut) &&
+      !libraryTitles.has(normalizeTitle(r.seriesName));
+    const detailOpen = expanded.has(cardKey);
     const cls = [
       styles.card,
       linked ? '' : styles.cardUnlinked,
@@ -324,38 +438,81 @@ export function CalendarScreen() {
         data-linked={linked}
         data-future={isFuture}
       >
-        <div className={styles.spine} style={spineStyle(r)} aria-hidden />
-        <div className={styles.cardBody}>
-          <div className={styles.cardTitle}>{name}</div>
-          <div className={styles.cardSub}>{rowSub(r)}</div>
-          {isFuture && <div className={styles.unreleased}>Not yet released</div>}
-        </div>
-        {linked ? (
-          <div className={styles.actions}>
-            <button
-              type="button"
-              className={styles.iconBtn}
-              aria-label={`${monitored ? 'Skip' : 'Want'} ${name}`}
-              title={monitored ? 'Stop monitoring' : 'Monitor / want'}
-              onClick={() =>
-                toggle.mutate({ issueId: r.matchedIssueId as number, monitored: !monitored })
-              }
-            >
-              <BookmarkIcon size={13} filled={monitored} />
-            </button>
-            <button
-              type="button"
-              className={styles.iconBtn}
-              aria-label={`Search for ${name}`}
-              title="Automatic search"
-              disabled={command.running}
-              onClick={() => dispatchSearch(r)}
-            >
-              <SearchIcon size={13} />
-            </button>
+        <div className={styles.cardRow}>
+          <CardCover r={r} name={name} />
+          <div className={styles.cardBody}>
+            <div className={styles.cardTitle}>
+              <span className={styles.cardTitleText}>{name}</span>
+              {isDebut && (
+                <span
+                  className={styles.badgeNew}
+                  data-testid={`calendar-new-badge-${cardKey}`}
+                >
+                  New
+                </span>
+              )}
+            </div>
+            <div className={styles.cardSub}>{rowSub(r)}</div>
+            {isFuture && <div className={styles.unreleased}>Not yet released</div>}
           </div>
-        ) : (
-          <StateGlyph state={r.state} />
+          <div className={styles.actions}>
+            {canAdd && (
+              <button
+                type="button"
+                className={styles.addBtn}
+                aria-label={`Add ${r.seriesName}`}
+                onClick={() => addFromEntry(r)}
+              >
+                <PlusIcon size={13} />
+                Add
+              </button>
+            )}
+            {hasDetail(r) && (
+              <button
+                type="button"
+                className={styles.iconBtn}
+                aria-label={`${detailOpen ? 'Hide' : 'Show'} details for ${name}`}
+                aria-expanded={detailOpen}
+                title="Details"
+                onClick={() => toggleDetail(cardKey)}
+              >
+                <MoreIcon size={13} />
+              </button>
+            )}
+            {linked ? (
+              <>
+                <button
+                  type="button"
+                  className={styles.iconBtn}
+                  aria-label={`${monitored ? 'Skip' : 'Want'} ${name}`}
+                  title={monitored ? 'Stop monitoring' : 'Monitor / want'}
+                  onClick={() =>
+                    toggle.mutate({
+                      issueId: r.matchedIssueId as number,
+                      monitored: !monitored,
+                    })
+                  }
+                >
+                  <BookmarkIcon size={13} filled={monitored} />
+                </button>
+                <button
+                  type="button"
+                  className={styles.iconBtn}
+                  aria-label={`Search for ${name}`}
+                  title="Automatic search"
+                  disabled={command.running}
+                  onClick={() => dispatchSearch(r)}
+                >
+                  <SearchIcon size={13} />
+                </button>
+              </>
+            ) : (
+              <StateGlyph state={r.state} />
+            )}
+          </div>
+        </div>
+        {detailOpen && (
+          <EntryDetail r={r} testId={`calendar-detail-${cardKey}`} />
         )}
       </div>
     );
@@ -372,6 +529,19 @@ export function CalendarScreen() {
                 {commandLabel}: {command.status}
               </span>
             )}
+            <button
+              type="button"
+              className={styles.filterToggle}
+              data-active={debutsOnly}
+              aria-pressed={debutsOnly}
+              title="Show only this week's new-series debuts"
+              onClick={() => setDebutsOnly((v) => !v)}
+            >
+              New series only
+              {view.debutCount > 0 && (
+                <span className={styles.filterCount}>{view.debutCount}</span>
+              )}
+            </button>
             <select
               className={styles.pubSelect}
               aria-label="Filter by publisher"
@@ -454,40 +624,6 @@ export function CalendarScreen() {
               <i className={`fa-solid fa-layer-group ${styles.bannerIcon}`} aria-hidden />
               <div className={styles.bannerText}>{banner}</div>
             </div>
-
-            {view.newSeries.length > 0 && (
-              <section className={styles.strip} data-testid="new-this-week">
-                <div className={styles.stripHeading}>New this week</div>
-                <div className={styles.stripItems}>
-                  {view.newSeries.map((r) => {
-                    const cardKey =
-                      r.id ?? `${r.seriesName}-${r.issueNumber}-new`;
-                    return (
-                      <div
-                        key={cardKey}
-                        className={styles.stripCard}
-                        data-testid={`new-series-${cardKey}`}
-                      >
-                        <div className={styles.spine} style={spineStyle(r)} aria-hidden />
-                        <div className={styles.cardBody}>
-                          <div className={styles.cardTitle}>{r.seriesName}</div>
-                          <div className={styles.cardSub}>{rowSub(r)}</div>
-                        </div>
-                        <button
-                          type="button"
-                          className={styles.addBtn}
-                          aria-label={`Add ${r.seriesName}`}
-                          onClick={() => addNewSeries(r)}
-                        >
-                          <PlusIcon size={13} />
-                          Add
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </section>
-            )}
 
             <div data-testid="calendar-agenda">
               {view.days.length === 0 ? (

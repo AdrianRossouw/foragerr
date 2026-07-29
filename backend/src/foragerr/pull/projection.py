@@ -127,6 +127,12 @@ class ProjectedPullEntry:
     the source simply hasn't surfaced this release) — there is no physical
     ``pull_entries`` row backing it. ``state`` is ``None`` only for an
     unmatched / new-series pull entry, which links to no issue at all.
+
+    The trailing enrichment fields (FRG-PULL-011) come from the stored pull
+    entry alone and default to absent: a library-primary row has no pull entry
+    to carry them, and a week stored before migration 0029 has none until its
+    next refresh. ``creators`` / ``characters`` travel as the stored JSON
+    strings — :mod:`foragerr.api.pull` decodes them at the wire edge.
     """
 
     pull_entry_id: int | None
@@ -141,6 +147,11 @@ class ProjectedPullEntry:
     matched_issue_id: int | None
     series_id: int | None
     state: str | None
+    cover_url: str | None = None
+    description: str | None = None
+    upc: str | None = None
+    creators: str | None = None
+    characters: str | None = None
 
 
 def _derive_issue_state(
@@ -308,6 +319,11 @@ async def weekly_pull(session: AsyncSession, week: str) -> list[ProjectedPullEnt
                     matched_issue_id=row.matched_issue_id,
                     series_id=base.series_id,
                     state=base.state,
+                    cover_url=row.cover_url,
+                    description=row.description,
+                    upc=row.upc,
+                    creators=row.creators,
+                    characters=row.characters,
                 )
             else:
                 extra.append(
@@ -324,6 +340,11 @@ async def weekly_pull(session: AsyncSession, week: str) -> list[ProjectedPullEnt
                         matched_issue_id=None,
                         series_id=None,
                         state=STATE_PENDING_REFRESH if _pending_refresh(row) else None,
+                        cover_url=row.cover_url,
+                        description=row.description,
+                        upc=row.upc,
+                        creators=row.creators,
+                        characters=row.characters,
                     )
                 )
 

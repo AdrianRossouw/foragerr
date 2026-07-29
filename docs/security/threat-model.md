@@ -1809,6 +1809,75 @@ New attack surface and its disposition (COMP 1 / COMP 8 boundary):
   WITHOUT widening the CSP — the FRG-SEC-006 posture is unchanged.
   Abuse scenarios are tagged tests (`backend/tests/security/test_cover_proxy.py`).
 
+### 2026-07-29 — m11-discovery-surface
+
+New attack surface and its disposition (COMP 1 / COMP 8 boundary — the
+milestone's one security-touching change, extending the 2026-07-23
+cover-proxy entry rather than opening a new one):
+
+- **Cover-proxy allowlist becomes per-host rules** (FRG-META-021): the
+  flat host set is now a tuple of rules — host, subdomain policy, and
+  an optional required path prefix. The ComicVine entries keep today's
+  dot-boundary subdomain matching with no prefix (unchanged behavior).
+  The new LOCG entry is the shared S3 endpoint `s3.amazonaws.com`,
+  matched **exact host only** — no subdomain form accepted, including
+  virtual-hosted bucket addressing — with required path prefix
+  `/comicgeeks/` matched on a directory boundary. Rationale: the host
+  is Amazon's shared multi-tenant S3 endpoint; a bare-host or
+  subdomain-matched entry would authorize fetching from any public
+  bucket on the internet, turning the proxy into an open relay. Live
+  verification 2026-07-29 confirmed the same LOCG objects resolve
+  virtual-hosted-style at `comicgeeks.s3.amazonaws.com` — that
+  subdomain, and every other bucket subdomain of the shared host, is
+  refused by the exact-host policy. ComicVine's own hosts are not
+  shared multi-tenant infrastructure, so their existing subdomain
+  matching is unaffected.
+- **Dot-segment and encoded-traversal refusal, single-decode
+  semantics**: before the prefix comparison the path is percent-decoded
+  exactly once and refused outright if any dot-segment (`.`/`..`,
+  encoded or not) or backslash remains, and the prefix must land on a
+  directory boundary (so `/comicgeeks-evil/` fails). Deciding on a
+  single decode pass — rather than decoding to a fixed point — avoids
+  the double-decode ambiguity a payload like `%252e` would otherwise
+  exploit.
+- **One rule evaluator enforced at three points, not two**: the
+  request-time check and the per-hop redirect check (unchanged from
+  2026-07-23) now share the evaluator with a third enforcement point —
+  pull-ingest time (FRG-PULL-011). This closes a trust-boundary gap the
+  cover-URL work opened: a hostile pull source has graduated from
+  supplying display text (spoofing only, RISK-039) to supplying *fetch
+  targets*. Cover URLs are validated fail-closed at ingest, the actual
+  trust boundary, before they can ever persist — a relative placeholder,
+  `http://` URL, off-host URL, off-prefix S3 path, or traversal-bearing
+  path all store as absent rather than being retried, retained, or
+  surfaced as an error; the proxy's own check remains as defense in
+  depth for anything reaching it by another path. RISK-039 updated to
+  record the graduated trust; RISK-025 updated for the shared-host
+  entry.
+- **`FRG-API-026` (ComicVine lookup by volume id) reviewed as a
+  no-new-class surface**: `GET /series/lookup/volume/{id}` is an
+  authenticated, integer-parameterized variant of the existing
+  ComicVine outbound integration (COMP 8), issuing at most one upstream
+  fetch per call on the existing **interactive** lane (FRG-META-022)
+  under the existing rate limiter, and reusing the term lookup's
+  auth/error contract verbatim (503 + `comicvine_api_key` discriminator
+  on upstream auth failure; the key appears in no response or log
+  line). No new trust boundary, no new egress profile, no separate
+  `docs/security/` delta beyond this entry.
+- Abuse scenarios are tagged tests: `backend/tests/security/test_cover_proxy.py`
+  (bucket-subdomain refusal, non-prefix S3 path refusal,
+  dot-segment/encoded-traversal refusal, prefix-lookalike refusal,
+  redirect-hop escape refusal) and the pull-ingest tests (hostile and
+  placeholder payload cover URLs failing closed at ingest, both fields
+  covered by FRG-PULL-011's scenarios).
+
+No new STRIDE category, no new COMP, no new listener or credential, no
+SOUP change. Net effect: the allowlist's rule shape generalizes to
+express a shared-host constraint without becoming configurable, the
+proxy gains a second untrusted party's bytes behind a narrower rule
+than the first, and the pull-source trust boundary tightens (ingest-time
+fail-closed validation) rather than loosens.
+
 ## Coverage summary
 
 - **Well covered by the five drafts** (mitigation named, no new requirement needed): OPDS

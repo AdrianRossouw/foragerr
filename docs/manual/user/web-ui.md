@@ -170,22 +170,38 @@ defaults to **All releases** — the whole week's books, so the calendar reads a
 discovery surface first, with an "N followed" marker on days carrying series you
 already track. Switch to **Following** to narrow to just your library, where a
 "+N more titles shipping" note stands in for everything else; either scope is
-publisher-filterable. Each
-release card carries its live state (wanted, downloading, downloaded,
-unmonitored), computed from the issue and queue exactly like everywhere else;
-nothing is stored on the calendar itself. Cards for issues in your library offer
-want/skip and an immediate search — the same operations the Wanted screen uses.
-Debut issues (#1s) from series you don't have appear in a separate
-**New this week** strip with a one-click route into the standard add flow;
-foragerr never adds a series by itself. Next week's solicited releases appear
-under forward navigation once the pull source has published them, marked as not
-yet released, and the whole view keeps working from your local metadata when the
-external pull source is unconfigured or down. When the weekly pull source is
-actually down, the Calendar shows an inline notice that the external source is
-unavailable and the view is rendering from your library's own data only — so a
-temporary outage never reads as "nothing ships this week". The notice clears on
-its own once the source recovers (and never appears when the pull source is
-healthy or deliberately disabled).
+publisher-filterable. Each release card carries a cover thumbnail, loading
+lazily and falling back to the familiar tinted spine when no cover is stored for
+that entry or it fails to load — never a broken image. Opening a card's detail
+view shows whatever the pull source supplied for that release: description,
+creators (with their roles), characters, and UPC, each shown only when present.
+
+Cards for issues already in your library carry their live state (wanted,
+downloading, downloaded, unmonitored), computed from the issue and queue exactly
+like everywhere else — nothing is stored on the calendar itself — and offer
+want/skip and an immediate search, the same operations the Wanted screen uses.
+Every other entry — anything not linked to an issue in your library, whose
+series you don't already have — carries a one-click **Add** instead. Activating
+it opens the standard Add flow: when the pull source supplied a ComicVine id for
+that release, Add opens with the exact matching volume already resolved and
+preselected — cover, title, year, publisher — ready for your confirmation and
+add options, with no search term to type or edit; when it didn't (or ComicVine
+no longer recognizes the id), Add falls back to its ordinary search prefilled
+with the entry's name instead. Either way the id is only ever a starting point
+you confirm — foragerr never adds a series by itself, and no series record
+exists until you complete the add flow. Debut issues (#1s and #0s) additionally
+carry an inline "New" badge, with a filter to show debuts alone; entries for a
+series you already have never show the Add affordance, since the ordinary
+refresh links them in on its own.
+
+Next week's solicited releases appear under forward navigation once the pull
+source has published them, marked as not yet released, and the whole view keeps
+working from your local metadata when the external pull source is unconfigured or
+down. When the weekly pull source is actually down, the Calendar shows an inline
+notice that the external source is unavailable and the view is rendering from
+your library's own data only — so a temporary outage never reads as "nothing
+ships this week". The notice clears on its own once the source recovers (and
+never appears when the pull source is healthy or deliberately disabled).
 
 ## Creators
 

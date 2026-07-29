@@ -14,6 +14,7 @@ FRG-API-014 / FRG-SCHED-007), not this router.
 from __future__ import annotations
 
 import datetime as dt
+import json
 from typing import Any, Callable
 
 from fastapi import APIRouter, Query, Request
@@ -64,6 +65,20 @@ class PullIssue(BaseModel):
     title: str | None
 
 
+class PullCreator(BaseModel):
+    """One credited person from the source payload (FRG-PULL-011). ``role`` is
+    nullable — the source does not always say what someone did."""
+
+    role: str | None
+    name: str
+
+
+class PullCharacter(BaseModel):
+    """One character named by the source payload (FRG-PULL-011)."""
+
+    name: str
+
+
 class PullEntryResource(BaseModel):
     """One weekly pull row (FRG-API-019).
 
@@ -73,6 +88,13 @@ class PullEntryResource(BaseModel):
     issue's derived state (`missing_wanted` / `downloading` / `downloaded` /
     `unmonitored`), `pending_refresh` for a matched-but-not-yet-created
     entry, or `None` for an unmatched/new-series entry with no issue link.
+
+    The enrichment fields (FRG-PULL-011) are display-only and honest about
+    absence: the scalars are ``null`` when the source supplied nothing usable
+    (or, for ``coverUrl``, when what it supplied failed the allowlist at
+    ingest), and the two lists are always present — empty, never ``null`` —
+    matching the house list style (cf. ``SeriesResource.aliases``). A row with
+    no stored pull entry behind it carries all of them absent.
     """
 
     id: int | None
@@ -88,6 +110,11 @@ class PullEntryResource(BaseModel):
     state: str | None
     series: PullSeries | None
     issue: PullIssue | None
+    coverUrl: str | None
+    description: str | None
+    upc: str | None
+    creators: list[PullCreator]
+    characters: list[PullCharacter]
 
 
 class PullPage(BaseModel):
@@ -99,6 +126,46 @@ class PullPage(BaseModel):
     sortDirection: str
     totalRecords: int
     records: list[PullEntryResource]
+
+
+def _decode_list(stored: str | None) -> list[dict[str, Any]]:
+    """Decode a stored enrichment JSON array back to dicts (FRG-PULL-011).
+
+    The value was serialized by the ingest from already-sanitized, capped
+    fields, so this is a decode rather than a re-validation — but it still
+    degrades to an empty list for anything that is not a JSON array of objects,
+    so a row written by some other path can never turn a read into a 500.
+    """
+    if not stored:
+        return []
+    try:
+        decoded = json.loads(stored)
+    except ValueError:
+        return []
+    if not isinstance(decoded, list):
+        return []
+    return [item for item in decoded if isinstance(item, dict)]
+
+
+def _creators(stored: str | None) -> list[PullCreator]:
+    people = []
+    for item in _decode_list(stored):
+        name = item.get("name")
+        if not isinstance(name, str):
+            continue  # a credit with no one attached says nothing
+        role = item.get("role")
+        people.append(
+            PullCreator(role=role if isinstance(role, str) else None, name=name)
+        )
+    return people
+
+
+def _characters(stored: str | None) -> list[PullCharacter]:
+    return [
+        PullCharacter(name=item["name"])
+        for item in _decode_list(stored)
+        if isinstance(item.get("name"), str)
+    ]
 
 
 def _to_resource(entry: ProjectedPullEntry, issue, series) -> PullEntryResource:
@@ -120,6 +187,11 @@ def _to_resource(entry: ProjectedPullEntry, issue, series) -> PullEntryResource:
             if issue
             else None
         ),
+        coverUrl=entry.cover_url,
+        description=entry.description,
+        upc=entry.upc,
+        creators=_creators(entry.creators),
+        characters=_characters(entry.characters),
     )
 
 

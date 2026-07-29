@@ -463,6 +463,14 @@ export interface SuggestCandidate {
  */
 export interface AddSeriesNavigationState {
   prefillTerm?: string;
+  /**
+   * A known ComicVine volume id to resolve straight to one preselected
+   * candidate (FRG-PULL-008 / FRG-API-026) — the Calendar's add affordance
+   * carries the pull entry's source-supplied series id so the operator never
+   * re-types a term the payload already knew. `prefillTerm` stays the
+   * fallback: an id that does not resolve degrades to the name search.
+   */
+  prefillCvVolumeId?: number;
 }
 
 /*
@@ -498,6 +506,19 @@ export interface PullEntryIssue {
   title: string | null;
 }
 
+/** One stored creator credit on a pull entry (FRG-PULL-011): role + name only
+ * — the source's internal creator ids are dropped at ingest (nothing links to
+ * them). */
+export interface PullEntryCreator {
+  role: string | null;
+  name: string;
+}
+
+/** One stored character credit on a pull entry (FRG-PULL-011). */
+export interface PullEntryCharacter {
+  name: string;
+}
+
 /** One weekly pull row. `id` is the stored `pull_entries` row id, or `null` for
  * a pure library-primary row with no stored entry (degraded/unconfigured
  * source). `matchedIssueId` set ⇒ the row is linked to a library issue and
@@ -516,6 +537,19 @@ export interface PullEntryRecord {
   state: PullEntryState | null;
   series: PullEntrySeries | null;
   issue: PullEntryIssue | null;
+  /**
+   * Display-only enrichment stored at ingest (FRG-PULL-011), rendered by the
+   * Calendar (FRG-UI-042). `coverUrl` is the entry's primary cover, already
+   * canonicalized and allowlist-validated server-side — the screen still
+   * serves it through the same-origin cover proxy and falls back to the
+   * publisher spine when it is null or fails to load. A week stored before
+   * the enrichment migration carries nulls / empty lists, never partial data.
+   */
+  coverUrl: string | null;
+  description: string | null;
+  upc: string | null;
+  creators: PullEntryCreator[];
+  characters: PullEntryCharacter[];
 }
 
 /**

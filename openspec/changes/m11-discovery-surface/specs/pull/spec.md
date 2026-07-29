@@ -2,6 +2,53 @@
 
 ## MODIFIED Requirements
 
+### Requirement: FRG-PULL-007 — Pull view actions
+
+The pull/weekly view SHALL expose per-entry actions for entries **linked to a
+library issue** (`matched_issue_id` set): toggle monitored (want/skip) and
+trigger an immediate search. Each action SHALL delegate to the canonical
+issue-level operation — the single-issue monitored update
+(`PUT /api/v1/issues/{issue_id}`, FRG-API-004) and the `issue-search` command
+(FRG-SRCH-008) via the command endpoint — and SHALL NOT write any pull-side
+status (D4): the card's displayed state changes only because the issue/queue
+projection changed. Entries without a linked issue (unmatched, new-series,
+pending-refresh) SHALL NOT expose these actions.
+
+- **Milestone**: M4
+- **Source**: mylar-feature-surface.md capability map PULL (manual
+  want/skip/search from the pull view); sonarr-architecture.md §8 (derived
+  state); FRG-API-019 notes (actions delegate to issue endpoints; the pull
+  endpoint stays read-only).
+- **Notes**: D4. Reuses the existing frontend seams: the single-issue
+  monitored mutation and the generic command dispatch + watcher used by the
+  Wanted screen. Search completion invalidates the pull query so the card's
+  derived state updates. Restated in m11-discovery-surface solely because
+  the unlinked-entry scenario's cross-reference to the FRG-PULL-008 add
+  affordance widened with that requirement; the issue-action behavior is
+  unchanged.
+
+#### Scenario: Want toggles the linked issue's monitored flag
+
+- **WHEN** the user clicks "want" on a pull entry linked to an unmonitored
+  library issue
+- **THEN** the client issues `PUT /api/v1/issues/{issue_id}` with
+  `monitored: true`, no pull-entry field is written, and the card's state
+  re-projects to missing/wanted
+
+#### Scenario: Search queues the canonical issue-search command
+
+- **WHEN** the user triggers search on a linked pull entry
+- **THEN** an `issue-search` command is dispatched with that issue's
+  `series_id` and `issue_id` through the standard command endpoint, and its
+  terminal status invalidates the pull view so derived state refreshes
+
+#### Scenario: Unlinked entries expose no issue actions
+
+- **WHEN** an unmatched or new-series entry (no `matchedIssueId`) renders
+- **THEN** it offers no want/skip or search affordance (an unlinked entry
+  whose series is not already in the library offers the FRG-PULL-008 add
+  affordance instead)
+
 ### Requirement: FRG-PULL-008 — New-series surfacing (no auto-add)
 
 The system SHALL offer a one-click add affordance — routing into the

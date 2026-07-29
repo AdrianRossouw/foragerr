@@ -137,37 +137,59 @@
   line-height: 1.5;
 }
 
-/* --- New this week strip --- */
-.strip {
-  margin-bottom: var(--spacing-xl);
-}
-
-.stripHeading {
-  display: flex;
+/* --- Debuts-only filter toggle (FRG-PULL-008) --- */
+.filterToggle {
+  display: inline-flex;
   align-items: center;
-  gap: var(--spacing-sm);
-  margin-bottom: var(--spacing-sm);
-  font-size: var(--font-size-xs);
-  letter-spacing: var(--letter-spacing-label);
-  text-transform: uppercase;
-  color: var(--color-accent-light);
-  font-weight: var(--font-weight-bold);
-}
-
-.stripItems {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 10px;
-}
-
-.stripCard {
-  display: flex;
-  gap: 11px;
-  align-items: center;
-  background: var(--surface-card);
+  gap: var(--spacing-xs);
+  height: 34px;
+  padding: 0 var(--spacing-sm);
+  background: var(--surface-input);
   border: 1px solid var(--surface-border);
   border-radius: var(--radius-md);
-  padding: 8px 11px 8px 8px;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.filterToggle:hover {
+  color: var(--text-primary);
+}
+
+.filterToggle[data-active='true'] {
+  border-color: var(--color-accent);
+  background: var(--color-accent-tint);
+  color: var(--color-accent-light);
+}
+
+.filterToggle:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.filterCount {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  color: var(--text-muted);
+}
+
+.filterToggle[data-active='true'] .filterCount {
+  color: var(--color-accent-light);
+}
+
+/* --- New-series debut badge (inline in the agenda) --- */
+.badgeNew {
+  flex: none;
+  background: var(--color-accent-tint);
+  color: var(--color-accent-light);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  padding: 1px var(--spacing-xs);
+  border-radius: var(--radius-sm);
 }
 
 .addBtn {
@@ -307,13 +329,18 @@
 
 /* --- Release card --- */
 .card {
-  display: flex;
-  gap: 11px;
-  align-items: center;
   background: var(--surface-card);
   border: 1px solid var(--surface-border);
   border-radius: var(--radius-md);
   padding: 8px 11px 8px 8px;
+}
+
+/* The card's face: cover, title block, actions. The detail expando stacks
+ * under it, so the flex row lives here rather than on the card itself. */
+.cardRow {
+  display: flex;
+  gap: 11px;
+  align-items: center;
 }
 
 .card:hover {
@@ -338,15 +365,33 @@
   background-position: center;
 }
 
+/* Stored cover (FRG-UI-042) — same box as the spine it replaces, so a mixed
+ * week of covered and uncovered entries keeps one agenda rhythm. The spine
+ * style rides underneath as the letterbox while the image loads. */
+.cover {
+  width: 36px;
+  height: 54px;
+  flex: none;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+}
+
 .cardBody {
   flex: 1;
   min-width: 0;
 }
 
 .cardTitle {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
   color: var(--text-primary);
+  min-width: 0;
+}
+
+.cardTitleText {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -409,6 +454,40 @@
   flex: none;
   display: inline-flex;
   align-items: center;
+}
+
+/* --- Entry detail expando (FRG-UI-042) --- */
+.detail {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--surface-border);
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.detailDeck {
+  margin: 0 0 var(--spacing-sm);
+}
+
+.detailRow {
+  display: flex;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-xs);
+}
+
+.detailLabel {
+  flex: none;
+  min-width: 68px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: var(--font-weight-bold);
+}
+
+.detailValue {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 /* --- Derived-state tones (projection of `state`, never a stored value) --- */

@@ -106,15 +106,26 @@ function addFetcher({
   lookup = defaultLookup,
   suggest = defaultSuggest,
   rootFolders = () => mockRootFolders,
+  volume,
 }: {
   lookup?: (path: string) => unknown;
   suggest?: (path: string) => unknown;
   rootFolders?: () => unknown;
+  /** Resolver for the by-id volume lookup (FRG-API-026); omitted = the route
+   *  is not expected at all, so a stray call surfaces as an unexpected request. */
+  volume?: (path: string) => unknown;
 } = {}) {
   return fakeFetcher((path, options) => {
     const method = options?.method ?? 'GET';
     if (method === 'GET' && path.startsWith('/api/v1/series/lookup/suggest?term=')) {
       return suggest(path);
+    }
+    if (
+      volume &&
+      method === 'GET' &&
+      path.startsWith('/api/v1/series/lookup/volume/')
+    ) {
+      return volume(path);
     }
     if (method === 'GET' && path.startsWith('/api/v1/series/lookup?term=')) {
       return lookup(path);
@@ -141,6 +152,7 @@ function renderAdd(
     lookup?: (path: string) => unknown;
     suggest?: (path: string) => unknown;
     rootFolders?: () => unknown;
+    volume?: (path: string) => unknown;
     route?: RouteEntry;
   } = {},
 ) {
@@ -1389,5 +1401,142 @@ describe('FRG-UI-032: hidden-by-ignore-list results are recoverable', () => {
     expect(
       screen.queryByTestId('ignored-shown-line'),
     ).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * FRG-PULL-008 / FRG-API-026 — the id-first arm of the Add flow: a caller that
+ * already knows the ComicVine volume id (the Calendar's add affordance) hands
+ * it over, the screen resolves that one id into a single preselected candidate
+ * with its add panel open, and an id ComicVine cannot resolve degrades to the
+ * name search the caller also carried. A credential failure is the term
+ * lookup's contract verbatim.
+ */
+const RESOLVED_VOLUME = {
+  cv_volume_id: 154217,
+  name: 'Tidewrack',
+  publisher: 'Umbral Press',
+  start_year: 2024,
+  image_url: 'https://comicvine.gamespot.com/a/uploads/scale_small/tidewrack.jpg',
+  count_of_issues: 14,
+  description: 'A dredging crew hauls up something that remembers them.',
+  name_similarity: 1.0,
+  year_proximity: null,
+  target_issue_plausible: null,
+  have_it: false,
+  ignored: false,
+};
+
+/** The prefill a Calendar entry with a source-supplied CV series id emits. */
+const ID_PREFILL: RouteEntry = {
+  pathname: '/add',
+  state: { prefillCvVolumeId: 154217, prefillTerm: 'Tidewrack' },
+};
+
+describe('FRG-PULL-008: id-first add hand-off', () => {
+  it('FRG-PULL-008 / FRG-API-026 — a handed-over volume id resolves to one preselected candidate with no term search', async () => {
+    const { spy } = renderAdd({
+      volume: () => RESOLVED_VOLUME,
+      route: ID_PREFILL,
+    });
+
+    // The resolution runs against the by-id endpoint, once.
+    await waitFor(() =>
+      expect(screen.getByTestId('candidate-154217')).toBeInTheDocument(),
+    );
+    expect(
+      spy.mock.calls.filter(
+        ([path]) => path === '/api/v1/series/lookup/volume/154217',
+      ),
+    ).toHaveLength(1);
+
+    // It is THE candidate, already selected, with its add options open — no
+    // term editing, no result list to pick from.
+    const card = screen.getByTestId('candidate-154217');
+    expect(within(card).getByText('Tidewrack')).toBeInTheDocument();
+    expect(within(card).getByText('Umbral Press')).toBeInTheDocument();
+    expect(
+      within(card).getByRole('button', { name: 'Select Tidewrack' }),
+    ).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByTestId('add-options-panel')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /Add Tidewrack/ }),
+    ).toBeInTheDocument();
+
+    // No search of any kind was issued on the id's behalf: neither the full
+    // term lookup nor the passive autosuggest.
+    await afterSuggestDebounce();
+    expect(
+      spy.mock.calls.filter(([path]) =>
+        path.startsWith('/api/v1/series/lookup?term='),
+      ),
+    ).toHaveLength(0);
+    expect(
+      spy.mock.calls.filter(([path]) =>
+        path.startsWith('/api/v1/series/lookup/suggest?term='),
+      ),
+    ).toHaveLength(0);
+  });
+
+  it('FRG-PULL-008 — an id ComicVine does not know degrades to the name search with an honest notice', async () => {
+    const { spy } = renderAdd({
+      volume: () => {
+        throw new ApiRequestError(
+          404,
+          { message: 'comicvine volume 154217 not found', errors: [] },
+          '/api/v1/series/lookup/volume/154217',
+        );
+      },
+      suggest: (path) =>
+        path === '/api/v1/series/lookup/suggest?term=Tidewrack'
+          ? { records: mockSuggestCandidates, complete: true }
+          : { records: [], complete: true },
+      route: ID_PREFILL,
+    });
+
+    // The notice says plainly what happened and what is happening instead...
+    const note = await screen.findByTestId('volume-note');
+    expect(note).toHaveTextContent(/could not be resolved/i);
+    expect(note).toHaveTextContent(/searching by name instead/i);
+    // ...the name the caller carried is in the search box...
+    expect(screen.getByRole('searchbox', { name: 'Search ComicVine' })).toHaveValue(
+      'Tidewrack',
+    );
+    // ...and the ordinary name-prefilled flow takes over from there.
+    await afterSuggestDebounce();
+    await waitFor(() =>
+      expect(screen.getByTestId('suggest-40501234')).toBeInTheDocument(),
+    );
+    expect(
+      spy.mock.calls.some(
+        ([path]) => path === '/api/v1/series/lookup/suggest?term=Tidewrack',
+      ),
+    ).toBe(true);
+    // No candidate card is left standing for the id that failed to resolve.
+    expect(screen.queryByTestId('candidate-154217')).not.toBeInTheDocument();
+  });
+
+  it('FRG-PULL-008 / FRG-API-026 — a credential failure on the by-id lookup renders the term lookup’s Settings guidance', async () => {
+    renderAdd({
+      volume: () => {
+        throw new ApiRequestError(
+          503,
+          CV_AUTH_BODY,
+          '/api/v1/series/lookup/volume/154217',
+        );
+      },
+      route: ID_PREFILL,
+    });
+
+    const note = await screen.findByTestId('volume-note');
+    expect(note).toHaveTextContent(
+      'ComicVine API key missing or invalid — check Settings.',
+    );
+    expect(within(note).getByRole('link', { name: 'check Settings' })).toHaveAttribute(
+      'href',
+      '/settings/general',
+    );
+    // A key failure is not a name-search fallback — the same key fails there.
+    expect(note).not.toHaveTextContent(/searching by name instead/i);
   });
 });

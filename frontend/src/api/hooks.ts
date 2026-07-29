@@ -32,6 +32,7 @@ import type {
   IssueResource,
   LogLevel,
   LogRecordResource,
+  LookupCandidate,
   LookupResponse,
   PullEntryRecord,
   QueueItem,
@@ -276,6 +277,36 @@ export function useLookup(
     // handled by the screen's explicit same-term refetch).
     staleTime: (query) =>
       query.state.data?.complete && !query.state.data.truncated ? Infinity : 0,
+    retry: false,
+  });
+}
+
+/**
+ * GET /api/v1/series/lookup/volume/{id} — resolve ONE known ComicVine volume
+ * id to a single lookup candidate (FRG-API-026), the id-first arm of the Add
+ * flow (FRG-PULL-008): a pull entry's source-supplied series id lands on the
+ * exact volume instead of a term search the operator has to edit. Disabled
+ * while the id is null, so a name-only prefill costs nothing.
+ *
+ * Failures reject with an `ApiRequestError` the screen classifies structurally:
+ * a 404 is ComicVine not knowing the id (degrade to the name search), any other
+ * status is an upstream/credential failure — a credential one carries the same
+ * `comicvine_api_key` discriminator the term lookup does.
+ */
+export function useLookupVolume(
+  cvVolumeId: number | null,
+): UseQueryResult<LookupCandidate> {
+  const fetcher = useFetcher();
+  return useQuery({
+    // `?? -1` only satisfies the key type while the query is disabled — no
+    // request is ever issued for it.
+    queryKey: queryKeys.lookup.volume(cvVolumeId ?? -1),
+    queryFn: () =>
+      fetcher<LookupCandidate>(`/api/v1/series/lookup/volume/${cvVolumeId}`),
+    enabled: cvVolumeId != null,
+    // One volume resolution per add-click against a live, rate-limited
+    // upstream; the resolved candidate is stable within a session.
+    staleTime: Infinity,
     retry: false,
   });
 }

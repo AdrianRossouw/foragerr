@@ -166,6 +166,41 @@ async def _seed_future_week(db, tmp_path) -> dict[str, int]:
     }
 
 
+#: An allowlist-passing cover URL in the shape ingest stores it (canonical, no
+#: cache-buster query) — see FRG-PULL-011.
+ENRICHED_COVER = "https://s3.amazonaws.com/comicgeeks/comics/covers/large-4242.jpg"
+ENRICHED_DESCRIPTION = "A lamplighter walks the drowned district."
+
+
+async def _seed_enriched_week(db) -> int:
+    """Two stored entries for the same week: one carrying the full enrichment
+    set, one carrying none of it."""
+    async with db.write_session() as session:
+        rows = await pull_repo.replace_week(
+            session,
+            WEEK,
+            [
+                ParsedPullEntry(
+                    series_name="Hollow Lantern",
+                    issue_number="3",
+                    release_date=IN_WEEK,
+                    publisher="Paper Tiger Press",
+                    cover_url=ENRICHED_COVER,
+                    description=ENRICHED_DESCRIPTION,
+                    upc="76194137701100311",
+                    creators='[{"role":"Writer","name":"R. Halloway"}]',
+                    characters='[{"name":"The Lamplighter"}]',
+                ),
+                ParsedPullEntry(
+                    series_name="Paper Tigers",
+                    issue_number="1",
+                    release_date=IN_WEEK,
+                ),
+            ],
+        )
+        return rows[0].id
+
+
 _ENVELOPE_KEYS = {"page", "pageSize", "sortKey", "sortDirection", "totalRecords", "records"}
 
 
@@ -261,6 +296,29 @@ def test_paging_envelope_and_size_cap(client, tmp_path):
     resp = client.get(f"/api/v1/pull?week={WEEK}&sortKey=bogus")
     assert resp.status_code == 400
     assert resp.json()["errors"][0]["field"] == "sortKey"
+
+
+@pytest.mark.req("FRG-PULL-011")
+def test_entry_resource_carries_the_enrichment_fields(client):
+    """The stored enrichment reaches the wire in camelCase, with the two list
+    fields decoded from their stored JSON. Absence is honest: absent scalars
+    are null, absent lists are empty (never null)."""
+    entry_id = client.portal.call(_seed_enriched_week, client.app.state.db)
+    body = client.get(f"/api/v1/pull?week={WEEK}&pageSize=200").json()
+
+    enriched = {r["id"]: r for r in body["records"]}[entry_id]
+    assert enriched["coverUrl"] == ENRICHED_COVER
+    assert enriched["description"] == ENRICHED_DESCRIPTION
+    assert enriched["upc"] == "76194137701100311"
+    assert enriched["creators"] == [{"role": "Writer", "name": "R. Halloway"}]
+    assert enriched["characters"] == [{"name": "The Lamplighter"}]
+
+    bare = [r for r in body["records"] if r["seriesName"] == "Paper Tigers"][0]
+    assert bare["coverUrl"] is None
+    assert bare["description"] is None
+    assert bare["upc"] is None
+    assert bare["creators"] == []
+    assert bare["characters"] == []
 
 
 @pytest.mark.req("FRG-API-019")

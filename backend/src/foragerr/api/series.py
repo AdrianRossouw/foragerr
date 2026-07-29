@@ -57,6 +57,7 @@ from foragerr.metadata import (
     ComicVineBudgetExhausted,
     ComicVineClient,
     ComicVineError,
+    ComicVineMalformedResponse,
     sanitize_cv_text,
     sort_by_relevance,
 )
@@ -518,6 +519,33 @@ _GROUP_SORT_KEYS = ("title", "issue_count", "owned_count", "series_count")
 # --- routes -------------------------------------------------------------------
 
 
+#: ComicVine's own JSON-envelope signal that a single-object id (e.g. a
+#: volume) is unrecognized: envelope ``status_code`` 101, "Object Not Found" —
+#: distinct from the OK (1/absent) and auth-failure (100) codes
+#: ``ComicVineClient._raise_for_cv_error`` already special-cases. Every other
+#: envelope status falls through that method's catch-all as a
+#: ``ComicVineMalformedResponse`` whose message embeds the numeric code
+#: verbatim (``f"comicvine returned error status_code {status}"``); for a
+#: single-volume fetch, 101 is the only value that catch-all can plausibly
+#: carry, so this exact string is the volume-lookup route's only vantage
+#: point on the client's current typed errors — there is no dedicated
+#: ``ComicVineNotFound`` type to catch instead (FRG-API-026).
+_CV_OBJECT_NOT_FOUND_MESSAGE = "comicvine returned error status_code 101"
+
+
+def _is_cv_volume_not_found(exc: ComicVineError) -> bool:
+    """True when a ``get_volume`` failure means ComicVine does not recognize
+    the id (see :data:`_CV_OBJECT_NOT_FOUND_MESSAGE`), as opposed to any
+    other upstream failure (rate limit, malformed body, 5xx, egress refusal)
+    — all of which stay on the standard :func:`_comicvine_error_to_api_error`
+    mapping, so a transport failure is never misreported as "this id does
+    not exist" (FRG-API-026)."""
+    return (
+        isinstance(exc, ComicVineMalformedResponse)
+        and str(exc) == _CV_OBJECT_NOT_FOUND_MESSAGE
+    )
+
+
 def _comicvine_error_to_api_error(exc: ComicVineError) -> ApiError:
     """Map any ComicVine client failure to the uniform error the lookup
     FAMILY surfaces — shared verbatim by ``GET /lookup`` (FRG-API-003) and
@@ -841,6 +869,69 @@ async def suggest_series(term: str, request: Request) -> SuggestResponse:
             for record in candidates
         ],
         complete=result.complete,
+    )
+
+
+# NOTE: registered BEFORE "/{series_id}" for consistency with "/lookup" and
+# "/lookup/suggest" above, though this route's three path segments could
+# never actually collide with that single-segment int route.
+@router.get("/lookup/volume/{cv_volume_id}", response_model=LookupCandidateResource)
+async def lookup_volume(cv_volume_id: int, request: Request) -> LookupCandidateResource:
+    """Resolve one ComicVine volume id straight to a lookup candidate
+    (FRG-API-026) — the Calendar's CV-id-first add affordance (FRG-PULL-008)
+    resolves a pull entry's known id here instead of making the operator
+    retype a term search.
+
+    Reuses ``ComicVineClient.get_volume`` (the add flow's own existence
+    check) and, for every failure except a not-found id,
+    ``_comicvine_error_to_api_error`` verbatim — an auth failure is the
+    identical 503/``comicvine_api_key`` contract ``GET /lookup`` carries. An
+    id ComicVine itself does not recognize is a structured 404
+    (:func:`_is_cv_volume_not_found`), deliberately distinct from a
+    transport failure, so the caller can degrade to a term search on a
+    bad/stale id specifically rather than on any upstream hiccup.
+
+    The response is a single candidate object — not a list envelope, no
+    ``complete``/``truncated`` (nothing to paginate or degrade over one
+    fetch). No plausibility scoring runs: there is no search term to score a
+    direct id resolution against, so the shared candidate shape's scoring
+    fields carry "not applicable" values rather than being omitted, keeping
+    one Pydantic type both lookup routes render through.
+    """
+    settings = request.app.state.settings
+    factory = comicvine_factory(settings)
+    try:
+        # Interactive lane (FRG-META-022): an operator's add-click is waiting
+        # on this single resolution, exactly like the term lookup above.
+        async with ComicVineClient(settings, factory, lane="interactive") as cv:
+            record = await cv.get_volume(cv_volume_id)
+    except ComicVineError as exc:
+        if _is_cv_volume_not_found(exc):
+            raise ApiError(404, f"comicvine volume {cv_volume_id} not found") from exc
+        raise _comicvine_error_to_api_error(exc) from exc
+
+    db = request.app.state.db
+    async with db.read_session() as session:
+        existing = await session.execute(
+            select(SeriesRow.id).where(SeriesRow.cv_volume_id == record.cv_volume_id)
+        )
+        have_it = existing.scalar_one_or_none() is not None
+
+    return LookupCandidateResource(
+        cv_volume_id=record.cv_volume_id,
+        name=record.name,
+        publisher=record.publisher,
+        start_year=record.start_year,
+        count_of_issues=record.count_of_issues,
+        image_url=record.image_url,
+        description=_candidate_description(record.description),
+        # Not applicable to a direct id fetch (no term to score against) —
+        # see the docstring above.
+        name_similarity=1.0,
+        year_proximity=None,
+        target_issue_plausible=None,
+        have_it=have_it,
+        ignored=False,
     )
 
 
