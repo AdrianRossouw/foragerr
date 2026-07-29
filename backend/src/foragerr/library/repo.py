@@ -13,6 +13,7 @@ add/refresh flow in change 3).
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from sqlalchemy import Select, case, exists, func, or_, select
@@ -66,6 +67,36 @@ async def series_is_read_only(session: AsyncSession, series_id: int) -> bool:
             .where(SeriesRow.id == series_id)
         )
     )
+
+
+async def read_only_root_ids(session: AsyncSession) -> set[int]:
+    """The ids of every read-only reference root (FRG-SER-021).
+
+    One query for a whole page of series resources, so annotating each row's
+    ``read_only`` never becomes a per-row lookup."""
+    result = await session.execute(
+        select(RootFolderRow.id).where(RootFolderRow.read_only.is_(True))
+    )
+    return set(result.scalars().all())
+
+
+async def read_only_issue_ids(
+    session: AsyncSession, issue_ids: Sequence[int]
+) -> list[int]:
+    """Which of ``issue_ids`` belong to a series on a read-only root
+    (FRG-SER-021/022), ascending — the query behind the bulk acquisition
+    guards. Empty in, empty out."""
+    if not issue_ids:
+        return []
+    result = await session.execute(
+        select(IssueRow.id)
+        .join(SeriesRow, SeriesRow.id == IssueRow.series_id)
+        .join(RootFolderRow, RootFolderRow.id == SeriesRow.root_folder_id)
+        .where(IssueRow.id.in_(issue_ids))
+        .where(RootFolderRow.read_only.is_(True))
+        .order_by(IssueRow.id)
+    )
+    return list(result.scalars().all())
 
 
 async def list_root_folders(session: AsyncSession) -> list[RootFolderRow]:

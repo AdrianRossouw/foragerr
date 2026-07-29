@@ -50,6 +50,7 @@ from foragerr.library.flows import (
     edit_series,
 )
 from foragerr.library.models import SeriesRow
+from foragerr.library.read_only import refuse_read_only_series
 from foragerr.library.repo import SeriesStatistics
 from foragerr.metadata import (
     COMICVINE_CREDENTIAL_MESSAGE,
@@ -98,11 +99,17 @@ class SeriesStatisticsResource(BaseModel):
         return cls(**asdict(stats))
 
 
-def _series_fields(row: SeriesRow, stats: SeriesStatistics) -> dict:
+def _series_fields(
+    row: SeriesRow, stats: SeriesStatistics, *, read_only: bool = False
+) -> dict:
     """The shared field dict for both ``SeriesResource`` and
     ``SeriesCreateResponse`` (which adds one field on top) — a single place
     to keep the row->resource field mapping, rather than duplicating it or
-    reaching into a constructed model's ``__dict__``."""
+    reaching into a constructed model's ``__dict__``.
+
+    ``read_only`` is a property of the series' ROOT, not of the row, so it is
+    passed in: the paged list resolves it once per page from
+    ``repo.read_only_root_ids()`` rather than per row."""
     return {
         "id": row.id,
         "cv_volume_id": row.cv_volume_id,
@@ -123,6 +130,7 @@ def _series_fields(row: SeriesRow, stats: SeriesStatistics) -> dict:
         "aliases": list(decode_aliases(row.aliases, series_id=row.id)),
         "series_group_id": row.series_group_id,
         "booktype": row.booktype,
+        "read_only": read_only,
         "statistics": SeriesStatisticsResource.from_stats(stats),
     }
 
@@ -158,13 +166,18 @@ class SeriesResource(BaseModel):
     #: ``hc``/``one_shot``, or ``None`` for an ordinary single-issues run.
     #: Display/naming metadata only — never affects wanted state (FRG-SER-019).
     booktype: str | None
+    #: True when this series lives on a read-only reference root (FRG-SER-021):
+    #: indexed in place, served, never written to or acquired into. The UI marks
+    #: it and suppresses the monitor/search/rename/delete affordances the
+    #: backend would refuse (FRG-UI-045).
+    read_only: bool
     statistics: SeriesStatisticsResource
 
     @classmethod
     def from_row_and_stats(
-        cls, row: SeriesRow, stats: SeriesStatistics
+        cls, row: SeriesRow, stats: SeriesStatistics, *, read_only: bool = False
     ) -> "SeriesResource":
-        return cls(**_series_fields(row, stats))
+        return cls(**_series_fields(row, stats, read_only=read_only))
 
 
 class SeriesPage(BaseModel):
@@ -230,9 +243,17 @@ class SeriesCreateResponse(SeriesResource):
 
     @classmethod
     def from_row_stats_and_command(
-        cls, row: SeriesRow, stats: SeriesStatistics, refresh_command_id: int
+        cls,
+        row: SeriesRow,
+        stats: SeriesStatistics,
+        refresh_command_id: int,
+        *,
+        read_only: bool = False,
     ) -> "SeriesCreateResponse":
-        return cls(**_series_fields(row, stats), refresh_command_id=refresh_command_id)
+        return cls(
+            **_series_fields(row, stats, read_only=read_only),
+            refresh_command_id=refresh_command_id,
+        )
 
 
 class SeriesGroupEdit(BaseModel):
@@ -619,10 +640,17 @@ async def list_series(
             sort_direction=sortDirection,
             whitelist=_SORT_WHITELIST,
         )
+        # One query for the whole page's read-only annotation (FRG-SER-021) —
+        # the flag lives on the root, and there are only ever a handful of roots.
+        read_only_roots = await repo.read_only_root_ids(session)
         records = []
         for row in result["records"]:
             stats = await repo.series_statistics(session, row.id)
-            records.append(SeriesResource.from_row_and_stats(row, stats))
+            records.append(
+                SeriesResource.from_row_and_stats(
+                    row, stats, read_only=row.root_folder_id in read_only_roots
+                )
+            )
     result["records"] = records
     return SeriesPage(**result)
 
@@ -930,7 +958,8 @@ async def get_series(series_id: int, request: Request) -> SeriesResource:
         if row is None:
             raise ApiError(404, f"series {series_id} not found")
         stats = await repo.series_statistics(session, series_id)
-    return SeriesResource.from_row_and_stats(row, stats)
+        read_only = await repo.root_is_read_only(session, row.root_folder_id)
+    return SeriesResource.from_row_and_stats(row, stats, read_only=read_only)
 
 
 @router.post("", status_code=201, response_model=SeriesCreateResponse)
@@ -985,8 +1014,10 @@ async def create_series(
         next_release_date=None,
         last_release_date=None,
     )
+    async with db.read_session() as session:
+        read_only = await repo.root_is_read_only(session, result.series.root_folder_id)
     return SeriesCreateResponse.from_row_stats_and_command(
-        result.series, stats, result.refresh_command_id
+        result.series, stats, result.refresh_command_id, read_only=read_only
     )
 
 
@@ -1038,7 +1069,8 @@ async def update_series(
 
     async with db.read_session() as session:
         stats = await repo.series_statistics(session, series_id)
-    return SeriesResource.from_row_and_stats(row, stats)
+        read_only = await repo.root_is_read_only(session, row.root_folder_id)
+    return SeriesResource.from_row_and_stats(row, stats, read_only=read_only)
 
 
 @router.delete("/{series_id}")
@@ -1058,7 +1090,8 @@ async def remove_series(
     mount if run inline, and the command shares ``IMPORT_FILE_MUTATION_GROUP``
     so a concurrent import/rescan cannot add a file after the delete snapshots
     the file list (which would orphan it). A 404 is still returned up front
-    when the series does not exist, in both modes."""
+    when the series does not exist, in both modes; ``?deleteFiles=true`` for a
+    series on a read-only reference root is refused with a 409 (FRG-SER-021)."""
     db = request.app.state.db
     settings = request.app.state.settings
 
@@ -1066,6 +1099,13 @@ async def remove_series(
         async with db.read_session() as session:
             if await repo.get_series(session, series_id) is None:
                 raise ApiError(404, f"series {series_id} not found")
+            # Refused up front (FRG-SER-021) so the operator gets a reason rather
+            # than a queued command that fails in a worker; the flow refuses too,
+            # closing the direct command-enqueue route. The rows-only delete
+            # below stays available — it writes nothing to the root.
+            await refuse_read_only_series(
+                session, series_id, action="deleting library files"
+            )
         service = request.app.state.commands
         try:
             record = await service.enqueue(

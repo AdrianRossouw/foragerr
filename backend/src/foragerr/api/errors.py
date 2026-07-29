@@ -19,7 +19,20 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from foragerr.library.read_only import ReadOnlySeriesError
+
 __all__ = ["ApiError", "error_body", "register_error_handlers"]
+
+#: Status for a read-only reference-library refusal (FRG-SER-021/022): the
+#: request is well-formed, the library's state is what forbids it — a conflict,
+#: not a malformed request.
+READ_ONLY_STATUS = 409
+
+#: The ``errors[]`` discriminator every read-only refusal carries, so a client
+#: can recognise "this series is browse-only" structurally instead of matching
+#: on message prose (the ``comicvine_budget`` precedent in ``api.series``). It
+#: names a condition, not a form input.
+READ_ONLY_FIELD = "read_only"
 
 
 class ApiError(Exception):
@@ -98,15 +111,34 @@ async def _api_error_handler(request: Request, exc: ApiError) -> JSONResponse:
     return JSONResponse(status_code=exc.status_code, content=error_body(exc.message, errors))
 
 
+async def _read_only_error_handler(
+    request: Request, exc: ReadOnlySeriesError
+) -> JSONResponse:
+    """Map a read-only reference-library refusal to one uniform 409.
+
+    The refusal is raised at the boundary itself — a library flow, a command
+    handler, or a route — so mapping it here once means every current and future
+    write/acquire surface surfaces the SAME status, message, and structural
+    discriminator without restating the policy (FRG-SER-021/022)."""
+    return JSONResponse(
+        status_code=READ_ONLY_STATUS,
+        content=error_body(
+            str(exc), [{"field": READ_ONLY_FIELD, "message": str(exc)}]
+        ),
+    )
+
+
 def register_error_handlers(app: FastAPI) -> None:
     """Install the uniform-shape handlers (FRG-API-002).
 
     Registered for ``RequestValidationError`` (covers Pydantic body/query/path
     validation failures and malformed JSON bodies), Starlette's
     ``HTTPException`` (covers 404s — including the framework's own
-    route-not-found — and any handler-raised ``HTTPException``), and the
-    application's :class:`ApiError`.
+    route-not-found — and any handler-raised ``HTTPException``), the
+    application's :class:`ApiError`, and the read-only reference-library
+    refusal :class:`ReadOnlySeriesError` (FRG-SER-021/022).
     """
     app.add_exception_handler(RequestValidationError, _validation_exception_handler)
     app.add_exception_handler(StarletteHTTPException, _http_exception_handler)
     app.add_exception_handler(ApiError, _api_error_handler)
+    app.add_exception_handler(ReadOnlySeriesError, _read_only_error_handler)

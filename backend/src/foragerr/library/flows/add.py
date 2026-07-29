@@ -88,6 +88,11 @@ async def add_series(
     * ``cv_volume_id`` already has a series row;
     * ``path_override`` does not resolve under a registered root folder.
 
+    When ``root_folder_id`` is a **read-only** reference root (FRG-SER-021), the
+    series is created browse/serve-only (FRG-SER-022): unmonitored, with the
+    monitoring strategy and new-item policy forced to ``none`` and search-on-add
+    off, whatever the caller asked for.
+
     ``booktype`` / ``booktype_locked`` carry the optional add-time
     collected-edition override (FRG-SER-018): with ``booktype_locked=True`` the
     given ``booktype`` (a vocabulary value, or ``None`` for explicit single
@@ -149,6 +154,20 @@ async def add_series(
                 f"root folder {root_folder_id} is not registered"
             )
 
+        if root.read_only:
+            # A series on a read-only reference root is browse/serve-only
+            # (FRG-SER-022): there is nowhere to download into, so the whole
+            # acquisition surface is off by CONSTRUCTION rather than by a later
+            # refusal — the series is unmonitored, no issue is monitored by the
+            # add-time strategy, refresh-discovered issues arrive unmonitored,
+            # and no search-on-add sweep is requested. Overridden rather than
+            # rejected: the caller's monitoring intent is meaningless for a root
+            # that cannot receive files, and refusing the add would refuse the
+            # only thing a reference library is for.
+            monitor_strategy = "none"
+            monitor_new_items = "none"
+            search_on_add = False
+
         resolved_profile_id = await _resolve_format_profile_id(
             session, format_profile_id
         )
@@ -184,6 +203,7 @@ async def add_series(
             title=title,
             publisher=record.publisher,
             start_year=record.start_year,
+            monitored=not root.read_only,
             monitor_new_items=monitor_new_items,
             format_profile_id=resolved_profile_id,
             root_folder_id=root_folder_id,
