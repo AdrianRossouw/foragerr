@@ -231,6 +231,16 @@ through the normal placement/renaming path. Re-running the scan re-checks the
 root: confirmed and skipped decisions carry forward, and files that imported
 are never staged again.
 
+If importing a group fails before any of its files are attached — a metadata
+fetch that could not complete, or every file blocked — foragerr leaves nothing
+half-added: the series it would have created is rolled back, so the library
+does not gain an empty, monitored series that quietly starts searching for
+issues on its own. The group keeps its failure reason on the review screen, and
+re-running it once the cause is fixed imports it cleanly as a first run. A group
+that imports at least one file keeps its series, exactly as before. A series
+that already existed is never removed by a failed import — only a series this
+import created and then could not populate.
+
 ## Duplicate handling
 
 When an incoming file targets an issue that already has a file, the format

@@ -85,6 +85,7 @@ from foragerr.library import matching
 from foragerr.library.flows import reconcile
 from foragerr.library.flows._common import SeriesValidationError, comicvine_factory
 from foragerr.library.flows.add import add_series
+from foragerr.library.flows.edit_delete import delete_series
 from foragerr.library.flows.refresh import refresh_series
 from foragerr.library.models import (
     IssueFileRow,
@@ -844,6 +845,7 @@ async def _import_group(
     # through the ONE add flow (CV fetch, path build; refresh handled below —
     # enqueue_refresh=False so the group gets EXACTLY one refresh).
     series = await _series_for_volume(db, group.confirmed_cv_volume_id)
+    created_series_id: int | None = None
     if series is not None:
         same_folder = bool(group.folder) and os.path.realpath(
             series.path
@@ -880,7 +882,63 @@ async def _import_group(
             )
             return "add-failed"
         series = result.series
+        # This group created the series in THIS run (FRG-IMP-027). If the group
+        # then attaches no file — a refresh failure, an error, or every file
+        # blocked — the series is rolled back below rather than left as a
+        # monitored, issueless shell the scheduled refresh + backlog search
+        # would silently "complete" behind an operator who saw the group fail.
+        # A reused / pre-existing series is never rolled back (created stays 0).
+        created_series_id = series.id
 
+    attached_flag = [False]
+    try:
+        return await _import_group_body(
+            db,
+            settings,
+            commands,
+            group,
+            series,
+            format_profile_id=format_profile_id,
+            monitor_strategy=monitor_strategy,
+            search_on_add=search_on_add,
+            offload=offload,
+            factory=factory,
+            now=now,
+            in_place=in_place,
+            mark_attached=lambda: attached_flag.__setitem__(0, True),
+        )
+    finally:
+        if created_series_id is not None and not attached_flag[0]:
+            # Metadata-only delete: cascades the shell's issue/file rows and
+            # cached cover, leaves any on-disk files untouched (delete_files
+            # False). A scan-series the refresh may have enqueued no-ops on the
+            # now-missing series.
+            await delete_series(
+                db, created_series_id, delete_files=False, settings=settings
+            )
+
+
+async def _import_group_body(
+    db: Database,
+    settings: Settings | None,
+    commands: CommandService,
+    group: LibraryImportGroupRow,
+    series,
+    *,
+    format_profile_id: int | None,
+    monitor_strategy: str,
+    search_on_add: bool,
+    offload: OffloadFn | None,
+    factory: HttpClientFactory | None,
+    now: dt.datetime,
+    in_place: bool,
+    mark_attached,
+) -> str:
+    """The refresh + attach steps for one group (FRG-IMP-027 split out so the
+    caller's try/finally can roll back a group-created shell that attaches no
+    file). ``mark_attached`` is called once at least one file is imported (or
+    the group's files are already fully registered), pinning the series to
+    keep it; otherwise the caller rolls it back."""
     # Populate the issue list DETERMINISTICALLY before importing: files can
     # only match issues that exist. Runs for a just-created series (always
     # issueless) and for a reused series whose add-enqueued refresh is still
@@ -942,6 +1000,7 @@ async def _import_group(
 
     if not candidates:
         if all_already_registered:
+            mark_attached()  # files already registered — a real, populated series
             await _set_group_outcome(
                 db,
                 group.id,
@@ -959,6 +1018,8 @@ async def _import_group(
         )
         return "empty"
     if blocked_reasons:
+        if imported:
+            mark_attached()  # at least one file landed — keep the series
         await _set_group_outcome(
             db,
             group.id,
@@ -970,6 +1031,7 @@ async def _import_group(
             rejections=blocked_reasons,
         )
         return "partial" if imported else "blocked"
+    mark_attached()
     await _set_group_outcome(
         db,
         group.id,
