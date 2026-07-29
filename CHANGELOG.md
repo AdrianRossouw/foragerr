@@ -9,6 +9,21 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.15.2] — 2026-07-29
+
+Calendar title legibility fix.
+
+### Fixed
+
+- Calendar entry titles now wrap to two lines at the base font size instead of
+  truncating to a few characters, keeping long series titles readable on the
+  release calendar (FRG-UI-018). Long unbroken titles break mid-word rather
+  than overflowing; titles longer than two lines are clamped with an ellipsis.
+  Card heights within a day group may now vary between one- and two-line
+  titles.
+
+No upgrade or migration steps.
+
 ## [v0.15.1] — 2026-07-29
 
 ### Fixed
