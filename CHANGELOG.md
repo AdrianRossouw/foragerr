@@ -9,6 +9,46 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.14.0] — 2026-07-29
+
+M11 import-intelligence, change 5 (final pre-designed change): the
+Calendar earns its keep. Every unmatched weekly release is now
+actionable, entries carry cover art and metadata pulled straight from
+the pull source, and adding a series the source already identified lands
+on the exact ComicVine volume instead of a search you have to retype.
+
+### Added
+- **Add from anywhere, straight to the right volume** (`FRG-PULL-008`,
+  `FRG-API-026`): every weekly entry not already in your library — not
+  just #1 debuts — offers a one-click Add. When the pull source supplied
+  the ComicVine id, Add opens on that exact volume, ready to confirm;
+  otherwise it falls back to a name-prefilled search. New series debuts
+  now show an inline "New" badge with a filter, replacing the separate
+  "New this week" strip. foragerr still never adds a series by itself.
+- **Cover art and details on the Calendar** (`FRG-UI-042`,
+  `FRG-PULL-011`): entries render cover thumbnails and an expandable
+  detail view (description, creators, characters, UPC), served from the
+  data the pull source already provides — no ComicVine budget spent.
+
+### Changed
+- **Pull ingest stores cover and enrichment fields** (`FRG-PULL-011`,
+  migration `0029`): the weekly fetch now keeps the cover URL,
+  description, creators, characters, and UPC it previously discarded.
+  Existing stored weeks populate on their next refresh. Cover URLs are
+  validated fail-closed at ingest; untrusted text is sanitized and
+  length-bounded.
+
+### Security
+- **Cover proxy allowlist grows to the LOCG image host** (`FRG-META-021`):
+  the same-origin cover proxy now serves pull covers from the shared S3
+  endpoint under an exact-host + required-path-prefix rule — a bare-host
+  entry there would proxy any public S3 bucket, so the rule refuses
+  bucket subdomains, off-prefix paths, traversal, userinfo, non-default
+  ports, and non-ASCII hosts, enforced identically at request time, at
+  every redirect hop, and at ingest. Threat model and risk register
+  (RISK-025, RISK-039) updated in the same change; reviewed under the
+  full security gate.
+
 ## [v0.13.1] — 2026-07-28
 
 Release-record correction: the `v0.13.0` tag was minted without its
