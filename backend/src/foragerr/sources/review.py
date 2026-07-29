@@ -35,7 +35,11 @@ import logging
 from dataclasses import dataclass
 
 from foragerr.db.base import utcnow
-from foragerr.sources.matching import LibrarySeriesLite, compute_proposed_match
+from foragerr.sources.matching import (
+    LibrarySeriesLite,
+    compute_proposed_match,
+    group_key as _group_key,
+)
 from foragerr.sources.models import SourceEntitlementRow
 
 logger = logging.getLogger("foragerr.sources.review")
@@ -455,11 +459,7 @@ async def _degrade_to_match(
     The FRG-SRC-008 degrade: reads the series title, then delegates to
     :func:`_resolve_as_match` for the shared sibling sweep + match tail.
     """
-    from foragerr.library.models import SeriesRow
-
-    async with db.read_session() as session:
-        series = await session.get(SeriesRow, series_id)
-        series_title = series.title if series is not None else None
+    series_title = await _series_title(db, series_id)
     return await _resolve_as_match(
         db,
         entitlement_id,
@@ -762,6 +762,11 @@ async def bulk_match(
     commands=None,
     matched_via: str,
 ) -> BulkResult:
+    # A bulk selection can span many groups; sweeping per member would re-scan
+    # the source's open queue once per row (O(members x queue) in the writer
+    # lock). The group sweep is the single-pick / group-header convenience, not
+    # a bulk one — the FRG-SRC-008 volume sweep on the add path is ungated and
+    # still runs.
     return await _bulk(
         db,
         entitlement_ids,
@@ -771,6 +776,7 @@ async def bulk_match(
             series_id=series_id,
             commands=commands,
             matched_via=matched_via,
+            sweep_group=False,
         ),
     )
 
@@ -784,6 +790,7 @@ async def accept_entitlement(
     factory=None,
     root_folder_id: int | None = None,
     matched_via: str,
+    sweep_group: bool = True,
 ) -> SourceEntitlementRow:
     """Apply an entitlement's OWN stored proposal (FRG-SRC-011).
 
@@ -837,6 +844,7 @@ async def accept_entitlement(
             commands=commands,
             matched_via=matched_via,
             require_new=True,
+            sweep_group=sweep_group,
         )
     cvid = _proposed_cv_id(row)
     if cvid is not None:
@@ -850,6 +858,7 @@ async def accept_entitlement(
             cv_volume_id=cvid,
             matched_via=matched_via,
             require_new=True,
+            sweep_group=sweep_group,
         )
     raise EntitlementActionError(
         f"entitlement {entitlement_id} has no proposed match to accept — "
@@ -872,7 +881,9 @@ async def bulk_accept(
 
     Heterogeneous by construction: some rows match, some add, and a row that
     cannot be accepted contributes an error entry while every other row still
-    runs (the shared :func:`_bulk` idiom).
+    runs (the shared :func:`_bulk` idiom). The group sweep is suppressed per
+    member (it would re-scan the source queue once per row); the FRG-SRC-008
+    volume sweep on the add path is ungated and still runs.
     """
     return await _bulk(
         db,
@@ -885,6 +896,7 @@ async def bulk_accept(
             factory=factory,
             root_folder_id=root_folder_id,
             matched_via=matched_via,
+            sweep_group=False,
         ),
     )
 
@@ -1162,20 +1174,6 @@ async def _reresolve_sibling_proposals(
     return rewritten
 
 
-def _group_key(human_name: str) -> str:
-    """The review screen's collapse key for a store title (FRG-SRC-014).
-
-    ``stripped_key(query_term(human_name))`` — the same fold the read surface
-    (``api.sources._group_key``) uses to collapse "same title, different edition
-    slice" rows into one operator-visible group. Reuses the shared matching
-    helpers rather than a second fold, so the sweep keys on exactly the grouping
-    the operator sees. The empty string is the "ungroupable" signal (a title that
-    folds to nothing) and never collapses with anything — the sweep honours that
-    by refusing to run on it.
-    """
-    from foragerr.sources.matching import query_term, stripped_key
-
-    return stripped_key(query_term(human_name))
 
 
 async def _reresolve_sibling_proposals_by_group(

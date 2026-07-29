@@ -37,6 +37,7 @@ from foragerr.sources.commands import (
     SOURCE_SYNC_TASK,
     make_humble_factory,
 )
+from foragerr.sources.matching import group_key
 from foragerr.sources.models import MATCHED_VIA_OPERATOR, SourceRow
 from foragerr.sources.registry import (
     UnknownSourceTypeError,
@@ -438,26 +439,6 @@ async def delete_source_endpoint(source_id: int, request: Request) -> None:
 # --- entitlement review surface (FRG-SRC-004/007) ---------------------------
 
 
-def _group_key(human_name: str) -> str:
-    """The review screen's collapse key for a store title (FRG-SRC-011).
-
-    ``stripped_key(query_term(human_name))`` — the store title trimmed to its
-    series-shaped term (the same trim the proposal ranker uses) and then run
-    through the ranker's boilerplate-STRIPPED fold, which itself bottoms out
-    in the ONE shared title fold (FRG-IMP-005). The strip is what makes the
-    collapse real: store fronts name the edition slices of ONE title with
-    per-ordinal idioms ("TITLE Vol. 243", "Title Issues #8", "Title #211"),
-    and every one of those keeps its ordinal through the plain fold
-    ("title vol 243"), so a long single-title run splinters into as many
-    groups as it has ordinals. The stripped fold is precisely the "same
-    title, different edition slice" equivalence the group means. Computed
-    server-side so the client cannot grow a second, subtly different fold.
-    """
-    from foragerr.sources.matching import query_term, stripped_key
-
-    return stripped_key(query_term(human_name))
-
-
 class EntitlementResource(BaseModel):
     """One reviewable entitlement as returned by the surface (FRG-SRC-004)."""
 
@@ -512,7 +493,7 @@ class EntitlementResource(BaseModel):
             human_name=row.human_name,
             publisher=row.publisher,
             bundle_human_name=row.bundle_human_name,
-            group_key=_group_key(row.human_name),
+            group_key=group_key(row.human_name),
             classification=row.classification,
             review_status=row.review_status,
             download_state=row.download_state,
