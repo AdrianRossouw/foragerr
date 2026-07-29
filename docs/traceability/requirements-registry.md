@@ -243,7 +243,7 @@ milestone-to-minor mapping. No id renumbered.
 | FRG-IMP-024 | Embedded metadata read during import | imp | implemented | M2 |
 | FRG-IMP-025 | Story-arc reading-order prefix | imp | approved | B |
 | FRG-IMP-026 | Issue-word filler stripping | imp | implemented | M11 |
-| FRG-IMP-027 | Per-group import atomicity (no zombie series shell) | imp | proposed | B |
+| FRG-IMP-027 | Per-group import atomicity (no zombie series shell) | imp | implemented | B |
 | FRG-PP-001 | Single shared import pipeline | pp | implemented | M1 |
 | FRG-PP-002 | Completed-download handling state machine | pp | implemented | M1 |
 | FRG-PP-003 | Grab reconciliation by download ID | pp | implemented | M1 |
