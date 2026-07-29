@@ -235,3 +235,44 @@ async def test_path_override_must_be_under_root(
     async with db.read_session() as session:
         remaining = (await session.execute(select(SeriesRow.cv_volume_id))).scalars().all()
     assert 10 not in remaining
+
+
+@pytest.mark.req("FRG-SER-022")
+async def test_add_under_a_read_only_root_is_browse_only(
+    db, settings, commands, tmp_path
+):
+    """A series added under a read-only reference root comes out browse/serve-
+    only (FRG-SER-022): unmonitored, the monitoring strategy and new-item policy
+    forced to ``none``, and no search-on-add sweep — the caller's opposite
+    request is OVERRIDDEN, because a root nothing can be written to has no
+    acquisition to configure."""
+    reference = tmp_path / "reference-library"
+    reference.mkdir()
+    async with db.write_session() as session:
+        root = await repo.create_root_folder(session, str(reference), read_only=True)
+        read_only_root_id = root.id
+
+    factory = build_factory(
+        settings, FakeCV().volume(77, name="Example Series").handler()
+    )
+    result = await add_series(
+        db,
+        settings,
+        cv_volume_id=77,
+        root_folder_id=read_only_root_id,
+        commands=commands,
+        # Everything the operator could ask for that acquisition needs.
+        monitor_strategy="all",
+        monitor_new_items="all",
+        search_on_add=True,
+        factory=factory,
+    )
+
+    async with db.read_session() as session:
+        series = await repo.get_series(session, result.series.id)
+    assert series.monitored is False
+    assert series.monitor_new_items == "none"
+    opts = decode_add_options(series.add_options)
+    assert opts.monitor_strategy == "none"
+    assert opts.monitor_new_items == "none"
+    assert opts.search_on_add is False
