@@ -737,11 +737,11 @@ async def bulk_entitlements_endpoint(
             matched_via=MATCHED_VIA_OPERATOR,
         )
     elif body.action == "apply_to_group":
-        if body.series_id is None and body.cv_volume_id is None:
+        if (body.series_id is None) == (body.cv_volume_id is None):
             raise ApiError(
                 422,
-                "apply_to_group requires series_id (in-library) or cv_volume_id "
-                "(add)",
+                "apply_to_group requires exactly one of series_id (in-library) "
+                "or cv_volume_id (add)",
                 field="series_id",
             )
         try:

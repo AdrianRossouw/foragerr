@@ -423,6 +423,10 @@ async def _auto_accept(
                     # own: only the write-transaction re-read can make an
                     # operator decision landed between read and write win.
                     require_new=True,
+                    # Unattended: no operator is reviewing, so the sibling
+                    # proposal sweep would be pure churn — and running it per
+                    # auto-accepted row is O(queue) work times the queue size.
+                    sweep_group=False,
                 )
             elif proposal.best.kind == "comicvine" and proposal.best.cv_volume_id:
                 await review.add_entitlement(
@@ -433,6 +437,7 @@ async def _auto_accept(
                     cv_volume_id=proposal.best.cv_volume_id,
                     matched_via=MATCHED_VIA_AUTO,
                     require_new=True,
+                    sweep_group=False,  # unattended — see the match branch above
                     # Nobody is waiting on an auto-accept: it runs from the
                     # nightly enrichment batch, and the add's ComicVine
                     # existence check must be capped at the batch share like

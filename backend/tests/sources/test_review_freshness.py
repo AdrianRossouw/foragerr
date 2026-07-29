@@ -909,3 +909,83 @@ async def test_bulk_apply_to_group_needs_a_target(db, config_dir):
             commands=FakeCommands(), matched_via=MATCHED_VIA_OPERATOR,
         )
     assert exc.value.status == 422
+
+
+@pytest.mark.req("FRG-SRC-014")
+async def test_bulk_apply_to_group_rejects_both_targets(db, config_dir):
+    """Both a series_id and a cv_volume_id at once is a 422 — the pick is
+    exactly one of in-library or add, never ambiguous."""
+    source = await _synced_source(db, config_dir)
+    ids = [e.id for e in await _new_comics(db, source.id)]
+    with pytest.raises(review.EntitlementActionError) as exc:
+        await review.bulk_apply_to_group(
+            db, make_settings(config_dir), ids, series_id=1, cv_volume_id=2,
+            commands=FakeCommands(), matched_via=MATCHED_VIA_OPERATOR,
+        )
+    assert exc.value.status == 422
+
+
+@pytest.mark.req("FRG-SRC-014")
+async def test_bulk_apply_to_group_skips_matched_and_ignored_members(
+    db, config_dir, root_folder_id, format_profile_id
+):
+    """A group header spans mixed-status rows. "Match all" applies ONLY to the
+    rows still in review — a member the operator already ignored is never
+    reversed into a match (the FRG-SRC-011 hazard), and a member already matched
+    to another series is left alone."""
+    source = await _synced_source(db, config_dir)
+    target = await _mk_series(
+        db, root_folder_id, format_profile_id, cvid=720, title="Synthetic Hero"
+    )
+    other = await _mk_series(
+        db, root_folder_id, format_profile_id, cvid=721, title="Other Hero"
+    )
+    a, b, c = await _new_comics(db, source.id)
+    for e, i in ((a, 1), (b, 2), (c, 3)):
+        await _set_name(db, e.id, f"Synthetic Hero #{i}")
+    # b was already matched to a DIFFERENT series; c was withdrawn (ignored).
+    await review.match_entitlement(
+        db, b.id, series_id=other, commands=FakeCommands(),
+        matched_via=MATCHED_VIA_OPERATOR,
+    )
+    await review.ignore_entitlement(db, c.id)
+
+    result = await review.bulk_apply_to_group(
+        db, make_settings(config_dir), [a.id, b.id, c.id], series_id=target,
+        commands=FakeCommands(), matched_via=MATCHED_VIA_OPERATOR,
+    )
+
+    assert result.applied == 1  # only the one new row
+    row_a = await repo.get_entitlement(db, a.id)
+    row_b = await repo.get_entitlement(db, b.id)
+    row_c = await repo.get_entitlement(db, c.id)
+    assert row_a.review_status == "matched" and row_a.matched_series_id == target
+    assert row_b.review_status == "matched" and row_b.matched_series_id == other
+    assert row_c.review_status == "ignored"  # never un-ignored, never queued
+
+
+@pytest.mark.req("FRG-SRC-014")
+async def test_bulk_apply_to_group_add_picks_first_new_not_decided(
+    db, config_dir, root_folder_id, format_profile_id
+):
+    """The add branch adds against the first row still IN REVIEW, not a decided
+    row that happens to sort first in the list."""
+    source = await _synced_source(db, config_dir)
+    settings = flows_settings(config_dir)
+    factory = build_factory(
+        settings, FakeCV().volume(722, name="Synthetic Hero").handler()
+    )
+    a, b, c = await _new_comics(db, source.id)
+    for e, i in ((a, 1), (b, 2), (c, 3)):
+        await _set_name(db, e.id, f"Synthetic Hero #{i}")
+    await review.ignore_entitlement(db, a.id)  # first in the list, decided
+
+    result = await review.bulk_apply_to_group(
+        db, settings, [a.id, b.id, c.id], cv_volume_id=722,
+        commands=FakeCommands(), factory=factory, root_folder_id=root_folder_id,
+        matched_via=MATCHED_VIA_OPERATOR,
+    )
+
+    assert result.applied == 1
+    assert (await repo.get_entitlement(db, a.id)).review_status == "ignored"
+    assert (await repo.get_entitlement(db, b.id)).review_status == "matched"

@@ -150,6 +150,7 @@ async def match_entitlement(
     commands=None,
     matched_via: str,
     require_new: bool = False,
+    sweep_group: bool = True,
 ) -> SourceEntitlementRow:
     """Link an entitlement to an existing library series and accept it.
 
@@ -169,6 +170,13 @@ async def match_entitlement(
     the entitlement was already imported against a DIFFERENT series, that prior
     series' owned-via-edition fills are reverted so the re-match does not strand
     ownership pointing at the old collected edition (FRG-SRC-007).
+
+    ``sweep_group`` runs the same-group sibling proposal sweep (FRG-SRC-014)
+    after the match. It defaults on for a single operator pick; a bulk
+    group-apply passes ``False`` per member and sweeps ONCE for the whole group
+    (the per-member sweep would re-scan the source's open queue N times), and
+    unattended ``_auto_accept`` passes ``False`` (no operator is watching, so
+    the convenience proposals are pure churn).
 
     ``require_new`` is the ACCEPT path's precondition (FRG-SRC-011), and it is
     checked HERE — inside the write transaction that stamps ``matched`` —
@@ -221,14 +229,15 @@ async def match_entitlement(
     # series so their next single action is first-click correct — never a commit,
     # never a touch on a matched / ignored row. This is the case that swept
     # nothing before; the add/degrade tail reaches it through this same call.
-    await _reresolve_sibling_proposals_by_group(
-        db,
-        source_id=source_id,
-        group_key=group_key,
-        series_id=series_id,
-        series_title=series_title,
-        exclude_entitlement_id=entitlement_id,
-    )
+    if sweep_group:
+        await _reresolve_sibling_proposals_by_group(
+            db,
+            source_id=source_id,
+            group_key=group_key,
+            series_id=series_id,
+            series_title=series_title,
+            exclude_entitlement_id=entitlement_id,
+        )
     await _queue_grab(db, entitlement_id, commands)
     return await _reload(db, entitlement_id)
 
@@ -244,6 +253,7 @@ async def add_entitlement(
     cv_volume_id: int | None = None,
     matched_via: str,
     require_new: bool = False,
+    sweep_group: bool = True,
     lane: str = "interactive",
 ) -> SourceEntitlementRow:
     """Add a brand-new series for an entitlement via the normal add flow.
@@ -317,6 +327,7 @@ async def add_entitlement(
             commands=commands,
             matched_via=matched_via,
             require_new=require_new,
+            sweep_group=sweep_group,
         )
 
     root_id = root_folder_id
@@ -364,6 +375,7 @@ async def add_entitlement(
                 commands=commands,
                 matched_via=matched_via,
                 require_new=require_new,
+                sweep_group=sweep_group,
             )
         raise EntitlementActionError(
             f"add-series failed for volume {cvid}: {exc}", status=400
@@ -380,6 +392,7 @@ async def add_entitlement(
         commands=commands,
         matched_via=matched_via,
         require_new=require_new,
+        sweep_group=sweep_group,
     )
 
 
@@ -393,6 +406,7 @@ async def _resolve_as_match(
     commands=None,
     matched_via: str,
     require_new: bool = False,
+    sweep_group: bool = True,
 ) -> SourceEntitlementRow:
     """Sweep sibling proposals for ``cv_volume_id`` then match the acting row.
 
@@ -421,6 +435,7 @@ async def _resolve_as_match(
         commands=commands,
         matched_via=matched_via,
         require_new=require_new,
+        sweep_group=sweep_group,
     )
 
 
@@ -433,6 +448,7 @@ async def _degrade_to_match(
     commands=None,
     matched_via: str,
     require_new: bool = False,
+    sweep_group: bool = True,
 ) -> SourceEntitlementRow:
     """Resolve an add whose volume is already in the library as a match.
 
@@ -453,6 +469,7 @@ async def _degrade_to_match(
         commands=commands,
         matched_via=matched_via,
         require_new=require_new,
+        sweep_group=sweep_group,
     )
 
 
@@ -886,38 +903,69 @@ async def bulk_apply_to_group(
 ) -> BulkResult:
     """Resolve an operator-picked series across a whole review group (FRG-SRC-014).
 
-    One action for the group header's "pick a series for this group":
+    One action for the group header's "pick a series for this group". The
+    group's rows are mixed-status (a header spans ``new`` / ``matched`` /
+    ``ignored``), so this applies ONLY to rows still in review — a group pick is
+    the accept path's convenience, not a mandate over a decision the operator
+    already made, and it must never silently un-ignore a withdrawn row and queue
+    its download (the FRG-SRC-011 guard):
 
-    * an **in-library** pick (``series_id`` given) bulk-MATCHES every listed
-      member — the existing :func:`bulk_match`, so each member is committed and,
-      per row, its download queued;
+    * an **in-library** pick (``series_id`` given) MATCHES every ``new`` member
+      (``require_new`` — ``matched`` / ``ignored`` members are per-row skips),
+      then runs the same-group sibling sweep ONCE for the whole group;
     * a **not-yet-added** pick (``cv_volume_id`` given, no ``series_id``) ADDS the
-      series once for the first member through the ordinary add path, whose
-      group-key sweep re-proposes the remaining members. Only the added member is
-      committed here; the rest stay ``new`` with swept proposals for a single
-      follow-up bulk accept — nothing else downloads without a further operator
-      action.
+      series once for the first ``new`` member through the ordinary add path,
+      whose group-key sweep re-proposes the remaining members. Only the added
+      member is committed here; the rest stay ``new`` with swept proposals for a
+      single follow-up bulk accept — nothing else downloads without a further
+      operator action.
 
-    Returns the shared :class:`BulkResult` per-id outcome shape either way. A
-    caller that supplies neither target is a per-request 422 at the API layer.
+    Returns the shared :class:`BulkResult` per-id outcome shape either way.
+    Exactly one target is required (neither, or both, is a 422).
     """
-    if series_id is not None:
-        return await bulk_match(
-            db,
-            entitlement_ids,
-            series_id=series_id,
-            commands=commands,
-            matched_via=matched_via,
-        )
-    if cv_volume_id is None:
+    if (series_id is None) == (cv_volume_id is None):
         raise EntitlementActionError(
-            "apply-to-group needs either a series_id (in-library) or a "
+            "apply-to-group needs exactly one of series_id (in-library) or "
             "cv_volume_id (add)",
             status=422,
         )
     if not entitlement_ids:
         return BulkResult(applied=0, skipped=0, errors={})
-    first = entitlement_ids[0]
+
+    new_ids, group_key, source_id = await _new_group_members(db, entitlement_ids)
+
+    if series_id is not None:
+        # Match only the ``new`` members (require_new skips matched/ignored),
+        # sweeping ONCE afterward rather than per member.
+        result = await _bulk(
+            db,
+            entitlement_ids,
+            lambda eid: match_entitlement(
+                db,
+                eid,
+                series_id=series_id,
+                commands=commands,
+                matched_via=matched_via,
+                require_new=True,
+                sweep_group=False,
+            ),
+        )
+        if new_ids and group_key:
+            series_title = await _series_title(db, series_id)
+            await _reresolve_sibling_proposals_by_group(
+                db,
+                source_id=source_id,
+                group_key=group_key,
+                series_id=series_id,
+                series_title=series_title,
+                exclude_entitlement_id=None,
+            )
+        return result
+
+    if not new_ids:
+        # Nothing still in review to add against — every member already decided.
+        return BulkResult(applied=0, skipped=len(entitlement_ids), errors={})
+    first = new_ids[0]
     errors: dict[int, str] = {}
     try:
         await add_entitlement(
@@ -968,6 +1016,54 @@ async def _series_id_for_volume(db, cv_volume_id: int) -> int | None:
         return await session.scalar(
             select(SeriesRow.id).where(SeriesRow.cv_volume_id == cv_volume_id)
         )
+
+
+async def _series_title(db, series_id: int) -> str | None:
+    from sqlalchemy import select
+
+    from foragerr.library.models import SeriesRow
+
+    async with db.read_session() as session:
+        return await session.scalar(
+            select(SeriesRow.title).where(SeriesRow.id == series_id)
+        )
+
+
+async def _new_group_members(
+    db, entitlement_ids: list[int]
+) -> tuple[list[int], str, int | None]:
+    """The subset of ``entitlement_ids`` still in review, plus the group's fold
+    key and source (from the first existing row). A group-apply matches/adds only
+    ``new`` rows — a header spans decided rows the operator didn't individually
+    pick, and reversing those is the FRG-SRC-011 hazard."""
+    from sqlalchemy import select
+
+    new_ids: list[int] = []
+    group_key = ""
+    source_id: int | None = None
+    async with db.read_session() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(SourceEntitlementRow).where(
+                        SourceEntitlementRow.id.in_(entitlement_ids)
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    by_id = {row.id: row for row in rows}
+    for eid in entitlement_ids:  # preserve caller order
+        row = by_id.get(eid)
+        if row is None:
+            continue
+        if source_id is None:
+            source_id = row.source_id
+            group_key = _group_key(row.human_name)
+        if row.review_status == "new":
+            new_ids.append(eid)
+    return new_ids, group_key, source_id
 
 
 async def _reresolve_sibling_proposals(
@@ -1089,7 +1185,7 @@ async def _reresolve_sibling_proposals_by_group(
     group_key: str,
     series_id: int,
     series_title: str | None,
-    exclude_entitlement_id: int,
+    exclude_entitlement_id: int | None,
 ) -> int:
     """Point same-``group_key`` siblings' proposals at the resolved series.
 
