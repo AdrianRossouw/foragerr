@@ -256,6 +256,16 @@ allocated yet).
   - **T-ARCH-4 (Tampering — password-protected/corrupt archives)**: Coverage: FD `PP — Archive
     validity verification` (invalid → failed path), ACQ `DL — Failed download handling`. RISK-030.
 
+**Lesson (read-only-library, see below)**: this trust boundary already named
+"ComicInfo rewrite" as a library write before the read-only-library change
+existed, but that change's write-path enumeration was not cross-referenced
+against it at proposal time — a scoping miss, not a new threat. ComicInfo
+tagging (and CBR→CBZ conversion, the same post-placement step) is exactly the
+class of write COMP 9's read-only boundary must suppress, and is treated as
+part of that boundary's checkable set below. Any future write-boundary
+feature should audit against every COMP entry that already names a
+filesystem write, not only the entries its own proposal expected to touch.
+
 ---
 
 ## COMP 8 — ComicVine client
@@ -1900,20 +1910,61 @@ attacker, but tampering all the same if a write path is missed.
   the same structured 400 as any other root. The read-only flag is a
   persisted, additive column on the root-folder row — no schema rewrite,
   existing (non-read-only) roots unaffected.
-- **The write boundary is fail-closed at every disk-write path, not just
-  behind the endpoints that normally reach them**: import placement,
-  per-series rescan moves, the download/import writer, and delete/
-  recycle-bin all gate on a single guard — `root_is_read_only()` /
-  `series_is_read_only()` — checked in the **flow body**, not only at the
-  API route. This placement matters because `POST /api/v1/command` can
-  enqueue any registered command by name (FRG-SCHED, COMP 12): a
-  per-endpoint check on the ordinary rescan/delete routes would not stop
-  the same operation reaching a read-only series through the generic
-  command surface. One guard, checked where the write actually happens,
-  covers both paths by construction rather than by remembering to add
-  the check twice. A write reaching any of these paths for a read-only
-  series is refused with a clear reason; no bytes are written to the
-  read-only root by any route.
+- **The write boundary is fail-closed over a checkable, enumerable set of
+  write paths — stated honestly, not as a universal claim**: a gate review
+  of this change found the first shipped cut of the guard was NOT
+  complete (see RISK-054) — the in-place import branch disposed of an
+  already-tracked file before the guard ran, ComicInfo tagging and
+  CBR→CBZ conversion were not covered by the rename/in-place forcing,
+  on-demand convert (`convert-series`/`convert-issue`) never routed
+  through the guarded pipeline at all, and a series or path could be
+  planted inside a read-only root while its `root_folder_id` named a
+  writable one. The design intent — and what the fix restores — is a
+  single guard, `root_is_read_only()` / `series_is_read_only()`,
+  consulted in the **flow body** (not only at the API route) of every
+  path in the checkable set:
+  - the eight commands sharing `IMPORT_FILE_MUTATION_GROUP` exclusivity
+    (library-import, rename, delete/recycle, rescan, `convert-series`,
+    `convert-issue`, manual-import, download-import);
+  - the single `pipeline.execute()` placement step, gated ABOVE the
+    in-place/move branch split so disposal of an already-tracked file is
+    covered in both branches, not only the move branch;
+  - the post-placement archive rewrites (ComicInfo tagging, CBR→CBZ
+    conversion) that run after every successful import, forced off for a
+    read-only root's series alongside `rename_enabled` (see COMP 7's
+    scoping note above);
+  - source-side confinement for manual-import and `rescan-series`'
+    `path_override`: any candidate whose *resolved source path* lies
+    under a read-only root is refused in move mode regardless of the
+    destination series' root, closing the direction where files move OUT
+    of a reference library;
+  - path-derived, not FK-derived, read-only status for add/edit: a path
+    under a read-only root is refused independent of which root's id the
+    request names, so a mismatched `root_folder_id` cannot present a
+    read-only path as writable.
+
+  This placement matters because `POST /api/v1/command` can enqueue any
+  registered command by name (FRG-SCHED, COMP 12): a per-endpoint check
+  on the ordinary rescan/delete routes would not stop the same operation
+  reaching a read-only series through the generic command surface. One
+  guard, checked where the write actually happens, covers both paths by
+  construction rather than by remembering to add the check twice. A
+  registry-level test asserts every `IMPORT_FILE_MUTATION_GROUP` command
+  consults the guard, so a future mutating command added without it
+  fails the test rather than shipping a silent gap. **This is the full
+  extent of the claim**: every write path in the enumerated set above is
+  refused fail-closed with no bytes written to the read-only root; no
+  claim is made about write paths outside this set, and any new
+  disk-write path must be added to the registry-level test before merge.
+- **The force-grab override cannot cross the boundary (FRG-SER-022)**:
+  `POST /release`'s acquisition guard (`refuse_read_only_series_in`) runs
+  before the approved/force branch, so `force: true` — the sole bypass of
+  the quality-rule approval gate (RISK-053) — never reaches a read-only
+  series. `force` overrides the quality rules only, never the write/
+  acquisition boundary; there is no supplied flag or override anywhere in
+  the surface that reopens the boundary once a series is read-only. This
+  is the strongest single property in the implementation and was
+  previously undocumented.
 - **Index-in-place import (FRG-IMP-028)**: importing a Library Import
   group under a read-only root reuses the existing scan → match →
   register pipeline with the placement step made a no-op — the series
@@ -1929,22 +1980,58 @@ attacker, but tampering all the same if a write path is missed.
 - **A read-only series is acquisition-inert by construction
   (FRG-SER-022)**: created unmonitored, and the monitor/search/grab/
   delete-files entry points refuse it with a clear reason rather than a
-  silent no-op; the derived wanted-issues/calendar projections exclude
-  read-only series from the acquisition surfaces at the query level, so
-  there is no monitored-but-suppressed state to drift out of sync. This
-  mirrors the FRG-SER-019/020 pattern of proving an invariant by
-  exclusion at the projection rather than scattering a conditional
-  through the wanted/search machinery.
+  silent no-op. The wanted-issues/missing-count projection (FRG-SER-009)
+  genuinely excludes a read-only series at the query level — it shares the
+  same "series monitored" predicate every other drift-free aggregate
+  uses, and a read-only series is never monitored, so no read-only-
+  specific conditional was needed there. The calendar/pull-source
+  projection (`pull/projection.py`) is a **separate** surface with its
+  own predicate; a gate review found it did NOT exclude read-only series
+  — a stored pull-source entry matching a read-only series' issue could
+  surface live Want/Skip/Search controls that then 409 on use, and the
+  matching frontend has no read-only awareness either. Fix in flight:
+  exclude read-only series in that projection's issue lookup so the same
+  invariant holds there by construction (matching the FRG-SER-019/020
+  pattern of proving an invariant by exclusion at the projection) rather
+  than by UI-only suppression.
 - **UI marking is convenience, not the boundary (FRG-UI-045)**: read-only
   roots and their series are marked read-only and the monitor toggle,
   search/grab, and file-mutating actions are hidden or disabled — so the
   operator is never offered an action the backend will refuse — but the
   backend guard above is what actually enforces the boundary; a UI bug
-  or a direct API call is still caught fail-closed.
+  or a direct API call is still caught fail-closed. A gate review found
+  several affordances (series edit, add-series root picker, the rename
+  picker) not yet gated this way; closing those is UI-layer convenience
+  work tracked against the same requirement, not a boundary gap — the
+  backend guard already refuses every one of them.
+- **Information disclosure — `read_only` on `RootFolderResource` /
+  `SeriesResource` (COMP 1)**: both fields are visible only on the
+  existing authenticated `/api/v1` surface (T-API-1's no-auth-within-
+  tailnet acceptance applies unchanged, RISK-020) and reveal nothing an
+  authenticated caller could not already infer from a 409 on a write
+  attempt. No new disclosure class.
+- **DoS/scale — a very large read-only root (COMP 9)**: index-in-place
+  import walks the whole tree at scan/import time, and registering a
+  reference library can burst a ComicVine metadata fetch per newly-
+  discovered series. Both are governed by the existing scan and CV
+  rate-limiter controls (no new control needed), but a multi-thousand-
+  issue reference library is a materially larger single scan/refresh
+  burst than any writable-root library exercised so far. Flagged as an
+  at-scale question for the post-merge rig sanity task (tasks.md 4.3:
+  scan throughput, CV metadata budget), not a new mitigation.
+- **Health surface (COMP 1)**: `health/service.py`'s root-folder probe no
+  longer treats an unwritable path as an error when the root is
+  registered read-only — existence and readability are still enforced
+  (a missing or unreachable root is still an error state). The probe
+  never attempts a write either way — it inspects `os.access(path,
+  os.W_OK)`, it does not write a byte — so this is a narrowing of what
+  counts as unhealthy, not a new write attempt.
 
 No new STRIDE category: this entry **tightens** an existing one (COMP 9
 Tampering — move/delete safety) by adding a write-refusal boundary over a
-class of root the write paths previously assumed didn't exist. No new
+class of root the write paths previously assumed didn't exist, and adds
+informational/DoS legs to the existing COMP 1 authenticated-surface
+acceptance rather than opening a new trust boundary there. No new
 listener, no new egress target, no new parser of untrusted input, no new
 credential, no new dependency, no migration beyond the additive
 `read_only` column. RISK-010/019/032 (archive safety, path confinement,
