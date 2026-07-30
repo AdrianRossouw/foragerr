@@ -53,9 +53,10 @@ surfacing) adapt their geometry, not their assertions.
 
 - [~10 rows per screen vs 22 before] → the owner chose this trade
   explicitly; day headers + lazy covers keep long days navigable.
-- [Derived hues could collide between two small publishers] → hues are
-  spread over 360°; collision cost is cosmetic and the name is printed
-  beside the swatch.
+- [Derived hues collide between small publishers] → collisions are
+  expected at real publisher counts (hundreds of names into a ~290-value
+  arc); the cost is cosmetic by design — the name is always printed
+  beside the swatch, and the named palette carries the majors.
 - [Two-line clamp hides description tails] → full text stays on the
   detail surface; the clamp is a browse teaser, not the reading surface.
 

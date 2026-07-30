@@ -49,8 +49,9 @@ SHALL provide:
     other column's content SHALL reduce its measure below approximately 30
     characters per line — the title SHALL therefore carry a definite
     minimum, and the description/creator lines SHALL yield (clamp) to it.
-    An entry SHALL occupy no more vertical rhythm than its cover plus
-    spacing (approximately 110 CSS px), the deliberate trade of v0.17.0's
+    An entry whose title fits one line SHALL occupy no more vertical
+    rhythm than its cover plus spacing (approximately 110 CSS px; a
+    wrapped title adds its own lines and nothing else), the deliberate trade of v0.17.0's
     row density for discoverability: the cover and the on-row metadata are
     the browsing surface (owner decision, design session 2).
   - **Below the crossover — quiet cards.** A single column of cards in which
@@ -59,8 +60,10 @@ SHALL provide:
     block (no labelled button competes with the title for horizontal space),
     and the day's gutter folds into an inline day header so the card keeps the
     viewport's width.
-  - Both modes SHALL render the same entry data and expose the same actions:
-    nothing SHALL be reachable in one mode and unreachable in the other.
+  - Both modes SHALL expose the same actions and make the same entry data
+    reachable (the card face defers creators and description to the detail
+    surface; the shelf row surfaces them inline): nothing SHALL be
+    reachable in one mode and unreachable in the other.
 - **Derived-state display**: each entry's state SHALL be a projection of the
   entry's `state` (missing/wanted, downloading, downloaded, unmonitored,
   pending-refresh) — never a status stored on the pull entry (D4) — and SHALL
@@ -176,9 +179,10 @@ in-flight behavior by FRG-UI-048.
 #### Scenario: Neither mode hides an action the other offers
 
 - **WHEN** the same week is rendered on either side of the crossover
-- **THEN** each entry exposes the identical set of actions and the identical
-  entry data in both modes, differing only in placement and in whether an
-  action's label is rendered as text
+- **THEN** each entry exposes the identical set of actions, and the
+  identical entry data is reachable in both modes (inline on the shelf
+  row, via the detail surface on the card), differing only in placement
+  and in whether an action's label is rendered as text
 
 #### Scenario: A dense day browses by cover
 
