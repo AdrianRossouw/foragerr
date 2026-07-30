@@ -57,8 +57,8 @@ None — extensions of the existing library/import/OPDS areas.
 ### Modified Capabilities
 
 - `ser`: ADDED FRG-SER-021 (read-only root), FRG-SER-022 (browse-only
-  series). Relates to FRG-SER-008 (root registration/writability) —
-  the writable requirement becomes "writable OR read-only-and-readable".
+  series). MODIFIED FRG-SER-008 (root registration/writability) — the
+  writable requirement becomes "writable OR read-only-and-readable".
 - `imp`: ADDED FRG-IMP-028 (index-in-place import, no disk mutation).
 - `ui`: ADDED FRG-UI-045 (read-only marking + suppressed write actions).
 
@@ -81,7 +81,12 @@ None — extensions of the existing library/import/OPDS areas.
   delete. No new listener/egress/parser of untrusted input; no new
   dependency; no migration beyond the additive `read_only` column.
 - Manual: `docs/manual/user/library.md` + `import.md` (registering a
-  read-only library; what it does and does not do).
+  read-only library; what it does and does not do); `docs/manual/admin/
+  configuration.md` §Root folders (previously said read-only mounts were
+  unsupported — a gate review caught this as a direct contradiction the
+  original manual-impact declaration missed); `docs/manual/user/web-ui.md`
+  (Media Management's read-only checkbox/badge, Add Series inline
+  registration wording).
 
 ## Non-goals
 
@@ -98,5 +103,4 @@ None — extensions of the existing library/import/OPDS areas.
 index + serve, no acquisition — and pulling it forward to run foragerr on
 the real library now, accepting a small 1.0-timeline cost for the
 at-scale dogfood signal). Sequenced AFTER the approved import-atomicity
-fix (whose write-path audit this feature builds on). Awaiting formal
-approval (FRG-PROC-009) before implementation.
+fix (whose write-path audit this feature builds on).
