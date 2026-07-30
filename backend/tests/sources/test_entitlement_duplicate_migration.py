@@ -1,9 +1,10 @@
-"""``source_entitlements.duplicate_of`` + the ``(source_id, md5)`` index
-(migration 0032): the pointer md5 dedupe parks a copy with (FRG-SRC-015).
+"""``source_entitlements.duplicate_of`` / ``dedupe_opt_out`` and the two dedupe
+indexes (migration 0032) — the columns md5 dedupe parks and un-parks a copy with
+(FRG-SRC-015).
 
-Additive, nullable, forward-only (FRG-DB-002), with NO data rewrite — every
-pre-0032 row reads as unlinked, and the startup backfill (not SQL) applies the
-review-state rule that decides which sets may link at all.
+Additive, forward-only (FRG-DB-002), with NO data rewrite — every pre-0032 row
+reads as unlinked and not opted out, and the startup backfill (not SQL) applies
+the review-state rule that decides which sets may link at all.
 """
 
 from __future__ import annotations
@@ -36,6 +37,10 @@ def test_duplicate_of_column_and_md5_index_are_present(tmp_path):
         assert cols["duplicate_of"][3] == 0  # NULLABLE — most rows are unlinked
         assert cols["duplicate_of"][4] is None  # no invented default
 
+        assert "dedupe_opt_out" in cols
+        assert cols["dedupe_opt_out"][3] == 1  # NOT NULL — no third "maybe"
+        assert "0" in str(cols["dedupe_opt_out"][4])  # defaults to not opted out
+
         indexes = {
             row[1]: row
             for row in conn.execute("PRAGMA index_list(source_entitlements)")
@@ -48,6 +53,17 @@ def test_duplicate_of_column_and_md5_index_are_present(tmp_path):
             )
         ]
         assert columns == ["source_id", "md5"]
+
+        # The copies chip resolves "which rows point at these canonicals" on
+        # every review-list request; unindexed that is a full scan of a queue
+        # that runs to thousands of rows.
+        assert "ix_source_entitlements_duplicate_of" in indexes
+        assert [
+            row[2]
+            for row in conn.execute(
+                "PRAGMA index_info(ix_source_entitlements_duplicate_of)"
+            )
+        ] == ["duplicate_of"]
 
 
 @pytest.mark.req("FRG-SRC-015")
@@ -71,7 +87,8 @@ def test_a_legacy_shaped_row_reads_as_unlinked(tmp_path):
             "'2026-07-30 00:00:00', '2026-07-30 00:00:00')"
         )
         row = conn.execute(
-            "SELECT human_name, review_status, duplicate_of FROM source_entitlements"
+            "SELECT human_name, review_status, duplicate_of, dedupe_opt_out "
+            "FROM source_entitlements"
         ).fetchone()
 
-    assert row == ("Example Item", "new", None)
+    assert row == ("Example Item", "new", None, 0)

@@ -122,6 +122,16 @@ class SourceEntitlementRow(Base):
     #: the set never spans sources (which cascade as a whole), and a dangling
     #: pointer must read as "no set" rather than block a delete.
     duplicate_of: Mapped[int | None] = mapped_column(StrictInteger, nullable=True)
+    #: Whether the operator has RESTORED this row out of a duplicate parking
+    #: (FRG-SRC-015). The linking pass never parks a flagged row again: a
+    #: restore is an explicit statement that this copy is to be reviewed on its
+    #: own, and the next sync silently reversing it would make restore a
+    #: gesture rather than a decision. It does not stop the row being a
+    #: CANONICAL — flagged or not, it is an ordinary reviewable row. Survives
+    #: ignore/restore cycles; only set, never cleared.
+    dedupe_opt_out: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
     #: Download/import-progress axis, separate from review status (design
     #: decision 2): ``None`` (never grabbed) → ``queued`` → ``fetching`` →
     #: ``verifying`` → ``import_pending`` → ``imported`` | ``import_blocked`` |
@@ -205,5 +215,11 @@ class SourceEntitlementRow(Base):
             "ix_source_entitlements_source_md5",
             "source_id",
             "md5",
+        ),
+        # The copies chip resolves "which rows point at these canonicals" on
+        # every listing of the review queue, which runs to thousands of rows.
+        Index(
+            "ix_source_entitlements_duplicate_of",
+            "duplicate_of",
         ),
     )

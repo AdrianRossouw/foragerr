@@ -450,9 +450,11 @@ class EntitlementResource(BaseModel):
     #: set only while :attr:`review_status` is ``duplicate``.
     duplicate_of: int | None
     #: How many copies are parked behind this row. Non-zero only on a CANONICAL
-    #: row — a copy reports 0, because the chip discloses a set from the row that
-    #: represents it, and a copy showing its siblings' count would read as a
-    #: second set.
+    #: row that is still reviewable — a copy reports 0, because the chip
+    #: discloses a set from the row that represents it and a copy showing its
+    #: siblings' count would read as a second set; an IGNORED canonical reports 0
+    #: too, because a withdrawn row represents nothing and a chip on it would
+    #: advertise a set the operator has already excluded.
     duplicate_count: int
     #: Those copies' bundle identities, in a stable order (FRG-SRC-015). A copy
     #: whose bundle the store never named is omitted from the NAMES while still
@@ -495,7 +497,10 @@ class EntitlementResource(BaseModel):
                 proposed = None
         key = group_key(row.human_name)
         volume_ordinal, issue_number = sort_ordinals(row.human_name)
-        copies = copies or []
+        # An ignored canonical discloses nothing (FRG-SRC-015): the row is a
+        # withdrawal, so a "2 copies" chip on it would invite the operator into a
+        # set whose representative they have already taken out of review.
+        copies = [] if row.review_status == "ignored" else (copies or [])
         return cls(
             id=row.id,
             source_id=row.source_id,
@@ -677,13 +682,17 @@ async def ignore_entitlement_endpoint(
 async def restore_entitlement_endpoint(
     entitlement_id: int, request: Request
 ) -> EntitlementResource:
-    """Restore an ignored entitlement to ``new`` with a recomputed proposal.
+    """Restore a PARKED entitlement to ``new`` with a recomputed proposal.
+
+    Parked is ``ignored`` (FRG-SRC-004) or ``duplicate`` (FRG-SRC-015); any
+    other review state is a 409, because restoring a ``matched`` row would
+    silently unmake the operator's match. Restoring a copy also opts it out of
+    future md5 parking, so the next sync leaves it independently reviewable.
 
     The recomputation is ComicVine-backed when a key is configured
     (FRG-SRC-010): restore is operator-initiated and single-row, so it costs one
     CV call, and without it the row was stamped with a ``library-fallback``
-    proposal that the review screen renders as a catalog verdict. Ignored-only
-    — any other review state is a 409."""
+    proposal that the review screen renders as a catalog verdict."""
     async with _operator_cv_client(request) as (cv_client, cv_configured):
         return await _run_action(
             request,

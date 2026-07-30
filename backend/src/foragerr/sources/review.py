@@ -139,13 +139,30 @@ async def _queue_grab(db, entitlement_id: int, commands) -> None:
 _ACCEPTABLE_REVIEW_STATES = ("new",)
 
 
+def _duplicate_refusal(entitlement_id: int) -> EntitlementActionError:
+    """The ONE refusal every write path gives a parked copy (FRG-SRC-015).
+
+    A ``duplicate`` row's bytes are already represented by its canonical, so
+    resolving it — by its own proposal, by an operator-chosen series, or by an
+    add — would queue a byte-identical grab the canonical's own decision covers,
+    and would leave the row ``matched`` while still pointing at a canonical it
+    is supposedly no longer a copy of. Restore is the one documented way out,
+    and this is the wording that says so wherever the refusal is raised.
+    """
+    return EntitlementActionError(
+        f"entitlement {entitlement_id} is a copy of a byte-identical item "
+        "already in review — restore it first to review it on its own",
+        status=409,
+    )
+
+
 def _accept_precondition_error(
     entitlement_id: int, review_status: str
 ) -> EntitlementActionError | None:
     """The per-row error for accepting a row that is no longer in review.
 
     ``None`` when the row is acceptable. The messages are the operator-facing
-    text of the two refusals, and they are per-ROW (a bulk accept reports them
+    text of the refusals, and they are per-ROW (a bulk accept reports them
     against the id and keeps going) — never a failure of the whole request.
     """
     if review_status in _ACCEPTABLE_REVIEW_STATES:
@@ -156,11 +173,7 @@ def _accept_precondition_error(
             status=409,
         )
     if review_status == "duplicate":
-        return EntitlementActionError(
-            f"entitlement {entitlement_id} is a copy of a byte-identical item "
-            "already in review — restore it first to review it on its own",
-            status=409,
-        )
+        return _duplicate_refusal(entitlement_id)
     return EntitlementActionError(
         f"entitlement {entitlement_id} is already matched — accept applies "
         "only to items still in review",
@@ -214,6 +227,10 @@ async def match_entitlement(
     OPERATOR's explicit match action leaves it ``False``: choosing a series for
     an already-decided row is a legitimate re-decision, and that is the action
     the operator took.
+
+    A ``duplicate`` row is refused whatever ``require_new`` says (FRG-SRC-015) —
+    see :func:`_duplicate_refusal`. In a bulk run that lands as that row's
+    per-row error and the rest of the selection still applies.
     """
     from foragerr.library.models import SeriesRow
     from foragerr.library.read_only import refuse_read_only_series
@@ -225,6 +242,14 @@ async def match_entitlement(
             raise EntitlementActionError(
                 f"entitlement {entitlement_id} not found", status=404
             )
+        if row.review_status == "duplicate":
+            # UNCONDITIONAL, and inside the transaction that would stamp
+            # ``matched`` (FRG-SRC-015). ``require_new`` is off for the
+            # operator's own match — re-deciding a matched or ignored row is a
+            # legitimate action — but a parked copy is not a decision to
+            # revisit: matching it queues the same bytes the canonical already
+            # represents and leaves ``duplicate_of`` set on a matched row.
+            raise _duplicate_refusal(entitlement_id)
         if require_new:
             refusal = _accept_precondition_error(entitlement_id, row.review_status)
             if refusal is not None:
@@ -334,6 +359,13 @@ async def add_entitlement(
         raise EntitlementActionError(
             f"entitlement {entitlement_id} not found", status=404
         )
+    if row.review_status == "duplicate":
+        # Unconditional, like the match path's own guard (FRG-SRC-015): an add
+        # ends in a match, so a parked copy would otherwise be resolved — and
+        # its byte-identical grab queued — by the direct add endpoint whatever
+        # ``require_new`` says. Raised BEFORE ``add_series`` so the refusal
+        # costs no refresh + scan.
+        raise _duplicate_refusal(entitlement_id)
     if require_new:
         # Cheap pre-check so an accept of a withdrawn row never pays for an
         # ``add_series`` (refresh + scan) it will then refuse to link. The
@@ -793,6 +825,13 @@ async def restore_entitlement(
         refusal = _restore_precondition_error(entitlement_id, fresh.review_status)
         if refusal is not None:
             raise refusal
+        if fresh.review_status == "duplicate":
+            # Restoring a copy is a DECISION about the parking, not a one-off
+            # nudge (FRG-SRC-015): without the flag the next linking pass finds
+            # the same md5 set and parks the row straight back, so the operator
+            # would have to restore it after every sync forever. Only ever set
+            # here, so an ignore/restore round trip later keeps it.
+            fresh.dedupe_opt_out = True
         fresh.review_status = "new"
         fresh.matched_series_id = None
         # The row leaves its duplicate set (FRG-SRC-015): it is back in
@@ -1018,13 +1057,18 @@ async def bulk_apply_to_group(
 
     * an **in-library** pick (``series_id`` given) MATCHES every ``new`` member
       (``require_new`` — ``matched`` / ``ignored`` members are per-row skips),
-      then runs the same-group sibling sweep ONCE for the whole group;
+      then runs the same-group sibling sweep ONCE PER FOLD KEY the group carries;
     * a **not-yet-added** pick (``cv_volume_id`` given, no ``series_id``) ADDS the
       series once for the first ``new`` member through the ordinary add path,
-      whose group-key sweep re-proposes the remaining members. Only the added
-      member is committed here; the rest stay ``new`` with swept proposals for a
-      single follow-up bulk accept — nothing else downloads without a further
-      operator action.
+      then runs that same sweep so the remaining members are re-proposed onto it.
+      Only the added member is committed here; the rest stay ``new`` with swept
+      proposals for a single follow-up bulk accept — nothing else downloads
+      without a further operator action.
+
+    "Once per fold key" and not once per member: a DISPLAY group can merge
+    several exact ``group_key`` values (FRG-UI-029), and sweeping only the acting
+    row's key left the other fold's members holding stale proposals under a
+    header that claimed the rest were proposed.
 
     Returns the shared :class:`BulkResult` per-id outcome shape either way.
     Exactly one target is required (neither, or both, is a 422).
@@ -1038,7 +1082,7 @@ async def bulk_apply_to_group(
     if not entitlement_ids:
         return BulkResult(applied=0, skipped=0, errors={})
 
-    new_ids, group_key, source_id = await _new_group_members(db, entitlement_ids)
+    new_ids, group_keys, source_id = await _new_group_members(db, entitlement_ids)
 
     if series_id is not None:
         # Match only the ``new`` members (require_new skips matched/ignored),
@@ -1056,15 +1100,14 @@ async def bulk_apply_to_group(
                 sweep_group=False,
             ),
         )
-        if new_ids and group_key:
+        if new_ids and group_keys and source_id is not None:
             series_title = await _series_title(db, series_id)
-            await _reresolve_sibling_proposals_by_group(
+            await _sweep_group_keys(
                 db,
                 source_id=source_id,
-                group_key=group_key,
+                group_keys=group_keys,
                 series_id=series_id,
                 series_title=series_title,
-                exclude_entitlement_id=None,
             )
         return result
 
@@ -1073,8 +1116,13 @@ async def bulk_apply_to_group(
         return BulkResult(applied=0, skipped=len(entitlement_ids), errors={})
     first = new_ids[0]
     errors: dict[int, str] = {}
+    added = None
     try:
-        await add_entitlement(
+        # The add's own group sweep is suppressed: it keys on the ACTING row's
+        # fold key alone, which on a display-merged group leaves the other
+        # fold's members holding stale proposals. The sweep below covers every
+        # key the request's own membership carries instead.
+        added = await add_entitlement(
             db,
             settings,
             first,
@@ -1083,12 +1131,51 @@ async def bulk_apply_to_group(
             root_folder_id=root_folder_id,
             cv_volume_id=cv_volume_id,
             matched_via=matched_via,
+            sweep_group=False,
         )
     except EntitlementActionError as exc:
         errors[first] = str(exc)
+    if (
+        added is not None
+        and added.matched_series_id is not None
+        and source_id is not None
+    ):
+        await _sweep_group_keys(
+            db,
+            source_id=source_id,
+            group_keys=group_keys,
+            series_id=added.matched_series_id,
+            series_title=await _series_title(db, added.matched_series_id),
+        )
     return BulkResult(
         applied=0 if errors else 1, skipped=len(errors), errors=errors
     )
+
+
+async def _sweep_group_keys(
+    db,
+    *,
+    source_id: int,
+    group_keys: list[str],
+    series_id: int,
+    series_title: str | None,
+) -> None:
+    """Run the FRG-SRC-014 sibling sweep once for each of a group's fold keys.
+
+    A DISPLAY group can span several exact ``group_key`` values (the FRG-UI-029
+    containment merge), and each one is a separate sweep scope. Once per key,
+    never once per member — the keys come from the request's own membership, so
+    the scan count is bounded by how many title forms the group actually mixes.
+    """
+    for key in group_keys:
+        await _reresolve_sibling_proposals_by_group(
+            db,
+            source_id=source_id,
+            group_key=key,
+            series_id=series_id,
+            series_title=series_title,
+            exclude_entitlement_id=None,
+        )
 
 
 async def _bulk(db, entitlement_ids: list[int], action) -> BulkResult:
@@ -1190,15 +1277,26 @@ async def _series_title(db, series_id: int) -> str | None:
 
 async def _new_group_members(
     db, entitlement_ids: list[int]
-) -> tuple[list[int], str, int | None]:
-    """The subset of ``entitlement_ids`` still in review, plus the group's fold
-    key and source (from the first existing row). A group-apply matches/adds only
-    ``new`` rows — a header spans decided rows the operator didn't individually
-    pick, and reversing those is the FRG-SRC-011 hazard."""
+) -> tuple[list[int], list[str], int | None]:
+    """The subset of ``entitlement_ids`` still in review, plus the DISTINCT fold
+    keys the listed rows carry and their source.
+
+    A group-apply matches/adds only ``new`` rows — a header spans decided rows
+    the operator didn't individually pick, and reversing those is the
+    FRG-SRC-011 hazard.
+
+    The keys are a list, not one key, because a DISPLAY group can span more than
+    one exact ``group_key`` (the FRG-UI-029 containment merge). Sweeping only the
+    first member's key left the other fold's members holding stale proposals
+    while the header said the rest were proposed. The list is bounded by the
+    request's own membership — a handful of keys at most — so the sweep is still
+    once per key, never once per member.
+    """
     from sqlalchemy import select
 
     new_ids: list[int] = []
-    group_key = ""
+    group_keys: list[str] = []
+    seen_keys: set[str] = set()
     source_id: int | None = None
     async with db.read_session() as session:
         rows = (
@@ -1219,10 +1317,13 @@ async def _new_group_members(
             continue
         if source_id is None:
             source_id = row.source_id
-            group_key = _group_key(row.human_name)
+        key = _group_key(row.human_name)
+        if key and key not in seen_keys:
+            seen_keys.add(key)
+            group_keys.append(key)
         if row.review_status == "new":
             new_ids.append(eid)
-    return new_ids, group_key, source_id
+    return new_ids, group_keys, source_id
 
 
 async def _reresolve_sibling_proposals(

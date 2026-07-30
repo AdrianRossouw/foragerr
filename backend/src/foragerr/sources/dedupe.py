@@ -5,25 +5,36 @@ entitlement — a distinct store-native key, so the sync diff is right to keep
 both — but they carry the SAME store-computed md5, which means accepting both
 downloads the same bytes twice and the second import is blocked as a duplicate
 with nothing to explain it. Linking collapses such a set to ONE reviewable unit:
-the earliest row stays canonical and every other member parks at
+the canonical row stays reviewable and every other member parks at
 ``review_status = "duplicate"`` with :attr:`SourceEntitlementRow.duplicate_of`
 pointing at it.
 
-**One rule, applied in two places.** A set links only while EVERY member of it
-is still ``new``:
+**What freezes a set.** A ``matched`` or ``ignored`` member is the operator's
+decision, and re-shaping the set around it would either park a row behind a
+withdrawal or hide a row whose twin was already imported under a decision the
+operator never made about THIS row — so such a set links nothing further. An
+already-parked member does NOT freeze it: a third bundle selling the same file
+must still collapse onto the row the operator is already looking at, and a rule
+that treated the parked copy as disqualifying left every later arrival to be
+reviewed and downloaded on its own.
 
-* a decided row (``matched`` / ``ignored``) is the operator's, and re-shaping
-  the set around it would either park a row behind a withdrawal or hide a row
-  whose twin was already imported under a decision the operator never made about
-  THIS row;
-* an already-parked copy makes the set non-``new``, which is what makes both
-  entry points idempotent by construction — a second pass finds the set no
-  longer all-``new`` and does nothing.
+**Canonical** is the lowest-id member that is not itself parked. Parking is
+therefore flat by construction — a third copy points at the same row the second
+one does, never at the second copy — so the copies chip on one row discloses the
+whole set and no pointer chain has to be walked to find it.
 
-The consequence is the one the spec names: once any member is decided the set
-freezes, so restoring a copy while its twin stays decided leaves it independently
-reviewable, while restoring it back alongside an still-``new`` twin lets the next
-pass re-link the pair.
+**Nothing the operator did is silently undone.** A copy the operator restored
+carries :attr:`SourceEntitlementRow.dedupe_opt_out` and is never parked again;
+it can still BE a canonical, because it is an ordinary reviewable row.
+Idempotence comes from that flag plus the fact that a parked row is not
+re-parked — not from the set's overall state.
+
+**Unparking.** Store-side bytes change: a re-upload rewrites an md5, a payload
+that omits the digest nulls one. A copy whose md5 no longer equals its
+canonical's — or whose pointer names no row — has lost the evidence it was
+parked on, so the pass returns it to ``new`` and clears the pointer. It re-links
+on this same pass if it is still genuinely identical to something; otherwise it
+is reviewable again instead of hidden behind a row it does not duplicate.
 
 Rows with no stored md5 are never linked — absence of the signal is not evidence
 of identity. Linking is same-source by construction (the scan is source-scoped):
@@ -51,44 +62,114 @@ __all__ = [
     "link_duplicate_entitlements",
 ]
 
+#: Review states that freeze a set: the operator has decided one of its members.
+_DECIDED_STATES = ("matched", "ignored")
+
 
 async def link_duplicate_entitlements(db, source_id: int | None = None) -> int:
-    """Park every non-canonical member of an all-``new`` same-md5 set.
+    """Park every unparked, non-opted-out member of a same-md5 set behind its
+    canonical, and unpark every copy whose md5 no longer matches.
 
-    ``source_id`` bounds the scan to one source (the sync path); ``None`` scans
-    every source (the startup backfill). Returns the number of rows parked.
+    ``source_id`` bounds the scan to one source (the sync path); ``None`` runs
+    the same scan for each source in turn (the startup backfill) rather than
+    over the whole table at once, so every read is a keyed range of the
+    ``(source_id, md5)`` / ``(source_id, review_status)`` indexes and one store's
+    queue never sits in the writer lock for another's sake.
 
-    Runs as ONE write transaction so a set moves together — a half-linked set
-    would show the operator a copies chip whose members are still counted as
-    pending. The read that decides which sets qualify happens inside it, so a
-    concurrent match/ignore either lands before the decision (and disqualifies
-    the set) or after the parking (and is a decision on a canonical row, which
-    the set is allowed to carry).
+    Returns the number of rows parked.
+
+    One source's pass is ONE write transaction so a set moves together — a
+    half-linked set would show the operator a copies chip whose members are
+    still counted as pending. The read that decides which sets qualify happens
+    inside it, so a concurrent match/ignore either lands before the decision
+    (and freezes the set) or after the parking (and is a decision on a canonical
+    row, which the set is allowed to carry).
     """
+    if source_id is None:
+        parked = 0
+        async with db.read_session() as session:
+            source_ids = list(
+                (
+                    await session.execute(
+                        select(SourceEntitlementRow.source_id).distinct()
+                    )
+                ).scalars()
+            )
+        for sid in sorted(source_ids):
+            parked += await link_duplicate_entitlements(db, sid)
+        return parked
+
     parked = 0
     async with db.write_session() as session:
-        stmt = select(SourceEntitlementRow).where(
-            SourceEntitlementRow.md5.is_not(None)
+        # Two keyed reads rather than one table scan: the md5-bearing rows are
+        # the linking candidates, and the parked rows are re-checked even when
+        # their md5 has since been nulled — which is itself an unpark trigger,
+        # so those rows cannot be reached by the first read.
+        rows = (
+            (
+                await session.execute(
+                    select(SourceEntitlementRow)
+                    .where(
+                        SourceEntitlementRow.source_id == source_id,
+                        SourceEntitlementRow.md5.is_not(None),
+                    )
+                    .order_by(SourceEntitlementRow.id)
+                )
+            )
+            .scalars()
+            .all()
         )
-        if source_id is not None:
-            stmt = stmt.where(SourceEntitlementRow.source_id == source_id)
-        rows = (await session.execute(stmt.order_by(SourceEntitlementRow.id))).scalars()
-        sets: dict[tuple[int, str], list[SourceEntitlementRow]] = defaultdict(list)
-        for row in rows:
+        parked_rows = (
+            (
+                await session.execute(
+                    select(SourceEntitlementRow).where(
+                        SourceEntitlementRow.source_id == source_id,
+                        SourceEntitlementRow.review_status == "duplicate",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        by_id = {row.id: row for row in rows}
+        for row in parked_rows:
+            by_id.setdefault(row.id, row)
+        members_by_id = sorted(by_id.values(), key=lambda row: row.id)
+        now = utcnow()
+
+        for copy in members_by_id:
+            if copy.review_status != "duplicate":
+                continue
+            canonical = by_id.get(copy.duplicate_of) if copy.duplicate_of else None
+            if canonical is not None and copy.md5 and copy.md5 == canonical.md5:
+                continue
+            copy.review_status = "new"
+            copy.duplicate_of = None
+            copy.updated_at = now
+
+        sets: dict[str, list[SourceEntitlementRow]] = defaultdict(list)
+        for row in members_by_id:
             if not row.md5:
                 continue  # an empty string is no more a fingerprint than NULL
-            sets[(row.source_id, row.md5)].append(row)
-        now = utcnow()
-        for members in sets.values():
+            sets[row.md5].append(row)
+        for members in sets.values():  # id-ordered: members_by_id was
             if len(members) < 2:
                 continue
-            if any(member.review_status != "new" for member in members):
+            if any(member.review_status in _DECIDED_STATES for member in members):
                 continue
-            canonical, *copies = members  # id-ordered: the earliest is canonical
-            for copy in copies:
-                copy.review_status = "duplicate"
-                copy.duplicate_of = canonical.id
-                copy.updated_at = now
+            canonical = next(
+                (m for m in members if m.review_status != "duplicate"), None
+            )
+            if canonical is None:  # pragma: no cover — unparking leaves one
+                continue
+            for member in members:
+                if member.id == canonical.id:
+                    continue
+                if member.review_status != "new" or member.dedupe_opt_out:
+                    continue
+                member.review_status = "duplicate"
+                member.duplicate_of = canonical.id
+                member.updated_at = now
                 parked += 1
     if parked:
         logger.info(
@@ -99,11 +180,12 @@ async def link_duplicate_entitlements(db, source_id: int | None = None) -> int:
 
 
 async def duplicate_backfill_startup_hook(app) -> None:
-    """Link pre-existing all-``new`` md5 sets once, at boot (FRG-SRC-015).
+    """Link pre-existing md5 sets once, at boot (FRG-SRC-015).
 
-    Idempotent by construction (a linked set is no longer all-``new``), so it
-    needs no completion marker. Never fatal: a failure is logged and the boot
-    continues with the rows unlinked, and the next start retries.
+    Idempotent: an already-parked row is not re-parked and a restored one
+    carries the opt-out flag, so the hook needs no completion marker. Never
+    fatal: a failure is logged and the boot continues with the rows unlinked,
+    and the next start retries.
     """
     db = getattr(app.state, "db", None)
     if db is None:  # pragma: no cover — the db area always runs first

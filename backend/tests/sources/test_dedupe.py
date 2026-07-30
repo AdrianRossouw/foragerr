@@ -135,6 +135,41 @@ async def _set_status(db, entitlement_id: int, status: str) -> None:
         row.review_status = status
 
 
+async def _set_md5(db, entitlement_id: int, md5: str | None) -> None:
+    """The store re-uploading a file (a new digest) or serving a payload that
+    omits the digest — both of which the sync copies straight onto the row."""
+    async with db.write_session() as session:
+        row = await session.get(SourceEntitlementRow, entitlement_id)
+        row.md5 = md5
+
+
+async def _later_arrival(
+    db, source_id: int, machine_name: str, *, md5: str = SHARED_MD5
+) -> int:
+    """One more bundle selling the same file, arriving after the set is linked."""
+    from foragerr.db.base import utcnow
+
+    async with db.write_session() as session:
+        now = utcnow()
+        row = SourceEntitlementRow(
+            source_id=source_id,
+            gamekey=f"gamekey-{machine_name}",
+            machine_name=machine_name,
+            human_name="Example Saga Vol. 1",
+            bundle_human_name="Example Later Bundle",
+            classification="comic",
+            review_status="new",
+            md5=md5,
+            filename="CBZ",
+            formats_json="[]",
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(row)
+        await session.flush()
+        return row.id
+
+
 # --- linking at sync ---------------------------------------------------------
 
 
@@ -476,3 +511,260 @@ async def test_linking_is_bounded_to_one_source(db, config_dir):
     ][0]
     assert other.review_status == "new"
     assert other.duplicate_of is None
+
+
+# --- a set that keeps growing -------------------------------------------------
+
+
+@pytest.mark.req("FRG-SRC-015")
+async def test_a_third_and_fourth_bundle_park_onto_the_same_canonical(db, config_dir):
+    """A store keeps re-selling one file. Every later arrival collapses onto the
+    row the operator is already looking at — and points AT it, never at the copy
+    parked before it, so one chip discloses the whole set."""
+    source, _result = await _twin_source(db, config_dir)
+    rows = await _by_machine_name(db, source.id)
+    canonical_id = rows["first_saga_v1"].id
+    third = await _later_arrival(db, source.id, "third_saga_v1")
+
+    assert await link_duplicate_entitlements(db, source.id) == 1
+
+    third_row = await repo.get_entitlement(db, third)
+    assert third_row.review_status == "duplicate"
+    assert third_row.duplicate_of == canonical_id
+
+    fourth = await _later_arrival(db, source.id, "fourth_saga_v1")
+    assert await link_duplicate_entitlements(db, source.id) == 1
+    assert (await repo.get_entitlement(db, fourth)).duplicate_of == canonical_id
+    copies = await repo.duplicate_copies(db, [canonical_id])
+    assert len(copies[canonical_id]) == 3
+
+
+@pytest.mark.req("FRG-SRC-015")
+async def test_a_decided_member_freezes_the_set_against_later_arrivals(db, config_dir):
+    """The operator has matched one member: the set is theirs now, so a later
+    arrival stays independently reviewable rather than being hidden behind a
+    decision that was never made about it."""
+    source, _result = await _twin_source(db, config_dir)
+    rows = await _by_machine_name(db, source.id)
+    await _set_status(db, rows["first_saga_v1"].id, "matched")
+    third = await _later_arrival(db, source.id, "third_saga_v1")
+
+    assert await link_duplicate_entitlements(db, source.id) == 0
+
+    assert (await repo.get_entitlement(db, third)).review_status == "new"
+
+
+@pytest.mark.req("FRG-SRC-015")
+async def test_replaying_the_linking_pass_parks_nothing_further(db, config_dir):
+    source, result = await _twin_source(db, config_dir)
+    rows = await _by_machine_name(db, source.id)
+
+    assert result.duplicates_parked == 1
+    assert await link_duplicate_entitlements(db, source.id) == 0
+    assert await link_duplicate_entitlements(db, source.id) == 0
+
+    replayed = await _by_machine_name(db, source.id)
+    assert replayed["second_saga_v1"].duplicate_of == rows["first_saga_v1"].id
+    assert replayed["first_saga_v1"].review_status == "new"
+
+
+# --- the bytes stop matching --------------------------------------------------
+
+
+@pytest.mark.req("FRG-SRC-015")
+async def test_a_copy_whose_md5_changes_returns_to_review(db, config_dir):
+    """The store re-uploaded this copy's file. It is no longer the same bytes as
+    the canonical, so keeping it parked would hide a file the operator owns and
+    has never seen."""
+    source, _result = await _twin_source(db, config_dir)
+    rows = await _by_machine_name(db, source.id)
+    copy_id = rows["second_saga_v1"].id
+    await _set_md5(db, copy_id, THIRD_MD5)
+
+    await link_duplicate_entitlements(db, source.id)
+
+    unparked = await repo.get_entitlement(db, copy_id)
+    assert unparked.review_status == "new"
+    assert unparked.duplicate_of is None
+
+
+@pytest.mark.req("FRG-SRC-015")
+async def test_a_canonical_whose_md5_changes_frees_its_copies(db, config_dir):
+    source, _result = await _twin_source(db, config_dir)
+    rows = await _by_machine_name(db, source.id)
+    copy_id = rows["second_saga_v1"].id
+    await _set_md5(db, rows["first_saga_v1"].id, THIRD_MD5)
+
+    await link_duplicate_entitlements(db, source.id)
+
+    unparked = await repo.get_entitlement(db, copy_id)
+    assert unparked.review_status == "new"
+    assert unparked.duplicate_of is None
+
+
+@pytest.mark.req("FRG-SRC-015")
+async def test_a_copy_whose_md5_is_gone_returns_to_review(db, config_dir):
+    """A row with no digest is never LINKED, so it must not stay linked either —
+    absence of the signal is not evidence of identity in either direction."""
+    source, _result = await _twin_source(db, config_dir)
+    rows = await _by_machine_name(db, source.id)
+    copy_id = rows["second_saga_v1"].id
+    await _set_md5(db, copy_id, None)
+
+    await link_duplicate_entitlements(db, source.id)
+
+    unparked = await repo.get_entitlement(db, copy_id)
+    assert unparked.review_status == "new"
+    assert unparked.duplicate_of is None
+
+
+# --- restore is a decision, not a nudge ---------------------------------------
+
+
+@pytest.mark.req("FRG-SRC-015")
+async def test_a_restored_copy_survives_the_next_linking_pass(db, config_dir):
+    """Without the opt-out the very next sync re-parked the row, so the operator
+    had to restore it again after every sync — an operator action silently
+    reversed by a background pass."""
+    source, _result = await _twin_source(db, config_dir)
+    rows = await _by_machine_name(db, source.id)
+    copy_id = rows["second_saga_v1"].id
+    await review.restore_entitlement(db, copy_id)
+
+    assert await link_duplicate_entitlements(db, source.id) == 0
+
+    still_free = await repo.get_entitlement(db, copy_id)
+    assert still_free.review_status == "new"
+    assert still_free.duplicate_of is None
+    assert still_free.dedupe_opt_out is True
+
+
+@pytest.mark.req("FRG-SRC-015")
+async def test_an_opted_out_row_can_still_be_a_canonical(db, config_dir):
+    """The flag says "never park THIS row", not "never let it represent a set" —
+    it is an ordinary reviewable row, and a later arrival collapses onto it."""
+    source, _result = await _twin_source(db, config_dir)
+    rows = await _by_machine_name(db, source.id)
+    copy_id = rows["second_saga_v1"].id
+    await review.restore_entitlement(db, copy_id)
+    # The original canonical's file was re-uploaded, so it leaves the set.
+    await _set_md5(db, rows["first_saga_v1"].id, THIRD_MD5)
+    later = await _later_arrival(db, source.id, "third_saga_v1")
+
+    assert await link_duplicate_entitlements(db, source.id) == 1
+
+    assert (await repo.get_entitlement(db, copy_id)).review_status == "new"
+    assert (await repo.get_entitlement(db, later)).duplicate_of == copy_id
+
+
+@pytest.mark.req("FRG-SRC-015")
+async def test_the_opt_out_survives_an_ignore_and_restore_cycle(db, config_dir):
+    source, _result = await _twin_source(db, config_dir)
+    rows = await _by_machine_name(db, source.id)
+    copy_id = rows["second_saga_v1"].id
+
+    await review.restore_entitlement(db, copy_id)
+    await review.ignore_entitlement(db, copy_id)
+    restored = await review.restore_entitlement(db, copy_id)
+
+    assert restored.dedupe_opt_out is True
+    assert await link_duplicate_entitlements(db, source.id) == 0
+    assert (await repo.get_entitlement(db, copy_id)).review_status == "new"
+
+
+@pytest.mark.req("FRG-SRC-004")
+async def test_restoring_an_ignored_row_never_invents_an_opt_out(db, config_dir):
+    """The flag records a decision about DUPLICATE parking; an ordinary ignore /
+    restore round trip has made no such decision."""
+    source, _result = await _twin_source(db, config_dir)
+    rows = await _by_machine_name(db, source.id)
+    plain_id = rows["first_other"].id
+    await review.ignore_entitlement(db, plain_id)
+
+    restored = await review.restore_entitlement(db, plain_id)
+
+    assert restored.dedupe_opt_out is False
+
+
+# --- the direct row actions refuse a copy -------------------------------------
+
+
+@pytest.mark.req("FRG-SRC-015")
+async def test_a_direct_match_refuses_a_parked_copy(
+    db, config_dir, root_folder_id, format_profile_id
+):
+    """The operator's own match carries no ``new`` precondition — re-deciding a
+    matched row is legitimate — but a parked copy is not a decision to revisit:
+    resolving it queues the bytes the canonical already represents."""
+    source, _result = await _twin_source(db, config_dir)
+    rows = await _by_machine_name(db, source.id)
+    copy_id = rows["second_saga_v1"].id
+    series_id = await _mk_series(
+        db, root_folder_id, format_profile_id, cvid=911, title="Example Saga"
+    )
+    commands = FakeCommands()
+
+    with pytest.raises(review.EntitlementActionError) as refusal:
+        await review.match_entitlement(
+            db,
+            copy_id,
+            series_id=series_id,
+            commands=commands,
+            matched_via=MATCHED_VIA_OPERATOR,
+        )
+
+    assert refusal.value.status == 409
+    still_parked = await repo.get_entitlement(db, copy_id)
+    assert still_parked.review_status == "duplicate"
+    assert still_parked.duplicate_of == rows["first_saga_v1"].id
+    assert still_parked.matched_series_id is None
+    assert commands.grabs() == []
+
+
+@pytest.mark.req("FRG-SRC-015")
+async def test_a_direct_add_refuses_a_parked_copy(db, config_dir):
+    source, _result = await _twin_source(db, config_dir)
+    rows = await _by_machine_name(db, source.id)
+    copy_id = rows["second_saga_v1"].id
+    commands = FakeCommands()
+
+    with pytest.raises(review.EntitlementActionError) as refusal:
+        await review.add_entitlement(
+            db,
+            None,
+            copy_id,
+            commands=commands,
+            cv_volume_id=912,
+            matched_via=MATCHED_VIA_OPERATOR,
+        )
+
+    assert refusal.value.status == 409
+    still_parked = await repo.get_entitlement(db, copy_id)
+    assert still_parked.review_status == "duplicate"
+    assert still_parked.duplicate_of == rows["first_saga_v1"].id
+    assert commands.grabs() == []
+
+
+@pytest.mark.req("FRG-SRC-015")
+async def test_bulk_match_reports_a_parked_copy_and_still_matches_the_rest(
+    db, config_dir, root_folder_id, format_profile_id
+):
+    source, _result = await _twin_source(db, config_dir)
+    rows = await _by_machine_name(db, source.id)
+    copy_id = rows["second_saga_v1"].id
+    series_id = await _mk_series(
+        db, root_folder_id, format_profile_id, cvid=913, title="Example Saga"
+    )
+
+    result = await review.bulk_match(
+        db,
+        [rows["first_other"].id, copy_id],
+        series_id=series_id,
+        commands=FakeCommands(),
+        matched_via=MATCHED_VIA_OPERATOR,
+    )
+
+    assert result.applied == 1
+    assert list(result.errors) == [copy_id]
+    assert "restore it first" in result.errors[copy_id]
+    assert (await repo.get_entitlement(db, copy_id)).review_status == "duplicate"
