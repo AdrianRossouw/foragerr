@@ -131,3 +131,16 @@ with two directives folded into scope: (1) run the retroactive sweep over
 existing comments as part of this change, (2) keep `tools/comment_check.py`
 generic — pattern-class detectors (host:port literals, personal absolute
 paths, provenance phrasing, email addresses), not a list of specific values.
+
+## Gate evidence
+
+Tier: medium (new gate tooling guarding the public repo). Angles: scanner
+correctness/robustness (strong tier), sweep-safety audit (AST-verified
+comment-only), Codex full-diff — plus a re-verification pass by the scanner
+angle after fixes. Two fix rounds: 11 findings (3 blocking: quote-parity
+blindness, detector/spec gap, mutation-vulnerable tests) then 1 residual
+(explicit denylist path fails closed). Mutation check: 20/22 caught, 2
+survivors assessed non-gaps. Suites at merge: backend 2704, frontend 538,
+tsc clean; comment_check/trace/soup/risk exit 0. Accepted residuals: 2
+same-line unbalanced-quote notes (stderr, named files); template-literal
+continuation lines scannable as comments (documented).
