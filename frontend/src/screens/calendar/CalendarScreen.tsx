@@ -3,15 +3,13 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Toolbar } from '../../components/Toolbar';
 import { SegmentedControl } from '../../components/SegmentedControl';
+import { Chip, type ChipTone } from '../../components/Chip';
 import { stripHtml } from '../add/AddSeries';
 import {
   BookmarkIcon,
-  CheckIcon,
   MoreIcon,
   PlusIcon,
-  RefreshIcon,
   SearchIcon,
-  SpinnerIcon,
 } from '../../components/icons';
 import {
   useRunCommand,
@@ -25,9 +23,11 @@ import { queryKeys } from '../../api/queryKeys';
 import type {
   AddSeriesNavigationState,
   PullEntryRecord,
+  PullEntryState,
 } from '../../api/types';
 import { candidateCoverUrl } from '../../api/urls';
 import { publisherAccent, publisherTint } from '../../theme/palettes';
+import { useCompactViewport } from '../../theme/useCompactViewport';
 import {
   addWeeks,
   currentIsoWeek,
@@ -53,9 +53,18 @@ import styles from './CalendarScreen.module.css';
  * and new-series debuts render inline with a "New" badge behind an optional
  * debuts-only filter (FRG-PULL-008). Stored covers and enrichment render from
  * the pull row itself, spending no ComicVine budget (FRG-UI-042).
+ *
+ * Entries present in one of two modes selected by the single compact crossover
+ * (theme/layout.ts): dense agenda rows at or above it, quiet single-column
+ * cards with an icon-only action rail below it. Both modes render the same data
+ * and expose the same action SET — nothing is reachable in one and not the
+ * other — so the mode is a presentation choice, never a capability boundary.
  */
 
 type Scope = 'following' | 'all';
+
+/** Which of FRG-UI-018's two entry presentations is rendering. */
+type EntryMode = 'row' | 'card';
 
 const SCOPE_OPTIONS = [
   { value: 'following' as const, label: 'Following' },
@@ -98,6 +107,48 @@ function rowSub(r: PullEntryRecord): string {
   return `${issue} · ${r.publisher ?? 'Unknown'}`;
 }
 
+/**
+ * Derived state as words + a chip tone (FRG-UI-047). The label is the state's
+ * only rendering: a status carries no glyph that also denotes a control on this
+ * surface, so the bookmark stays exclusive to the real monitor toggle. `wanted`
+ * is deliberately NOT accent-toned — the accent-filled bookmark is the active
+ * toggle's treatment, and a status must not borrow it.
+ */
+const STATE_PRESENTATION: Record<PullEntryState, { label: string; tone: ChipTone }> = {
+  missing_wanted: { label: 'Wanted', tone: 'neutral' },
+  downloading: { label: 'Downloading', tone: 'info' },
+  downloaded: { label: 'Downloaded', tone: 'success' },
+  unmonitored: { label: 'Not tracked', tone: 'muted' },
+  pending_refresh: { label: 'Pending refresh', tone: 'muted' },
+};
+
+/** An entry linked to no library issue has no derived state to project. */
+const UNLINKED_PRESENTATION: { label: string; tone: ChipTone } = {
+  label: 'Not in library',
+  tone: 'muted',
+};
+
+/**
+ * The entry's state as a status indicator (FRG-UI-047): a plain chip `<span>` —
+ * no button role, no `aria-pressed`, not focusable, no pointer cursor and no
+ * control hover treatment — whose meaning is the text inside it, so assistive
+ * technology announces state rather than an operable element.
+ */
+function StatusChip({
+  state,
+  testId,
+}: {
+  state: PullEntryState | null;
+  testId: string;
+}) {
+  const { label, tone } = state === null ? UNLINKED_PRESENTATION : STATE_PRESENTATION[state];
+  return (
+    <Chip tone={tone} testId={testId} className={styles.stateChip}>
+      {label}
+    </Chip>
+  );
+}
+
 /** The card's cover spine style — publisher tint + accent edge (palettes.ts). */
 function spineStyle(r: PullEntryRecord): CSSProperties {
   return {
@@ -117,18 +168,28 @@ function spineStyle(r: PullEntryRecord): CSSProperties {
 const CardCover = memo(function CardCover({
   r,
   name,
+  mode,
 }: {
   r: PullEntryRecord;
   name: string;
+  /** Agenda rows carry a smaller fixed thumbnail than cards, for row density. */
+  mode: EntryMode;
 }) {
   const [failed, setFailed] = useState(false);
+  const sizeClass = mode === 'row' ? styles.thumbRow : styles.thumbCard;
   const src = failed ? null : candidateCoverUrl(r.coverUrl);
   if (src === null) {
-    return <div className={styles.spine} style={spineStyle(r)} aria-hidden />;
+    return (
+      <div
+        className={`${styles.spine} ${sizeClass}`}
+        style={spineStyle(r)}
+        aria-hidden
+      />
+    );
   }
   return (
     <img
-      className={styles.cover}
+      className={`${styles.cover} ${sizeClass}`}
       src={src}
       alt={`${name} cover`}
       loading="lazy"
@@ -191,43 +252,6 @@ function EntryDetail({ r, testId }: { r: PullEntryRecord; testId: string }) {
   );
 }
 
-/** The derived-state glyph shown on a card (a projection of `state`, D4). */
-function StateGlyph({ state }: { state: PullEntryRecord['state'] }) {
-  switch (state) {
-    case 'downloaded':
-      return (
-        <span className={`${styles.stateGlyph} ${styles.toneSuccess}`} title="Downloaded">
-          <CheckIcon size={13} />
-        </span>
-      );
-    case 'downloading':
-      return (
-        <span className={`${styles.stateGlyph} ${styles.toneInfo}`} title="Downloading">
-          <SpinnerIcon size={13} />
-        </span>
-      );
-    case 'missing_wanted':
-      return (
-        <span className={`${styles.stateGlyph} ${styles.toneAccent}`} title="Wanted">
-          <BookmarkIcon size={13} filled />
-        </span>
-      );
-    case 'pending_refresh':
-      return (
-        <span className={`${styles.stateGlyph} ${styles.toneWait}`} title="Pending refresh">
-          <RefreshIcon size={13} />
-        </span>
-      );
-    default:
-      // unmonitored / unmatched (null) — a quiet outline bookmark.
-      return (
-        <span className={`${styles.stateGlyph} ${styles.toneMuted}`} title="Not tracked">
-          <BookmarkIcon size={13} />
-        </span>
-      );
-  }
-}
-
 export function CalendarScreen() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -245,6 +269,11 @@ export function CalendarScreen() {
       setSearchParams({}, { replace: true });
     }
   }, [rawWeek, weekParamValid, setSearchParams]);
+
+  // One crossover for the whole app (theme/layout.ts): rows above it, cards
+  // below it, and the shell's sidebar collapses at exactly the same width.
+  const compact = useCompactViewport();
+  const mode: EntryMode = compact ? 'card' : 'row';
 
   const [scope, setScope] = useState<Scope>('all');
   const [publisher, setPublisher] = useState<string>('all');
@@ -298,6 +327,47 @@ export function CalendarScreen() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.queue.all() });
     }
   });
+
+  // Want/skip and search both write through the canonical issue operations, so
+  // either can be refused (a read-only series' issue answers 409). Report the
+  // refusal in one alert region: a silently-rejected toggle is indistinguishable
+  // from a bookmark that simply did not stick.
+  const actionError =
+    toggle.error?.message ?? runCommand.error?.message ?? null;
+
+  // Monitor toggles in flight, keyed by issue id and holding the REQUESTED
+  // monitored value (FRG-UI-048). The optimistic value is dropped only once the
+  // re-projection that replaces it has landed, so the control never flashes back
+  // to the stale state between the response and the refetch; a key present here
+  // also suppresses a second mutation for that entry.
+  const [requestedMonitor, setRequestedMonitor] = useState<
+    ReadonlyMap<number, boolean>
+  >(new Map());
+
+  const settleMonitor = (issueId: number) => {
+    setRequestedMonitor((prev) => {
+      if (!prev.has(issueId)) return prev;
+      const next = new Map(prev);
+      next.delete(issueId);
+      return next;
+    });
+  };
+
+  const toggleMonitor = (issueId: number, monitored: boolean) => {
+    if (requestedMonitor.has(issueId)) return;
+    setRequestedMonitor((prev) => new Map(prev).set(issueId, monitored));
+    toggle.mutate(
+      { issueId, monitored },
+      {
+        // Returning the invalidation promise makes react-query await the
+        // refetch before onSettled, which is what keeps the optimistic value in
+        // place until the projection that supersedes it is on screen.
+        onSuccess: () =>
+          queryClient.invalidateQueries({ queryKey: queryKeys.pull.all() }),
+        onSettled: () => settleMonitor(issueId),
+      },
+    );
+  };
 
   const todayKey = useMemo(() => {
     // "Today" is the viewer's LOCAL calendar day (read local y/m/d), so the
@@ -427,15 +497,22 @@ export function CalendarScreen() {
   };
 
   /**
-   * One release card. Linked rows (matchedIssueId set) expose want/skip +
-   * search; unlinked rows show their derived-state glyph (FRG-PULL-007) and,
-   * when nothing links them to the library and their title is not already
-   * there, the add affordance (FRG-PULL-008). Any entry carrying stored
-   * enrichment also offers the detail expando (FRG-UI-042).
+   * One entry, in whichever of FRG-UI-018's two presentations is active. Linked
+   * entries (matchedIssueId set) expose want/skip + search; an unlinked entry
+   * whose series is not already in the library exposes the add hand-off
+   * (FRG-PULL-008), and any entry carrying stored enrichment exposes the detail
+   * expando (FRG-UI-042). The action SET is computed once and rendered
+   * identically in both modes — only its placement differs, so no affordance can
+   * exist on one side of the crossover and not the other.
+   *
+   * Every action is icon-only in BOTH modes. A labelled Add is roughly three
+   * times an icon button's width in the same fixed cluster, and on a row that
+   * width comes straight off the title's measure — the one element the screen
+   * exists to let the operator scan.
    */
-  const renderCard = (r: PullEntryRecord, isFuture: boolean) => {
+  const renderEntry = (r: PullEntryRecord, isFuture: boolean) => {
     const linked = r.matchedIssueId != null;
-    const monitored = r.state !== 'unmonitored';
+    const issueId = r.matchedIssueId;
     const name = rowName(r);
     const cardKey = String(
       r.id ?? `${r.seriesName}-${r.issueNumber}-${r.matchedIssueId}`,
@@ -448,99 +525,140 @@ export function CalendarScreen() {
       (r.matchType === 'unmatched' || isDebut) &&
       !libraryTitles.has(normalizeTitle(r.seriesName));
     const detailOpen = expanded.has(cardKey);
+    // The requested value wins while a mutation is in flight, so activation
+    // reads as done at once instead of dead until the refetch (FRG-UI-048).
+    const inFlight = issueId != null && requestedMonitor.has(issueId);
+    const monitored =
+      inFlight && issueId != null
+        ? (requestedMonitor.get(issueId) as boolean)
+        : r.state !== 'unmonitored';
     const cls = [
-      styles.card,
-      linked ? '' : styles.cardUnlinked,
-      isFuture ? styles.cardFuture : '',
+      mode === 'row' ? styles.row : styles.card,
+      linked ? '' : styles.entryUnlinked,
+      isFuture ? styles.entryFuture : '',
     ]
       .filter(Boolean)
       .join(' ');
+
+    const actions = (
+      <div className={mode === 'row' ? styles.rowActions : styles.cardRail}>
+        {canAdd && (
+          <button
+            type="button"
+            className={`${styles.iconBtn} ${styles.iconBtnPrimary}`}
+            aria-label={`Add ${r.seriesName}`}
+            title="Add series"
+            onClick={() => addFromEntry(r)}
+          >
+            <PlusIcon size={14} />
+          </button>
+        )}
+        {hasDetail(r) && (
+          <button
+            type="button"
+            className={styles.iconBtn}
+            aria-label={`${detailOpen ? 'Hide' : 'Show'} details for ${name}`}
+            aria-expanded={detailOpen}
+            title="Details"
+            onClick={() => toggleDetail(cardKey)}
+          >
+            <MoreIcon size={14} />
+          </button>
+        )}
+        {linked && issueId != null && (
+          <>
+            {/* The bookmark glyph renders ONLY here — on the real toggle
+                (FRG-UI-047). `aria-busy` carries the in-flight state without
+                disabling the control, which would drop it out of keyboard
+                order mid-interaction; the duplicate mutation is suppressed in
+                the handler instead. */}
+            <button
+              type="button"
+              className={`${styles.iconBtn}${inFlight ? ` ${styles.iconBtnBusy}` : ''}`}
+              aria-label={`${monitored ? 'Skip' : 'Want'} ${name}`}
+              aria-pressed={monitored}
+              aria-busy={inFlight}
+              title={monitored ? 'Stop monitoring' : 'Monitor / want'}
+              onClick={() => toggleMonitor(issueId, !monitored)}
+            >
+              <BookmarkIcon size={14} filled={monitored} />
+            </button>
+            <button
+              type="button"
+              className={styles.iconBtn}
+              aria-label={`Search for ${name}`}
+              title="Automatic search"
+              disabled={command.running}
+              onClick={() => dispatchSearch(r)}
+            >
+              <SearchIcon size={14} />
+            </button>
+          </>
+        )}
+      </div>
+    );
+
+    const title = (
+      <div className={mode === 'row' ? styles.rowTitle : styles.cardTitle}>
+        <span className={mode === 'row' ? styles.rowTitleText : styles.cardTitleText}>
+          {name}
+        </span>
+        {isDebut && (
+          <span
+            className={styles.badgeNew}
+            data-testid={`calendar-new-badge-${cardKey}`}
+          >
+            New
+          </span>
+        )}
+      </div>
+    );
+
+    const meta = (
+      <div className={mode === 'row' ? styles.rowMeta : styles.cardMeta}>
+        <span className={styles.metaText}>{rowSub(r)}</span>
+        <StatusChip state={r.state} testId={`calendar-state-${cardKey}`} />
+        {isFuture && <span className={styles.unreleased}>Not yet released</span>}
+      </div>
+    );
+
+    /* Keyed on the cover URL, not just cardKey: the entry's `failed` flag lives
+       inside CardCover's own state, so a refetch that repairs a previously-broken
+       cover under the SAME row id needs a changed key here to remount the
+       component and reset `failed` — otherwise the stale flag keeps forcing the
+       spine even once the URL is good. */
+    const cover = (
+      <CardCover key={r.coverUrl ?? 'none'} r={r} name={name} mode={mode} />
+    );
+
     return (
       <div
         key={cardKey}
         className={cls}
         data-testid={`calendar-card-${cardKey}`}
+        data-mode={mode}
         data-linked={linked}
         data-future={isFuture}
       >
-        <div className={styles.cardRow}>
-          {/* Keyed on the cover URL, not just cardKey: the row's `failed` flag
-              lives inside CardCover's own state, so a refetch that repairs a
-              previously-broken cover under the SAME row id needs a changed key
-              here to remount the component and reset `failed` — otherwise the
-              stale flag keeps forcing the spine even once the URL is good. */}
-          <CardCover key={r.coverUrl ?? 'none'} r={r} name={name} />
-          <div className={styles.cardBody}>
-            <div className={styles.cardTitle}>
-              <span className={styles.cardTitleText}>{name}</span>
-              {isDebut && (
-                <span
-                  className={styles.badgeNew}
-                  data-testid={`calendar-new-badge-${cardKey}`}
-                >
-                  New
-                </span>
-              )}
+        {mode === 'row' ? (
+          <div className={styles.rowFace}>
+            {cover}
+            {title}
+            {meta}
+            {actions}
+          </div>
+        ) : (
+          <>
+            <div className={styles.cardFace}>
+              {cover}
+              <div className={styles.cardBody}>
+                {title}
+                {meta}
+              </div>
             </div>
-            <div className={styles.cardSub}>{rowSub(r)}</div>
-            {isFuture && <div className={styles.unreleased}>Not yet released</div>}
-          </div>
-          <div className={styles.actions}>
-            {canAdd && (
-              <button
-                type="button"
-                className={styles.addBtn}
-                aria-label={`Add ${r.seriesName}`}
-                onClick={() => addFromEntry(r)}
-              >
-                <PlusIcon size={13} />
-                Add
-              </button>
-            )}
-            {hasDetail(r) && (
-              <button
-                type="button"
-                className={styles.iconBtn}
-                aria-label={`${detailOpen ? 'Hide' : 'Show'} details for ${name}`}
-                aria-expanded={detailOpen}
-                title="Details"
-                onClick={() => toggleDetail(cardKey)}
-              >
-                <MoreIcon size={13} />
-              </button>
-            )}
-            {linked ? (
-              <>
-                <button
-                  type="button"
-                  className={styles.iconBtn}
-                  aria-label={`${monitored ? 'Skip' : 'Want'} ${name}`}
-                  title={monitored ? 'Stop monitoring' : 'Monitor / want'}
-                  onClick={() =>
-                    toggle.mutate({
-                      issueId: r.matchedIssueId as number,
-                      monitored: !monitored,
-                    })
-                  }
-                >
-                  <BookmarkIcon size={13} filled={monitored} />
-                </button>
-                <button
-                  type="button"
-                  className={styles.iconBtn}
-                  aria-label={`Search for ${name}`}
-                  title="Automatic search"
-                  disabled={command.running}
-                  onClick={() => dispatchSearch(r)}
-                >
-                  <SearchIcon size={13} />
-                </button>
-              </>
-            ) : (
-              <StateGlyph state={r.state} />
-            )}
-          </div>
-        </div>
+            {actions}
+          </>
+        )}
         {detailOpen && (
           <EntryDetail r={r} testId={`calendar-detail-${cardKey}`} />
         )}
@@ -598,7 +716,7 @@ export function CalendarScreen() {
           </span>
         }
       />
-      <div className={styles.screen}>
+      <div className={styles.screen} data-compact={compact ? 'true' : 'false'}>
         <div className={styles.weekBar}>
           <div className={styles.weekNav}>
             <button
@@ -647,6 +765,16 @@ export function CalendarScreen() {
           </div>
         )}
 
+        {actionError && (
+          <p
+            className={styles.actionError}
+            role="alert"
+            data-testid="calendar-action-error"
+          >
+            {actionError}
+          </p>
+        )}
+
         {isLoading && <p className={styles.stateMsg}>Loading this week&rsquo;s releases…</p>}
         {isError && (
           <p className={styles.stateMsg}>Could not load the weekly release list.</p>
@@ -669,32 +797,53 @@ export function CalendarScreen() {
                 </div>
               ) : (
                 view.days.map((d) => (
-                  <div className={styles.day} key={d.key}>
-                    <div className={styles.gutter}>
-                      <div
-                        className={`${styles.dow} ${
-                          d.isNewComicDay ? styles.dowBig : d.isToday ? styles.dowToday : ''
-                        }`}
-                      >
-                        {d.dow}
+                  <div
+                    className={compact ? styles.dayCompact : styles.day}
+                    key={d.key}
+                    data-testid={`calendar-day-${d.key}`}
+                  >
+                    {/* The 72px gutter costs a narrow viewport 114px of chrome it
+                        cannot spare, so below the crossover the date folds into
+                        the day header instead of holding a fixed column. */}
+                    {!compact && (
+                      <div className={styles.gutter}>
+                        <div
+                          className={`${styles.dow} ${
+                            d.isNewComicDay ? styles.dowBig : d.isToday ? styles.dowToday : ''
+                          }`}
+                        >
+                          {d.dow}
+                        </div>
+                        <div
+                          className={`${styles.dateNum} ${
+                            d.isToday
+                              ? styles.dateNumToday
+                              : d.isNewComicDay
+                                ? styles.dateNumBig
+                                : ''
+                          }`}
+                        >
+                          {d.date}
+                        </div>
+                        <div className={styles.mon}>{d.mon}</div>
                       </div>
-                      <div
-                        className={`${styles.dateNum} ${
-                          d.isToday
-                            ? styles.dateNumToday
-                            : d.isNewComicDay
-                              ? styles.dateNumBig
-                              : ''
-                        }`}
-                      >
-                        {d.date}
-                      </div>
-                      <div className={styles.mon}>{d.mon}</div>
-                    </div>
+                    )}
                     <div
-                      className={`${styles.stream} ${d.isNewComicDay ? styles.streamBig : ''}`}
+                      className={
+                        compact
+                          ? styles.streamCompact
+                          : `${styles.stream} ${d.isNewComicDay ? styles.streamBig : ''}`
+                      }
                     >
                       <div className={styles.dayHeader}>
+                        {compact && (
+                          <span
+                            className={styles.dayInlineDate}
+                            data-testid={`calendar-day-inline-${d.key}`}
+                          >
+                            {d.dow} {d.date} {d.mon}
+                          </span>
+                        )}
                         {d.isNewComicDay && (
                           <span className={styles.badgeNcd}>
                             <i className="fa-solid fa-bolt" aria-hidden />
@@ -706,14 +855,17 @@ export function CalendarScreen() {
                           {d.count} issue{d.count === 1 ? '' : 's'}
                         </span>
                         {scope === 'all' && d.followed > 0 && (
+                          // Not a bookmark: that glyph belongs to the monitor
+                          // toggle on this surface, and FRG-UI-047 keeps a
+                          // non-interactive indicator off a control's glyph.
                           <span className={styles.followed}>
-                            <i className="fa-solid fa-bookmark" aria-hidden />
+                            <i className="fa-solid fa-eye" aria-hidden />
                             {d.followed} followed
                           </span>
                         )}
                       </div>
-                      <div className={styles.cards}>
-                        {d.releases.map((r) => renderCard(r, d.isFuture))}
+                      <div className={compact ? styles.cards : styles.rows}>
+                        {d.releases.map((r) => renderEntry(r, d.isFuture))}
                       </div>
                       {scope === 'following' && d.hidden > 0 && (
                         <div className={styles.hidden}>
