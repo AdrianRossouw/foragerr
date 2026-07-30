@@ -281,7 +281,14 @@ export function buildReviewItems(
       }
       continue;
     }
-    for (const row of slot.rows) {
+    // Below the collapse threshold there is no header, but the rows still
+    // share a title — so they still go through the SAME comparator (D5).
+    // Within-key order is a property of the key, not of whether the group grew
+    // big enough to earn chrome: leaving these in arrival order made a pair
+    // re-sort itself the moment a third row arrived.
+    const ordered =
+      slot.key === null ? slot.rows : [...slot.rows].sort(compareGroupRows);
+    for (const row of ordered) {
       items.push({ kind: 'row', key: `r:${row.id}`, entitlement: row, group: null });
     }
   }

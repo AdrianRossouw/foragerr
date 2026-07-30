@@ -27,6 +27,7 @@ from foragerr.library.flows._common import SeriesValidationError
 from foragerr.library.models import SeriesRow
 from foragerr.sources import ratelimit, repo, review
 from foragerr.sources.grab import _handoff_to_import
+from foragerr.sources.matching import group_key, merge_display_groups
 from foragerr.sources.models import MATCHED_VIA_OPERATOR, SourceEntitlementRow
 from flows_support import FakeCV, build_factory, flows_settings, reset_gate
 from http_support import make_settings
@@ -895,6 +896,44 @@ async def test_bulk_apply_to_group_add_adds_once_and_proposes_rest(
         assert row.review_status == "new"  # a swept proposal, never committed
         assert row.proposed_series_id == added_series_id
         assert json.loads(row.proposed_match_json)["auto"] is False
+
+
+@pytest.mark.req("FRG-SRC-014")
+async def test_bulk_apply_to_group_add_sweeps_every_fold_key_it_was_given(
+    db, config_dir, root_folder_id, format_profile_id
+):
+    """A DISPLAY-merged group spans more than one exact ``group_key``
+    (FRG-UI-029). Applying a not-yet-added pick to it must re-propose EVERY
+    listed member, not only the ones sharing the acting row's fold key — the
+    header says the rest are proposed, and a member of the other fold left
+    holding a stale proposal makes that claim false."""
+    source = await _synced_source(db, config_dir)
+    settings = flows_settings(config_dir)
+    factory = build_factory(
+        settings, FakeCV().volume(733, name="Synthetic Hero").handler()
+    )
+    a, b, c = await _new_comics(db, source.id)
+    await _set_name(db, a.id, "Synthetic Hero #1")
+    await _set_name(db, b.id, "Synthetic Hero #2")
+    # A second title form of the same franchise: one display group, a DIFFERENT
+    # fold key.
+    await _set_name(db, c.id, "The First Tale Of Synthetic Hero")
+    ids = [a.id, b.id, c.id]
+    keys = {group_key(n) for n in ("Synthetic Hero #1", "The First Tale Of Synthetic Hero")}
+    assert len(keys) == 2 and len(set(merge_display_groups(keys).values())) == 1
+
+    result = await review.bulk_apply_to_group(
+        db, settings, ids, cv_volume_id=733, commands=FakeCommands(),
+        factory=factory, root_folder_id=root_folder_id,
+        matched_via=MATCHED_VIA_OPERATOR,
+    )
+
+    assert result.applied == 1
+    added_series_id = (await repo.get_entitlement(db, a.id)).matched_series_id
+    for eid in (b.id, c.id):
+        row = await repo.get_entitlement(db, eid)
+        assert row.review_status == "new"
+        assert row.proposed_series_id == added_series_id
 
 
 @pytest.mark.req("FRG-SRC-014")

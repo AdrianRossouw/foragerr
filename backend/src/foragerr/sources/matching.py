@@ -426,26 +426,43 @@ def _contains_run(haystack: tuple[str, ...], needle: tuple[str, ...]) -> bool:
     return any(haystack[i : i + n] == needle for i in range(len(haystack) - n + 1))
 
 
+#: Fewest tokens a key must have to be merged INTO a longer one. A single-token
+#: key is a word, not a title: "force" is inside every key that mentions it, so
+#: allowing it as a needle makes it a container for unrelated franchises and
+#: collapses the whole review list into a handful of groups named after one-word
+#: series. A two-token run is the shortest evidence that two keys are forms of
+#: ONE title rather than titles sharing a word.
+_MERGE_MIN_NEEDLE_TOKENS = 2
+
+
 def merge_display_groups(keys: Iterable[str]) -> dict[str, str]:
     """Map each :func:`group_key` to the DISPLAY group it renders under.
 
-    Read-side only (FRG-UI-029, design D4 — see :func:`group_key`). Two fold
-    keys merge when one's tokens occur as a contiguous run inside the other's:
-    the same containment relation the FRG-SRC-010 confidence floor already
-    trusts (:func:`_contains_run`), which is what reunites one franchise split
-    across two title forms — a bare series name and a longer form that carries
-    it whole.
+    Read-side only (FRG-UI-029, design D4 — see :func:`group_key`). A fold key
+    merges into another when its tokens occur as a contiguous run inside that
+    other's: the same containment relation the FRG-SRC-010 confidence floor
+    already trusts (:func:`_contains_run`), which is what reunites one franchise
+    split across two title forms — a bare series name and a longer form that
+    carries it whole.
 
-    The representative of a merged component is its SHORTEST key (ties broken
-    lexicographically): the contained key is the part every member shares, so it
-    is the only label that is true of all of them, and picking it makes the
-    mapping independent of input order. The empty key is the ungroupable signal
-    and never merges — it maps to itself.
+    Two rules keep the widening from running away, because a merged group is not
+    only a glance: its header scopes a Match-all, which WRITES.
 
-    Containment is not transitive-safe on its own (``a`` inside ``a b`` inside
-    ``x a b`` links ``a`` to ``x a b`` without either containing the other), so
-    the components are closed transitively: a chain the operator can see as one
-    franchise must not render as two groups depending on which pair was compared.
+    * the contained key (the needle) must carry at least
+      :data:`_MERGE_MIN_NEEDLE_TOKENS` tokens;
+    * each needle attaches to its LONGEST container ONLY — one edge per key, not
+      the transitive closure of every containment pair. Under the closure a key
+      contained in two unrelated longer keys welded them together, and those in
+      turn welded their own containers, so distinct titles chained into a single
+      group. Following one-parent edges to their root still reunites a genuine
+      chain ("a b" inside "a b c" inside "a b c d") without ever joining two keys
+      that share nothing but a needle.
+
+    Ties on container length break lexicographically, and the representative of a
+    merged group is its SHORTEST key (ties likewise): the contained key is the
+    part every member shares, so it is the only label true of all of them, and
+    both choices make the mapping independent of input order. The empty key is
+    the ungroupable signal and never merges — it maps to itself.
 
     Comparison is indexed by the needle's FIRST token rather than run over every
     pair — a contained run must start somewhere in the container, so only keys
@@ -460,32 +477,36 @@ def merge_display_groups(keys: Iterable[str]) -> dict[str, str]:
     for key, toks in tokens.items():
         by_first.setdefault(toks[0], []).append(key)
 
-    parent: dict[str, str] = {key: key for key in tokens}
-
-    def find(key: str) -> str:
-        while parent[key] != key:
-            parent[key] = parent[parent[key]]
-            key = parent[key]
-        return key
-
+    # needle -> its single longest container. Strictly length-decreasing, so
+    # following the edges always terminates and can never form a cycle.
+    container: dict[str, str] = {}
     for key, toks in tokens.items():
         for token in set(toks):
-            for other in by_first.get(token, ()):
-                if other == key:
+            for needle in by_first.get(token, ()):
+                if needle == key or len(tokens[needle]) < _MERGE_MIN_NEEDLE_TOKENS:
                     continue
-                if _contains_run(toks, tokens[other]):
-                    a, b = find(key), find(other)
-                    if a != b:
-                        parent[max(a, b)] = min(a, b)
+                if not _contains_run(toks, tokens[needle]):
+                    continue
+                current = container.get(needle)
+                if current is None or (-len(toks), key) < (
+                    -len(tokens[current]),
+                    current,
+                ):
+                    container[needle] = key
+
+    def root(key: str) -> str:
+        while key in container:
+            key = container[key]
+        return key
 
     best: dict[str, str] = {}
     for key in tokens:
-        root = find(key)
-        current = best.get(root)
+        top = root(key)
+        current = best.get(top)
         rank = (len(tokens[key]), key)
         if current is None or rank < (len(tokens[current]), current):
-            best[root] = key
-    return {key: best[find(key)] for key in tokens}
+            best[top] = key
+    return {key: best[root(key)] for key in tokens}
 
 
 @lru_cache(maxsize=4096)

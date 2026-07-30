@@ -11,25 +11,11 @@ import {
   lookupOutcomeNote,
   normalizeLookupTerm,
   OutcomeErrorText,
+  parseVolumeId,
+  VOLUME_ID_PATTERN,
 } from '../add/AddSeries';
 import type { LookupCandidate, SuggestCandidate } from '../../api/types';
 import styles from './sources.module.css';
-
-/**
- * `normalizeLookupTerm`'s bare-id output shape ("4050-1234") — the id path
- * (FRG-UI-039 / FRG-API-026) fires only when the normalized term is EXACTLY
- * this, never for a term that merely contains a "4050-" substring.
- */
-const VOLUME_ID_PATTERN = /^4050-\d+$/;
-
-/**
- * "4050-1234" -> 1234. The "4050-" is ComicVine's volume TYPE prefix, not part
- * of the id: the volume-id endpoint takes the bare number (the Calendar's
- * hand-off passes it bare), and the backend re-adds the prefix upstream.
- */
-function parseVolumeId(normalized: string): number {
-  return Number(normalized.slice('4050-'.length));
-}
 
 /**
  * The shape the picker hands back — structurally satisfied by BOTH a full
@@ -267,7 +253,22 @@ export function EntitlementSearch({
           aria-label="Search ComicVine for this item"
           placeholder="Series name, or a ComicVine volume URL / 4050-XXXX id"
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => {
+            const next = e.target.value;
+            setInput(next);
+            // A resolved volume is the answer to the id that produced it. The
+            // moment the box stops naming that id, the resolved candidate is
+            // stale — drop it, which also re-enables the passive suggest (it is
+            // gated on `volumeId === null`). Without this the picker sat on one
+            // volume while the operator typed a series name at it, exactly the
+            // dead end the id path was added to remove.
+            if (
+              volumeId !== null &&
+              !VOLUME_ID_PATTERN.test(normalizeLookupTerm(next))
+            ) {
+              setVolumeId(null);
+            }
+          }}
           data-testid={`row-search-input-${instanceId}`}
         />
         <button type="submit" className={styles.linkBtn}>

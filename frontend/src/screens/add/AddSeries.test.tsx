@@ -485,18 +485,29 @@ describe('FRG-UI-005: add series', () => {
     );
   });
 
-  it('FRG-UI-005 — a pasted ComicVine volume URL or cv: id normalizes to the bare 4050 id term', async () => {
+  it('FRG-UI-005 / FRG-API-026 — a pasted ComicVine volume URL or cv: id resolves by ID, never as a name search', async () => {
     expect(normalizeLookupTerm('https://comicvine.gamespot.com/saga/4050-56789/')).toBe(
       '4050-56789',
     );
     expect(normalizeLookupTerm('cv:4050-123')).toBe('4050-123');
     expect(normalizeLookupTerm('  Saga  ')).toBe('Saga');
 
-    const { spy } = renderAdd();
+    // The screen already resolves a HANDED-OVER id this way; a hand-typed or
+    // pasted one is the same request. Submitting it as a term asks ComicVine
+    // for a series literally named "4050-56789" and always comes back empty.
+    const { spy } = renderAdd({
+      volume: () => mockLookupCandidates[0],
+    });
     await searchFor('https://comicvine.gamespot.com/saga/4050-56789/');
     await waitFor(() =>
-      expect(spy).toHaveBeenCalledWith('/api/v1/series/lookup?term=4050-56789'),
+      expect(spy).toHaveBeenCalledWith('/api/v1/series/lookup/volume/56789'),
     );
+    expect(spy).not.toHaveBeenCalledWith(
+      '/api/v1/series/lookup?term=4050-56789',
+    );
+    expect(
+      spy.mock.calls.some((call) => call[0].includes('lookup/suggest?term=4050')),
+    ).toBe(false);
   });
 });
 

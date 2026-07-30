@@ -1,10 +1,10 @@
-"""entitlement md5 duplicate pointer + md5 index (review-experience-2 FRG-SRC-015)
+"""entitlement md5 duplicate pointer + dedupe indexes (review-experience-2 FRG-SRC-015)
 
 Revision ID: 0032_entitlement_duplicate_of
 Revises: 0031_root_folder_read_only
 Create Date: 2026-07-30
 
-Adds one nullable column and one index to ``source_entitlements``:
+Adds two columns and two indexes to ``source_entitlements``:
 
 ``duplicate_of``
     The id of the canonical row this one is a byte-identical copy of, set only
@@ -14,15 +14,29 @@ Adds one nullable column and one index to ``source_entitlements``:
     source, which already cascades as a whole, and a dangling pointer must read
     as "no set" rather than block a delete. NULL on every other row.
 
-``ix_source_entitlements_source_md5``
-    ``(source_id, md5)``. Linking asks "which rows of THIS source carry THIS
-    md5", and md5 previously had no index at all — the column existed only for
-    post-download integrity, which reads it off the row it already holds.
+``dedupe_opt_out``
+    Whether the operator restored this row out of a duplicate parking. The
+    linking pass never parks a flagged row again (FRG-SRC-015), so a restore
+    survives the next sync instead of being silently reversed. NOT NULL with a
+    false server default: every pre-0032 row has made no such decision, and a
+    nullable "maybe opted out" would need a three-way read at every link.
 
-No data rewrite: every pre-0032 row reads as unlinked. The one-time startup
-backfill (``foragerr.sources.dedupe``) parks pre-existing all-``new`` sets, so
-the linking is done by application code that can apply the review-state rule
-rather than by SQL that cannot.
+``ix_source_entitlements_source_md5``
+    ``(source_id, md5)``. Linking reads "the md5-bearing rows of THIS source"
+    and groups them in memory; md5 previously had no index at all — the column
+    existed only for post-download integrity, which reads it off the row it
+    already holds.
+
+``ix_source_entitlements_duplicate_of``
+    The copies chip's read is "which rows point at these canonicals"
+    (``foragerr.sources.repo.duplicate_copies``), issued on every listing of a
+    review queue that runs to thousands of rows; without this index that is a
+    full table scan on the review screen's hot path.
+
+No data rewrite: every pre-0032 row reads as unlinked and not opted out. The
+startup backfill (``foragerr.sources.dedupe``) parks pre-existing sets, so the
+linking is done by application code that can apply the review-state rule rather
+than by SQL that cannot.
 
 Additive + forward-only (FRG-DB-002).
 """
@@ -43,10 +57,24 @@ def upgrade() -> None:
         "source_entitlements",
         sa.Column("duplicate_of", sa.Integer(), nullable=True),
     )
+    op.add_column(
+        "source_entitlements",
+        sa.Column(
+            "dedupe_opt_out",
+            sa.Boolean(),
+            nullable=False,
+            server_default=sa.false(),
+        ),
+    )
     op.create_index(
         "ix_source_entitlements_source_md5",
         "source_entitlements",
         ["source_id", "md5"],
+    )
+    op.create_index(
+        "ix_source_entitlements_duplicate_of",
+        "source_entitlements",
+        ["duplicate_of"],
     )
 
 

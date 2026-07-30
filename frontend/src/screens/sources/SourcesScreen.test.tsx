@@ -598,6 +598,90 @@ describe('FRG-SRC-015: duplicate-set presentation', () => {
     expect(screen.queryByTestId('copies-21')).toBeNull();
   });
 
+  it('FRG-SRC-015 — the chip states the copies it cannot name instead of appearing to have listed them all', async () => {
+    // A copy whose bundle the store never named counts but cannot be listed,
+    // so `duplicate_bundles` is SHORTER than `duplicate_count`.
+    renderScreen({
+      sources: [source],
+      entitlements: [
+        ent({
+          id: 30,
+          human_name: 'Example Saga, Vol. 1',
+          duplicate_count: 3,
+          duplicate_bundles: ['Example Bundle #1'],
+        }),
+      ],
+      calls: [],
+    });
+
+    const chip = await screen.findByTestId('copies-30');
+    expect(chip).toHaveTextContent('3 copies');
+    expect(chip).toHaveTextContent('Example Bundle #1');
+    expect(chip).toHaveTextContent('+ 2 more');
+  });
+
+  it('FRG-SRC-015 — a bulk accept over a duplicate row surfaces its own refusal in the errors panel', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [
+        ent({
+          id: 40,
+          human_name: 'Unrelated Item',
+          proposed_match: {
+            kind: 'library',
+            series_id: 1,
+            cv_volume_id: null,
+            title: 'Driftwood',
+            year: null,
+            confidence: 0.9,
+          },
+        }),
+        ent({
+          id: 41,
+          human_name: 'Example Saga, Vol. 1 (Choice copy)',
+          review_status: 'duplicate',
+          duplicate_of: 40,
+        }),
+      ],
+      calls: [],
+      bulkResult: (body) => {
+        expect(body.action).toBe('accept');
+        state.entitlements = state.entitlements.map((e) =>
+          e.id === 40
+            ? { ...e, review_status: 'matched' as const, matched_series_id: 1 }
+            : e,
+        );
+        return {
+          applied: 1,
+          skipped: 1,
+          errors: {
+            '41':
+              'entitlement 41 is a copy of a byte-identical item already in ' +
+              'review — restore it first to review it on its own',
+          },
+        };
+      },
+    };
+    renderScreen(state);
+
+    // The copy is reachable through its own filter, where "select all" picks
+    // it up alongside rows that ARE acceptable.
+    await user.click(await screen.findByTestId('filter-duplicate'));
+    await user.click(await screen.findByTestId('select-41'));
+    await user.click(screen.getByTestId('filter-all'));
+    await user.click(await screen.findByTestId('select-40'));
+    await user.click(screen.getByTestId('bulk-accept'));
+
+    const toggle = await screen.findByTestId('bulk-errors-toggle');
+    expect(toggle).toHaveTextContent('1 item could not be accepted');
+    await user.click(toggle);
+    const failure = await screen.findByTestId('bulk-error-41');
+    // The row's OWN refusal, naming the one way out — not a generic skip.
+    expect(failure).toHaveTextContent('byte-identical');
+    expect(failure).toHaveTextContent('restore it first');
+  });
+
   it('FRG-SRC-015 — a bulk Restore applies to a selected duplicate row exactly like an ignored one', async () => {
     const user = userEvent.setup();
     const state: FetcherState = { sources: [source], entitlements, calls: [] };
@@ -1308,6 +1392,44 @@ describe('FRG-UI-039: pasted volume id resolves through the id lookup', () => {
       state.reads!.some((p) => p.startsWith('/api/v1/series/lookup?term=')),
     ).toBe(false);
     expect(screen.queryByTestId(/^cand-55-/)).toBeNull();
+  });
+
+  it('FRG-UI-039 — editing the box away from a resolved id drops the candidate and re-enables suggest', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [orphan],
+      calls: [],
+      reads: [],
+      volume: (id) =>
+        id === 1234
+          ? candidate({ cv_volume_id: 1234, name: 'Widget Chronicles' })
+          : undefined,
+      suggest: () => ({
+        records: [candidate({ cv_volume_id: 7777, name: 'Vane' })],
+        complete: true,
+        truncated: false,
+      }),
+    };
+    renderScreen(state);
+
+    await user.click(await screen.findByTestId('search-55'));
+    const panel = await screen.findByTestId('row-search-55');
+    const input = within(panel).getByTestId('row-search-input-55');
+    await user.clear(input);
+    await user.type(input, '4050-1234');
+    await user.click(within(panel).getByRole('button', { name: 'Search' }));
+    await screen.findByTestId('cand-55-1234');
+
+    // The operator gives up on the id and types a name instead. The resolved
+    // volume is no longer what the box says, so it must not stay on screen —
+    // and the accelerator, gated off while an id was live, must come back.
+    await user.clear(input);
+    await user.type(input, 'Vane');
+    await afterSuggestDebounce();
+
+    expect(screen.queryByTestId('cand-55-1234')).toBeNull();
+    expect(await screen.findByTestId('cand-55-7777')).toBeInTheDocument();
   });
 });
 
