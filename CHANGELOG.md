@@ -9,6 +9,18 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.18.1] — 2026-07-30
+
+Add-flow covers load reliably.
+
+### Fixed
+- Lookup, suggest, and add-from-Calendar candidates now serve a
+  display-sized ComicVine cover instead of the original scan; originals
+  frequently exceed the cover proxy's 2 MiB safety cap, which correctly
+  refused them and left candidate cards showing the placeholder initial.
+  Library cover caching and OPDS keep full-quality originals; the proxy
+  cap is unchanged. (FRG-META-021, FRG-PULL-008)
+
 ## [v0.18.0] — 2026-07-30
 
 Non-comic publisher filtering now works out of the box, in one place: a

@@ -107,6 +107,58 @@ def test_hostile_title_sanitized_but_number_untouched():
     assert "Chapter" in rec.title and "One" in rec.title
 
 
+@pytest.mark.req("FRG-META-021")
+def test_display_image_url_prefers_medium_over_original():
+    # A candidate card renders small; the sized variant must win even when an
+    # original is also present.
+    rec = map_volume(
+        volume_payload(
+            image={
+                "medium_url": "https://comicvine.gamespot.com/a/uploads/medium/saga.jpg",
+                "original_url": "https://comicvine.gamespot.com/a/uploads/original/saga.jpg",
+            }
+        )
+    )
+    assert rec.display_image_url.endswith("/medium/saga.jpg")
+    # The full-quality field is untouched by the sized-variant preference —
+    # the library cover cache and OPDS page rendering still get the original.
+    assert rec.image_url.endswith("/original/saga.jpg")
+
+
+@pytest.mark.req("FRG-META-021")
+def test_display_image_url_falls_back_through_the_size_chain():
+    for present_key, expected_suffix in (
+        ("super_url", "/super.jpg"),
+        ("small_url", "/small.jpg"),
+        ("original_url", "/original.jpg"),
+    ):
+        rec = map_volume(
+            volume_payload(image={present_key: f"https://example.com{expected_suffix}"})
+        )
+        assert rec.display_image_url == f"https://example.com{expected_suffix}"
+
+
+@pytest.mark.req("FRG-META-021")
+def test_display_image_url_priority_with_every_variant_present():
+    rec = map_volume(
+        volume_payload(
+            image={
+                "small_url": "https://example.com/small.jpg",
+                "super_url": "https://example.com/super.jpg",
+                "medium_url": "https://example.com/medium.jpg",
+                "original_url": "https://example.com/original.jpg",
+            }
+        )
+    )
+    assert rec.display_image_url == "https://example.com/medium.jpg"
+
+
+@pytest.mark.req("FRG-META-021")
+def test_display_image_url_absent_when_no_image():
+    rec = map_volume(volume_payload(image=None))
+    assert rec.display_image_url is None
+
+
 @pytest.mark.req("FRG-META-005")
 def test_malformed_numeric_string_maps_to_none_not_a_crash():
     """A multi-sign numeric-looking string ("--5") must not raise ValueError
