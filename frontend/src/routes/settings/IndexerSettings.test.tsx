@@ -209,6 +209,37 @@ describe('FRG-UI-008: schema-driven add/edit modal', () => {
     );
   });
 
+  it('FRG-UI-008 — testing a SAVED indexer sends its indexer_id, the only way the write-only key reaches the probe', async () => {
+    const user = userEvent.setup();
+    const { spy, fetcher } = fakeFetcher(indexerResolver());
+    renderWithProviders(<IndexerSettings />, { fetcher });
+
+    await user.click(await screen.findByTestId('provider-card-1'));
+    await user.click(screen.getByRole('button', { name: 'Test' }));
+
+    await screen.findByTestId('test-result');
+    const body = spy.mock.calls.find(([p]) => p === '/api/v1/indexer/test')?.[1]
+      ?.body as { indexer_id?: number; settings: Record<string, unknown> };
+    expect(body.indexer_id).toBe(1);
+    // The form never held the secret, so it cannot be in the payload.
+    expect('api_key' in body.settings).toBe(false);
+  });
+
+  it('FRG-UI-008 — the add form omits indexer_id: there is no saved row to merge with', async () => {
+    const user = userEvent.setup();
+    const { spy, fetcher } = fakeFetcher(indexerResolver());
+    renderWithProviders(<IndexerSettings />, { fetcher });
+
+    // One implementation, so the add button opens the form without a picker.
+    await user.click(await screen.findByRole('button', { name: 'Add Indexer' }));
+    await user.click(screen.getByRole('button', { name: 'Test' }));
+
+    await screen.findByTestId('test-result');
+    const body = spy.mock.calls.find(([p]) => p === '/api/v1/indexer/test')?.[1]
+      ?.body as Record<string, unknown>;
+    expect('indexer_id' in body).toBe(false);
+  });
+
   it('FRG-UI-008 — a degraded indexer pass is surfaced as a warning, not a clean pass', async () => {
     const user = userEvent.setup();
     const { fetcher } = fakeFetcher(

@@ -335,7 +335,10 @@ renders them, so a new provider type needs no UI change; General and Media
 Management are each their own dedicated single-form screen. Secret fields (API
 keys) are write-only — the form shows that a value is stored but never displays
 it back. Every provider has a Test button that performs a live connectivity
-check before you save.
+check before you save. Testing an already-saved provider works with the key
+field left blank — the server uses the stored key for the probe; type a new key
+in only when you actually want to test that one, and it is still not saved
+until you press Save.
 
 On a fresh install, Indexers and Download Clients are not empty: foragerr seeds
 one **GetComics** DDL indexer and one **built-in DDL** download client — but

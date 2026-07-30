@@ -96,6 +96,40 @@ describe('FRG-UI-009: download-client settings reuse the generic renderer', () =
     );
   });
 
+  it('FRG-UI-009 — testing a SAVED client sends its client_id, the only way the write-only key reaches the probe', async () => {
+    const user = userEvent.setup();
+    const { spy, fetcher } = fakeFetcher(dlResolver());
+    renderWithProviders(<DownloadClientSettings />, { fetcher });
+
+    await user.click(await screen.findByTestId('provider-card-1'));
+    await user.click(screen.getByRole('button', { name: 'Test' }));
+
+    await screen.findByTestId('test-result');
+    const body = spy.mock.calls.find(
+      ([p]) => p === '/api/v1/downloadclient/test',
+    )?.[1]?.body as { client_id?: number; settings: Record<string, unknown> };
+    expect(body.client_id).toBe(1);
+    // The form never held the secret, so it cannot be in the payload.
+    expect('api_key' in body.settings).toBe(false);
+  });
+
+  it('FRG-UI-009 — the add form omits client_id: there is no saved row to merge with', async () => {
+    const user = userEvent.setup();
+    const { spy, fetcher } = fakeFetcher(dlResolver());
+    renderWithProviders(<DownloadClientSettings />, { fetcher });
+
+    await user.click(await screen.findByRole('button', { name: 'Add Download Client' }));
+    const picker = screen.getByRole('dialog', { name: 'Add Download Client' });
+    await user.click(within(picker).getByRole('button', { name: /SABnzbd/ }));
+    await user.click(screen.getByRole('button', { name: 'Test' }));
+
+    await screen.findByTestId('test-result');
+    const body = spy.mock.calls.find(
+      ([p]) => p === '/api/v1/downloadclient/test',
+    )?.[1]?.body as Record<string, unknown>;
+    expect('client_id' in body).toBe(false);
+  });
+
   it('FRG-UI-009 — a field-precise test failure lands on the field it concerns', async () => {
     const user = userEvent.setup();
     const { fetcher } = fakeFetcher(

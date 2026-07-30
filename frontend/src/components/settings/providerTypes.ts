@@ -75,6 +75,14 @@ export interface ProviderKindConfig {
   singular: string;
   /** REST base, e.g. '/api/v1/indexer'. */
   apiBase: string;
+  /**
+   * The key POST {apiBase}/test takes the row id under. Each provider router
+   * names it after its own resource, so this is data like every other
+   * per-kind difference. Sending it lets the backend merge the row's stored
+   * secret in — without it, testing a saved provider would fail on the
+   * write-only key the form cannot resend.
+   */
+  testIdField: 'client_id' | 'indexer_id';
   /** Provider-row fields (name, toggles, priority) rendered by SchemaForm. */
   rowFields: SchemaField[];
   /** Initial row values for a new provider. */
