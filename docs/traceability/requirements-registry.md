@@ -374,7 +374,7 @@ in the table below until that branch lands. No id is renumbered when it does.
 | FRG-SRC-012 | Publisher classification rules | sources | implemented | M11 |
 | FRG-SRC-013 | Frugal, convergent proposal enrichment | sources | implemented | M11 |
 | FRG-SRC-014 | Group-key sibling proposal sweep on operator pick | sources | implemented | M11 |
-| FRG-SRC-015 | md5-identical entitlement dedupe | sources | proposed | B |
+| FRG-SRC-015 | md5-identical entitlement dedupe | sources | implemented | B |
 | FRG-EXT-001 | Explicit-action cookie-to-clipboard copy | extension | implemented | 0.9.x |
 | FRG-EXT-002 | Least-privilege, no-network permission surface | extension | implemented | 0.9.x |
 | FRG-EXT-003 | Cross-browser parity and reproducible self-distributed build | extension | implemented | 0.9.x |
