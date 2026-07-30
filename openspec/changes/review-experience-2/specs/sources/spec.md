@@ -12,9 +12,11 @@ one-time upgrade backfill, and SHALL only ever park rows that are in
 review state `new` — a matched, ignored, or already-parked row is never
 re-linked or re-pointed. Parked copies take review state `duplicate`
 (FRG-SRC-004): excluded from pending-review counts and default views,
-never eligible for grab or accept, retained under their own filter, and
-individually restorable to independent `new` review with their proposal
-recomputed. Entitlements without a stored md5 SHALL never be linked.
+never eligible for grab, accept, match, or add through any path
+(explicit restore is the only way back to actionable review), retained
+under their own filter, and individually restorable to independent
+`new` review with their proposal recomputed — permanently: a restored
+copy is never re-parked. Entitlements without a stored md5 SHALL never be linked.
 The canonical row SHALL disclose its set (copy count and each copy's
 bundle identity) on the review surface (FRG-UI-029).
 
@@ -56,8 +58,26 @@ bundle identity) on the review surface (FRG-UI-029).
 
 - **WHEN** the operator restores a `duplicate` row
 - **THEN** it returns to `new` with its duplicate link cleared and its
-  proposal recomputed, and it is not re-linked while it remains decided
-  or until a later sync finds it still `new` alongside its md5 twin
+  proposal recomputed, and no later sync ever re-parks it — restoring a
+  copy is an operator decision to review it independently, and operator
+  decisions are never silently reversed (the row may still serve as the
+  canonical of a future set)
+
+#### Scenario: A later arrival joins an existing set
+
+- **WHEN** a sync discovers a third byte-identical entitlement after two
+  are already linked
+- **THEN** the newcomer parks behind the same canonical (never behind
+  another copy), and only a matched or ignored member — or a restored
+  copy's independence — freezes a set against linking
+
+#### Scenario: A diverged copy leaves its set
+
+- **WHEN** a later sync leaves a parked copy without a stored md5 or
+  with an md5 that no longer equals its canonical's
+- **THEN** that row returns to independent `new` review with its link
+  cleared — a row is parked only while it demonstrably duplicates its
+  canonical
 
 ## MODIFIED Requirements
 
