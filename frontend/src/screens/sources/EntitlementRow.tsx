@@ -41,11 +41,18 @@ function pct(confidence: number): string {
  * FRG-UI-029): "2 copies · also in Example Bundle #1, Example Bundle #2" —
  * doubles as the chip's title/tooltip so the full bundle list is available
  * even when the inline text truncates.
+ *
+ * A copy the store never named contributes to `count` but not to `bundles`, so
+ * the named list can be SHORTER than the count. The unnamed remainder is stated
+ * ("+ 1 more") rather than left implicit: a chip reading "3 copies · also in
+ * Example Bundle #1" otherwise looks like it has listed them all and lost two.
  */
-function copiesLabel(count: number, bundles: readonly string[]): string {
+export function copiesLabel(count: number, bundles: readonly string[]): string {
   const noun = count === 1 ? 'copy' : 'copies';
-  const bundleText = bundles.length > 0 ? ` · also in ${bundles.join(', ')}` : '';
-  return `${count} ${noun}${bundleText}`;
+  if (bundles.length === 0) return `${count} ${noun}`;
+  const unnamed = count - bundles.length;
+  const more = unnamed > 0 ? `, + ${unnamed} more` : '';
+  return `${count} ${noun} · also in ${bundles.join(', ')}${more}`;
 }
 
 /** The reconcile explanation + issue chips for one expanded entitlement. */

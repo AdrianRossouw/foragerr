@@ -289,6 +289,30 @@ describe('FRG-UI-029 (review-experience-2): containment-merged display groups', 
     const expanded = buildReviewItems(rows, new Set(['k']));
     expect(rowIdsOf(expanded.items)).toEqual([103, 101, 102, 100]);
   });
+
+  it('FRG-UI-029 (design D5) — a sub-threshold same-key run is ordered by the SAME comparator', () => {
+    // Two rows share a title but never earn a header. Within-key order is a
+    // property of the key, not of whether the run grew big enough for chrome —
+    // otherwise the pair silently re-sorts the day a third row arrives.
+    const pair = [
+      ent({ id: 200, human_name: 'Series Vol. 2', group_key: 'k', volume_ordinal: 2 }),
+      ent({ id: 201, human_name: 'Series Vol. 1', group_key: 'k', volume_ordinal: 1 }),
+    ];
+    const { items, groups } = buildReviewItems(pair, new Set());
+
+    expect(groups).toHaveLength(0); // still no header
+    expect(rowIdsOf(items)).toEqual([201, 200]);
+    // …and the order it renders in is the order it keeps once a third arrival
+    // pushes the run over the threshold.
+    const grown = buildReviewItems(
+      [
+        ...pair,
+        ent({ id: 202, human_name: 'Series Vol. 3', group_key: 'k', volume_ordinal: 3 }),
+      ],
+      new Set(['k']),
+    );
+    expect(rowIdsOf(grown.items)).toEqual([201, 200, 202]);
+  });
 });
 
 describe('FRG-SRC-011: bundlesInView', () => {
