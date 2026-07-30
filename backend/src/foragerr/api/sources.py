@@ -206,7 +206,7 @@ async def connect_source_endpoint(
         raise ApiError(400, str(exc), field="type") from exc
     _reject_reserved_secret_prefix(body.type, body.settings)
     try:
-        model = validate_settings(body.type, body.settings)
+        model = validate_settings(body.type, _without_publisher_rules(body.settings))
     except ValidationError as exc:
         raise _validation_error(exc) from exc
 
@@ -245,7 +245,9 @@ async def reconnect_source_endpoint(
         raise ApiError(404, f"source {source_id} not found")
     _reject_reserved_secret_prefix(existing.type, body.settings)
     try:
-        model = validate_settings(existing.type, body.settings)
+        model = validate_settings(
+            existing.type, _without_publisher_rules(body.settings)
+        )
     except ValidationError as exc:
         raise _validation_error(exc) from exc
     try:
@@ -789,6 +791,19 @@ def _reject_reserved_secret_prefix(source_type: str, supplied: dict[str, Any]) -
                 f"'{ENC_PREFIX}' prefix (it is reserved for at-rest secret framing)",
                 field=f"settings.{name}",
             )
+
+
+def _without_publisher_rules(supplied: dict[str, Any]) -> dict[str, Any]:
+    """The submitted settings with any ``publisher_rules`` key dropped
+    (FRG-SRC-012).
+
+    The envelope field exists only so a settings blob written by an earlier
+    release still deserializes; the rules the classifier reads are ONE
+    library-wide setting written through the General config resource. A value
+    accepted here would persist in the envelope and be unioned into that
+    library-wide list by the next start's migration — a per-source endpoint
+    holding a deferred write into a global setting."""
+    return {k: v for k, v in supplied.items() if k != "publisher_rules"}
 
 
 def _validation_error(exc: ValidationError) -> ApiError:

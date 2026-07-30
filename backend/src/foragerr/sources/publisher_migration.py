@@ -32,9 +32,9 @@ from foragerr.config import (
     env_var_is_set,
     read_config_file,
 )
+from foragerr.metadata.comicvine import split_csv
 from foragerr.parser.normalize import matching_key
 from foragerr.sources import repo
-from foragerr.sources.classify import split_rules
 
 logger = logging.getLogger("foragerr.sources.publisher_migration")
 
@@ -75,7 +75,7 @@ def union_publisher_rules(current: str, additions: Iterable[str]) -> str:
     one exception being a collision where the addition is a wildcard and the
     stored entry is not: the wildcard replaces it in place, because dropping it
     would silently narrow a rule the operator had."""
-    entries = split_rules(current)
+    entries = split_csv(current)
     positions: dict[str, list[int]] = {}
     for index, entry in enumerate(entries):
         positions.setdefault(_rule_identity(entry), []).append(index)
@@ -189,7 +189,7 @@ async def _migrate(app, db) -> None:
     )
     current = stored if isinstance(stored, str) else ""
     merged = union_publisher_rules(current, entries)
-    if merged != ", ".join(split_rules(current)):
+    if merged != ", ".join(split_csv(current)):
         new_settings, _ = apply_config_file_updates(
             config_dir, {"non_comic_publishers": merged}
         )
