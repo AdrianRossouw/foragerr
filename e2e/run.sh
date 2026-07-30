@@ -49,7 +49,12 @@ cleanup() {
 trap cleanup EXIT
 
 echo "==> run dir: ${RUN_DIR}"
-mkdir -p "${RUN_DIR}"/{config,library,certs,data}
+# `reference` and `unwritable` back the read-only reference-library tier
+# (FRG-SER-021): `reference` is mounted writable so the zero-write proof belongs
+# to the boundary rather than to the kernel, `unwritable` is mounted :ro so the
+# readability-instead-of-writability registration check is exercised for real.
+# Neither is registered here — registering them IS the tier's first scenario.
+mkdir -p "${RUN_DIR}"/{config,library,certs,data,reference,unwritable}
 chmod -R 777 "${RUN_DIR}"
 
 # --- 1. build the real image under test -------------------------------------

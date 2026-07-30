@@ -70,9 +70,26 @@ The spine (`tests/spine.spec.ts`, serial — the library grows across steps):
    show `has_file` with the files renamed per the naming template inside the
    scanned folder (never moved out of it, byte-identical) and no download
    involved (`FRG-UI-015`, `FRG-IMP-023`).
-9. **restart resilience** — `docker restart` mid-flight; library + persisted
+9. **read-only reference library**
+   (`tests/y2-read-only-library.spec.ts`, runs after the library import) — a
+   SECOND root registered read-only through the API, proven against real
+   mounts: a `:ro`-mounted directory registers read-only while an ordinary
+   registration of it is still refused for unwritability (`FRG-SER-021`); a
+   series added on the read-only root comes back unmonitored with no search
+   dispatched even though the request asked for both (`FRG-SER-022`);
+   interactive search, the monitor toggles, rename and delete-with-files are
+   refused with the uniform 409 carrying the `read_only` `errors[]`
+   discriminator, and the same refusals hold when the command is enqueued
+   directly instead of reached through its route; a Library Import of files
+   already inside the root indexes them **in place** with no rename, move or
+   rewrite (`FRG-IMP-028`) and OPDS serves them from where they lie; and the
+   UI marks the series and offers none of the suppressed affordances
+   (`FRG-UI-045`). The read-only mount is deliberately WRITABLE to the
+   container, so the untouched-filesystem assertions (names, inodes, sizes,
+   mtimes, bytes) prove the boundary rather than the kernel.
+10. **restart resilience** — `docker restart` mid-flight; library + persisted
    command queue survive (`FRG-SCHED-002`).
-10. **mandatory-auth negative paths** (`tests/z-auth-negative.spec.ts`) — the
+11. **mandatory-auth negative paths** (`tests/z-auth-negative.spec.ts`) — the
    (c) leg of the three-way FRG-AUTH-010 proof, end-to-end per surface: a bare
    API GET is refused 401; OPDS answers a bare request with the
    `Basic realm="foragerr-opds"` challenge then serves with Basic creds; a
@@ -82,7 +99,7 @@ The spine (`tests/spine.spec.ts`, serial — the library grows across steps):
    returns to the intended path; a logged-out session token replays to 401
    (FRG-AUTH-004); and a logged-in browser brings the authenticated WebSocket
    live (proving the socket perimeter admits the good path).
-11. **unconfigured key** (`tests/zz-unconfigured.spec.ts`, runs last) — the app
+12. **unconfigured key** (`tests/zz-unconfigured.spec.ts`, runs last) — the app
    container is recreated with an explicitly **empty** ComicVine key
    (`E2E_CV_API_KEY=` against compose's `${E2E_CV_API_KEY-e2e-example-key}`);
    an Add Series search renders the actionable credential error pointing at
@@ -124,6 +141,14 @@ attest to any of the following, which the fixtures do NOT exercise:
   default hermetic run skips it. A hermetic GREEN says nothing about SAB.
 - **Real ComicVine / Newznab upstreams.** Metadata and indexer responses come
   from the in-repo mock, not the live services.
+- **The whole read-only write set.** The read-only tier drives four of the
+  enumerated write paths (import placement, rename, delete-with-files, and the
+  acquisition surface). Per-series rescan moves, post-placement archive
+  rewrites (ComicInfo tagging, CBR→CBZ) and the disposal-directory refusals
+  stay backend-tested only — the enumeration's own completeness check
+  (`FRG-SER-021`) lives with them. **Grab** is unreachable here by
+  construction: a grab needs a cached decision, and the search that would cache
+  one is refused first, so only the backend suite covers that leg.
 
 ## Download path: built-in DDL, not usenet/SAB
 
@@ -135,7 +160,10 @@ usenet/SAB path is available as the live tier.
 
 ## Topology (`compose.yaml`)
 
-- **foragerr** — the built image, fresh `/config` + `/library` per run.
+- **foragerr** — the built image, fresh `/config` + `/library` per run, plus two
+  extra library locations for the read-only tier: `/reference` (writable to the
+  container, registered read-only through the API) and `/unwritable` (mounted
+  `:ro`, so a readable-but-unwritable directory really exists to register).
 - **mockhub** — one fixture process (built `FROM` the app image to reuse its
   venv) serving three upstreams:
   - **ComicVine** over http (`/api/*`) — the app is pointed here via
