@@ -19,12 +19,31 @@ import {
 
 /** The hue a derived color must stay clear of: the brand accent's own. */
 const BRAND_HUE = 140;
-const BRAND_HUE_GUARD = 15;
+const BRAND_HUE_GUARD = 35;
 
 function hueOf(color: string): number {
   const match = /^hsl\((\d+(?:\.\d+)?) /.exec(color);
   expect(match, `expected an hsl() color, got ${color}`).not.toBeNull();
   return Number((match as RegExpExecArray)[1]);
+}
+
+/** The hue of a `#rrggbb` literal, by the same HSL conversion the browser
+ * uses — needed because `PUBLISHER_ACCENT_DEFAULT` is stored as a hex
+ * literal, not an `hsl()` string like a derived color. */
+function hexHue(hex: string): number {
+  const match = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+  expect(match, `expected a #rrggbb color, got ${hex}`).not.toBeNull();
+  const [r, g, b] = (match as RegExpExecArray).slice(1, 4).map((c) => parseInt(c, 16) / 255);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const delta = max - min;
+  if (delta === 0) return 0;
+  let hue: number;
+  if (max === r) hue = ((g - b) / delta) % 6;
+  else if (max === g) hue = (b - r) / delta + 2;
+  else hue = (r - g) / delta + 4;
+  hue *= 60;
+  return hue < 0 ? hue + 360 : hue;
 }
 
 describe('FRG-UI-042: live publisher names resolve to their palette colors', () => {
@@ -61,6 +80,17 @@ describe('FRG-UI-042: live publisher names resolve to their palette colors', () 
   });
 });
 
+describe('FRG-UI-042: BRAND_HUE tracks the real brand accent', () => {
+  it("FRG-UI-042 — BRAND_HUE is PUBLISHER_ACCENT_DEFAULT's own hue", () => {
+    // BRAND_HUE is a hand-derived literal (module comment: #57b877 ≈
+    // 139.79°), not computed from the accent at runtime — so a future accent
+    // change with no matching BRAND_HUE update would silently mis-center the
+    // whole derived-hue guard band around a color the app no longer uses.
+    const distance = Math.abs(hexHue(PUBLISHER_ACCENT_DEFAULT) - BRAND_HUE);
+    expect(distance).toBeLessThan(2);
+  });
+});
+
 describe('FRG-UI-042: a publisher outside the named palette gets a stable derived hue', () => {
   it('FRG-UI-042 — an unnamed publisher is not drawn in the brand accent', () => {
     const accent = publisherAccent('Titan Comics');
@@ -85,6 +115,11 @@ describe('FRG-UI-042: a publisher outside the named palette gets a stable derive
       'Ablaze',
       'Fantagraphics',
       'Umbral Press',
+      // Hashed 15° off brand under the old 15° guard — technically outside
+      // it, but perceptually still near-green at this surface's saturation
+      // and lightness. The 35° guard this probes hashes it to a different,
+      // clearly-distinct hue.
+      'Heavy Metal',
     ]) {
       const hue = hueOf(publisherAccent(name));
       const distance = Math.min(

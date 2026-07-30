@@ -406,7 +406,8 @@
  * ellipsise, the title never does). `min()` keeps the minimum from ever
  * exceeding the row, so a narrower container cannot overflow.
  *
- * Vertical: the cover is 99px and the padding 5px a side, so a row is ~109px —
+ * Vertical: the cover is 99px, the padding 4px a side, and `.row`'s own
+ * hairline `border-bottom` (below) another 1px, so a row is ~108px — under
  * FRG-UI-018's ~110px ceiling. `align-items: start` keeps a wrapped two-line
  * title from re-centering the cover.
  */
@@ -415,7 +416,7 @@
   grid-template-columns: auto minmax(min(25ch, 100%), 1fr) auto;
   align-items: start;
   gap: var(--spacing-sm);
-  padding: 5px var(--spacing-xs) 5px 2px;
+  padding: 4px var(--spacing-xs) 4px 2px;
 }
 
 /* The three stacked lines: title, meta cluster, description teaser. */
