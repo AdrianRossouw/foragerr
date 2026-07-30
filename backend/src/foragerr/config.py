@@ -1567,7 +1567,13 @@ def read_config_file(config_file: Path) -> dict[str, Any]:
     """The stored ``config.yaml`` mapping, or ``{}`` for an absent/non-mapping
     file. Reports what the FILE carries, not the effective settings — the caller
     that has to tell a stored value from an env-supplied or defaulted one needs
-    key PRESENCE, which the collapsed :class:`Settings` object cannot answer."""
+    key PRESENCE, which the collapsed :class:`Settings` object cannot answer.
+
+    Deliberately LENIENT about a non-mapping top level, where
+    :func:`load_settings` keeps its own strict read and raises
+    :class:`ConfigError` for it: startup must refuse a config it cannot trust,
+    while a caller asking only "is this key stored?" gets the same answer from a
+    junk file as from an absent one. Invalid YAML still propagates from both."""
     if not config_file.exists():
         return {}
     loaded = yaml.safe_load(config_file.read_text(encoding="utf-8")) or {}

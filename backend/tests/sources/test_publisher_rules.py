@@ -809,6 +809,42 @@ async def test_the_sources_patch_no_longer_accepts_publisher_rules(app_client):
 
 
 @pytest.mark.req("FRG-SRC-012")
+async def test_connect_and_reconnect_drop_publisher_rules_from_the_posted_settings(
+    app_client, tmp_path
+):
+    """No per-source rule surface remains anywhere. A rule accepted on connect
+    would validate, persist in the envelope, and be unioned into the
+    LIBRARY-WIDE list by the next start's migration — a per-source endpoint
+    performing a deferred write into a global setting."""
+    app = app_client.app
+    app.state.http_factory = make_factory(
+        tmp_path,
+        httpx.MockTransport(order_handler(list_body=fixture_bytes("order_list.json"))),
+    )
+    settings = {"session_cookie": "SYNTH-COOKIE", "publisher_rules": [OTHER_PUBLISHER]}
+
+    created = await app_client.post(
+        "/api/v1/sources", json={"type": "humble", "settings": settings}
+    )
+    assert created.status_code == 201
+    source_id = created.json()["source"]["id"]
+    assert await _rules_of(app.state.db, source_id) == []
+
+    reconnected = await app_client.post(
+        f"/api/v1/sources/{source_id}/reconnect", json={"settings": settings}
+    )
+    assert reconnected.status_code == 200
+    assert await _rules_of(app.state.db, source_id) == []
+
+    # ...so the migration that carries stored per-source rules finds nothing.
+    before = (await app_client.get("/api/v1/config/general")).json()
+    await publisher_rules_migration_startup_hook(app)
+    after = (await app_client.get("/api/v1/config/general")).json()
+    assert after["non_comic_publishers"] == before["non_comic_publishers"]
+    assert OTHER_PUBLISHER not in after["non_comic_publishers"]["value"]
+
+
+@pytest.mark.req("FRG-SRC-012")
 async def test_the_source_settings_form_renders_no_publisher_rules_field(app_client):
     """The field survives on the contract so an envelope written by an earlier
     release still deserializes, but it is hidden from the rendered form."""

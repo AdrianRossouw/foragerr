@@ -38,6 +38,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
+from foragerr.metadata.comicvine import split_csv
 from foragerr.parser.normalize import matching_key
 
 #: The Humble download platform that narrows to books/comics (humble-api.md).
@@ -123,8 +124,10 @@ class PublisherRuleSet:
     @classmethod
     def from_csv(cls, raw: str | None) -> "PublisherRuleSet":
         """Compile the comma-separated settings string
-        (``Settings.non_comic_publishers``)."""
-        return cls.parse(split_rules(raw))
+        (``Settings.non_comic_publishers``), split by the ONE CSV-settings
+        splitter (:func:`foragerr.metadata.comicvine.split_csv`) so this list and
+        the ComicVine ignore list separate entries identically."""
+        return cls.parse(split_csv(raw or ""))
 
     def __bool__(self) -> bool:
         return bool(self.exact or self.substrings)
@@ -146,13 +149,6 @@ class PublisherRuleSet:
 
 #: The compiled empty rule set — pure format-shape classification.
 NO_PUBLISHER_RULES = PublisherRuleSet(exact=frozenset(), substrings=())
-
-
-def split_rules(raw: str | None) -> list[str]:
-    """Split the comma-separated rule string into trimmed, non-empty entries."""
-    if not raw:
-        return []
-    return [item.strip() for item in raw.split(",") if item.strip()]
 
 
 def _as_rule_set(
