@@ -108,9 +108,12 @@ test('FRG-UI-047: every calendar and chrome control meets the 24px target floor 
     await page.setViewportSize(viewport);
     await openSeededWeek(page);
     // Below the crossover the chrome's nav toggle exists and must also clear the
-    // floor; opening the drawer puts its own controls on screen.
+    // floor, and the drawer is opened so its own nav items are on screen to be
+    // measured — closed, they are not rendered at all.
     if (viewport === NARROW) {
       await expect(page.getByTestId('nav-toggle')).toBeVisible();
+      await page.getByTestId('nav-toggle').click();
+      await expect(page.getByTestId('nav-drawer')).toBeVisible();
     }
     const controls = page.locator(
       'button:visible, a[href]:visible, select:visible, input:visible',
@@ -145,6 +148,12 @@ test('FRG-UI-018: an agenda row keeps ~30 characters of title measure at the cro
   // assumed from a pixel figure.
   await page.setViewportSize(AT_CROSSOVER);
   await openSeededWeek(page);
+  // Text measured before the webfont has swapped in is measured in the fallback
+  // face, and the character count derived from it describes a font the operator
+  // never sees.
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+  });
 
   const measured = await page.evaluate(() => {
     const title = document.querySelector<HTMLElement>(
@@ -166,29 +175,40 @@ test('FRG-UI-018: an agenda row keeps ~30 characters of title measure at the cro
     document.body.appendChild(probe);
     const perThirty = probe.getBoundingClientRect().width;
     probe.remove();
+    // The app's ONLY scrolling region (AppShell.module.css `.outlet`): its
+    // `overflow-y: auto` makes the horizontal axis `auto` too, so a screen wide
+    // enough to scroll sideways scrolls HERE and the document element's own
+    // scrollWidth can never grow past its client width.
+    const scroller = document.getElementById('main-content');
     return {
       titleWidth: title.getBoundingClientRect().width,
       thirtyCharsWidth: perThirty,
-      overflowing:
+      scrollerFound: scroller !== null,
+      scrollerOverflow:
+        scroller !== null && scroller.scrollWidth > scroller.clientWidth,
+      frameOverflow:
         document.documentElement.scrollWidth >
         document.documentElement.clientWidth,
     };
   });
 
   expect(measured, 'a row title to measure').not.toBeNull();
-  const { titleWidth, thirtyCharsWidth, overflowing } = measured!;
+  const { titleWidth, thirtyCharsWidth, scrollerFound } = measured!;
+  // A zero-width probe would make every ratio below Infinity and pass this
+  // scenario without measuring anything.
+  expect(thirtyCharsWidth, 'the 30-character probe has a width').toBeGreaterThan(0);
   const chars = (titleWidth / thirtyCharsWidth) * TITLE_MIN_CHARS;
-  // The measurement itself is the evidence this scenario exists to produce.
-  console.log(
-    `[FRG-UI-018] title measure at ${AT_CROSSOVER.width}px: ` +
-      `${titleWidth.toFixed(1)}px = ~${chars.toFixed(1)} characters`,
-  );
   expect(
     chars,
-    `title measure ${titleWidth.toFixed(1)}px = ~${chars.toFixed(1)} characters`,
+    `title measure ${titleWidth.toFixed(1)}px = ~${chars.toFixed(1)} characters ` +
+      `at ${AT_CROSSOVER.width}px`,
   ).toBeGreaterThanOrEqual(TITLE_MIN_CHARS);
-  // The floor must not have been bought with a horizontally scrolling frame.
-  expect(overflowing, 'the frame does not scroll sideways').toBe(false);
+  // The floor must not have been bought with a sideways-scrolling frame.
+  expect(scrollerFound, 'the scrolling region was found to measure').toBe(true);
+  expect(measured!.scrollerOverflow, 'the content region does not scroll sideways').toBe(
+    false,
+  );
+  expect(measured!.frameOverflow, 'the frame does not scroll sideways').toBe(false);
 });
 
 test('FRG-UI-018: a dense day holds every entry inside the per-entry vertical bound', async ({
@@ -211,11 +231,6 @@ test('FRG-UI-018: a dense day holds every entry inside the per-entry vertical bo
     };
   });
 
-  console.log(
-    `[FRG-UI-018] ${density.count} entries, tallest band ` +
-      `${density.maxBand.toFixed(1)}px, day ${density.dayHeight.toFixed(0)}px = ` +
-      `${(density.dayHeight / density.viewportHeight).toFixed(2)} viewport heights`,
-  );
   expect(density.count, 'a dense day was seeded').toBeGreaterThanOrEqual(30);
   expect(
     density.maxBand,
@@ -260,25 +275,61 @@ test('FRG-UI-049: the open nav drawer contains Tab and Shift+Tab', async ({ page
     });
 
   expect(await focusEscapee(), 'focus enters the drawer on open').toBeNull();
+
+  /**
+   * Walk the tab order one direction, recording where each press landed. One
+   * press more than asked for, so the LAST recorded landing still has a
+   * successor to be judged against.
+   */
+  const walkFocus = async (key: 'Tab' | 'Shift+Tab', presses: number) => {
+    const seen: (string | null)[] = [];
+    for (let press = 0; press <= presses; press += 1) {
+      await page.keyboard.press(key);
+      seen.push(await focusEscapee());
+    }
+    return seen;
+  };
+
   // More presses than the drawer has stops, in both directions, so a leak into
   // the header's quick-search or the Calendar's own controls has to show up.
-  const walk: (string | null)[] = [];
-  for (let press = 0; press < 40; press += 1) {
-    await page.keyboard.press('Tab');
-    walk.push(await focusEscapee());
-  }
-  for (let press = 0; press < 40; press += 1) {
-    await page.keyboard.press('Shift+Tab');
-    walk.push(await focusEscapee());
-  }
+  const forward = await walkFocus('Tab', 40);
+  const backward = await walkFocus('Shift+Tab', 40);
   expect(
-    walk.filter((where) => where !== null && where !== 'document'),
+    [...forward, ...backward].filter(
+      (where) => where !== null && where !== 'document',
+    ),
     'elements outside the drawer that received focus',
   ).toEqual([]);
+
+  // A wrap through the document root is containment working ONLY if the very
+  // next press is back inside the drawer. Focus lost to the body looks identical
+  // for one press and then never comes back, so accepting 'document' anywhere in
+  // the walk is what would let that pass.
+  const stranded: string[] = [];
+  for (const [label, segment] of [
+    ['Tab', forward],
+    ['Shift+Tab', backward],
+  ] as const) {
+    segment.slice(0, -1).forEach((where, index) => {
+      if (where === 'document' && segment[index + 1] !== null) {
+        stranded.push(`${label} press ${index + 1} -> ${segment[index + 1]}`);
+      }
+    });
+  }
+  expect(stranded, 'wraps after which focus did not return into the drawer').toEqual(
+    [],
+  );
   // Non-vacuity: the walk really did move through the drawer's own controls.
-  expect(walk.filter((where) => where === null).length).toBeGreaterThan(10);
+  expect(
+    [...forward, ...backward].filter((where) => where === null).length,
+  ).toBeGreaterThan(10);
 
   await page.keyboard.press('Escape');
   await expect(drawer).toHaveCount(0);
   expect(await page.locator('[inert]').count(), 'containment released').toBe(0);
+  // The dismissal returns focus to the control that opened the drawer. Only a
+  // real browser can prove this: the restore has to outlive the commit that
+  // releases the containment, because a focus() call into an inert subtree is
+  // silently ignored — and jsdom ignores `inert` instead.
+  await expect(page.getByTestId('nav-toggle')).toBeFocused();
 });

@@ -81,6 +81,43 @@ const VIEWPORTS = [
   { label: 'compact', width: 600, height: 900 },
 ] as const;
 
+/** Inject axe, scan the page as it stands, and keep the serious/critical rows. */
+async function runAxe(page: Page, label: string): Promise<Finding[]> {
+  // Inject axe as a page-context expression (CDP eval; CSP-exempt), then run it.
+  await page.evaluate(AXE_SOURCE);
+  const results = (await page.evaluate(
+    async (tags) =>
+      // @ts-expect-error injected at runtime on window
+      await window.axe.run(document, { runOnly: { type: 'tag', values: tags } }),
+    WCAG_TAGS as unknown as string[],
+  )) as AxeResults;
+
+  return results.violations
+    .filter((v) => v.impact === 'serious' || v.impact === 'critical')
+    .flatMap((v) =>
+      v.nodes.map((n) => ({
+        route: label,
+        rule: v.id,
+        impact: v.impact ?? 'unknown',
+        help: v.help,
+        target: n.target.join(' '),
+      })),
+    );
+}
+
+/**
+ * The open nav drawer (FRG-UI-049): a dialog that exists only once the toggle is
+ * pressed, so no route scan reaches it — and it is the one state in which the
+ * rest of the frame is inert, which is exactly what the modality rules check.
+ */
+async function scanOpenDrawer(page: Page): Promise<Finding[]> {
+  await page.goto('/calendar');
+  await expect(page.getByTestId('nav-toggle')).toBeVisible();
+  await page.getByTestId('nav-toggle').click();
+  await expect(page.getByTestId('nav-drawer')).toBeVisible();
+  return runAxe(page, '/calendar + nav drawer');
+}
+
 async function scanRoute(
   page: Page,
   route: string,
@@ -105,26 +142,7 @@ async function scanRoute(
     .poll(async () => page.getByText(/^Loading\b/i).count(), { timeout: 10_000 })
     .toBe(0);
 
-  // Inject axe as a page-context expression (CDP eval; CSP-exempt), then run it.
-  await page.evaluate(AXE_SOURCE);
-  const results = (await page.evaluate(
-    async (tags) =>
-      // @ts-expect-error injected at runtime on window
-      await window.axe.run(document, { runOnly: { type: 'tag', values: tags } }),
-    WCAG_TAGS as unknown as string[],
-  )) as AxeResults;
-
-  return results.violations
-    .filter((v) => v.impact === 'serious' || v.impact === 'critical')
-    .flatMap((v) =>
-      v.nodes.map((n) => ({
-        route,
-        rule: v.id,
-        impact: v.impact ?? 'unknown',
-        help: v.help,
-        target: n.target.join(' '),
-      })),
-    );
+  return runAxe(page, route);
 }
 
 test('FRG-PROC-019 FRG-UI-038 FRG-UI-049: core screens carry zero serious/critical axe WCAG 2.1 A/AA violations at both viewports', async ({
@@ -137,6 +155,14 @@ test('FRG-PROC-019 FRG-UI-038 FRG-UI-049: core screens carry zero serious/critic
     for (const route of CORE_ROUTES) {
       findings.push(
         ...(await scanRoute(page, route, compact)).map((f) => ({
+          ...f,
+          route: `${f.route} @${viewport.label}`,
+        })),
+      );
+    }
+    if (compact) {
+      findings.push(
+        ...(await scanOpenDrawer(page)).map((f) => ({
           ...f,
           route: `${f.route} @${viewport.label}`,
         })),
