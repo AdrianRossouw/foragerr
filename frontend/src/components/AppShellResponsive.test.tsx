@@ -88,6 +88,72 @@ describe('FRG-UI-049: responsive application chrome', () => {
     expect(screen.getByTestId('nav-toggle')).toHaveAttribute('aria-expanded', 'false');
   });
 
+  it('FRG-UI-049 — the open drawer claims modality and contains focus with it', async () => {
+    // `aria-modal` without containment is worse than neither: assistive
+    // technology hides the outside world while Tab still walks into it, behind an
+    // opaque backdrop. The backdrop already intercepts every click, so the rest
+    // of the frame is inert while the drawer is open.
+    setViewportWidth(NARROW);
+    renderShell();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByTestId('nav-toggle'));
+    const drawer = await screen.findByTestId('nav-drawer');
+    expect(drawer).toHaveAttribute('role', 'dialog');
+    expect(drawer).toHaveAttribute('aria-modal', 'true');
+    expect(drawer).toHaveAccessibleName('Navigation');
+
+    // Nothing focusable is left reachable outside the drawer: every candidate
+    // either lives in it or sits inside an inert subtree.
+    const escapees = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        'a[href], button, input, select, textarea, [tabindex]',
+      ),
+    ).filter(
+      (el) => !drawer.contains(el) && el.closest('[inert]') === null,
+    );
+    expect(escapees.map((el) => el.outerHTML.slice(0, 60))).toEqual([]);
+
+    await user.keyboard('{Escape}');
+    await waitFor(() =>
+      expect(screen.queryByTestId('nav-drawer')).not.toBeInTheDocument(),
+    );
+    // Containment is released with the drawer, or the app would be dead.
+    expect(document.querySelectorAll('[inert]')).toHaveLength(0);
+  });
+
+  it('FRG-UI-049 — focus enters the drawer at the first nav item, not the brand link home', async () => {
+    setViewportWidth(NARROW);
+    renderShell();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByTestId('nav-toggle'));
+    await screen.findByTestId('nav-drawer');
+    const nav = screen.getByRole('navigation', { name: 'Primary' });
+    expect(nav).toContainElement(document.activeElement as HTMLElement);
+    expect(document.activeElement).toHaveAccessibleName(/Comics/);
+  });
+
+  it('FRG-UI-049 — widening past the crossover with the drawer open moves focus into the persistent nav', async () => {
+    // The drawer unmounts without a dismissal, so focus inside it would fall to
+    // the document body and restart the tab order at the skip link.
+    setViewportWidth(NARROW);
+    renderShell();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByTestId('nav-toggle'));
+    await screen.findByTestId('nav-drawer');
+
+    act(() => setViewportWidth(WIDE));
+    await waitFor(() =>
+      expect(screen.queryByTestId('nav-drawer')).not.toBeInTheDocument(),
+    );
+    expect(document.activeElement).not.toBe(document.body);
+    expect(
+      screen.getByRole('navigation', { name: 'Primary' }),
+    ).toContainElement(document.activeElement as HTMLElement);
+  });
+
   it('FRG-UI-049 — the backdrop dismisses the drawer and restores focus to the toggle', async () => {
     setViewportWidth(NARROW);
     renderShell();

@@ -23,11 +23,15 @@
   grid-template-columns: 1fr;
 }
 
+/* The same overlay wash a modal lays over the frame (tokens.css). No central
+ * z-index scale exists yet, so these values outrank the modal layer's: a modal
+ * opened while the drawer is open would render beneath it. Normalising the
+ * stacking order is separate work. */
 .navBackdrop {
   position: fixed;
   inset: 0;
   z-index: 90;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--surface-overlay);
   animation: navFade 120ms ease-out;
 }
 
