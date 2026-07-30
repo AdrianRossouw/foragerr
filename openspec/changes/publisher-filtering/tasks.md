@@ -27,5 +27,5 @@
 
 - [x] 3.1 `docs/manual/` settings page (the list + what the defaults do)
       and sources page (the control moved); README labelling if needed
-- [ ] 3.2 Full backend (xdist) + frontend (serialized) green; soup 0; e2e
+- [x] 3.2 Full backend (xdist) + frontend (serialized) green; soup 0; e2e
       green; trace picks up FRG-UI-046 + the FRG-SRC-012 restatement
