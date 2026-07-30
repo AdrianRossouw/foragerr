@@ -20,7 +20,7 @@ backfill is required. Deliberately no index: target selection reads a series'
 STAMPED rows (``series_id = ? AND credits_fetched_at IS NOT NULL``, served by
 ``ix_issues_series_id``) and diffs against the just-walked records so brand-new
 issues are eligible the same run — a partial ``IS NULL`` index could not serve
-that read (gate finding).
+that read.
 
 Forward-only: no downgrade (FRG-DB-002).
 """
@@ -49,7 +49,7 @@ def upgrade() -> None:
     # issues become fetch-eligible in the same run, which an ``IS NULL`` query
     # over stored rows would miss. That per-series read is served by the
     # existing ``ix_issues_series_id``; a partial ``IS NULL`` index cannot
-    # serve it and would be dead weight (gate finding, m5-credits-live-fetch).
+    # serve it and would be dead weight.
 
 
 def downgrade() -> None:

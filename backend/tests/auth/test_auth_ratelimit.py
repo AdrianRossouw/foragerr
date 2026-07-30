@@ -84,7 +84,7 @@ def test_deadline_escalates_per_recorded_failure_not_per_refused_attempt():
     The wiring 429s a throttled attempt BEFORE calling record_failure, so a
     caller hammering during a live deadline records nothing and the deadline does
     not grow. It grows only when the caller waits the deadline out and fails
-    again. This pins the clarified spec semantics (Codex gate finding 1)."""
+    again. This pins the spec's semantics."""
     clock = {"t": 0.0}
     rl = _limiter(clock, threshold=2, window_seconds=1000, backoff_base_seconds=10)
 

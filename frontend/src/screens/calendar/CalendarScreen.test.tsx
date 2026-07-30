@@ -884,7 +884,7 @@ describe('FRG-UI-018: publisher filter + banner', () => {
 
     await screen.findByText('Saga');
     // In the DEFAULT All-releases scope, an active publisher filter must be
-    // named in the banner too (gate finding, calendar-discovery-default) —
+    // named in the banner too —
     // "Showing all N ... from DC", never an unqualified whole-week claim.
     await user.selectOptions(screen.getByLabelText('Filter by publisher'), 'DC');
     await waitFor(() =>

@@ -346,7 +346,7 @@ def build_app() -> FastAPI:
         # below) returns null. The refresh fetch phase calls this per
         # credit-needing issue. An UNKNOWN id is a 404, never an empty list —
         # a 200 would stamp a mis-constructed target id as covered and mask the
-        # regression (gate finding, m5-credits-live-fetch).
+        # regression.
         credits = None
         for volume in VOLUMES.values():
             for issue in volume["issues"]:

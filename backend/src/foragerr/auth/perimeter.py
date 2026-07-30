@@ -114,7 +114,7 @@ class OpdsVerifyCache:
         # ``user + NUL + password`` join is ambiguous in principle (("a\0b","c")
         # and ("a","b\0c") collide); env/login inputs cannot contain NUL so it is
         # not exploitable today, but the fixed-width digest join removes the class
-        # entirely (defense-in-depth, gate finding).
+        # entirely (defense-in-depth).
         u = hashlib.sha256(username.encode("utf-8")).digest()
         p = hashlib.sha256(password.encode("utf-8")).digest()
         return hashlib.sha256(u + p).digest()
@@ -288,7 +288,7 @@ async def _authenticate(request: HTTPConnection) -> tuple[int, str] | None:
                 # Capture the generation BEFORE reading the principal, so a
                 # credential write (clear) landing during the KDF below causes the
                 # eventual put() to be dropped rather than resurrect a stale
-                # positive (TOCTOU gate finding).
+                # positive (the TOCTOU window this ordering closes).
                 generation = cache.generation()
                 cached_id = cache.get(creds[0], creds[1])
                 if cached_id is not None:

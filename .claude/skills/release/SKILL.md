@@ -11,7 +11,7 @@ metadata:
 Cut a release for foragerr.
 
 This skill is **subordinate to the spec**: `FRG-PROC-013 — Release tagging`
-(`openspec/specs/dev-process/spec.md`) owns the scheme, and item 9 of the
+(`openspec/specs/dev-process/spec.md`) owns the scheme, and item 10 of the
 merge-gate checklist (`docs/process/commit-standard.md`) owns the gate ordering.
 This skill only *executes* that process mechanically and consistently. If this
 skill and the spec ever disagree, the spec wins — fix the skill.

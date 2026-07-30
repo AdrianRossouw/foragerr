@@ -131,7 +131,7 @@ def _cbz_without_images() -> bytes:
 
 @pytest.mark.req("FRG-OPDS-017")
 def test_head_404s_out_of_range_page_like_get(client, tmp_path):
-    """HEAD must run GET's existence checks (Codex gate finding): an
+    """HEAD must run GET's existence checks: an
     out-of-range page 404s on both verbs, never 200-on-HEAD/404-on-GET."""
     fid = _seed_image_library(client, tmp_path)
     url = f"/opds/page/{fid}/99"

@@ -1165,7 +1165,7 @@ const BATMAN_SUGGEST = {
   complete: true,
 };
 
-describe('FRG-UI-005 / FRG-UI-019: autosuggest / quick-search seam (gate review)', () => {
+describe('FRG-UI-005 / FRG-UI-019: autosuggest / quick-search seam', () => {
   it('FRG-UI-019 — a second navigation to the already-mounted Add Series re-seeds the input and fires autosuggest for the new term', async () => {
     const { spy, fetcher } = addFetcher({
       suggest: (path) =>

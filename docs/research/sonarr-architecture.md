@@ -1,6 +1,6 @@
 # Sonarr Architecture Study for foragerr
 
-Research deliverable. Source: `/Users/adrian/Projects/foragerr/.reference/sonarr` (studied read-only;
+Research deliverable. Source: `.reference/sonarr` (studied read-only;
 all paths below are relative to `src/` unless noted). Purpose: extract the behaviors and
 architecture foragerr should imitate for a comic-shaped domain (ComicVine volumes/issues,
 Newznab-only indexers, SABnzbd + DDL, SQLite/FastAPI/asyncio). We are not porting code.

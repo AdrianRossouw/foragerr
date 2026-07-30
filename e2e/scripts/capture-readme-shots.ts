@@ -14,17 +14,17 @@
  * Run (from the e2e/ directory). On a Node build with TypeScript stripping
  * compiled in (>= 22.6, not all distro packages):
  *
- *     BASE_URL=http://127.0.0.1:8790 \
+ *     BASE_URL=<app base URL> \
  *       node --experimental-strip-types scripts/capture-readme-shots.ts
  *
  * On a Node build without it (ERR_NO_TYPESCRIPT), transpile first:
  *
  *     node_modules/.bin/tsc --module nodenext --target es2022 \
- *       --outDir /tmp/capture scripts/capture-readme-shots.ts
- *     BASE_URL=http://127.0.0.1:8790 node /tmp/capture/capture-readme-shots.js
+ *       --outDir <scratch dir> scripts/capture-readme-shots.ts
+ *     BASE_URL=<app base URL> node <scratch dir>/capture-readme-shots.js
  *
  * Env:
- *   BASE_URL  base URL of the running app        (default http://127.0.0.1:8790)
+ *   BASE_URL  base URL of the running app        (default: the loopback URL below)
  *   OUT_DIR   output directory for the PNGs      (default ../docs/readme-assets)
  *   SHOTS     comma-separated subset of shot ids (default: all)
  *             ids: comics-grid, series-detail, creators-grid, wanted,

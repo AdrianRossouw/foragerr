@@ -1,14 +1,14 @@
 # Sonarr v4 UI Analysis — screenshot-grounded research for foragerr change 7
 
-Source rig: Sonarr v4.0.19.2979 (lscr.io/linuxserver/sonarr:latest) in Docker
-(`sonarr-research`, port 8989), dark theme, 1440x900 viewport (plus 900px responsive
+Source: Sonarr v4.0.19.2979 (lscr.io/linuxserver/sonarr:latest) in Docker on its own
+default port, dark theme, 1440x900 viewport (plus 900px responsive
 set), library seeded with 8 real series (TheTVDB metadata + posters), SABnzbd and
 Newznab behaviour simulated by local stub servers so Activity/Queue, History and
 Interactive Search render with real data.
 
 All anatomy below is described from the captured PNGs in this directory, not from
 memory. Token values are cited from the Sonarr frontend source in
-`/Users/adrian/Projects/foragerr/.reference/sonarr/frontend/src/Styles/`.
+`.reference/sonarr/frontend/src/Styles/`.
 
 ---
 

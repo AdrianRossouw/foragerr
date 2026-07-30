@@ -338,7 +338,7 @@ class HttpClientFactory:
 
     >>> factory = HttpClientFactory(settings)
     >>> cv = factory.external()                       # full egress policy
-    >>> sab = factory.local_service("http://192.168.1.10:8080")
+    >>> sab = factory.local_service("http://sabnzbd.example.com:8080")
 
     ``resolver``, ``test_allow_addresses`` and ``transport`` are TEST-ONLY
     injection points (stub DNS records, allow fixture servers on 127.0.0.1,
