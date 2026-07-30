@@ -3,7 +3,8 @@ import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../../test/renderWithProviders';
 import { fakeFetcher } from '../../test/fakeFetcher';
-import { makeIssue, makeSeriesResource, pageOf } from '../../test/mockData';
+import { makeCommand, makeIssue, makeSeriesResource, pageOf } from '../../test/mockData';
+import { addWeeks, currentIsoWeek, isoDateKey, weekDates } from '../../utils/isoWeek';
 import { setViewportWidth } from '../../test/viewport';
 import { createQueryClient } from '../../queryClient';
 import { queryKeys } from '../../api/queryKeys';
@@ -22,6 +23,10 @@ const WEEK = '2026-W27';
 const DAY = '2026-07-01';
 const WIDE = COMPACT_CROSSOVER_PX + 100;
 const NARROW = COMPACT_CROSSOVER_PX - 300;
+
+/** A week that is always ahead of the store date, whenever the suite runs. */
+const FUTURE_WEEK = addWeeks(currentIsoWeek(), 4);
+const FUTURE_DAY = isoDateKey(weekDates(FUTURE_WEEK)[2]);
 
 /** Long enough to have shattered mid-word in the shipped clamped card grid. */
 const LONG_TITLE = 'Chronicles of the Meridian Expedition Deluxe Omnibus';
@@ -56,13 +61,14 @@ function linkedRow(
   name: string,
   over: Partial<PullEntryRecord> = {},
 ): PullEntryRecord {
+  const issueId = over.matchedIssueId ?? 500;
   return makePullRecord({
     seriesName: name,
     matchType: 'id',
-    matchedIssueId: 500,
+    matchedIssueId: issueId,
     state: 'missing_wanted',
     series: { id: 7, title: name },
-    issue: { id: 500, issueNumber: '1', title: null },
+    issue: { id: issueId, issueNumber: '1', title: null },
     ...over,
   });
 }
@@ -190,6 +196,72 @@ describe('FRG-UI-018: responsive entry presentation', () => {
     expect(screen.queryByTestId(`calendar-day-inline-${DAY}`)).not.toBeInTheDocument();
   });
 
+  it('FRG-UI-018 — a future-dated day is marked not-yet-released once in its heading, never per entry', async () => {
+    // Per entry the marking is a ~110px nowrap token in the row's meta track,
+    // and the title's measure is what pays for it — while the store date that
+    // makes an entry unreleased belongs to the whole day group anyway.
+    setViewportWidth(WIDE);
+    const records = [
+      makePullRecord({
+        id: 1,
+        seriesName: 'Tidewrack Survey',
+        matchType: 'unmatched',
+        week: FUTURE_WEEK,
+        releaseDate: FUTURE_DAY,
+      }),
+      makePullRecord({
+        id: 2,
+        seriesName: 'Meridian Signal',
+        matchType: 'unmatched',
+        week: FUTURE_WEEK,
+        releaseDate: FUTURE_DAY,
+      }),
+    ];
+    const { fetcher } = fakeFetcher((path) =>
+      path.startsWith('/api/v1/series')
+        ? pageOf([])
+        : pageOf(records, { pageSize: 200 }),
+    );
+    renderWithProviders(<CalendarScreen />, {
+      fetcher,
+      route: `/calendar?week=${FUTURE_WEEK}`,
+    });
+
+    const day = await screen.findByTestId(`calendar-day-${FUTURE_DAY}`);
+    expect(screen.getAllByText('Not yet released')).toHaveLength(1);
+    expect(
+      within(day).getByTestId(`calendar-unreleased-${FUTURE_DAY}`),
+    ).toBeInTheDocument();
+    // Both entries carry the state as data, and neither repeats the words.
+    for (const id of [1, 2]) {
+      const card = screen.getByTestId(`calendar-card-${id}`);
+      expect(card).toHaveAttribute('data-future', 'true');
+      expect(within(card).queryByText('Not yet released')).not.toBeInTheDocument();
+    }
+  });
+
+  it('FRG-UI-018 — each day group is a heading over a list of entries in both modes', async () => {
+    // 60 entries with no structure is 240 tab stops and no jump points; the
+    // grouping the sighted reader gets from the gutter has to exist in the
+    // markup too.
+    for (const width of [WIDE, NARROW]) {
+      setViewportWidth(width);
+      const view = renderWeek([
+        linkedRow('Meridian Signal', { id: 1 }),
+        makePullRecord({ id: 2, seriesName: 'Tidewrack Survey', matchType: 'unmatched' }),
+      ]);
+      const day = await screen.findByTestId(`calendar-day-${DAY}`);
+      const heading = within(day).getByRole('heading', { level: 2 });
+      // The date is in the accessible name at both widths, though only the
+      // narrow mode draws it inside the heading.
+      expect(heading).toHaveAccessibleName(expect.stringContaining('Jul'));
+      const list = within(day).getByRole('list');
+      expect(within(list).getAllByRole('listitem')).toHaveLength(2);
+      expect(list).toContainElement(screen.getByTestId('calendar-card-1'));
+      view.unmount();
+    }
+  });
+
   it('FRG-UI-018 — a resize across the crossover switches presentation without a remount of the week', async () => {
     setViewportWidth(WIDE);
     renderWeek([
@@ -235,10 +307,10 @@ describe('FRG-UI-047: status indicators are never shaped like controls', () => {
       expect(chip).not.toHaveAttribute('tabindex');
       expect(chip.tabIndex).toBe(-1);
       expect(chip.textContent).toBeTruthy();
-      // No want/skip button anywhere on the entry, and no bookmark glyph —
+      // No monitor button anywhere on the entry, and no bookmark glyph —
       // filled or hollow — impersonating one.
       expect(
-        within(card).queryByRole('button', { name: /^(Want|Skip) / }),
+        within(card).queryByRole('button', { name: /^Monitor / }),
       ).not.toBeInTheDocument();
       expect(bookmarkGlyphCount(card)).toBe(0);
     });
@@ -285,13 +357,38 @@ describe('FRG-UI-047: status indicators are never shaped like controls', () => {
     renderWeek([linkedRow('Meridian Signal', { id: 1 })]);
 
     const card = await screen.findByTestId('calendar-card-1');
-    const toggle = within(card).getByRole('button', { name: 'Skip Meridian Signal' });
+    const toggle = within(card).getByRole('button', { name: 'Monitor Meridian Signal' });
     expect(toggle.tagName).toBe('BUTTON');
     expect(toggle).toHaveAttribute('aria-pressed', 'true');
     expect(toggle).not.toBeDisabled();
     // Exactly one bookmark on the entry, and it is inside the toggle.
     expect(bookmarkGlyphCount(card)).toBe(1);
     expect(bookmarkGlyphCount(toggle)).toBe(1);
+  });
+
+  it('FRG-UI-047 — the toggle names itself neutrally in both states so aria-pressed is not contradicted', async () => {
+    // An action-phrased name ("Skip …") beside aria-pressed=true announces
+    // "skipping is ON" — the negation of the truth — so the name must carry no
+    // verb at all and the state must live only on aria-pressed.
+    setViewportWidth(WIDE);
+    renderWeek([
+      linkedRow('Meridian Signal', { id: 1 }),
+      linkedRow('Tidewrack Survey', {
+        id: 2,
+        matchedIssueId: 501,
+        state: 'unmonitored',
+        series: { id: 8, title: 'Tidewrack Survey' },
+      }),
+    ]);
+
+    await screen.findByTestId('calendar-card-1');
+    const monitored = screen.getByRole('button', { name: 'Monitor Meridian Signal' });
+    const notMonitored = screen.getByRole('button', { name: 'Monitor Tidewrack Survey' });
+    expect(monitored).toHaveAttribute('aria-pressed', 'true');
+    expect(notMonitored).toHaveAttribute('aria-pressed', 'false');
+    for (const toggle of [monitored, notMonitored]) {
+      expect(toggle.getAttribute('aria-label')).not.toMatch(/skip|want|stop/i);
+    }
   });
 
   it('FRG-UI-047 — the per-entry button count equals the number of actions that entry has', async () => {
@@ -308,9 +405,9 @@ describe('FRG-UI-047: status indicators are never shaped like controls', () => {
 
     await screen.findByTestId('calendar-card-1');
     expect(actionNames(screen.getByTestId('calendar-card-1'))).toEqual([
+      'Monitor Meridian Signal',
       'Search for Meridian Signal',
       'Show details for Meridian Signal',
-      'Skip Meridian Signal',
     ]);
     expect(actionNames(screen.getByTestId('calendar-card-2'))).toEqual([
       'Add Tidewrack Survey',
@@ -318,56 +415,196 @@ describe('FRG-UI-047: status indicators are never shaped like controls', () => {
   });
 });
 
-describe('FRG-UI-048: in-flight feedback for the monitor toggle', () => {
-  /** A PUT that stays pending until the test releases it. */
-  function deferredToggle(records: PullEntryRecord[]) {
-    let release: (() => void) | null = null;
-    let fail: ((error: Error) => void) | null = null;
-    const resolver = (path: string, init?: { method?: string }) => {
-      if (init?.method === 'PUT' && path === '/api/v1/issues/500') {
-        return new Promise((resolve, reject) => {
-          release = () => resolve(makeIssue({ id: 500, series_id: 7, monitored: false }));
-          fail = (error: Error) => reject(error);
-        });
-      }
-      if (path.startsWith('/api/v1/series')) return pageOf([]);
-      return pageOf(records, { pageSize: 200 });
-    };
-    return {
-      resolver,
-      release: () => release?.(),
-      fail: (message: string) => fail?.(new Error(message)),
-    };
-  }
-
-  it('FRG-UI-048 — activation renders the requested state at once in a busy presentation and a second activation issues no second mutation', async () => {
-    const records = [linkedRow('Meridian Signal', { id: 1 })];
-    const deferred = deferredToggle(records);
+describe('FRG-UI-047: a control that is present is a real, honest control', () => {
+  it('FRG-UI-047 — the details control references the panel it opens, and only while it exists', async () => {
     setViewportWidth(WIDE);
-    const { spy } = renderWeek(records, deferred.resolver);
+    renderWeek([
+      linkedRow('Meridian Signal', {
+        id: 1,
+        description: 'A relay station answers on a dead channel.',
+      }),
+    ]);
     const user = userEvent.setup();
 
     await screen.findByTestId('calendar-card-1');
-    await user.click(screen.getByRole('button', { name: 'Skip Meridian Signal' }));
+    const trigger = screen.getByRole('button', {
+      name: 'Show details for Meridian Signal',
+    });
+    // Closed: no reference at all rather than one pointing at nothing.
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(trigger).not.toHaveAttribute('aria-controls');
+
+    await user.click(trigger);
+    const opened = screen.getByRole('button', {
+      name: 'Hide details for Meridian Signal',
+    });
+    const panelId = opened.getAttribute('aria-controls');
+    expect(panelId).toBe('calendar-detail-1');
+    expect(document.getElementById(panelId as string)).toBeInTheDocument();
+  });
+
+  it('FRG-UI-047 — a running search keeps its control in keyboard order and announces itself', async () => {
+    // `disabled` on the focused button drops focus to the document body and
+    // silently disables every row's search at once, because the running flag is
+    // screen-wide; unavailable-but-focusable plus a live status region does not.
+    const records = [
+      linkedRow('Meridian Signal', { id: 1 }),
+      linkedRow('Tidewrack Survey', {
+        id: 2,
+        matchedIssueId: 501,
+        series: { id: 8, title: 'Tidewrack Survey' },
+      }),
+    ];
+    setViewportWidth(WIDE);
+    renderWeek(records, (path, init) => {
+      if (init?.method === 'POST' && path === '/api/v1/command') {
+        return makeCommand({ id: 90, name: 'issue-search', status: 'queued' });
+      }
+      if (path === '/api/v1/command/90') {
+        return makeCommand({ id: 90, name: 'issue-search', status: 'started' });
+      }
+      if (path.startsWith('/api/v1/series')) return pageOf([]);
+      return pageOf(records, { pageSize: 200 });
+    });
+    const user = userEvent.setup();
+
+    await screen.findByTestId('calendar-card-1');
+    const search = screen.getByRole('button', { name: 'Search for Meridian Signal' });
+    await user.click(search);
+
+    const status = await screen.findByTestId('command-status');
+    expect(status).toHaveAttribute('role', 'status');
+    for (const name of ['Meridian Signal', 'Tidewrack Survey']) {
+      const button = screen.getByRole('button', { name: `Search for ${name}` });
+      expect(button).toHaveAttribute('aria-disabled', 'true');
+      expect(button).not.toBeDisabled();
+    }
+    // The control the operator activated still holds focus.
+    expect(search).toHaveFocus();
+  });
+});
+
+describe('FRG-UI-048: in-flight feedback for the monitor toggle', () => {
+  /**
+   * A fetcher whose PUTs AND whose post-mutation pull refetch stay pending until
+   * the test releases them, one issue id at a time. Nothing may resolve in a
+   * microtask: a fetcher that settles immediately hides both the window in which
+   * an optimistic value can flash back to the stale projection and the ordering
+   * that decides whether a concurrent toggle ever settles at all.
+   */
+  function gatedFetcher(
+    records: PullEntryRecord[],
+    settled?: PullEntryRecord[],
+    { holdRefetches = false } = {},
+  ) {
+    const puts = new Map<
+      number,
+      { resolve: () => void; reject: (error: Error) => void }
+    >();
+    const refetches: Array<() => void> = [];
+    let pullCalls = 0;
+    const resolver = (path: string, init?: { method?: string }) => {
+      const put = /^\/api\/v1\/issues\/(\d+)$/.exec(path);
+      if (init?.method === 'PUT' && put) {
+        const issueId = Number(put[1]);
+        return new Promise((resolve, reject) => {
+          puts.set(issueId, {
+            resolve: () =>
+              resolve(makeIssue({ id: issueId, series_id: 7, monitored: false })),
+            reject,
+          });
+        });
+      }
+      if (path.startsWith('/api/v1/series')) return pageOf([]);
+      pullCalls += 1;
+      // The first load resolves so the week renders. A refetch after it lands a
+      // macrotask later at the earliest — or only when the test releases it,
+      // which is the window an optimistic value has to survive.
+      if (pullCalls === 1) return pageOf(records, { pageSize: 200 });
+      return new Promise((resolve) => {
+        const land = () => resolve(pageOf(settled ?? records, { pageSize: 200 }));
+        if (holdRefetches) refetches.push(land);
+        else setTimeout(land, 0);
+      });
+    };
+    return {
+      resolver,
+      release: (issueId: number) => act(() => void puts.get(issueId)?.resolve()),
+      fail: (issueId: number, message: string) =>
+        act(() => void puts.get(issueId)?.reject(new Error(message))),
+      pendingRefetches: () => refetches.length,
+      releaseRefetches: () =>
+        act(() => {
+          for (const release of refetches.splice(0)) release();
+        }),
+    };
+  }
+
+  const toggleOf = (name: string) =>
+    screen.getByRole('button', { name: `Monitor ${name}` });
+
+  it('FRG-UI-048 — activation renders the requested state at once in a busy presentation and a second activation issues no second mutation', async () => {
+    const records = [linkedRow('Meridian Signal', { id: 1 })];
+    const gated = gatedFetcher(records);
+    setViewportWidth(WIDE);
+    const { spy } = renderWeek(records, gated.resolver);
+    const user = userEvent.setup();
+
+    await screen.findByTestId('calendar-card-1');
+    await user.click(toggleOf('Meridian Signal'));
 
     // The requested state (unmonitored) is on screen before the PUT settles,
-    // and the control says it is working.
-    const busy = await screen.findByRole('button', { name: 'Want Meridian Signal' });
+    // and the control says it is unavailable while it works.
+    const busy = toggleOf('Meridian Signal');
     expect(busy).toHaveAttribute('aria-pressed', 'false');
-    expect(busy).toHaveAttribute('aria-busy', 'true');
+    expect(busy).toHaveAttribute('aria-disabled', 'true');
 
-    const putsBefore = spy.mock.calls.filter(([, init]) => init?.method === 'PUT').length;
-    expect(putsBefore).toBe(1);
+    expect(spy.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1);
     await user.click(busy);
     expect(spy.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1);
 
-    deferred.release();
+    gated.release(500);
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Skip Meridian Signal' })).toHaveAttribute(
-        'aria-busy',
-        'false',
-      ),
+      expect(toggleOf('Meridian Signal')).toHaveAttribute('aria-disabled', 'false'),
     );
+  });
+
+  it('FRG-UI-048 — the requested state holds across the whole refetch window rather than flashing back', async () => {
+    // The cache still holds the pre-toggle page until the refetch lands, so
+    // clearing the optimistic value when the PUT resolves would flip the
+    // bookmark back to monitored for the length of that refetch — the "click
+    // looks flaky" symptom this requirement exists to kill.
+    const records = [linkedRow('Meridian Signal', { id: 1 })];
+    const settled = [linkedRow('Meridian Signal', { id: 1, state: 'unmonitored' })];
+    const gated = gatedFetcher(records, settled, { holdRefetches: true });
+    setViewportWidth(WIDE);
+    renderWeek(records, gated.resolver);
+    const user = userEvent.setup();
+
+    await screen.findByTestId('calendar-card-1');
+    await user.click(toggleOf('Meridian Signal'));
+    expect(toggleOf('Meridian Signal')).toHaveAttribute('aria-pressed', 'false');
+
+    gated.release(500);
+    await waitFor(() => expect(gated.pendingRefetches()).toBe(1));
+    // The refetch is in flight and the cache is still stale: the requested value
+    // must be what is on screen, and the control must still read as busy.
+    for (let tick = 0; tick < 5; tick += 1) {
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(toggleOf('Meridian Signal')).toHaveAttribute('aria-pressed', 'false');
+      expect(toggleOf('Meridian Signal')).toHaveAttribute('aria-disabled', 'true');
+    }
+
+    gated.releaseRefetches();
+    // Settled on the SERVER's projection, and only then is the optimistic value
+    // released — the value it lands on happens to agree, but it is no longer the
+    // optimistic one that is holding it there.
+    await waitFor(() =>
+      expect(toggleOf('Meridian Signal')).toHaveAttribute('aria-disabled', 'false'),
+    );
+    expect(toggleOf('Meridian Signal')).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('FRG-UI-048 — success settles to the re-projected derived state, not the optimistic guess', async () => {
@@ -384,40 +621,82 @@ describe('FRG-UI-048: in-flight feedback for the monitor toggle', () => {
     const user = userEvent.setup();
 
     await screen.findByTestId('calendar-card-1');
-    await user.click(screen.getByRole('button', { name: 'Skip Meridian Signal' }));
+    await user.click(toggleOf('Meridian Signal'));
 
     await waitFor(() =>
       expect(spy.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1),
     );
     await waitFor(() =>
-      expect(
-        screen.getByRole('button', { name: 'Skip Meridian Signal' }),
-      ).toHaveAttribute('aria-pressed', 'true'),
+      expect(toggleOf('Meridian Signal')).toHaveAttribute('aria-pressed', 'true'),
     );
     expect(screen.queryByTestId('calendar-action-error')).not.toBeInTheDocument();
   });
 
-  it('FRG-UI-048 — a failed toggle reverts to the true state and surfaces the failure', async () => {
-    const records = [linkedRow('Meridian Signal', { id: 1 })];
-    const deferred = deferredToggle(records);
-    renderWeek(records, deferred.resolver);
+  it('FRG-UI-048 — two toggles in flight at once both settle, and neither is left permanently busy', async () => {
+    // One mutation observer serves every row, so a second activation replaces
+    // the first one's per-call callbacks: whatever clears the optimistic value
+    // must belong to the activation itself, or the first row never recovers.
+    const records = [
+      linkedRow('Meridian Signal', { id: 1 }),
+      linkedRow('Tidewrack Survey', {
+        id: 2,
+        matchedIssueId: 501,
+        series: { id: 8, title: 'Tidewrack Survey' },
+      }),
+    ];
+    const gated = gatedFetcher(records);
+    setViewportWidth(WIDE);
+    const { spy } = renderWeek(records, gated.resolver);
     const user = userEvent.setup();
 
     await screen.findByTestId('calendar-card-1');
-    await user.click(screen.getByRole('button', { name: 'Skip Meridian Signal' }));
-    await screen.findByRole('button', { name: 'Want Meridian Signal' });
+    await user.click(toggleOf('Meridian Signal'));
+    await user.click(toggleOf('Tidewrack Survey'));
+    expect(spy.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(2);
 
-    deferred.fail('That series is read-only.');
+    gated.release(501);
+    gated.release(500);
+
+    await waitFor(() => {
+      expect(toggleOf('Meridian Signal')).toHaveAttribute('aria-disabled', 'false');
+      expect(toggleOf('Tidewrack Survey')).toHaveAttribute('aria-disabled', 'false');
+    });
+    // Both are operable again: a second activation reaches the server.
+    await user.click(toggleOf('Meridian Signal'));
+    expect(spy.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(3);
+  });
+
+  it('FRG-UI-048 — a failed toggle reverts to the true state and surfaces the failure even when another toggle succeeded meanwhile', async () => {
+    const records = [
+      linkedRow('Meridian Signal', { id: 1 }),
+      linkedRow('Tidewrack Survey', {
+        id: 2,
+        matchedIssueId: 501,
+        series: { id: 8, title: 'Tidewrack Survey' },
+      }),
+    ];
+    const gated = gatedFetcher(records);
+    setViewportWidth(WIDE);
+    renderWeek(records, gated.resolver);
+    const user = userEvent.setup();
+
+    await screen.findByTestId('calendar-card-1');
+    await user.click(toggleOf('Meridian Signal'));
+    await user.click(toggleOf('Tidewrack Survey'));
+
+    // The later mutation succeeds first; the shared observer's error would be
+    // null by the time the earlier one is refused.
+    gated.release(501);
+    gated.fail(500, 'That series is read-only.');
 
     // Back to the entry's true state, AND the operator is told why — never a
     // silent snap-back that reads as a click that did nothing.
     await waitFor(() =>
-      expect(
-        screen.getByRole('button', { name: 'Skip Meridian Signal' }),
-      ).toHaveAttribute('aria-pressed', 'true'),
+      expect(toggleOf('Meridian Signal')).toHaveAttribute('aria-pressed', 'true'),
     );
     const alert = await screen.findByTestId('calendar-action-error');
     expect(alert).toHaveTextContent('That series is read-only.');
     expect(alert).toHaveAttribute('role', 'alert');
+    expect(toggleOf('Meridian Signal')).toHaveAttribute('aria-disabled', 'false');
   });
 });

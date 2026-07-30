@@ -241,7 +241,7 @@ describe('FRG-PULL-007: Calendar per-entry actions', () => {
     renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
 
     await screen.findByText('Saga');
-    await user.click(screen.getByRole('button', { name: 'Want Saga' }));
+    await user.click(screen.getByRole('button', { name: 'Monitor Saga' }));
 
     await waitFor(() =>
       expect(spy).toHaveBeenCalledWith('/api/v1/issues/500', {

@@ -110,12 +110,13 @@ function rowSub(r: PullEntryRecord): string {
 /**
  * Derived state as words + a chip tone (FRG-UI-047). The label is the state's
  * only rendering: a status carries no glyph that also denotes a control on this
- * surface, so the bookmark stays exclusive to the real monitor toggle. `wanted`
- * is deliberately NOT accent-toned — the accent-filled bookmark is the active
- * toggle's treatment, and a status must not borrow it.
+ * surface, so the bookmark stays exclusive to the real monitor toggle. The
+ * wanted state takes the amber warning tone a missing released issue already
+ * carries on the series screen, so one state does not read two ways; amber is a
+ * semantic status hue, never the accent that marks an active toggle.
  */
 const STATE_PRESENTATION: Record<PullEntryState, { label: string; tone: ChipTone }> = {
-  missing_wanted: { label: 'Wanted', tone: 'neutral' },
+  missing_wanted: { label: 'Wanted', tone: 'warning' },
   downloading: { label: 'Downloading', tone: 'info' },
   downloaded: { label: 'Downloaded', tone: 'success' },
   unmonitored: { label: 'Not tracked', tone: 'muted' },
@@ -217,12 +218,12 @@ function hasDetail(r: PullEntryRecord): boolean {
  * same untrusted ComicVine deck the Add-series candidate card renders, so it
  * runs through the identical `stripHtml` before display (never dangerouslySet).
  */
-function EntryDetail({ r, testId }: { r: PullEntryRecord; testId: string }) {
+function EntryDetail({ r, id }: { r: PullEntryRecord; id: string }) {
   const creators = r.creators ?? [];
   const characters = r.characters ?? [];
   const description = r.description ? stripHtml(r.description) : '';
   return (
-    <div className={styles.detail} data-testid={testId}>
+    <div className={styles.detail} id={id} data-testid={id}>
       {description && <p className={styles.detailDeck}>{description}</p>}
       {creators.length > 0 && (
         <div className={styles.detailRow}>
@@ -332,8 +333,13 @@ export function CalendarScreen() {
   // either can be refused (a read-only series' issue answers 409). Report the
   // refusal in one alert region: a silently-rejected toggle is indistinguishable
   // from a bookmark that simply did not stick.
-  const actionError =
-    toggle.error?.message ?? runCommand.error?.message ?? null;
+  //
+  // The toggle's failure is held in local state rather than read off
+  // `toggle.error`: one mutation observer serves every row, and a later
+  // activation replaces the observer's result, so a concurrent toggle would
+  // erase a refusal before the operator ever saw it.
+  const [monitorError, setMonitorError] = useState<string | null>(null);
+  const actionError = monitorError ?? runCommand.error?.message ?? null;
 
   // Monitor toggles in flight, keyed by issue id and holding the REQUESTED
   // monitored value (FRG-UI-048). The optimistic value is dropped only once the
@@ -353,20 +359,26 @@ export function CalendarScreen() {
     });
   };
 
-  const toggleMonitor = (issueId: number, monitored: boolean) => {
+  const toggleMonitor = async (issueId: number, monitored: boolean) => {
     if (requestedMonitor.has(issueId)) return;
     setRequestedMonitor((prev) => new Map(prev).set(issueId, monitored));
-    toggle.mutate(
-      { issueId, monitored },
-      {
-        // Returning the invalidation promise makes react-query await the
-        // refetch before onSettled, which is what keeps the optimistic value in
-        // place until the projection that supersedes it is on screen.
-        onSuccess: () =>
-          queryClient.invalidateQueries({ queryKey: queryKeys.pull.all() }),
-        onSettled: () => settleMonitor(issueId),
-      },
-    );
+    setMonitorError(null);
+    try {
+      // `mutateAsync` and not `mutate`: the per-call `onSuccess`/`onSettled`
+      // callbacks live on the shared observer, so a second row's activation
+      // discards this one's — leaving its optimistic value in the map forever
+      // (a permanently busy, dead control) and swallowing its failure. Only the
+      // returned promise is per-call.
+      await toggle.mutateAsync({ issueId, monitored });
+      // Awaited, so the requested value stays on screen until the re-projection
+      // that supersedes it has landed (FRG-UI-048): clearing it any earlier
+      // shows the pre-toggle state again for the length of a refetch.
+      await queryClient.invalidateQueries({ queryKey: queryKeys.pull.all() });
+    } catch (error) {
+      setMonitorError(error instanceof Error ? error.message : String(error));
+    } finally {
+      settleMonitor(issueId);
+    }
   };
 
   const todayKey = useMemo(() => {
@@ -525,6 +537,7 @@ export function CalendarScreen() {
       (r.matchType === 'unmatched' || isDebut) &&
       !libraryTitles.has(normalizeTitle(r.seriesName));
     const detailOpen = expanded.has(cardKey);
+    const detailId = `calendar-detail-${cardKey}`;
     // The requested value wins while a mutation is in flight, so activation
     // reads as done at once instead of dead until the refetch (FRG-UI-048).
     const inFlight = issueId != null && requestedMonitor.has(issueId);
@@ -559,6 +572,9 @@ export function CalendarScreen() {
             className={styles.iconBtn}
             aria-label={`${detailOpen ? 'Hide' : 'Show'} details for ${name}`}
             aria-expanded={detailOpen}
+            // Only while the panel exists: `aria-controls` pointing at an
+            // absent id is an invalid reference, not a hint.
+            aria-controls={detailOpen ? detailId : undefined}
             title="Details"
             onClick={() => toggleDetail(cardKey)}
           >
@@ -568,28 +584,38 @@ export function CalendarScreen() {
         {linked && issueId != null && (
           <>
             {/* The bookmark glyph renders ONLY here — on the real toggle
-                (FRG-UI-047). `aria-busy` carries the in-flight state without
-                disabling the control, which would drop it out of keyboard
-                order mid-interaction; the duplicate mutation is suppressed in
-                the handler instead. */}
+                (FRG-UI-047). The accessible name is state-NEUTRAL because
+                `aria-pressed` already carries the state: an action-phrased name
+                ("Skip …") pairs with pressed to announce the inverse of the
+                truth. The action wording stays on `title`, for sighted hover.
+                In flight the control is `aria-disabled`, not `disabled`, so it
+                keeps its place in keyboard order mid-interaction; the duplicate
+                mutation is suppressed in the handler. */}
             <button
               type="button"
               className={`${styles.iconBtn}${inFlight ? ` ${styles.iconBtnBusy}` : ''}`}
-              aria-label={`${monitored ? 'Skip' : 'Want'} ${name}`}
+              aria-label={`Monitor ${name}`}
               aria-pressed={monitored}
-              aria-busy={inFlight}
+              aria-disabled={inFlight}
               title={monitored ? 'Stop monitoring' : 'Monitor / want'}
-              onClick={() => toggleMonitor(issueId, !monitored)}
+              onClick={() => void toggleMonitor(issueId, !monitored)}
             >
               <BookmarkIcon size={14} filled={monitored} />
             </button>
+            {/* One watched command backs the status chip, so only one search
+                runs at a time. `aria-disabled` rather than `disabled`: the
+                running flag is screen-wide, and disabling the focused button
+                would drop focus to the document body mid-agenda. */}
             <button
               type="button"
               className={styles.iconBtn}
               aria-label={`Search for ${name}`}
               title="Automatic search"
-              disabled={command.running}
-              onClick={() => dispatchSearch(r)}
+              aria-disabled={command.running}
+              onClick={() => {
+                if (command.running) return;
+                dispatchSearch(r);
+              }}
             >
               <SearchIcon size={14} />
             </button>
@@ -614,11 +640,15 @@ export function CalendarScreen() {
       </div>
     );
 
+    // The not-yet-released marking is a property of the DAY, not the entry (a
+    // store date is in the future for every entry in that group), so it is
+    // stated once in the day header. Repeating it per entry would put a ~110px
+    // nowrap token in the row's meta track, and the title's measure is what
+    // pays for it (FRG-UI-018).
     const meta = (
       <div className={mode === 'row' ? styles.rowMeta : styles.cardMeta}>
         <span className={styles.metaText}>{rowSub(r)}</span>
         <StatusChip state={r.state} testId={`calendar-state-${cardKey}`} />
-        {isFuture && <span className={styles.unreleased}>Not yet released</span>}
       </div>
     );
 
@@ -632,7 +662,7 @@ export function CalendarScreen() {
     );
 
     return (
-      <div
+      <li
         key={cardKey}
         className={cls}
         data-testid={`calendar-card-${cardKey}`}
@@ -659,10 +689,8 @@ export function CalendarScreen() {
             {actions}
           </>
         )}
-        {detailOpen && (
-          <EntryDetail r={r} testId={`calendar-detail-${cardKey}`} />
-        )}
-      </div>
+        {detailOpen && <EntryDetail r={r} id={detailId} />}
+      </li>
     );
   };
 
@@ -672,8 +700,14 @@ export function CalendarScreen() {
         title="Calendar"
         actions={
           <span className={styles.toolbarActions}>
+            {/* The running search disables no row's button visibly on its own,
+                so its progress is announced instead of only drawn. */}
             {commandLabel && command.status && (
-              <span className={styles.commandChip} data-testid="command-status">
+              <span
+                className={styles.commandChip}
+                role="status"
+                data-testid="command-status"
+              >
                 {commandLabel}: {command.status}
               </span>
             )}
@@ -835,13 +869,22 @@ export function CalendarScreen() {
                           : `${styles.stream} ${d.isNewComicDay ? styles.streamBig : ''}`
                       }
                     >
-                      <div className={styles.dayHeader}>
-                        {compact && (
+                      {/* A heading, so the day groups are structure a screen
+                          reader can jump between rather than styled text: a
+                          drop day runs to dozens of entries. Wide mode draws
+                          the date in the gutter, so the heading carries it for
+                          assistive technology only. */}
+                      <h2 className={styles.dayHeader}>
+                        {compact ? (
                           <span
                             className={styles.dayInlineDate}
                             data-testid={`calendar-day-inline-${d.key}`}
                           >
                             {d.dow} {d.date} {d.mon}
+                          </span>
+                        ) : (
+                          <span className={styles.srOnly}>
+                            {`${d.dow} ${d.date} ${d.mon}`}
                           </span>
                         )}
                         {d.isNewComicDay && (
@@ -863,13 +906,22 @@ export function CalendarScreen() {
                             {d.followed} followed
                           </span>
                         )}
-                      </div>
-                      <div className={compact ? styles.cards : styles.rows}>
+                        {d.isFuture && (
+                          <span
+                            className={styles.unreleased}
+                            data-testid={`calendar-unreleased-${d.key}`}
+                          >
+                            Not yet released
+                          </span>
+                        )}
+                      </h2>
+                      <ul className={compact ? styles.cards : styles.rows}>
                         {d.releases.map((r) => renderEntry(r, d.isFuture))}
-                      </div>
+                      </ul>
                       {scope === 'following' && d.hidden > 0 && (
+                        // No glyph: the details control on this same surface
+                        // draws an identical ellipsis (FRG-UI-047).
                         <div className={styles.hidden}>
-                          <i className="fa-solid fa-ellipsis" aria-hidden />
                           +{d.hidden} more title{d.hidden === 1 ? '' : 's'} shipping this day
                         </div>
                       )}
