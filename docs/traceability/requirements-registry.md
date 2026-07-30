@@ -71,6 +71,14 @@ approval as of 2026-07-29) and do not yet appear in this baseline table.
 the next free id after that branch's reservation: `FRG-PROC-023`. No id is
 renumbered when `m10-release-pipeline` lands.
 
+`FRG-UI-045` (read-only library treatment, `change/read-only-library`) and
+`FRG-UI-046` (publisher-filtering settings panel,
+`change/publisher-filtering`) are likewise reserved on unmerged branches and
+do not yet appear in this baseline table. `calendar-legibility` therefore
+allocates the next free ids after those reservations —
+`FRG-UI-047`..`FRG-UI-049` — leaving the 045/046 gap in the table below until
+those branches land. No id is renumbered when they do.
+
 | ID | Title | Spec | Status | Milestone |
 |----|-------|------|--------|-----------|
 | FRG-PROC-001 | Commit traceability: Conventional Commits + Refs trailer | dev-process | active | — |
@@ -345,6 +353,9 @@ renumbered when `m10-release-pipeline` lands.
 | FRG-UI-042 | Calendar covers and enrichment detail | ui | implemented | M11 |
 | FRG-UI-043 | Group-header search/match affordance | ui | implemented | M11 |
 | FRG-UI-044 | Force-grab affordance for rejected releases | ui | implemented | M11 |
+| FRG-UI-047 | Status indicators are never shaped like controls | ui | proposed | B |
+| FRG-UI-048 | In-flight feedback for the calendar's monitor toggle | ui | proposed | B |
+| FRG-UI-049 | Responsive application chrome below the compact crossover | ui | proposed | B |
 | FRG-SRC-001 | store-source model and connection lifecycle | sources | implemented | M6 |
 | FRG-SRC-002 | Humble session-cookie authentication | sources | implemented | M6 |
 | FRG-SRC-003 | entitlement sync | sources | implemented | M6 |
