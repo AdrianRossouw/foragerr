@@ -5,9 +5,11 @@ journey talks to (FRG-PROC-010):
 
 * **ComicVine** metadata API over **http** on :8080 (``/api/*``) — the add /
   refresh flow's series + issue source. The real base is hardcoded https; the
-  harness points the app here via ``FORAGERR_COMICVINE_BASE_URL``. Serves TWO
-  volumes: Saga (the spine's download journey) and Fables (the library-import
-  scenario's in-place import of pre-existing files, FRG-UI-015/FRG-IMP-023).
+  harness points the app here via ``FORAGERR_COMICVINE_BASE_URL``. Serves THREE
+  volumes: Saga (the spine's download journey), Fables (the library-import
+  scenario's in-place import of pre-existing files, FRG-UI-015/FRG-IMP-023), and
+  a long single-day run for the calendar's density/target measurements
+  (FRG-UI-018/FRG-UI-047).
 * **Newznab** indexer over **http** on :8080 (``/newznab/api``) — supplies a
   deliberately *rejected* release so the interactive-search overlay has a
   verbatim rejection reason to render. Never grabbed.
@@ -81,6 +83,39 @@ LI_ISSUES = [
     {"id": 350002, "number": "2", "cover_date": "2002-08-14"},
 ]
 
+# A THIRD volume for the calendar-legibility scenarios
+# (w-calendar-legibility.spec.ts): a long run of issues all store-dated in the
+# SAME day of the current ISO week. The hermetic stack runs with the external
+# weekly-pull source disabled, so the projection's library-primary half
+# (FRG-PULL-001) is the only source of calendar rows, and rows are what the
+# 24px-target, title-measure and per-entry-density scenarios measure. The date is
+# computed per run so the week the browser opens by default is always the seeded
+# one. Distinct from Saga and Fables: those volumes' scenarios assert on issue
+# counts and on a search term matching nothing.
+CAL_VOLUME_ID = 6042
+CAL_VOLUME_NAME = "Example Weekly Drop Chronicles Deluxe Edition"
+CAL_START_YEAR = "2024"
+CAL_PUBLISHER = "Example Publisher Group"
+#: Enough entries for a day to exceed a viewport height several times over, which
+#: is the density claim under measurement.
+CAL_ISSUE_COUNT = 60
+
+
+def _current_week_wednesday() -> str:
+    """New Comic Day of the current ISO week, as the mock's store date."""
+    today = dt.date.today()
+    return (today - dt.timedelta(days=today.weekday()) + dt.timedelta(days=2)).isoformat()
+
+
+CAL_ISSUES = [
+    {
+        "id": 360000 + number,
+        "number": str(number),
+        "cover_date": _current_week_wednesday(),
+    }
+    for number in range(1, CAL_ISSUE_COUNT + 1)
+]
+
 #: Every volume the fixture ComicVine knows, keyed by cv volume id. A search
 #: term matches a volume when the volume's name appears in the parsed term
 #: (case-insensitive); any other term returns an EMPTY result set, which is
@@ -97,6 +132,12 @@ VOLUMES: dict[int, dict] = {
         "start_year": LI_START_YEAR,
         "publisher": LI_PUBLISHER,
         "issues": LI_ISSUES,
+    },
+    CAL_VOLUME_ID: {
+        "name": CAL_VOLUME_NAME,
+        "start_year": CAL_START_YEAR,
+        "publisher": CAL_PUBLISHER,
+        "issues": CAL_ISSUES,
     },
 }
 
