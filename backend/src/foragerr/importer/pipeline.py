@@ -81,6 +81,11 @@ from foragerr.importer.sources import (
 from foragerr.library import matching, repo
 from foragerr.library.booktype import COLLECTED_BOOKTYPES
 from foragerr.library.models import IssueFileRow, IssueRow, SeriesRow
+from foragerr.library.read_only import (
+    ReadOnlySeriesError,
+    path_is_read_only,
+    series_is_read_only,
+)
 from foragerr.metadata.comicinfo import (
     EmbeddedMetadata,
     build_comicinfo_bytes,
@@ -94,13 +99,6 @@ from foragerr.security.archives import inspect_archive
 from foragerr.security.paths import safe_join
 
 logger = logging.getLogger("foragerr.importer.pipeline")
-
-
-class ReadOnlyRootError(RuntimeError):
-    """A file placement was attempted for a series on a read-only reference
-    root (FRG-SER-021). Raised fail-closed before any byte is written, so the
-    operator's real files are never mutated even if a mutating path is reached
-    by an unexpected route."""
 
 
 # --- outcome types -----------------------------------------------------------
@@ -1139,6 +1137,45 @@ async def execute(
         await _run_fs(ctx, os.remove, existing)
         return None
 
+    # Fail-closed write boundary (FRG-SER-021), decided BEFORE either branch
+    # because BOTH of them mutate the disk. The in-place branch places nothing,
+    # but it disposes of a superseded file (recycle / duplicate dump / — with no
+    # bin configured — an outright ``os.remove``), so a read-only root reached
+    # through the in-place branch could still destroy the operator's original:
+    # two copies of one issue in a reference folder (a .cbr and a .cbz of the
+    # same issue, or two scans) evaluate as a duplicate/upgrade and the loser is
+    # the file already indexed. The ONLY thing permitted for a read-only target
+    # is therefore a pure registration — a candidate that displaces nothing.
+    #
+    # ``_disposes_a_file`` is exactly the disposal condition both branches
+    # apply below: a tracked file that is PRESENT on disk and is not the
+    # candidate itself (an aliased path naming the same inode is the file being
+    # registered, so re-registering it writes nothing). A tracked row whose file
+    # has vanished is not a disposal — only its stale row is dropped.
+    disposes_a_file = existing_present and not source_is_existing
+    if not in_place or disposes_a_file:
+        if await series_is_read_only(session, series.id):
+            raise ReadOnlySeriesError(
+                f"series {series.id} is on a read-only reference library "
+                f"(browse and serve only); importing {candidate.file_name} "
+                f"would {'replace an indexed file in' if in_place else 'place a file under'} "
+                f"it, which is not available for it"
+            )
+        # The SOURCE side of the same boundary: the candidate's own file may be
+        # one of the operator's read-only originals even when the destination
+        # series is perfectly writable (a manual import browsing a reference
+        # root, a rescan pointed at one). In move mode the placement below is an
+        # ``os.replace`` that REMOVES that original from the reference library,
+        # so it is refused regardless of destination. Copy mode leaves the
+        # source untouched and is allowed.
+        if not in_place and ctx.transfer_mode is fileops.TransferMode.MOVE:
+            if await path_is_read_only(session, candidate.local_path):
+                raise ReadOnlySeriesError(
+                    f"{candidate.local_path} is inside a read-only reference "
+                    f"library (browse and serve only); moving it out of that "
+                    f"library is not available for it"
+                )
+
     if in_place:
         # In-place library import (FRG-IMP-023): the candidate is registered at
         # its existing path with NO move/copy/rename at all (design decision 4).
@@ -1152,16 +1189,6 @@ async def execute(
                 quarantine_path = await _dispose_existing()
             upgraded = True
     else:
-        # Fail-closed write boundary (FRG-SER-021): a series on a read-only
-        # reference root must never have a file moved/placed under it. The
-        # import path forces in-place registration for a read-only root (so
-        # this move branch is unreachable there); this guard is the last line —
-        # any path that reaches an actual place_file for a read-only series is
-        # refused before a byte is written, protecting the operator's files.
-        if await repo.root_is_read_only(session, series.root_folder_id):
-            raise ReadOnlyRootError(
-                f"series {series.id} is on a read-only root; no file is placed"
-            )
         if dest_is_existing and not source_is_existing:
             # The rendered destination IS the existing file's path: the loser
             # leaves (dump/recycle/delete) BEFORE place_file can overwrite it
@@ -1273,6 +1300,23 @@ def _source_provenance(candidate: ImportCandidate) -> str:
     return _PROVENANCE_BY_KIND.get(candidate.source_kind, history.SOURCE_DOWNLOAD)
 
 
+async def _read_only_target(
+    session: AsyncSession, ev: ImportEvaluation, result: ExecuteResult
+) -> bool:
+    """Whether the just-imported file must never be rewritten (FRG-SER-021).
+
+    The shared gate for both post-import archive rewrites (ComicInfo tagging and
+    CBR→CBZ conversion), which run AFTER placement on ``result.imported_path``
+    and so are the two write paths ``execute``'s placement boundary does not
+    cover. Read-only is derived from the target series AND from where the file
+    actually landed, so a rewrite is refused even if some caller re-enables the
+    toggles for a read-only import (the library-import flow forces them off, but
+    the boundary must not depend on that)."""
+    if ev.series_id is not None and await series_is_read_only(session, ev.series_id):
+        return True
+    return await path_is_read_only(session, result.imported_path)
+
+
 async def _tag_comicinfo(
     session: AsyncSession,
     candidate: ImportCandidate,
@@ -1292,6 +1336,12 @@ async def _tag_comicinfo(
     A tagging failure is swallowed here: the file lands untagged and a
     ``comicinfo_tag_failed`` warning event is recorded — the import still
     succeeded. This never raises.
+
+    A read-only reference target is skipped outright (FRG-SER-021): this rewrites
+    the file the import just registered, which for an index-in-place import IS
+    the operator's original inside the read-only library. The import itself
+    stands — indexing without mutating is the whole point of FRG-IMP-028 — so
+    the tag is skipped rather than the registration refused.
     """
     archive = ev.archive
     if not (
@@ -1300,6 +1350,12 @@ async def _tag_comicinfo(
         and archive.safe_to_extract
         and result.imported_path.lower().endswith(".cbz")
     ):
+        return
+    if await _read_only_target(session, ev, result):
+        logger.info(
+            "comicinfo: %s is in a read-only reference library; not tagged",
+            result.imported_path,
+        )
         return
     try:
         series = await session.get(SeriesRow, ev.series_id)
@@ -1355,6 +1411,11 @@ async def _convert_placed_cbr(
     verify-before-discard swap lives in :func:`convert.apply_conversion`, which
     records the ``converted``/``convert_failed`` event and never raises — the
     import still succeeds either way (a failed verification keeps the .cbr).
+
+    A read-only reference target is skipped outright (FRG-SER-021) for the same
+    reason tagging is: the conversion writes a new .cbz beside the source and
+    then DELETES the source, which for an index-in-place import is the
+    operator's original.
     """
     archive = ev.archive
     if not (
@@ -1363,6 +1424,12 @@ async def _convert_placed_cbr(
         and archive.kind == "rar"
         and archive.safe_to_extract
     ):
+        return
+    if await _read_only_target(session, ev, result):
+        logger.info(
+            "convert: %s is in a read-only reference library; not converted",
+            result.imported_path,
+        )
         return
     await convert.apply_conversion(
         session,
@@ -1494,7 +1561,14 @@ async def import_candidate(
             candidate.file_name,
             exc,
         )
-        reason = f"import failed placing the file on disk: {exc}"
+        # A boundary refusal is not an IO failure: it placed nothing and the
+        # reason IS the operator-facing explanation, so it is reported verbatim
+        # rather than wrapped in placement-failure wording (FRG-SER-021).
+        reason = (
+            str(exc)
+            if isinstance(exc, ReadOnlySeriesError)
+            else f"import failed placing the file on disk: {exc}"
+        )
         # Deduped like the rejection path above (RISK-040): a persistent IO
         # failure re-blocks identically on every retry cycle.
         await history.record_event_deduped(

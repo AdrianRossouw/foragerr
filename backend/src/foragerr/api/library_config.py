@@ -233,18 +233,60 @@ def _validate_new_root(path: str, existing: list, *, read_only: bool = False) ->
         _reject(f"path {path!r} is not writable")
 
     candidate = os.path.realpath(path)
+    fold = _case_insensitive_filesystem(candidate)
     for root in existing:
         root_real = os.path.realpath(root.path)
-        if candidate == root_real:
+        if _same_directory(candidate, root_real):
             _reject(f"path {path!r} is already registered as a root folder")
-        if _is_within(root_real, candidate):
+        fold_pair = fold or _case_insensitive_filesystem(root_real)
+        if _is_within(root_real, candidate, fold=fold_pair):
             _reject(f"path {path!r} is inside an existing root folder ({root.path})")
-        if _is_within(candidate, root_real):
+        if _is_within(candidate, root_real, fold=fold_pair):
             _reject(f"path {path!r} contains an existing root folder ({root.path})")
 
 
-def _is_within(ancestor: str, candidate: str) -> bool:
-    """True if ``candidate`` sits at or beneath ``ancestor`` (segment-aware)."""
+def _same_directory(candidate: str, root_real: str) -> bool:
+    """Whether two realpaths name the same physical directory.
+
+    String equality is not sufficient: on a case-insensitive volume ``<root>``
+    and ``<Root>`` are the SAME directory but different strings, so both would
+    register — and a read-only root re-registered under a different case would
+    hand out write access to the very files the flag protects. ``samestat``
+    (device+inode) answers for the actual filesystem, and also catches a bind
+    mount or hard-linked directory spelling the same place two ways."""
+    if candidate == root_real:
+        return True
+    try:
+        return os.path.samestat(os.stat(candidate), os.stat(root_real))
+    except OSError:
+        return False
+
+
+def _case_insensitive_filesystem(path: str) -> bool:
+    """Whether ``path``'s filesystem resolves names case-insensitively.
+
+    PROBED, not inferred from the platform: the same host can mount both kinds,
+    and ``os.path.normcase`` only folds on Windows. A case-swapped spelling of
+    the path is stat'd and compared by device+inode; a path with no cased
+    characters (or an unreadable one) is reported case-SENSITIVE, which only
+    ever makes the nesting comparison below stricter about nothing."""
+    swapped = path.swapcase()
+    if swapped == path:
+        return False
+    try:
+        return os.path.samestat(os.stat(path), os.stat(swapped))
+    except OSError:
+        return False
+
+
+def _is_within(ancestor: str, candidate: str, *, fold: bool = False) -> bool:
+    """True if ``candidate`` sits at or beneath ``ancestor`` (segment-aware).
+
+    ``fold`` case-folds both sides, for the nesting comparison on a
+    case-insensitive volume where ``<root>/sub`` and ``<ROOT>`` overlap
+    physically while differing as strings."""
+    if fold:
+        ancestor, candidate = ancestor.casefold(), candidate.casefold()
     if candidate == ancestor:
         return True
     try:
