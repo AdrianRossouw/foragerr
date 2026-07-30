@@ -10,9 +10,18 @@
   border-radius: var(--radius-md);
 }
 
+/* A real control, so it carries the WCAG 2.5.8 target floor (FRG-UI-047).
+ * Padding alone left the button 20px tall: the UA's `line-height: normal` on a
+ * 12px label is under the floor, so the minimum box and the line box are both
+ * stated here rather than inferred from the text. */
 .segment {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-width: 30px;
+  min-height: var(--layout-touch-target-min);
   padding: 3px var(--spacing-sm);
+  line-height: 1;
   background: none;
   border: none;
   border-radius: var(--radius-sm);
@@ -20,6 +29,11 @@
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
   cursor: pointer;
+}
+
+.segment:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -1px;
 }
 
 .segment:hover:not(.active) {

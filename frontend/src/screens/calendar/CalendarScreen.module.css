@@ -104,8 +104,12 @@
   cursor: pointer;
 }
 
-.pubSelect:focus {
-  outline: none;
+/* A border-colour change alone is not a focus indicator; the ring is the
+ * indicator every other control on this screen carries (FRG-UI-047), and
+ * :focus-visible so a mouse click does not draw it. */
+.pubSelect:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
   border-color: var(--color-accent);
 }
 
@@ -299,12 +303,29 @@
   color: var(--text-bright);
 }
 
+/* An `<h2>`, so the day groups are navigable structure; the UA heading type
+ * scale and margins are replaced by the header's own cluster rhythm. */
 .dayHeader {
   display: flex;
   align-items: center;
   gap: 11px;
-  margin-bottom: 13px;
+  margin: 0 0 13px;
+  font: inherit;
   flex-wrap: wrap;
+}
+
+/* Carried by the wide-mode day heading only: the date is drawn in the gutter,
+ * which is decorative markup a screen reader gets nothing from. */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 .badgeNcd {
@@ -344,21 +365,36 @@
   color: var(--color-accent-light);
 }
 
+/* Stated once per day rather than per entry: the store date that makes an entry
+ * unreleased is the day group's own. Full contrast — it is the words that carry
+ * the state (FRG-UI-047), so it is never dimmed. */
+.unreleased {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
 /* --- Agenda rows: the wide presentation (FRG-UI-018) --- */
 /*
  * Density is the requirement, not a preference: a single-issue drop day runs to
- * dozens of entries, so a row is a 34px band separated by a hairline rather than
- * a gapped card — roughly a third of the card grid's vertical spend per entry.
- * Every dimension below is load-bearing for that: the thumbnail is the row's
- * tallest element, so it caps how dense the band can be.
+ * dozens of entries, so a row is a ~29px band separated by a hairline rather
+ * than a gapped card — FRG-UI-018 caps a single-line entry at 36 CSS px of
+ * vertical rhythm. Every dimension below is load-bearing for that: the
+ * thumbnail is the row's tallest element, so it caps how dense the band can be.
  */
 .rows {
   display: flex;
   flex-direction: column;
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }
 
+/* The same hairline every other dense list in the app separates rows with. */
 .row {
-  border-bottom: 1px solid var(--surface-border);
+  border-bottom: 1px solid var(--surface-row-border);
 }
 
 .row:last-child {
@@ -371,17 +407,27 @@
 
 /*
  * The title is the ONLY flexible column: the thumbnail and the action cluster
- * are fixed, and the meta column sizes to its own content, so every pixel the
- * row does not spend elsewhere goes to the title's measure. An action must never
- * be given `1fr` here — that is how the shipped card grid starved the title.
+ * are fixed, so every pixel the row does not spend elsewhere goes to the title's
+ * measure. An action must never be given `1fr` here — that is how the shipped
+ * card grid starved the title.
+ *
+ * The title's track carries a DEFINITE minimum, because a meta track that sizes
+ * to its own content is not bounded by anything: a long publisher name plus a
+ * state chip is wider than the title at the crossover, and the flexible track is
+ * the one grid sacrifices. 25ch of digit width measures ~31 characters of
+ * mixed-case text at the body size, clearing FRG-UI-018's ~30-character floor;
+ * the meta track
+ * shrinks below its content instead, and its issue · publisher text ellipsises.
+ * `min()` keeps the minimum from ever exceeding the row, so a narrower container
+ * cannot overflow.
  */
 .rowFace {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-columns: auto minmax(min(25ch, 100%), 1fr) minmax(0, auto) auto;
   align-items: center;
-  gap: 10px;
-  min-height: 34px;
-  padding: 2px var(--spacing-sm) 2px 2px;
+  gap: var(--spacing-sm);
+  min-height: 28px;
+  padding: 2px var(--spacing-xs) 2px 2px;
 }
 
 .rowTitle {
@@ -405,13 +451,25 @@
   overflow-wrap: break-word;
 }
 
+/* Shrinkable: `min-width: 0` is what lets the meta go below its own content
+ * width so the title's minimum is reachable at the crossover. The state chip
+ * keeps its size — it is the entry's state — and the issue · publisher text is
+ * the part that yields. */
 .rowMeta {
   display: inline-flex;
   align-items: center;
-  gap: var(--spacing-sm);
-  flex: none;
+  gap: var(--spacing-xs);
+  min-width: 0;
+  overflow: hidden;
   font-size: var(--font-size-sm);
   color: var(--text-secondary);
+}
+
+.rowMeta .metaText {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .rowActions {
@@ -426,6 +484,9 @@
   display: grid;
   grid-template-columns: 1fr;
   gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }
 
 .card {
@@ -503,7 +564,17 @@
   color: var(--text-muted);
 }
 
-.entryFuture {
+/*
+ * A future-dated entry reads one step back — but the dimming is confined to the
+ * artwork. Applied to the whole entry it multiplies through every text colour
+ * inside it: --text-secondary meta drops from 5.79:1 to 3.68:1 and the status
+ * chip from 5.24:1 to 3.43:1 against the page, under the 4.5:1 WCAG 1.4.3 AA
+ * floor — and since FRG-UI-047 makes that text the ONLY carrier of state, the
+ * dimming would be applied to the one thing that must stay readable. The day
+ * header's "Not yet released" token carries the affordance in words.
+ */
+.entryFuture .cover,
+.entryFuture .spine {
   opacity: 0.72;
 }
 
@@ -513,14 +584,6 @@
 
 .stateChip {
   flex: none;
-}
-
-.unreleased {
-  font-size: var(--font-size-xs);
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  white-space: nowrap;
 }
 
 .spine {
@@ -540,10 +603,12 @@
 }
 
 /* A row's thumbnail is the band's tallest element, so it sets the density
- * ceiling; the card has the vertical room for the larger cover. */
+ * ceiling: at 24px tall it is the same height as the row's controls, which is
+ * the floor a 24px minimum target imposes anyway. The card has the vertical room
+ * for the larger cover. */
 .thumbRow {
-  width: 20px;
-  height: 30px;
+  width: 16px;
+  height: 24px;
 }
 
 .thumbCard {
@@ -572,12 +637,15 @@
   cursor: pointer;
 }
 
-.iconBtn:hover:not(:disabled) {
+.iconBtn:hover:not(:disabled):not([aria-disabled='true']) {
   background: var(--surface-card-hover);
   color: var(--text-primary);
 }
 
-.iconBtn:disabled {
+/* Unavailable but still focusable: a control that leaves keyboard order while
+ * the operator is on it drops focus to the document body. */
+.iconBtn:disabled,
+.iconBtn[aria-disabled='true'] {
   opacity: 0.5;
   cursor: default;
 }
@@ -601,9 +669,11 @@
 }
 
 /* In flight (FRG-UI-048): the control already shows the REQUESTED state, so the
- * busy treatment must read as "working", not as disabled — it stays operable
- * and keyboard-reachable; the duplicate mutation is suppressed in the handler. */
-.iconBtnBusy {
+ * busy treatment reads as "working" rather than as unavailable. Two classes deep
+ * so it outranks the aria-disabled treatment the in-flight control also carries;
+ * it stays keyboard-reachable, and the duplicate mutation is suppressed in the
+ * handler. */
+.iconBtn.iconBtnBusy {
   cursor: progress;
   opacity: 0.65;
 }
