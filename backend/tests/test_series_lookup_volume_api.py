@@ -172,6 +172,36 @@ def test_lookup_volume_known_id_returns_one_candidate(client, monkeypatch):
     assert "/volume/4050-101" in str(transport.requests[0].url)
 
 
+@pytest.mark.req("FRG-META-021")
+def test_lookup_volume_candidate_serves_the_display_sized_cover(client, monkeypatch):
+    """The card this route feeds (FRG-PULL-008's calendar add-by-id affordance)
+    renders small — it must get ComicVine's sized variant, not the original the
+    cover proxy's byte cap would reject."""
+    factory, _transport = _volume_factory(
+        client.app.state.settings,
+        _volume_handler(
+            {
+                101: {
+                    "id": 101,
+                    "name": "Saga",
+                    "start_year": "2012",
+                    "image": {
+                        "medium_url": "https://comicvine.gamespot.com/a/uploads/medium/saga.jpg",
+                        "original_url": (
+                            "https://comicvine.gamespot.com/a/uploads/original/saga.jpg"
+                        ),
+                    },
+                }
+            }
+        ),
+    )
+    monkeypatch.setattr("foragerr.api.series.comicvine_factory", lambda _settings: factory)
+
+    response = client.get("/api/v1/series/lookup/volume/101")
+    assert response.status_code == 200
+    assert response.json()["image_url"].endswith("/medium/saga.jpg")
+
+
 @pytest.mark.req("FRG-API-026")
 def test_lookup_volume_marks_have_it_true_for_an_existing_series(
     client, tmp_path, monkeypatch

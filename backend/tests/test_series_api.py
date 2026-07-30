@@ -558,6 +558,34 @@ def test_lookup_returns_candidates_without_persisting(client, monkeypatch):
     assert client.get("/api/v1/series").json()["totalRecords"] == 0
 
 
+@pytest.mark.req("FRG-META-021")
+def test_lookup_candidate_serves_the_display_sized_cover(client, monkeypatch):
+    """A lookup result card renders small — it must get ComicVine's sized
+    variant, not the original the cover proxy's byte cap would reject."""
+    volumes = [
+        {
+            "id": 101,
+            "name": "Saga",
+            "start_year": "2012",
+            "image": {
+                "medium_url": "https://comicvine.gamespot.com/a/uploads/medium/saga.jpg",
+                "original_url": (
+                    "https://comicvine.gamespot.com/a/uploads/original/saga.jpg"
+                ),
+            },
+        }
+    ]
+    factory = build_factory(
+        settings=client.app.state.settings, handler=_search_handler(volumes)
+    )
+    monkeypatch.setattr("foragerr.api.series.comicvine_factory", lambda _settings: factory)
+
+    response = client.get("/api/v1/series/lookup", params={"term": "Saga"})
+    assert response.status_code == 200
+    candidate = response.json()["records"][0]
+    assert candidate["image_url"].endswith("/medium/saga.jpg")
+
+
 @pytest.mark.req("FRG-API-003")
 def test_lookup_marks_have_it_true_for_an_existing_series(
     client, tmp_path, monkeypatch
@@ -810,6 +838,54 @@ def test_lookup_clean_empty_is_200_complete_with_no_records(client, monkeypatch)
 # so `_search_handler` above is reused unchanged. These tests focus on what
 # is DIFFERENT from `/lookup`: no `truncated` field, a ~10 cap, and the SAME
 # 503/auth mapping reused (not re-implemented) from the lookup route.
+
+
+@pytest.mark.req("FRG-META-021")
+def test_suggest_candidate_serves_the_display_sized_cover(client, monkeypatch):
+    volumes = [
+        {
+            "id": 101,
+            "name": "Saga",
+            "start_year": "2012",
+            "image": {
+                "medium_url": "https://comicvine.gamespot.com/a/uploads/medium/x.jpg",
+                "original_url": "https://comicvine.gamespot.com/a/uploads/original/x.jpg",
+            },
+        }
+    ]
+    factory = build_factory(
+        settings=client.app.state.settings, handler=_search_handler(volumes)
+    )
+    monkeypatch.setattr("foragerr.api.series.comicvine_factory", lambda _settings: factory)
+
+    response = client.get("/api/v1/series/lookup/suggest", params={"term": "Saga"})
+    assert response.status_code == 200
+    candidate = response.json()["records"][0]
+    assert candidate["image_url"].endswith("/medium/x.jpg")
+
+
+@pytest.mark.req("FRG-META-021")
+def test_suggest_candidate_falls_back_to_the_original_cover(client, monkeypatch):
+    # A CV payload with only an original still yields a cover rather than none.
+    volumes = [
+        {
+            "id": 102,
+            "name": "Saga",
+            "start_year": "2012",
+            "image": {
+                "original_url": "https://comicvine.gamespot.com/a/uploads/original/y.jpg"
+            },
+        }
+    ]
+    factory = build_factory(
+        settings=client.app.state.settings, handler=_search_handler(volumes)
+    )
+    monkeypatch.setattr("foragerr.api.series.comicvine_factory", lambda _settings: factory)
+
+    response = client.get("/api/v1/series/lookup/suggest", params={"term": "Saga"})
+    assert response.status_code == 200
+    candidate = response.json()["records"][0]
+    assert candidate["image_url"].endswith("/original/y.jpg")
 
 
 @pytest.mark.req("FRG-API-017")
