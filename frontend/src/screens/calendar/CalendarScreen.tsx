@@ -949,7 +949,10 @@ export function CalendarScreen() {
                             {d.dow} {d.date} {d.mon}
                           </span>
                         ) : (
-                          <span className={styles.srOnly}>
+                          // The wide-mode gutter draws this same date as three
+                          // separate boxes and is hidden from the accessibility
+                          // tree, so this is the one place it is announced.
+                          <span className="sr-only">
                             {`${d.dow} ${d.date} ${d.mon}`}
                           </span>
                         )}
