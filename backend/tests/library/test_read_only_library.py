@@ -18,7 +18,6 @@ from pathlib import Path
 import pytest
 from sqlalchemy import func, select
 
-from flows_support import FakeCV, build_factory, flows_settings, issue
 from foragerr.commands import CommandService
 from foragerr.db import utcnow
 from foragerr.library import repo
@@ -48,6 +47,9 @@ from foragerr.library.read_only import (
 )
 from foragerr.library.read_only import series_is_read_only as read_only_series
 
+from flows_support import FakeCV, build_factory, flows_settings, issue
+from read_only_support import snapshot
+
 _PNG_1x1 = bytes.fromhex(
     "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
     "890000000a49444154789c6360000002000154a24f9f0000000049454e44ae42"
@@ -62,27 +64,6 @@ def make_large_cbz(path: Path, *, filler: int = 200 * 1024) -> Path:
         zf.writestr("page000.png", _PNG_1x1)
         zf.writestr("filler.bin", os.urandom(filler))
     return path
-
-
-def snapshot(root: Path) -> dict[str, tuple[bool, int, int, int]]:
-    """Every entry under ``root`` -> (is_file, inode, size, mtime_ns).
-
-    The zero-write assertion: comparing this before and after an operation
-    catches a moved or renamed file (the relative path key), a re-written one
-    (inode/mtime), a truncated one (size), a deleted one (a missing key), and
-    anything newly created under the root (an extra key) — including a
-    directory rename.
-    """
-    entries: dict[str, tuple[bool, int, int, int]] = {}
-    for path in sorted(root.rglob("*")):
-        stat = path.stat()
-        entries[str(path.relative_to(root))] = (
-            path.is_file(),
-            stat.st_ino,
-            stat.st_size if path.is_file() else 0,
-            stat.st_mtime_ns,
-        )
-    return entries
 
 
 @pytest.fixture

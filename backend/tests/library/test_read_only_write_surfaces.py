@@ -129,7 +129,7 @@ async def _await_command(app, command_id: int) -> dict:
     async def _terminal() -> dict | None:
         async with app.state.db.read_session() as session:
             row = await session.get(CommandRow, command_id)
-            if row is None or row.status not in ("succeeded", "failed"):
+            if row is None or row.status not in ("completed", "failed"):
                 return None
             return {"status": row.status, "error": row.error}
 
@@ -213,13 +213,18 @@ def test_the_same_directory_cannot_register_twice_under_a_different_spelling(
     reference.mkdir()
     client.portal.call(_add_read_only_root, client.app, reference)
 
-    # Same physical directory, spelled through a symlink: realpath collapses it,
-    # and samestat confirms it even where a string comparison would not.
+    # Same physical directory, spelled through a symlink.
     linked = tmp_path / "reference-link"
     os.symlink(reference, linked)
     duplicate = client.post("/api/v1/rootfolder", json={"path": str(linked)})
     assert duplicate.status_code == 400
     assert "already registered" in duplicate.json()["message"]
+    # ...and the same-directory test is what answers, not the string compare:
+    # these two spellings differ as strings and name one directory. A volume
+    # that preserves case while resolving it case-insensitively puts ``<root>``
+    # and ``<Root>`` in exactly this position.
+    assert str(linked) != str(reference)
+    assert library_config._same_directory(str(linked), str(reference)) is True
 
     # The probe reports the truth about the test volume; the folded comparison
     # is then exercised by forcing it.
