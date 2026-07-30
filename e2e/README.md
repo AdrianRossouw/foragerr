@@ -18,7 +18,12 @@ Exit code is Playwright's — non-zero when a scenario fails; the report names t
 failure. Traces/screenshots for failures land under `e2e/results/`.
 
 Useful env: `E2E_KEEP_UP=1` leaves the stack running for debugging;
-`E2E_SKIP_BUILD=1` reuses an already-built `FORAGERR_IMAGE`.
+`E2E_SKIP_BUILD=1` reuses an already-built `FORAGERR_IMAGE`;
+`FORAGERR_E2E_PROJECT=<name>` renames the compose project. Set that last one
+whenever a second run may overlap this one — the docker daemon is shared, so two
+runs under the same project name recreate and tear down each other's containers,
+and the survivor fails every scenario after the first teardown with
+`ECONNREFUSED` against a port that no longer exists.
 
 ## Authentication (mandatory login)
 

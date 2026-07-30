@@ -19,7 +19,14 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${HERE}/.." && pwd)"
 export FORAGERR_IMAGE="${FORAGERR_IMAGE:-foragerr:e2e}"
 
-COMPOSE=(docker compose -f "${HERE}/compose.yaml" -p foragerr-e2e)
+# The compose project name. Overridable because the docker daemon is SHARED:
+# two runs started from different worktrees under one project name tear down
+# each other's containers mid-suite (the surviving run then sees its app on a
+# dead port and every later scenario fails with ECONNREFUSED). Give a
+# concurrent run its own name. Exported so the specs that drive compose
+# themselves target the same project.
+export FORAGERR_E2E_PROJECT="${FORAGERR_E2E_PROJECT:-foragerr-e2e}"
+COMPOSE=(docker compose -f "${HERE}/compose.yaml" -p "${FORAGERR_E2E_PROJECT}")
 
 # Run-scoped scratch OUTSIDE the repo (keeps the build-context secret scan and
 # git status clean; certs/keys never touch the tree).
