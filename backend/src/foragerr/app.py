@@ -458,6 +458,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     import foragerr.sources.grab  # noqa: F401 — source-grab command registration
     from foragerr.api.sources import router as sources_router
     from foragerr.sources.commands import register_source_sync_task
+    from foragerr.sources.publisher_migration import (
+        publisher_rules_migration_startup_hook,
+    )
 
     app.include_router(sources_router, prefix="/api/v1")
 
@@ -465,6 +468,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         await register_source_sync_task(app.state.scheduler, app.state.settings)
 
     app.state.startup_hooks.append(_register_source_sync_task)
+    # The one-time carry of per-source publisher rules into the library-wide list
+    # (FRG-SRC-012). Runs here because it needs BOTH the db area (source rows)
+    # and the keystore area (the rules live inside encrypted envelopes), and
+    # BEFORE any sync can be dispatched, so the first sync after an upgrade
+    # already classifies against the migrated list.
+    app.state.startup_hooks.append(publisher_rules_migration_startup_hook)
 
     # --- first-run seeding (m2-first-run-defaults, area B): seed the default
     #     keyless GetComics indexer + built-in DDL client once per database,
