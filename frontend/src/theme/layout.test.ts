@@ -6,7 +6,11 @@ import tokensCss from './tokens.css?raw';
 import calendarCss from '../screens/calendar/CalendarScreen.module.css?raw';
 import shellCss from '../components/AppShell.module.css?raw';
 import segmentedCss from '../components/SegmentedControl.module.css?raw';
-import { COMPACT_CROSSOVER_PX, COMPACT_MEDIA_QUERY } from './layout';
+import {
+  COMPACT_CROSSOVER_PX,
+  COMPACT_MEDIA_QUERY,
+  TOUCH_TARGET_MIN_PX,
+} from './layout';
 
 /**
  * FRG-UI-018 / FRG-UI-047 / FRG-UI-049 — the layout invariants a rendered DOM
@@ -124,18 +128,28 @@ describe('FRG-UI-018: entry titles keep their measure', () => {
 });
 
 describe('FRG-UI-047: real controls declare the target floor', () => {
-  it('FRG-UI-047 — the token layer pins the WCAG 2.5.8 24px floor', () => {
-    expect(tokensCss).toMatch(/--layout-touch-target-min:\s*24px;/);
+  it('FRG-UI-047 — the token layer pins the WCAG 2.5.8 target floor', () => {
+    expect(tokensCss).toMatch(
+      new RegExp(`--layout-touch-target-min:\\s*${TOUCH_TARGET_MIN_PX}px;`),
+    );
   });
 
   /**
    * The stylesheets owned by the surfaces this change brings to the floor. The
-   * set of RULES is derived, never listed: an enumerated allowlist cannot fail
-   * for a control it does not name, which is how a 20px-tall shared segment
-   * shipped past a green stylesheet test. Controls these surfaces render from
-   * elsewhere are measured as rendered geometry in the browser-driven tier
-   * (e2e/tests/x-a11y.spec.ts) — bringing every other screen's ~21px icon button
-   * to the floor is separate work (FRG-UI-047 non-goal).
+   * set of RULES is derived from `cursor: pointer` rather than listed, so a
+   * control added to one of these stylesheets is swept without being named —
+   * an enumerated allowlist is how a 20px-tall shared segment shipped past a
+   * green stylesheet test.
+   *
+   * The sweep reaches DECLARED-cursor controls only. An anchor takes its pointer
+   * cursor from the UA and a control rendered by a shared component declares its
+   * box in that component's own stylesheet, so neither appears here; those are
+   * enforced as rendered geometry in the browser-driven tier
+   * (e2e/tests/w-calendar-legibility.spec.ts, e2e/tests/x-a11y.spec.ts), which
+   * measures whatever is on screen. `.navLink` is exactly that case, and the
+   * selectors named explicitly below are the icon-only controls whose WIDTH this
+   * height sweep cannot speak to. Bringing every other screen's ~21px icon
+   * button to the floor is separate work (FRG-UI-047 non-goal).
    */
   const SURFACE_STYLESHEETS: [string, string][] = [
     ['CalendarScreen.module.css', calendarCss],
@@ -160,7 +174,7 @@ describe('FRG-UI-047: real controls declare the target floor', () => {
   function meetsHeightFloor(body: string): boolean {
     if (/min-height:\s*var\(--layout-touch-target-min\)/.test(body)) return true;
     const literal = /(?:min-)?height:\s*(\d+)px/.exec(body);
-    return literal !== null && Number(literal[1]) >= 24;
+    return literal !== null && Number(literal[1]) >= TOUCH_TARGET_MIN_PX;
   }
 
   for (const [label, css] of SURFACE_STYLESHEETS) {

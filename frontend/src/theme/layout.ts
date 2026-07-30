@@ -20,3 +20,12 @@ export const COMPACT_CROSSOVER_PX = 900;
  * fails it is wide by definition; no width can fall between the two.
  */
 export const COMPACT_MEDIA_QUERY = `(max-width: ${COMPACT_CROSSOVER_PX - 0.02}px)`;
+
+/**
+ * The WCAG 2.5.8 pointer-target floor (FRG-UI-047), in pixels. The stylesheets
+ * spend it as `--layout-touch-target-min`, but a custom property is opaque to
+ * anything outside CSS: neither a stylesheet assertion nor a rendered-geometry
+ * measurement can read its value, so both would otherwise carry their own
+ * literal. This is the one place the number is written.
+ */
+export const TOUCH_TARGET_MIN_PX = 24;

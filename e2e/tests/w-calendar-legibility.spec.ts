@@ -1,8 +1,11 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { newApiContext, until } from './helpers';
-// The app's own crossover constant, not a copy of it: a second literal here
-// could drift from the one the shell and the Calendar both switch on.
-import { COMPACT_CROSSOVER_PX } from '../../frontend/src/theme/layout';
+// The app's own layout constants, not copies of them: a second literal here
+// could drift from the values the shell, the Calendar and the token layer share.
+import {
+  COMPACT_CROSSOVER_PX,
+  TOUCH_TARGET_MIN_PX,
+} from '../../frontend/src/theme/layout';
 
 /**
  * Calendar legibility, measured (FRG-UI-018, FRG-UI-047, FRG-UI-049). These are
@@ -26,8 +29,6 @@ const WIDE = { width: 1280, height: 900 };
 const AT_CROSSOVER = { width: COMPACT_CROSSOVER_PX, height: 900 };
 const NARROW = { width: 600, height: 900 };
 
-/** The WCAG 2.5.8 pointer-target floor FRG-UI-047 pins for these surfaces. */
-const TARGET_FLOOR_PX = 24;
 /** FRG-UI-018's per-entry vertical bound for a single-line agenda row. */
 const ROW_BAND_MAX_PX = 36;
 /** FRG-UI-018's title measure floor, in characters of the title's own font. */
@@ -37,6 +38,7 @@ let api: APIRequestContext;
 
 test.beforeAll(async ({ baseURL }) => {
   api = await newApiContext(baseURL!);
+  await seedDenseWeek();
 });
 
 test.afterAll(async () => {
@@ -93,10 +95,6 @@ async function openSeededWeek(page: Page): Promise<void> {
   ).toBeVisible();
 }
 
-test.beforeAll(async () => {
-  await seedDenseWeek();
-});
-
 test('FRG-UI-047: every calendar and chrome control meets the 24px target floor at both sides of the crossover', async ({
   page,
 }) => {
@@ -115,29 +113,48 @@ test('FRG-UI-047: every calendar and chrome control meets the 24px target floor 
       await page.getByTestId('nav-toggle').click();
       await expect(page.getByTestId('nav-drawer')).toBeVisible();
     }
-    const controls = page.locator(
-      'button:visible, a[href]:visible, select:visible, input:visible',
-    );
-    const count = await controls.count();
-    expect(count, 'controls were found to measure').toBeGreaterThan(3);
-    for (let index = 0; index < count; index += 1) {
-      const control = controls.nth(index);
-      const box = await control.boundingBox();
-      if (box === null) continue;
-      if (box.width < TARGET_FLOOR_PX || box.height < TARGET_FLOOR_PX) {
-        const name =
-          (await control.getAttribute('aria-label')) ??
-          (await control.getAttribute('data-testid')) ??
-          (await control.textContent()) ??
-          '(unnamed)';
+    // One round-trip for the whole screen: a per-control `boundingBox()` plus
+    // three `getAttribute()` calls is four protocol round-trips per control, and
+    // a seeded week renders hundreds of them.
+    const measured = await page.evaluate(() => {
+      const controls = Array.from(
+        document.querySelectorAll<HTMLElement>(
+          'button, a[href], select, input',
+        ),
+      );
+      return controls
+        // Playwright's own `:visible` predicate, in one expression: a non-empty
+        // bounding box and no `visibility: hidden`. Both halves are needed — a
+        // zero-area control and a hidden one are each unpointable, and a floor
+        // that counted them would fail on controls no operator can reach.
+        .map((control) => ({ control, box: control.getBoundingClientRect() }))
+        .filter(
+          ({ control, box }) =>
+            box.width > 0 &&
+            box.height > 0 &&
+            getComputedStyle(control).visibility !== 'hidden',
+        )
+        .map(({ control, box }) => ({
+          w: box.width,
+          h: box.height,
+          name:
+            control.getAttribute('aria-label') ??
+            control.getAttribute('data-testid') ??
+            control.textContent ??
+            '(unnamed)',
+        }));
+    });
+    expect(measured.length, 'controls were found to measure').toBeGreaterThan(3);
+    for (const { w, h, name } of measured) {
+      if (w < TOUCH_TARGET_MIN_PX || h < TOUCH_TARGET_MIN_PX) {
         undersized.push(
           `${viewport.width}px: "${name.trim().slice(0, 40)}" ` +
-            `${box.width.toFixed(1)}x${box.height.toFixed(1)}`,
+            `${w.toFixed(1)}x${h.toFixed(1)}`,
         );
       }
     }
   }
-  expect(undersized, `controls under ${TARGET_FLOOR_PX}px`).toEqual([]);
+  expect(undersized, `controls under ${TOUCH_TARGET_MIN_PX}px`).toEqual([]);
 });
 
 test('FRG-UI-018: an agenda row keeps ~30 characters of title measure at the crossover width', async ({
