@@ -124,9 +124,11 @@ describe('FRG-UI-018: entry titles keep their measure', () => {
   });
 
   it('FRG-UI-018 — the shelf cover sets the row rhythm at approximately 110px', () => {
-    // The cover is the row's tallest element, so its height plus the row face's
-    // vertical padding IS the entry's vertical rhythm — the ~110px ceiling a
-    // single-line title must stay under.
+    // The cover is the row's tallest element, so its height plus the row
+    // face's vertical padding plus the `.row` hairline `border-bottom` IS the
+    // entry's vertical rhythm — the ~110px ceiling a single-line title must
+    // stay under. The border is a real pixel of the rendered band: a sum that
+    // omitted it would let the padding alone erode this test's own margin.
     const cover = ruleBody(calendarCss, '.thumbRow');
     expect(cover).not.toBeNull();
     expect(cover).toMatch(/width:\s*66px/);
@@ -134,7 +136,11 @@ describe('FRG-UI-018: entry titles keep their measure', () => {
     const face = ruleBody(calendarCss, '.rowFace') as string;
     const padding = /padding:\s*(\d+)px/.exec(face);
     expect(padding).not.toBeNull();
-    expect(99 + 2 * Number(padding![1])).toBeLessThanOrEqual(110);
+    const row = ruleBody(calendarCss, '.row') as string;
+    const border = /border-bottom:\s*(\d+)px/.exec(row);
+    expect(border).not.toBeNull();
+    const band = 99 + 2 * Number(padding![1]) + Number(border![1]);
+    expect(band).toBeLessThanOrEqual(110);
   });
 
   it('FRG-UI-047 — the future-dated treatment dims artwork only, never the text that carries state', () => {

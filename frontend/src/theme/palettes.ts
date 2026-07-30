@@ -143,10 +143,18 @@ export function publisherKey(publisher: string | null | undefined): string | nul
  * The brand accent's hue, and the arc around it a derived hue may never land
  * in. A publisher outside the named palette must be distinguishable from the
  * app's own accent (FRG-UI-042) — a hash that happened to land on green would
- * read as "foragerr", not as a publisher.
+ * read as "foragerr", not as a publisher. `BRAND_HUE` is
+ * `PUBLISHER_ACCENT_DEFAULT`'s own hue (#57b877 ≈ 139.79°), asserted against
+ * that color in palettes.test.ts so the two cannot drift apart.
+ *
+ * The guard is a PERCEPTUAL band, not just the minimum that keeps a derived
+ * hue from being read as literally the same color: a hue only 15° off green
+ * ("Heavy Metal" hashed to 164°) still reads as near-green at this surface's
+ * saturation/lightness, not as its own distinct publisher color. 35° is wide
+ * enough to clear that.
  */
 const BRAND_HUE = 140;
-const BRAND_HUE_GUARD = 15;
+const BRAND_HUE_GUARD = 35;
 
 /**
  * FNV-1a over the normalized name: a derived hue must be STABLE — the same

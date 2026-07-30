@@ -113,10 +113,17 @@ function rowSub(r: PullEntryRecord): string {
   return `${issueLabel(r)} · ${r.publisher ?? 'Unknown'}`;
 }
 
-/** Creator roles the shelf row surfaces, in the order it prints them. */
+/**
+ * Creator roles the shelf row surfaces, in the order it prints them. A cover
+ * artist is excluded from the artist match even though "Cover Artist"
+ * contains the substring "artist": cover credits stay off the browse line
+ * (the full credit list, cover included, is on the detail surface), and
+ * without the exclusion a cover artist stored ahead of the interior
+ * penciller/artist would take that role's slot on stored order alone.
+ */
 const PRINCIPAL_ROLES: readonly ((role: string) => boolean)[] = [
   (role) => role.includes('writer'),
-  (role) => role.includes('artist') || role.includes('pencil'),
+  (role) => !role.includes('cover') && (role.includes('artist') || role.includes('pencil')),
 ];
 
 /** How many names one role contributes before the line is cut. */
@@ -138,11 +145,14 @@ function principalCreators(r: PullEntryRecord): string | null {
     for (const credit of stored) {
       if (taken === NAMES_PER_ROLE) break;
       if (!matches((credit.role ?? '').toLowerCase())) continue;
-      taken += 1;
-      // One person credited as both writer and artist is one name on the line.
+      // One person credited as both writer and artist is one name on the
+      // line: a duplicate credit must not consume the role's slot, or a real
+      // second creator further down the stored order is dropped for a name
+      // that was already going to print.
       if (seen.has(credit.name)) continue;
       seen.add(credit.name);
       names.push(credit.name);
+      taken += 1;
     }
   }
   return names.length > 0 ? names.join(' · ') : null;
@@ -530,15 +540,23 @@ export function CalendarScreen() {
   }, []);
 
   const view = useMemo(() => {
-    // Publisher options span every publisher present in the loaded week.
+    // Publisher options span every publisher present in the loaded week,
+    // built from the same normalized key the chip prints (palettes.ts):
+    // two feed spellings of one publisher ("Marvel Comics" / "Marvel") must
+    // collapse to the single option the operator actually sees on the row,
+    // not fork into two entries only one of which matches any row.
     const publishers = Array.from(
-      new Set(records.map((r) => r.publisher).filter((p): p is string => !!p)),
+      new Set(
+        records
+          .map((r) => publisherKey(r.publisher))
+          .filter((p): p is string => p !== null),
+      ),
     ).sort();
 
     const pubFiltered =
       publisher === 'all'
         ? records
-        : records.filter((r) => r.publisher === publisher);
+        : records.filter((r) => publisherKey(r.publisher) === publisher);
 
     // Debuts live in the day agenda in date position, badged (FRG-PULL-008) —
     // there is no separate strip to double-count them against.
