@@ -184,7 +184,7 @@ wheels = [
 
 [[package]]
 name = "foragerr"
-version = "0.14.0"
+version = "0.15.2"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
