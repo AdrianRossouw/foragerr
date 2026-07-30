@@ -7,6 +7,8 @@ import { fakeFetcher } from '../../test/fakeFetcher';
 import {
   makeCommand,
   makeIssue,
+  makeLinkedPullEntry,
+  makePullEntry,
   makeSeriesResource,
   pageOf,
 } from '../../test/mockData';
@@ -29,47 +31,8 @@ import { CalendarScreen } from './CalendarScreen';
  * future-week "not yet released" marking.
  */
 
-function makePullRecord(
-  overrides: Partial<PullEntryRecord> & Pick<PullEntryRecord, 'seriesName'>,
-): PullEntryRecord {
-  return {
-    id: null,
-    week: '2026-W27',
-    publisher: 'Image',
-    issueNumber: '1',
-    releaseDate: null,
-    cvSeriesId: null,
-    cvIssueId: null,
-    matchType: null,
-    matchedIssueId: null,
-    state: null,
-    series: null,
-    issue: null,
-    coverUrl: null,
-    description: null,
-    upc: null,
-    creators: [],
-    characters: [],
-    ...overrides,
-  };
-}
-
 const pullPath = (week: string, page = 1) =>
   `/api/v1/pull?week=${week}&page=${page}&pageSize=200&sortKey=release_date&sortDirection=asc`;
-
-/** A linked, monitored/missing library row keyed to a day. */
-function linkedRow(name: string, releaseDate: string, over: Partial<PullEntryRecord> = {}) {
-  return makePullRecord({
-    seriesName: name,
-    releaseDate,
-    matchType: 'id',
-    matchedIssueId: 500,
-    state: 'missing_wanted',
-    series: { id: 7, title: name },
-    issue: { id: 500, issueNumber: '1', title: null },
-    ...over,
-  });
-}
 
 describe('FRG-UI-018: Calendar agenda', () => {
   it('FRG-UI-018 — default load requests the current week in All-releases scope (unmatched included) and marks New Comic Day + Today', async () => {
@@ -84,11 +47,15 @@ describe('FRG-UI-018: Calendar agenda', () => {
       new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())),
     );
     const records = [
-      linkedRow('Saga', wedKey),
-      linkedRow('Bone', todayKey, { matchedIssueId: 501, series: { id: 8, title: 'Bone' } }),
+      makeLinkedPullEntry('Saga', { releaseDate: wedKey }),
+      makeLinkedPullEntry('Bone', {
+        releaseDate: todayKey,
+        matchedIssueId: 501,
+        series: { id: 8, title: 'Bone' },
+      }),
       // An unfollowed, unmatched book — the default view is a discovery surface,
       // so it must render without any scope change (owner decision 2026-07-11).
-      makePullRecord({
+      makePullEntry({
         id: 999,
         seriesName: 'Ghost Machine',
         publisher: 'Image',
@@ -140,8 +107,8 @@ describe('FRG-UI-018: Calendar agenda', () => {
   it('FRG-UI-018 — the Following scope narrows to library entries and All releases restores the full week', async () => {
     // Fixed week (2026-W27, Wed = Jul 1) so "today" never interferes.
     const records = [
-      linkedRow('Saga', '2026-07-01'),
-      makePullRecord({
+      makeLinkedPullEntry('Saga', { releaseDate: '2026-07-01' }),
+      makePullEntry({
         id: 999,
         seriesName: 'Ghost Machine',
         publisher: 'Image',
@@ -177,7 +144,7 @@ describe('FRG-UI-018: Calendar agenda', () => {
     // Pure library-primary rows (id null, matchType null) — what the projection
     // yields when no pull source is configured or its last fetch failed.
     const records = [
-      makePullRecord({
+      makePullEntry({
         seriesName: 'Invincible',
         publisher: 'Image',
         releaseDate: '2026-07-01',
@@ -229,7 +196,11 @@ describe('FRG-UI-018: Calendar agenda', () => {
 describe('FRG-PULL-007: Calendar per-entry actions', () => {
   it('FRG-PULL-007 — want toggles the linked issue via PUT /api/v1/issues/{id} and writes nothing pull-side', async () => {
     const records = [
-      linkedRow('Saga', '2026-07-01', { state: 'unmonitored', matchedIssueId: 500 }),
+      makeLinkedPullEntry('Saga', {
+        releaseDate: '2026-07-01',
+        state: 'unmonitored',
+        matchedIssueId: 500,
+      }),
     ];
     const { spy, fetcher } = fakeFetcher((path, init) => {
       if (init?.method === 'PUT' && path === '/api/v1/issues/500') {
@@ -255,7 +226,7 @@ describe('FRG-PULL-007: Calendar per-entry actions', () => {
   });
 
   it('FRG-PULL-007 — search dispatches an issue-search command with the linked ids', async () => {
-    const records = [linkedRow('Saga', '2026-07-01')];
+    const records = [makeLinkedPullEntry('Saga', { releaseDate: '2026-07-01' })];
     const { spy, fetcher } = fakeFetcher((path, init) => {
       if (init?.method === 'POST' && path === '/api/v1/command') {
         return makeCommand({ id: 90, name: 'issue-search', status: 'queued' });
@@ -281,7 +252,7 @@ describe('FRG-PULL-007: Calendar per-entry actions', () => {
 
   it('FRG-PULL-007 — unlinked entries expose no want/skip or search actions', async () => {
     const records = [
-      makePullRecord({
+      makePullEntry({
         id: 999,
         seriesName: 'Ghost Machine',
         releaseDate: '2026-07-01',
@@ -340,8 +311,8 @@ describe('FRG-PULL-008: add-from-anywhere hand-off', () => {
 
   it('FRG-PULL-008 — a mid-run unmatched entry for an unknown series offers Add and hands over its ComicVine series id', async () => {
     const records = [
-      linkedRow('Nocturne Atlas', '2026-07-01'),
-      makePullRecord({
+      makeLinkedPullEntry('Nocturne Atlas', { releaseDate: '2026-07-01' }),
+      makePullEntry({
         id: 2001,
         seriesName: 'Tidewrack',
         publisher: 'Umbral Press',
@@ -371,7 +342,7 @@ describe('FRG-PULL-008: add-from-anywhere hand-off', () => {
 
   it('FRG-PULL-008 — an entry without a ComicVine series id hands over the name alone', async () => {
     const records = [
-      makePullRecord({
+      makePullEntry({
         id: 2002,
         seriesName: 'Hollow Signal',
         publisher: 'Umbral Press',
@@ -397,7 +368,7 @@ describe('FRG-PULL-008: add-from-anywhere hand-off', () => {
 
   it('FRG-PULL-008 — an unlinked entry whose series is already in the library offers no Add', async () => {
     const records = [
-      makePullRecord({
+      makePullEntry({
         id: 2003,
         seriesName: 'Tidewrack',
         publisher: 'Umbral Press',
@@ -405,7 +376,7 @@ describe('FRG-PULL-008: add-from-anywhere hand-off', () => {
         releaseDate: '2026-07-01',
         matchType: 'unmatched',
       }),
-      makePullRecord({
+      makePullEntry({
         id: 2004,
         seriesName: 'Hollow Signal',
         publisher: 'Umbral Press',
@@ -444,7 +415,9 @@ describe('FRG-PULL-008: add-from-anywhere hand-off', () => {
   });
 
   it('FRG-PULL-008 — a linked entry offers no Add, only its issue actions', async () => {
-    const records = [linkedRow('Nocturne Atlas', '2026-07-01')];
+    const records = [
+      makeLinkedPullEntry('Nocturne Atlas', { releaseDate: '2026-07-01' }),
+    ];
     const { fetcher } = fakeFetcher(() => pageOf(records, { pageSize: 200 }));
     renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
 
@@ -460,8 +433,8 @@ describe('FRG-PULL-008: add-from-anywhere hand-off', () => {
 
 describe('FRG-PULL-008: inline debuts + debut filter', () => {
   const records = [
-    linkedRow('Nocturne Atlas', '2026-07-01'),
-    makePullRecord({
+    makeLinkedPullEntry('Nocturne Atlas', { releaseDate: '2026-07-01' }),
+    makePullEntry({
       id: 2101,
       seriesName: 'Hollow Signal',
       publisher: 'Umbral Press',
@@ -568,7 +541,9 @@ describe('FRG-PULL-008: inline debuts + debut filter', () => {
   });
 
   it('FRG-PULL-008 — a debut-free week offers no debuts-only toggle at all', async () => {
-    const noDebutRecords = [linkedRow('Nocturne Atlas', '2026-07-01')];
+    const noDebutRecords = [
+      makeLinkedPullEntry('Nocturne Atlas', { releaseDate: '2026-07-01' }),
+    ];
     const { fetcher } = fakeFetcher(() => pageOf(noDebutRecords, { pageSize: 200 }));
     renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
 
@@ -583,7 +558,7 @@ describe('FRG-UI-042: Calendar covers and enrichment detail', () => {
   const COVER_URL =
     'https://s3.amazonaws.com/comicgeeks/comics/covers/large-24680.jpg';
 
-  const enriched = makePullRecord({
+  const enriched = makePullEntry({
     id: 3001,
     seriesName: 'Tidewrack',
     publisher: 'Umbral Press',
@@ -615,7 +590,7 @@ describe('FRG-UI-042: Calendar covers and enrichment detail', () => {
 
   it('FRG-UI-042 — an entry with no stored cover renders the publisher spine, never a broken image', async () => {
     const records = [
-      makePullRecord({
+      makePullEntry({
         id: 3002,
         seriesName: 'Hollow Signal',
         publisher: 'Umbral Press',
@@ -680,7 +655,7 @@ describe('FRG-UI-042: Calendar covers and enrichment detail', () => {
 
   it('FRG-UI-042 — absent enrichment fields are omitted rather than rendered empty', async () => {
     const records = [
-      makePullRecord({
+      makePullEntry({
         id: 3003,
         seriesName: 'Hollow Signal',
         publisher: 'Umbral Press',
@@ -693,7 +668,7 @@ describe('FRG-UI-042: Calendar covers and enrichment detail', () => {
         upc: null,
       }),
       // Nothing stored at all: the entry offers no detail affordance.
-      makePullRecord({
+      makePullEntry({
         id: 3004,
         seriesName: 'Nocturne Atlas',
         publisher: 'Umbral Press',
@@ -751,7 +726,7 @@ describe('FRG-UI-042: Calendar covers and enrichment detail', () => {
     // at 4000 chars) description must not blow out the card past a 2-line clamp.
     const description = '<b>x</b>' + ' filler word'.repeat(200);
     const records = [
-      makePullRecord({
+      makePullEntry({
         id: 4001,
         seriesName: 'Marrow Line',
         publisher: 'Umbral Press',
@@ -786,7 +761,7 @@ describe('FRG-UI-042: Calendar covers and enrichment detail', () => {
     const fixedUrl = 'https://s3.amazonaws.com/comicgeeks/comics/covers/fixed.jpg';
     let coverUrl = brokenUrl;
     const records = () => [
-      makePullRecord({
+      makePullEntry({
         id: 5001,
         seriesName: 'Marrow Line',
         publisher: 'Umbral Press',
@@ -829,7 +804,7 @@ describe('FRG-UI-042: Calendar covers and enrichment detail', () => {
 describe('FRG-PULL-007: search completion re-projects the week', () => {
   it('FRG-PULL-007 — a search command reaching completed refetches the pull week', async () => {
     const week = '2026-W27';
-    const records = [linkedRow('Saga', '2026-07-01')];
+    const records = [makeLinkedPullEntry('Saga', { releaseDate: '2026-07-01' })];
     const { spy, fetcher } = fakeFetcher((path, init) => {
       if (init?.method === 'POST' && path === '/api/v1/command') {
         return makeCommand({ id: 90, name: 'issue-search', status: 'queued' });
@@ -861,14 +836,15 @@ describe('FRG-PULL-007: search completion re-projects the week', () => {
 describe('FRG-UI-018: publisher filter + banner', () => {
   it('FRG-UI-018 — selecting a publisher filters the cards, counts, and banner scope', async () => {
     const records = [
-      linkedRow('Saga', '2026-07-01', { publisher: 'Image' }),
-      linkedRow('Batman', '2026-07-01', {
+      makeLinkedPullEntry('Saga', { releaseDate: '2026-07-01', publisher: 'Image' }),
+      makeLinkedPullEntry('Batman', {
+        releaseDate: '2026-07-01',
         publisher: 'DC',
         matchedIssueId: 501,
         series: { id: 8, title: 'Batman' },
       }),
       // An unmatched Image row so the Following banner shows a nonzero "more".
-      makePullRecord({
+      makePullEntry({
         id: 999,
         seriesName: 'Ghost Machine',
         publisher: 'Image',
@@ -921,7 +897,7 @@ describe('FRG-PULL-009: Future-week presentation', () => {
   it('FRG-PULL-009 — a future-week entry renders marked not-yet-released', async () => {
     const futureWeek = addWeeks(currentIsoWeek(), 4);
     const futureDay = isoDateKey(weekDates(futureWeek)[2]);
-    const records = [linkedRow('Saga', futureDay)];
+    const records = [makeLinkedPullEntry('Saga', { releaseDate: futureDay })];
     const { fetcher } = fakeFetcher(() => pageOf(records, { pageSize: 200 }));
     renderWithProviders(<CalendarScreen />, {
       fetcher,

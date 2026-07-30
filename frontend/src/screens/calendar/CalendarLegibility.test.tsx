@@ -3,7 +3,16 @@ import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../../test/renderWithProviders';
 import { fakeFetcher } from '../../test/fakeFetcher';
-import { makeCommand, makeIssue, makeSeriesResource, pageOf } from '../../test/mockData';
+import {
+  PULL_DAY,
+  PULL_WEEK,
+  makeCommand,
+  makeIssue,
+  makeLinkedPullEntry,
+  makePullEntry,
+  makeSeriesResource,
+  pageOf,
+} from '../../test/mockData';
 import { addWeeks, currentIsoWeek, isoDateKey, weekDates } from '../../utils/isoWeek';
 import { setViewportWidth } from '../../test/viewport';
 import { createQueryClient } from '../../queryClient';
@@ -19,8 +28,6 @@ import { CalendarScreen } from './CalendarScreen';
  * acknowledges activation instead of looking dead until a refetch lands.
  */
 
-const WEEK = '2026-W27';
-const DAY = '2026-07-01';
 const WIDE = COMPACT_CROSSOVER_PX + 100;
 const NARROW = COMPACT_CROSSOVER_PX - 300;
 
@@ -30,48 +37,6 @@ const FUTURE_DAY = isoDateKey(weekDates(FUTURE_WEEK)[2]);
 
 /** Long enough to have shattered mid-word in the shipped clamped card grid. */
 const LONG_TITLE = 'Chronicles of the Meridian Expedition Deluxe Omnibus';
-
-function makePullRecord(
-  overrides: Partial<PullEntryRecord> & Pick<PullEntryRecord, 'seriesName'>,
-): PullEntryRecord {
-  return {
-    id: null,
-    week: WEEK,
-    publisher: 'Umbral Press',
-    issueNumber: '1',
-    releaseDate: DAY,
-    cvSeriesId: null,
-    cvIssueId: null,
-    matchType: null,
-    matchedIssueId: null,
-    state: null,
-    series: null,
-    issue: null,
-    coverUrl: null,
-    description: null,
-    upc: null,
-    creators: [],
-    characters: [],
-    ...overrides,
-  };
-}
-
-/** A linked library entry: the only shape that carries a real monitor toggle. */
-function linkedRow(
-  name: string,
-  over: Partial<PullEntryRecord> = {},
-): PullEntryRecord {
-  const issueId = over.matchedIssueId ?? 500;
-  return makePullRecord({
-    seriesName: name,
-    matchType: 'id',
-    matchedIssueId: issueId,
-    state: 'missing_wanted',
-    series: { id: 7, title: name },
-    issue: { id: issueId, issueNumber: '1', title: null },
-    ...over,
-  });
-}
 
 function renderWeek(
   records: PullEntryRecord[],
@@ -86,7 +51,7 @@ function renderWeek(
   );
   const rendered = renderWithProviders(<CalendarScreen />, {
     fetcher,
-    route: `/calendar?week=${WEEK}`,
+    route: `/calendar?week=${PULL_WEEK}`,
   });
   return { spy, ...rendered };
 }
@@ -122,7 +87,7 @@ function accessibleText(root: HTMLElement): string {
 describe('FRG-UI-018: responsive entry presentation', () => {
   it('FRG-UI-018 — at or above the crossover an entry is an agenda row whose long title is neither clamped nor truncated', async () => {
     setViewportWidth(WIDE);
-    renderWeek([makePullRecord({ id: 1, seriesName: LONG_TITLE, matchType: 'unmatched' })]);
+    renderWeek([makePullEntry({ id: 1, seriesName: LONG_TITLE, matchType: 'unmatched' })]);
 
     const card = await screen.findByTestId('calendar-card-1');
     expect(card).toHaveAttribute('data-mode', 'row');
@@ -140,7 +105,7 @@ describe('FRG-UI-018: responsive entry presentation', () => {
   it('FRG-UI-018 — below the crossover an entry is a card with every action icon-only on a rail beneath the title block', async () => {
     setViewportWidth(NARROW);
     renderWeek([
-      makePullRecord({
+      makePullEntry({
         id: 1,
         seriesName: LONG_TITLE,
         matchType: 'unmatched',
@@ -165,11 +130,11 @@ describe('FRG-UI-018: responsive entry presentation', () => {
 
   it('FRG-UI-018 — neither mode hides an action the other offers', async () => {
     const records = [
-      linkedRow('Meridian Signal', {
+      makeLinkedPullEntry('Meridian Signal', {
         id: 1,
         description: 'A relay station answers on a dead channel.',
       }),
-      makePullRecord({ id: 2, seriesName: 'Tidewrack Survey', matchType: 'unmatched' }),
+      makePullEntry({ id: 2, seriesName: 'Tidewrack Survey', matchType: 'unmatched' }),
     ];
 
     setViewportWidth(WIDE);
@@ -196,17 +161,17 @@ describe('FRG-UI-018: responsive entry presentation', () => {
   it('FRG-UI-018 — the day gutter folds into an inline day header only below the crossover', async () => {
     setViewportWidth(NARROW);
     const narrow = renderWeek([
-      makePullRecord({ id: 1, seriesName: 'Tidewrack Survey', matchType: 'unmatched' }),
+      makePullEntry({ id: 1, seriesName: 'Tidewrack Survey', matchType: 'unmatched' }),
     ]);
-    expect(await screen.findByTestId(`calendar-day-inline-${DAY}`)).toBeInTheDocument();
+    expect(await screen.findByTestId(`calendar-day-inline-${PULL_DAY}`)).toBeInTheDocument();
     narrow.unmount();
 
     setViewportWidth(WIDE);
     renderWeek([
-      makePullRecord({ id: 1, seriesName: 'Tidewrack Survey', matchType: 'unmatched' }),
+      makePullEntry({ id: 1, seriesName: 'Tidewrack Survey', matchType: 'unmatched' }),
     ]);
     await screen.findByTestId('calendar-card-1');
-    expect(screen.queryByTestId(`calendar-day-inline-${DAY}`)).not.toBeInTheDocument();
+    expect(screen.queryByTestId(`calendar-day-inline-${PULL_DAY}`)).not.toBeInTheDocument();
   });
 
   it('FRG-UI-018 — a future-dated day is marked not-yet-released once in its heading, never per entry', async () => {
@@ -215,14 +180,14 @@ describe('FRG-UI-018: responsive entry presentation', () => {
     // makes an entry unreleased belongs to the whole day group anyway.
     setViewportWidth(WIDE);
     const records = [
-      makePullRecord({
+      makePullEntry({
         id: 1,
         seriesName: 'Tidewrack Survey',
         matchType: 'unmatched',
         week: FUTURE_WEEK,
         releaseDate: FUTURE_DAY,
       }),
-      makePullRecord({
+      makePullEntry({
         id: 2,
         seriesName: 'Meridian Signal',
         matchType: 'unmatched',
@@ -260,10 +225,10 @@ describe('FRG-UI-018: responsive entry presentation', () => {
     for (const width of [WIDE, NARROW]) {
       setViewportWidth(width);
       const view = renderWeek([
-        linkedRow('Meridian Signal', { id: 1 }),
-        makePullRecord({ id: 2, seriesName: 'Tidewrack Survey', matchType: 'unmatched' }),
+        makeLinkedPullEntry('Meridian Signal', { id: 1 }),
+        makePullEntry({ id: 2, seriesName: 'Tidewrack Survey', matchType: 'unmatched' }),
       ]);
-      const day = await screen.findByTestId(`calendar-day-${DAY}`);
+      const day = await screen.findByTestId(`calendar-day-${PULL_DAY}`);
       const heading = within(day).getByRole('heading', { level: 2 });
       // The date is in the accessible name at both widths, though only the
       // narrow mode draws it inside the heading.
@@ -282,7 +247,7 @@ describe('FRG-UI-018: responsive entry presentation', () => {
   it('FRG-UI-018 — a resize across the crossover switches presentation without a remount of the week', async () => {
     setViewportWidth(WIDE);
     renderWeek([
-      makePullRecord({ id: 1, seriesName: 'Tidewrack Survey', matchType: 'unmatched' }),
+      makePullEntry({ id: 1, seriesName: 'Tidewrack Survey', matchType: 'unmatched' }),
     ]);
     expect(await screen.findByTestId('calendar-card-1')).toHaveAttribute(
       'data-mode',
@@ -312,7 +277,7 @@ describe('FRG-UI-047: status indicators are never shaped like controls', () => {
   for (const [label, over] of unlinkedStates) {
     it(`FRG-UI-047 — an entry with no real toggle (${label}) shows a status, not a button`, async () => {
       setViewportWidth(WIDE);
-      renderWeek([makePullRecord({ id: 1, seriesName: 'Tidewrack Survey', ...over })]);
+      renderWeek([makePullEntry({ id: 1, seriesName: 'Tidewrack Survey', ...over })]);
 
       const card = await screen.findByTestId('calendar-card-1');
       const chip = within(card).getByTestId('calendar-state-1');
@@ -345,7 +310,7 @@ describe('FRG-UI-047: status indicators are never shaped like controls', () => {
         ? pageOf([makeSeriesResource({ id: 7, title: 'tidewrack survey' })])
         : pageOf(
             [
-              makePullRecord({
+              makePullEntry({
                 id: 1,
                 seriesName: 'Tidewrack Survey',
                 matchType: 'unmatched',
@@ -358,7 +323,7 @@ describe('FRG-UI-047: status indicators are never shaped like controls', () => {
     renderWithProviders(<CalendarScreen />, {
       client,
       fetcher,
-      route: `/calendar?week=${WEEK}`,
+      route: `/calendar?week=${PULL_WEEK}`,
     });
 
     const card = await screen.findByTestId('calendar-card-1');
@@ -371,7 +336,7 @@ describe('FRG-UI-047: status indicators are never shaped like controls', () => {
 
   it('FRG-UI-047 — a linked entry carries a real aria-pressed toggle and it alone draws the bookmark', async () => {
     setViewportWidth(WIDE);
-    renderWeek([linkedRow('Meridian Signal', { id: 1 })]);
+    renderWeek([makeLinkedPullEntry('Meridian Signal', { id: 1 })]);
 
     const card = await screen.findByTestId('calendar-card-1');
     const toggle = within(card).getByRole('button', { name: 'Monitor Meridian Signal' });
@@ -388,7 +353,7 @@ describe('FRG-UI-047: status indicators are never shaped like controls', () => {
     // wanted: a downloading issue is monitored and stays operable, so the derived
     // state must decide the CHIP's words and never whether a control exists.
     setViewportWidth(WIDE);
-    renderWeek([linkedRow('Meridian Signal', { id: 1, state: 'downloading' })]);
+    renderWeek([makeLinkedPullEntry('Meridian Signal', { id: 1, state: 'downloading' })]);
 
     const card = await screen.findByTestId('calendar-card-1');
     expect(within(card).getByTestId('calendar-state-1')).toHaveTextContent(
@@ -407,8 +372,8 @@ describe('FRG-UI-047: status indicators are never shaped like controls', () => {
     // verb at all and the state must live only on aria-pressed.
     setViewportWidth(WIDE);
     renderWeek([
-      linkedRow('Meridian Signal', { id: 1 }),
-      linkedRow('Tidewrack Survey', {
+      makeLinkedPullEntry('Meridian Signal', { id: 1 }),
+      makeLinkedPullEntry('Tidewrack Survey', {
         id: 2,
         matchedIssueId: 501,
         state: 'unmonitored',
@@ -430,12 +395,12 @@ describe('FRG-UI-047: status indicators are never shaped like controls', () => {
     setViewportWidth(WIDE);
     renderWeek([
       // Linked + enriched: details, monitor, search.
-      linkedRow('Meridian Signal', {
+      makeLinkedPullEntry('Meridian Signal', {
         id: 1,
         description: 'A relay station answers on a dead channel.',
       }),
       // Unlinked, addable, no enrichment: add alone.
-      makePullRecord({ id: 2, seriesName: 'Tidewrack Survey', matchType: 'unmatched' }),
+      makePullEntry({ id: 2, seriesName: 'Tidewrack Survey', matchType: 'unmatched' }),
     ]);
 
     await screen.findByTestId('calendar-card-1');
@@ -454,7 +419,7 @@ describe('FRG-UI-047: a control that is present is a real, honest control', () =
   it('FRG-UI-047 — the details control references the panel it opens, and only while it exists', async () => {
     setViewportWidth(WIDE);
     renderWeek([
-      linkedRow('Meridian Signal', {
+      makeLinkedPullEntry('Meridian Signal', {
         id: 1,
         description: 'A relay station answers on a dead channel.',
       }),
@@ -483,8 +448,8 @@ describe('FRG-UI-047: a control that is present is a real, honest control', () =
     // silently disables every row's search at once, because the running flag is
     // screen-wide; unavailable-but-focusable plus a live status region does not.
     const records = [
-      linkedRow('Meridian Signal', { id: 1 }),
-      linkedRow('Tidewrack Survey', {
+      makeLinkedPullEntry('Meridian Signal', { id: 1 }),
+      makeLinkedPullEntry('Tidewrack Survey', {
         id: 2,
         matchedIssueId: 501,
         series: { id: 8, title: 'Tidewrack Survey' },
@@ -579,7 +544,7 @@ describe('FRG-UI-048: in-flight feedback for the monitor toggle', () => {
     screen.getByRole('button', { name: `Monitor ${name}` });
 
   it('FRG-UI-048 — activation renders the requested state at once in a busy presentation and a second activation issues no second mutation', async () => {
-    const records = [linkedRow('Meridian Signal', { id: 1 })];
+    const records = [makeLinkedPullEntry('Meridian Signal', { id: 1 })];
     const gated = gatedFetcher(records);
     setViewportWidth(WIDE);
     const { spy } = renderWeek(records, gated.resolver);
@@ -614,8 +579,8 @@ describe('FRG-UI-048: in-flight feedback for the monitor toggle', () => {
     // clearing the optimistic value when the PUT resolves would flip the
     // bookmark back to monitored for the length of that refetch — the "click
     // looks flaky" symptom this requirement exists to kill.
-    const records = [linkedRow('Meridian Signal', { id: 1 })];
-    const settled = [linkedRow('Meridian Signal', { id: 1, state: 'unmonitored' })];
+    const records = [makeLinkedPullEntry('Meridian Signal', { id: 1 })];
+    const settled = [makeLinkedPullEntry('Meridian Signal', { id: 1, state: 'unmonitored' })];
     const gated = gatedFetcher(records, settled, { holdRefetches: true });
     setViewportWidth(WIDE);
     renderWeek(records, gated.resolver);
@@ -650,7 +615,7 @@ describe('FRG-UI-048: in-flight feedback for the monitor toggle', () => {
   it('FRG-UI-048 — success settles to the re-projected derived state, not the optimistic guess', async () => {
     // The projection keeps reporting `missing_wanted` after the PUT succeeds:
     // the entry must end up showing the SERVER's state, not the requested one.
-    const records = [linkedRow('Meridian Signal', { id: 1 })];
+    const records = [makeLinkedPullEntry('Meridian Signal', { id: 1 })];
     const { spy } = renderWeek(records, (path, init) => {
       if (init?.method === 'PUT' && path === '/api/v1/issues/500') {
         return makeIssue({ id: 500, series_id: 7, monitored: false });
@@ -677,7 +642,7 @@ describe('FRG-UI-048: in-flight feedback for the monitor toggle', () => {
     // issue's, so storing the issue flag on an issue whose series is unmonitored
     // answers 200 and leaves the entry exactly as it was. The bookmark reverting
     // with no message is indistinguishable from a click that did nothing.
-    const records = [linkedRow('Meridian Signal', { id: 1, state: 'unmonitored' })];
+    const records = [makeLinkedPullEntry('Meridian Signal', { id: 1, state: 'unmonitored' })];
     setViewportWidth(WIDE);
     const { spy } = renderWeek(records, (path, init) => {
       if (init?.method === 'PUT' && path === '/api/v1/issues/500') {
@@ -711,8 +676,8 @@ describe('FRG-UI-048: in-flight feedback for the monitor toggle', () => {
     // the first one's per-call callbacks: whatever clears the optimistic value
     // must belong to the activation itself, or the first row never recovers.
     const records = [
-      linkedRow('Meridian Signal', { id: 1 }),
-      linkedRow('Tidewrack Survey', {
+      makeLinkedPullEntry('Meridian Signal', { id: 1 }),
+      makeLinkedPullEntry('Tidewrack Survey', {
         id: 2,
         matchedIssueId: 501,
         series: { id: 8, title: 'Tidewrack Survey' },
@@ -742,8 +707,8 @@ describe('FRG-UI-048: in-flight feedback for the monitor toggle', () => {
 
   it('FRG-UI-048 — a failed toggle reverts to the true state and surfaces the failure even when another toggle succeeded meanwhile', async () => {
     const records = [
-      linkedRow('Meridian Signal', { id: 1 }),
-      linkedRow('Tidewrack Survey', {
+      makeLinkedPullEntry('Meridian Signal', { id: 1 }),
+      makeLinkedPullEntry('Tidewrack Survey', {
         id: 2,
         matchedIssueId: 501,
         series: { id: 8, title: 'Tidewrack Survey' },
