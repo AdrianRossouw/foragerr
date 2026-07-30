@@ -194,5 +194,22 @@ describe('FRG-UI-047: real controls declare the target floor', () => {
   it('FRG-UI-047 — the calendar and shell controls carry a visible focus-visible outline', () => {
     expect(calendarCss).toMatch(/\.iconBtn:focus-visible\s*\{[^}]*outline:/);
     expect(shellCss).toMatch(/\.iconButton:focus-visible\s*\{[^}]*outline:/);
+    // The nav item is the element the drawer moves focus onto (FRG-UI-049), so a
+    // keyboard operator arrives on it with no indicator unless it has its own.
+    expect(shellCss).toMatch(/\.navLink:focus-visible\s*\{[^}]*outline:/);
+  });
+
+  it('FRG-UI-047 — an unavailable-but-focusable control is quieted by colour, not by opacity', () => {
+    // Ancestor opacity multiplies through the focus ring as well as the glyph,
+    // and these controls stay focusable while unavailable (aria-disabled, not
+    // disabled) — a ring under 3:1 fails WCAG 2.4.11 on the one control the
+    // keyboard operator is standing on.
+    const quieted = /\.iconBtn:disabled,\s*\.iconBtn\[aria-disabled='true'\]\s*\{([^}]*)\}/.exec(
+      calendarCss,
+    );
+    expect(quieted).not.toBeNull();
+    expect(quieted![1]).not.toMatch(/opacity/);
+    expect(quieted![1]).toMatch(/color:\s*var\(--text-muted\)/);
+    expect(ruleBody(calendarCss, '.iconBtn.iconBtnBusy')).not.toMatch(/opacity/);
   });
 });

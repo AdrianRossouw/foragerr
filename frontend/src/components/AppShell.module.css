@@ -177,6 +177,14 @@
   color: var(--text-primary);
 }
 
+/* The nav item is where the drawer puts focus on open, so it needs the same
+ * visible indicator every other control carries (FRG-UI-047). Inset, because the
+ * link spans the full sidebar width and an outset ring would be clipped. */
+.navLink:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
 .navLinkActive {
   color: var(--text-primary);
   background: var(--surface-active);

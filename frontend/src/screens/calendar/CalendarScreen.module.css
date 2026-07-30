@@ -93,8 +93,11 @@
   white-space: nowrap;
 }
 
+/* 34px clears the WCAG 2.5.8 24x24 floor; the minimum is stated so a later size
+ * change cannot silently drop under it (FRG-UI-047). */
 .pubSelect {
   height: 34px;
+  min-height: var(--layout-touch-target-min);
   padding: 0 var(--spacing-lg) 0 var(--spacing-sm);
   background: var(--surface-input);
   border: 1px solid var(--surface-border);
@@ -314,8 +317,9 @@
   flex-wrap: wrap;
 }
 
-/* Carried by the wide-mode day heading only: the date is drawn in the gutter,
- * which is decorative markup a screen reader gets nothing from. */
+/* Carried by the wide-mode day heading only: the gutter draws the same date as
+ * three separate boxes and is hidden from the accessibility tree, so this is the
+ * one place the day's date is announced — never a second copy of it. */
 .srOnly {
   position: absolute;
   width: 1px;
@@ -643,10 +647,12 @@
 }
 
 /* Unavailable but still focusable: a control that leaves keyboard order while
- * the operator is on it drops focus to the document body. */
+ * the operator is on it drops focus to the document body. The quieting is a
+ * colour change on the glyph, never opacity — opacity multiplies through the
+ * focus ring too, and this control can be the focused one (FRG-UI-047). */
 .iconBtn:disabled,
 .iconBtn[aria-disabled='true'] {
-  opacity: 0.5;
+  color: var(--text-muted);
   cursor: default;
 }
 
@@ -668,14 +674,14 @@
   color: var(--color-accent-light);
 }
 
-/* In flight (FRG-UI-048): the control already shows the REQUESTED state, so the
- * busy treatment reads as "working" rather than as unavailable. Two classes deep
- * so it outranks the aria-disabled treatment the in-flight control also carries;
- * it stays keyboard-reachable, and the duplicate mutation is suppressed in the
- * handler. */
+/* In flight (FRG-UI-048): the control already draws the REQUESTED state, and
+ * `aria-busy` — not a visual dimming — is what says it is working. The cursor is
+ * the whole treatment: two classes deep so it outranks the aria-disabled rule
+ * the in-flight control also matches, and nothing here touches opacity, which
+ * would dim the focus ring of a control that stays keyboard-reachable. The
+ * duplicate mutation is suppressed in the handler. */
 .iconBtn.iconBtnBusy {
   cursor: progress;
-  opacity: 0.65;
 }
 
 /* --- Entry detail expando (FRG-UI-042) --- */
