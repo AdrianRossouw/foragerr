@@ -187,17 +187,16 @@ async def _handle_grab_release(
     # downloads.resolver -> search_ops.grab dependency never becomes a cycle.
     from sqlalchemy import select
 
-    from foragerr.library.read_only import (
-        refuse_read_only_issues,
-        refuse_read_only_series_in,
-    )
-
     from foragerr.db import utcnow
     from foragerr.downloads import make_download_factory
     from foragerr.downloads.models import SOURCE_DDL, SOURCE_INDEXER, GrabHistoryRow
     from foragerr.downloads.registry import PROTOCOL_DDL
     from foragerr.downloads.resolver import protocol_for_grab, resolve_client_for
     from foragerr.importer import history as import_history
+    from foragerr.library.read_only import (
+        refuse_read_only_issues,
+        refuse_read_only_series_in,
+    )
     from foragerr.providers.backoff import ProviderBackoff
 
     # Either identity is enough to refuse: a hand-off built by the engine carries
