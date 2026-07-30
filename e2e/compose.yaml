@@ -14,7 +14,11 @@ networks:
     driver: bridge
     ipam:
       config:
-        - subnet: 203.0.113.0/24
+        # Overridable alongside FORAGERR_E2E_PROJECT: docker refuses a second
+        # network on an overlapping pool, so a concurrent run needs its own.
+        # Any replacement MUST stay outside RFC-1918 for the reason below —
+        # TEST-NET-2 (198.51.100.0/24) and TEST-NET-1 (192.0.2.0/24) qualify.
+        - subnet: ${FORAGERR_E2E_SUBNET:-203.0.113.0/24}
 
 services:
   foragerr:

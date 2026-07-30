@@ -19,11 +19,13 @@ failure. Traces/screenshots for failures land under `e2e/results/`.
 
 Useful env: `E2E_KEEP_UP=1` leaves the stack running for debugging;
 `E2E_SKIP_BUILD=1` reuses an already-built `FORAGERR_IMAGE`;
-`FORAGERR_E2E_PROJECT=<name>` renames the compose project. Set that last one
-whenever a second run may overlap this one — the docker daemon is shared, so two
-runs under the same project name recreate and tear down each other's containers,
-and the survivor fails every scenario after the first teardown with
-`ECONNREFUSED` against a port that no longer exists.
+`FORAGERR_E2E_PROJECT=<name>` plus `FORAGERR_E2E_SUBNET=<cidr>` and a distinct
+`FORAGERR_IMAGE` isolate a run that may overlap another. Set those whenever a
+second run can overlap this one — the docker daemon is shared, so two runs under
+the same project name recreate and tear down each other's containers, and the
+survivor fails every scenario after the first teardown with `ECONNREFUSED`
+against a port that no longer exists. A replacement subnet must stay outside
+RFC-1918 (see the egress-policy constraint below).
 
 ## Authentication (mandatory login)
 
