@@ -1133,11 +1133,6 @@ export function useToggleIssueMonitored(): UseMutationResult<
   const fetcher = useFetcher();
   const queryClient = useQueryClient();
   return useMutation({
-    // `always`, not the default `online`: a mutation started while the browser
-    // reports itself offline would otherwise be PAUSED, and its promise never
-    // settles — leaving the caller's optimistic state stranded on a control that
-    // stays busy forever. Failing fast reaches the revert-and-report path.
-    networkMode: 'always',
     mutationFn: ({ issueId, monitored }) =>
       fetcher<IssueResource>(`/api/v1/issues/${issueId}`, {
         method: 'PUT',
