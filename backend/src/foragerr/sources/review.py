@@ -798,10 +798,9 @@ async def bulk_match(
     commands=None,
     matched_via: str,
 ) -> BulkResult:
-    # Every member targets the SAME series, so a browse-only target refuses the
-    # whole request before any row is touched (FRG-SER-022) — the all-or-none
-    # shape the bulk toggles already use, rather than a per-row error N times.
-    await _refuse_read_only_target(db, series_id)
+    # Every member targets the SAME series, so a browse-only target is refused by
+    # the first member's own in-transaction check (FRG-SER-022) and the whole
+    # request aborts with nothing applied — no separate up-front check needed.
     # A bulk selection can span many groups; sweeping per member would re-scan
     # the source's open queue once per row (O(members x queue) in the writer
     # lock). The group sweep is the single-pick / group-header convenience, not
@@ -990,8 +989,6 @@ async def bulk_apply_to_group(
         )
     if not entitlement_ids:
         return BulkResult(applied=0, skipped=0, errors={})
-    if series_id is not None:
-        await _refuse_read_only_target(db, series_id)
 
     new_ids, group_key, source_id = await _new_group_members(db, entitlement_ids)
 
@@ -1063,19 +1060,6 @@ async def _bulk(db, entitlement_ids: list[int], action) -> BulkResult:
 # --- helpers ----------------------------------------------------------------
 
 
-async def _refuse_read_only_target(db, series_id: int) -> None:
-    """Refuse an acquisition action aimed at a browse-only series (FRG-SER-022).
-
-    The up-front form for the actions that know their target before they start
-    writing; the authoritative in-transaction checks stay in
-    :func:`match_entitlement` and :func:`_queue_grab`."""
-    from foragerr.library.read_only import refuse_read_only_series_in
-
-    await refuse_read_only_series_in(
-        db, series_id, action="downloading a store purchase into it"
-    )
-
-
 async def _refuse_read_only_root(db, root_folder_id: int) -> None:
     """Refuse adding a series FOR a store entitlement onto a read-only root
     (FRG-SER-022) — registering a reference library is legitimate, downloading
@@ -1104,6 +1088,8 @@ async def _refuse_read_only_proposals(db, entitlement_ids: list[int]) -> None:
         return
     from sqlalchemy import select
 
+    from foragerr.library.read_only import refuse_read_only_series_in
+
     async with db.read_session() as session:
         rows = (
             (
@@ -1122,7 +1108,9 @@ async def _refuse_read_only_proposals(db, entitlement_ids: list[int]) -> None:
         if series_id is not None
     }
     for series_id in sorted(targets):
-        await _refuse_read_only_target(db, series_id)
+        await refuse_read_only_series_in(
+            db, series_id, action="downloading a store purchase into it"
+        )
 
 
 async def _series_id_for_volume(db, cv_volume_id: int) -> int | None:

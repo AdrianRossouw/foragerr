@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import httpx
 import pytest
+from sqlalchemy import select
 
 from foragerr.library import repo as library_repo
 from foragerr.library.read_only import ReadOnlySeriesError
@@ -246,14 +247,36 @@ async def test_queue_grab_seam_refuses_even_for_an_already_matched_row(
 async def test_retry_refuses_and_keeps_the_failed_row_intact(
     db, config_dir, browse_only_series_id
 ):
+    """Refused before the retry's own bookkeeping runs: the failure the operator
+    is looking at survives, including the tracked row a retry would delete."""
+    from foragerr.db import utcnow
+    from foragerr.downloads.models import TrackedDownloadRow
+    from foragerr.sources.import_hook import HUMBLE_DOWNLOAD_PREFIX
+
     source = await _synced_source(db, config_dir)
     ent = await _comic(db, source.id, "synth_singleissue_01")
+    download_id = f"{HUMBLE_DOWNLOAD_PREFIX}{ent.id}"
     async with db.write_session() as session:
         row = await session.get(SourceEntitlementRow, ent.id)
         row.review_status = "matched"
         row.matched_series_id = browse_only_series_id
         row.download_state = "failed"
         row.download_error = "synthetic prior failure"
+        now = utcnow()
+        session.add(
+            TrackedDownloadRow(
+                download_id=download_id,
+                client_id=None,
+                client_name="store",
+                protocol="ddl",
+                state="failed_pending",
+                status="error",
+                issue_id=None,
+                series_id=browse_only_series_id,
+                added_at=now,
+                updated_at=now,
+            )
+        )
     commands = FakeCommands()
 
     with pytest.raises(ReadOnlySeriesError):
@@ -263,6 +286,15 @@ async def test_retry_refuses_and_keeps_the_failed_row_intact(
     assert after.download_state == "failed"
     assert after.download_error == "synthetic prior failure"
     assert commands.enqueued == []
+    async with db.read_session() as session:
+        surviving = (
+            await session.execute(
+                select(TrackedDownloadRow).where(
+                    TrackedDownloadRow.download_id == download_id
+                )
+            )
+        ).all()
+    assert len(surviving) == 1
 
 
 @pytest.mark.req("FRG-SER-022")
