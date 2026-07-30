@@ -1,0 +1,13 @@
+# Committed exceptions for tools/comment_check.py (FRG-PROC-023).
+#
+# One entry per line:  <path glob>  <rule[,rule]|*>   # why this hit is legitimate
+#
+# An entry is a claim that the matched text is product fact or a
+# deliberate illustration — never a way to keep an environment-specific
+# value. The standard is docs/process/code-comments.md.
+
+tools/comment_check.py            *            # the detector patterns are the tool's subject matter
+tools/comment_check_allow.txt     *            # this file names the rules it exempts
+backend/tests/test_comment_check.py *          # fixtures must embed the violations they assert on
+docs/process/code-comments.md     *            # the standard shows its own non-compliant examples
+.claude/skills/release/SKILL.md   local-path   # /tmp in a shell recipe is portable scratch, not one machine

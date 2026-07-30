@@ -30,6 +30,11 @@ logs/
 sample-comics/
 .DS_Store
 
+# Comment-hygiene local denylist (FRG-PROC-023): operator-specific literals
+# tools/comment_check.py should flag — real collection titles, rig hostnames.
+# Never committed; the tool skips that pass when it is absent.
+tools/comment_check_local_denylist.txt
+
 # Secrets — API keys live in env/.env, never in the repo
 .env
 .env.*

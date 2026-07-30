@@ -49,6 +49,14 @@ This project is developed under the `dev-process` spec
    exit 0 at every merge gate (full checklist:
    `docs/process/commit-standard.md` §Merge-gate checklist).
 
+10. **Comment hygiene** (FRG-PROC-023). Committed comments, docstrings, test names
+    and fixture literals state a constraint the code cannot express — never
+    narration, never review provenance, never a value true only of one
+    environment (rig host/port, container name, local path, operator identity),
+    and examples use synthetic identifiers ("Example Series #1", `example.com`).
+    Standard: `docs/process/code-comments.md`; `tools/comment_check.py` must
+    exit 0 at every merge gate.
+
 ## Orchestration
 
 The main session acts as orchestrator. Fan implementation and research work out to

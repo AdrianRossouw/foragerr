@@ -9,30 +9,30 @@
 
 ## 2. Standard doc (FRG-PROC-023)
 
-- [ ] 2.1 Write `docs/process/code-comments.md`: the four rules in full,
+- [x] 2.1 Write `docs/process/code-comments.md`: the four rules in full,
       each with a compliant/non-compliant example pair (comment
       narration vs. invariant; rig hostname vs. neutral placeholder; real
       collection title vs. "Example Series #1"; review-provenance phrase
       vs. requirement-ID-as-constraint).
-- [ ] 2.2 Cross-link from `docs/process/commit-standard.md` and from
+- [x] 2.2 Cross-link from `docs/process/commit-standard.md` and from
       `CLAUDE.md`.
 
 ## 3. Merge-gate checklist (FRG-PROC-023)
 
-- [ ] 3.1 Add a comment-hygiene line to
+- [x] 3.1 Add a comment-hygiene line to
       `docs/process/commit-standard.md` §Merge-gate checklist, alongside
       the existing SOUP/trace/risk-register mechanical-check lines,
       naming `tools/comment_check.py` and the gate's angle-checklist pass.
 
 ## 4. CLAUDE.md pointer (FRG-PROC-023)
 
-- [ ] 4.1 Add one line under "Non-negotiable process rules" pointing to
+- [x] 4.1 Add one line under "Non-negotiable process rules" pointing to
       `docs/process/code-comments.md`, matching the existing style used
       for FRG-PROC-004/006 summaries.
 
 ## 5. Mechanical scanner (FRG-PROC-023)
 
-- [ ] 5.1 `tools/comment_check.py`: stdlib-only script (no new
+- [x] 5.1 `tools/comment_check.py`: stdlib-only script (no new
       dependency — `tools/soup_check.py` precedent) that walks committed
       text (comments, docstrings, test names/fixture literals, sample
       configs, committed docs outside README/manual) for a committed set
@@ -40,19 +40,19 @@
       common container-name shapes, known home-directory path prefixes,
       review-provenance phrases ("fixed in review", "per gate feedback",
       etc.).
-- [ ] 5.2 Optional gitignored local denylist file support: if present,
+- [x] 5.2 Optional gitignored local denylist file support: if present,
       also flags its literal entries (real titles, rig hostnames the
       operator maintains locally); if absent, emits a warning and still
       exits according to the generic-pattern pass alone (never fails
       solely because the local file is missing).
-- [ ] 5.3 Exits non-zero on any generic-pattern or local-denylist match,
+- [x] 5.3 Exits non-zero on any generic-pattern or local-denylist match,
       naming the file/line and the matched rule, mirroring
       `tools/soup_check.py`'s reporting style.
-- [ ] 5.4 Tagged test(s) for FRG-PROC-023 covering: a rig-hostname/port
+- [x] 5.4 Tagged test(s) for FRG-PROC-023 covering: a rig-hostname/port
       literal is flagged; a review-provenance phrase is flagged; a clean
       fixture tree passes; the local-denylist-absent case still exits 0
       when the generic pass is clean.
-- [ ] 5.5 Wire into the merge-gate checklist procedure (this is the
+- [x] 5.5 Wire into the merge-gate checklist procedure (this is the
       mechanical half of task 3; task 3 documents it, this task makes it
       real and runnable).
 
