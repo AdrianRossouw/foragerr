@@ -996,7 +996,8 @@ describe('FRG-UI-035: Calendar degraded pull-source notice', () => {
 describe('FRG-UI-045: Calendar refusals are visible', () => {
   it('FRG-UI-045 — a refused want/skip toggle surfaces the reason', async () => {
     const records = [
-      linkedRow('Example Series', '2026-07-01', {
+      makeLinkedPullEntry('Example Series', {
+        releaseDate: '2026-07-01',
         state: 'unmonitored',
         matchedIssueId: 500,
       }),
@@ -1011,7 +1012,7 @@ describe('FRG-UI-045: Calendar refusals are visible', () => {
     renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
 
     await screen.findByText('Example Series');
-    await user.click(screen.getByRole('button', { name: 'Want Example Series' }));
+    await user.click(screen.getByRole('button', { name: 'Monitor Example Series' }));
 
     expect(await screen.findByTestId('calendar-action-error')).toHaveTextContent(
       'series is in a read-only library',
@@ -1019,7 +1020,9 @@ describe('FRG-UI-045: Calendar refusals are visible', () => {
   });
 
   it('FRG-UI-045 — a refused search dispatch surfaces the reason', async () => {
-    const records = [linkedRow('Example Series', '2026-07-01')];
+    const records = [
+      makeLinkedPullEntry('Example Series', { releaseDate: '2026-07-01' }),
+    ];
     const { fetcher } = fakeFetcher((path, init) => {
       if (init?.method === 'POST' && path === '/api/v1/command') {
         throw new Error('series is in a read-only library');
@@ -1038,23 +1041,31 @@ describe('FRG-UI-045: Calendar refusals are visible', () => {
   });
 
   it('FRG-UI-045 — an accepted want/skip leaves no error region behind', async () => {
-    const records = [
-      linkedRow('Example Series', '2026-07-01', {
-        state: 'unmonitored',
-        matchedIssueId: 500,
-      }),
-    ];
+    // The projection honours the write here, so the refetch that settles the
+    // toggle must serve the re-projected (monitored) state — leaving the
+    // record unmonitored would legitimately trigger the refusal explanation.
+    let monitored = false;
     const { spy, fetcher } = fakeFetcher((path, init) => {
       if (init?.method === 'PUT' && path === '/api/v1/issues/500') {
+        monitored = true;
         return makeIssue({ id: 500, series_id: 7, monitored: true });
       }
-      return pageOf(records, { pageSize: 200 });
+      return pageOf(
+        [
+          makeLinkedPullEntry('Example Series', {
+            releaseDate: '2026-07-01',
+            state: monitored ? 'missing_wanted' : 'unmonitored',
+            matchedIssueId: 500,
+          }),
+        ],
+        { pageSize: 200 },
+      );
     });
     const user = userEvent.setup();
     renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
 
     await screen.findByText('Example Series');
-    await user.click(screen.getByRole('button', { name: 'Want Example Series' }));
+    await user.click(screen.getByRole('button', { name: 'Monitor Example Series' }));
 
     await waitFor(() =>
       expect(spy).toHaveBeenCalledWith('/api/v1/issues/500', {
