@@ -36,7 +36,13 @@ CLASSIFICATIONS = ("comic", "other")
 
 #: Review-status axis values (design decision 2). ``download_state`` is a
 #: separate axis (the existing-pipeline progress), surfaced in Activity.
-REVIEW_STATUSES = ("new", "matched", "ignored")
+#: ``duplicate`` (FRG-SRC-015) is held by a copy parked behind a byte-identical
+#: canonical row: it counts and displays like ``ignored`` (out of pending counts
+#: and default views, listed under its own filter, restorable) but means "this
+#: exact file is already represented once" rather than an operator withdrawal.
+#: It deliberately sits OUTSIDE the accept/grab-eligible set, so every guard that
+#: keys on ``review_status == "new"`` excludes it without a second predicate.
+REVIEW_STATUSES = ("new", "matched", "ignored", "duplicate")
 
 #: Match-provenance values for :attr:`SourceEntitlementRow.matched_via`
 #: (FRG-PP-022 guard 3): a human review action vs an auto-sync acceptance.
@@ -105,9 +111,26 @@ class SourceEntitlementRow(Base):
     bundle_human_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     #: ``comic`` | ``other`` (FRG-SRC-003). Non-comic items are retained.
     classification: Mapped[str] = mapped_column(Text, nullable=False)
-    #: ``new`` | ``matched`` | ``ignored`` — the review axis (design decision 2).
+    #: ``new`` | ``matched`` | ``ignored`` | ``duplicate`` — the review axis
+    #: (design decision 2; :data:`REVIEW_STATUSES`).
     review_status: Mapped[str] = mapped_column(
         Text, nullable=False, default="new"
+    )
+    #: The canonical row this one is a byte-identical copy of (FRG-SRC-015) —
+    #: set only while ``review_status == "duplicate"``, cleared by restore and by
+    #: ignore. An id reference without a foreign key: it is review bookkeeping,
+    #: the set never spans sources (which cascade as a whole), and a dangling
+    #: pointer must read as "no set" rather than block a delete.
+    duplicate_of: Mapped[int | None] = mapped_column(StrictInteger, nullable=True)
+    #: Whether the operator has RESTORED this row out of a duplicate parking
+    #: (FRG-SRC-015). The linking pass never parks a flagged row again: a
+    #: restore is an explicit statement that this copy is to be reviewed on its
+    #: own, and the next sync silently reversing it would make restore a
+    #: gesture rather than a decision. It does not stop the row being a
+    #: CANONICAL — flagged or not, it is an ordinary reviewable row. Survives
+    #: ignore/restore cycles; only set, never cleared.
+    dedupe_opt_out: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
     )
     #: Download/import-progress axis, separate from review status (design
     #: decision 2): ``None`` (never grabbed) → ``queued`` → ``fetching`` →
@@ -185,5 +208,18 @@ class SourceEntitlementRow(Base):
             "ix_source_entitlements_source_classification",
             "source_id",
             "classification",
+        ),
+        # md5 linking (FRG-SRC-015) asks "which rows of THIS source carry THIS
+        # md5"; before it the column carried no index at all.
+        Index(
+            "ix_source_entitlements_source_md5",
+            "source_id",
+            "md5",
+        ),
+        # The copies chip resolves "which rows point at these canonicals" on
+        # every listing of the review queue, which runs to thousands of rows.
+        Index(
+            "ix_source_entitlements_duplicate_of",
+            "duplicate_of",
         ),
     )

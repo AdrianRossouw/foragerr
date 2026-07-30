@@ -424,6 +424,15 @@ export interface LookupCandidate {
    * (FRG-META-007 / FRG-UI-032). Absent/false on the default search.
    */
   ignored?: boolean;
+  /**
+   * True when the candidate's title carries collected-edition cues (FRG-UI-039
+   * / review-experience-2 design D6): a title heuristic derived from the one
+   * shared booktype vocabulary — ComicVine has no booktype field, so this is
+   * honestly a cue, never an asserted book type. A soft badge only, never a
+   * gate/filter/re-rank. Optional so an older payload without the field simply
+   * shows no badge.
+   */
+  collected_cues?: boolean;
 }
 
 /**
@@ -457,6 +466,8 @@ export interface SuggestCandidate {
    */
   description?: string | null;
   have_it: boolean;
+  /** See `LookupCandidate.collected_cues` — same honest title heuristic. */
+  collected_cues?: boolean;
 }
 
 /**
@@ -1172,8 +1183,14 @@ export interface SourceSyncResponse {
 /** Entitlement content classification (FRG-SRC-003): comic vs everything else. */
 export type EntitlementClassification = 'comic' | 'other';
 
-/** Entitlement review axis (FRG-SRC-004) — distinct from download progress. */
-export type EntitlementReviewStatus = 'new' | 'matched' | 'ignored';
+/**
+ * Entitlement review axis (FRG-SRC-004) — distinct from download progress.
+ * `duplicate` (FRG-SRC-015, review-experience-2): an md5-identical copy of
+ * another same-source row, parked at sync time. Excluded from pending counts
+ * and the default view; restore returns it to `new` exactly like an ignored
+ * row. A decided row (`matched`/`ignored`) is never re-linked into a set.
+ */
+export type EntitlementReviewStatus = 'new' | 'matched' | 'ignored' | 'duplicate';
 
 /**
  * The server-computed proposed match on a `new` entitlement (FRG-SRC-004): a
@@ -1231,6 +1248,16 @@ export interface EntitlementResource {
    * nothing (such a row never groups).
    */
   group_key: string;
+  /**
+   * The DISPLAY fold this row groups under (FRG-UI-029, review-experience-2):
+   * the server's containment merge of `group_key` across title forms of the
+   * same franchise ("Series Vol. 3" / "THE FIRST ADVENTURE OF SERIES"). Equals
+   * `group_key` when this row's fold merges with nothing. The write-side
+   * sibling sweep keeps using `group_key` (unchanged) — this field is
+   * presentation-only, per design.md D4. The client buckets same-title runs by
+   * THIS field, never `group_key` directly.
+   */
+  display_group_key: string;
   classification: EntitlementClassification;
   review_status: EntitlementReviewStatus;
   download_state: string | null;
@@ -1241,6 +1268,30 @@ export interface EntitlementResource {
   proposed_series_id: number | null;
   matched_series_id: number | null;
   proposed_match: EntitlementProposal | null;
+  /**
+   * md5-duplicate pointer (FRG-SRC-015): the canonical row's id when this row
+   * is a parked `duplicate`, else null. Set once at sync-time linking; never
+   * repointed while decided (D2).
+   */
+  duplicate_of: number | null;
+  /**
+   * On a canonical row: how many parked copies point at it (0 when it has
+   * none). Always 0 on a non-canonical/duplicate row — a duplicate does not
+   * itself carry a copies chip.
+   */
+  duplicate_count: number;
+  /** Bundle identities of this canonical row's copies, for the copies chip's
+   * tooltip; `[]` when `duplicate_count` is 0. */
+  duplicate_bundles: string[];
+  /**
+   * Parsed volume ordinal (FRG-UI-029 D5, the FRG-PP-022 derivation), or null
+   * when the title carries none. Drives within-group sort order — the client
+   * never re-parses `human_name` for this.
+   */
+  volume_ordinal: number | null;
+  /** Parsed issue number (same derivation as `volume_ordinal`), verbatim
+   * string ("1.5"/"1.MU" render unchanged) — null when none was parsed. */
+  issue_number: string | null;
 }
 
 /**

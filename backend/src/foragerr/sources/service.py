@@ -35,6 +35,7 @@ from foragerr.sources.classify import (
     PublisherRuleSet,
     classify,
 )
+from foragerr.sources.dedupe import link_duplicate_entitlements
 from foragerr.sources.humble import (
     HUMBLE_API_BASE,
     HumbleAuthError,
@@ -72,6 +73,8 @@ class SyncResult:
     comic: int = 0
     other: int = 0
     skipped_orders: int = 0
+    #: Copies parked behind a byte-identical canonical row this run (FRG-SRC-015).
+    duplicates_parked: int = 0
     expired: bool = False
     #: True once at least one order was processed (partial results are kept even
     #: when a later order triggers expiry).
@@ -87,6 +90,8 @@ class SyncResult:
         ]
         if self.skipped_orders:
             parts.append(f"{self.skipped_orders} order(s) skipped")
+        if self.duplicates_parked:
+            parts.append(f"{self.duplicates_parked} duplicate(s) parked")
         if self.expired:
             parts.append("session expired mid-sync")
         return ", ".join(parts)
@@ -207,26 +212,38 @@ async def run_sync(
         base_url=base_url,
     ) as client:
         gamekeys = await client.list_gamekeys()  # 401 here → caller marks expired
-        for gamekey in gamekeys:
-            try:
-                entitlements = await client.fetch_order(gamekey)
-            except HumbleAuthError:
-                # Mid-sync expiry: stop, keep everything already persisted.
-                result.expired = True
-                raise
-            except (HumbleUnavailable, HumbleMalformedError) as exc:
-                logger.warning(
-                    "sync: skipping order %s (%s); partial results kept",
-                    gamekey,
-                    exc,
+        try:
+            for gamekey in gamekeys:
+                try:
+                    entitlements = await client.fetch_order(gamekey)
+                except HumbleAuthError:
+                    # Mid-sync expiry: stop, keep everything already persisted.
+                    result.expired = True
+                    raise
+                except (HumbleUnavailable, HumbleMalformedError) as exc:
+                    logger.warning(
+                        "sync: skipping order %s (%s); partial results kept",
+                        gamekey,
+                        exc,
+                    )
+                    result.skipped_orders += 1
+                    continue
+                await _persist_order(
+                    db, source.id, entitlements, result, publisher_rules=publisher_rules
                 )
-                result.skipped_orders += 1
-                continue
-            await _persist_order(
-                db, source.id, entitlements, result, publisher_rules=publisher_rules
-            )
-            result.orders += 1
-            result.partial = True
+                result.orders += 1
+                result.partial = True
+        finally:
+            # md5 linking (FRG-SRC-015) runs ONCE per sync over the source's
+            # rows, not per order: a per-order pass would re-scan the whole
+            # inventory for every order, and a set can span orders anyway (the
+            # same file bought in two bundles is the case it exists for). In the
+            # ``finally`` so a mid-sync expiry still collapses whatever the run
+            # persisted, matching the partial-results contract above.
+            if result.orders:
+                result.duplicates_parked = await link_duplicate_entitlements(
+                    db, source.id
+                )
     return result
 
 

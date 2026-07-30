@@ -137,12 +137,15 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
 
 from functools import lru_cache
 
+from foragerr.db.base import utcnow
 from foragerr.library.booktype import detect_series_booktype
 from foragerr.metadata.search import name_similarity
+from foragerr.parser import parse
 from foragerr.parser.normalize import matching_key
 from foragerr.parser.vocab import DEFAULT_OPTIONS, booktype_cue_phrases
 
@@ -402,6 +405,15 @@ def group_key(human_name: str) -> str:
     "ungroupable" signal and never collapses with anything. The one shared fold
     is used by both the read surface (grouping) and the write surface (the
     FRG-SRC-014 sibling sweep) so the two can never diverge.
+
+    **The one sanctioned difference** (FRG-UI-029, design D4): the DISPLAY
+    grouping may additionally merge distinct keys that contain one another as a
+    contiguous token run (:func:`merge_display_groups`); write-side sweeps MUST
+    NOT. A display merge that is wrong costs a glance — every merged row keeps
+    its own proposal and its own actions — while a sweep keyed on the wider
+    relation would rewrite proposals across titles that were never the same
+    series. So the fold above stays the single key both surfaces compute, and the
+    widening lives on top of it, on the read side only.
     """
     return stripped_key(query_term(human_name))
 
@@ -412,6 +424,121 @@ def _contains_run(haystack: tuple[str, ...], needle: tuple[str, ...]) -> bool:
     if n == 0 or n > len(haystack):
         return False
     return any(haystack[i : i + n] == needle for i in range(len(haystack) - n + 1))
+
+
+#: Fewest tokens a key must have to be merged INTO a longer one. A single-token
+#: key is a word, not a title: "force" is inside every key that mentions it, so
+#: allowing it as a needle makes it a container for unrelated franchises and
+#: collapses the whole review list into a handful of groups named after one-word
+#: series. A two-token run is the shortest evidence that two keys are forms of
+#: ONE title rather than titles sharing a word.
+_MERGE_MIN_NEEDLE_TOKENS = 2
+
+
+def merge_display_groups(keys: Iterable[str]) -> dict[str, str]:
+    """Map each :func:`group_key` to the DISPLAY group it renders under.
+
+    Read-side only (FRG-UI-029, design D4 — see :func:`group_key`). A fold key
+    merges into another when its tokens occur as a contiguous run inside that
+    other's: the same containment relation the FRG-SRC-010 confidence floor
+    already trusts (:func:`_contains_run`), which is what reunites one franchise
+    split across two title forms — a bare series name and a longer form that
+    carries it whole.
+
+    Two rules keep the widening from running away, because a merged group is not
+    only a glance: its header scopes a Match-all, which WRITES.
+
+    * the contained key (the needle) must carry at least
+      :data:`_MERGE_MIN_NEEDLE_TOKENS` tokens;
+    * each needle attaches to its LONGEST container ONLY — one edge per key, not
+      the transitive closure of every containment pair. Under the closure a key
+      contained in two unrelated longer keys welded them together, and those in
+      turn welded their own containers, so distinct titles chained into a single
+      group. Following one-parent edges to their root still reunites a genuine
+      chain ("a b" inside "a b c" inside "a b c d") without ever joining two keys
+      that share nothing but a needle.
+
+    Ties on container length break lexicographically, and the representative of a
+    merged group is its SHORTEST key (ties likewise): the contained key is the
+    part every member shares, so it is the only label true of all of them, and
+    both choices make the mapping independent of input order. The empty key is
+    the ungroupable signal and never merges — it maps to itself.
+
+    Comparison is indexed by the needle's FIRST token rather than run over every
+    pair — a contained run must start somewhere in the container, so only keys
+    whose first token appears in the container can be inside it. The review list
+    is a thousand-row surface and the quadratic form is a per-request cost.
+    """
+    tokens: dict[str, tuple[str, ...]] = {}
+    for key in keys:
+        if key and key not in tokens:
+            tokens[key] = tuple(key.split())
+    by_first: dict[str, list[str]] = {}
+    for key, toks in tokens.items():
+        by_first.setdefault(toks[0], []).append(key)
+
+    # needle -> its single longest container. Every edge is strictly
+    # length-INCREASING (a container has more tokens than what it contains), so
+    # following the edges always terminates and can never form a cycle.
+    container: dict[str, str] = {}
+    for key, toks in tokens.items():
+        for token in set(toks):
+            for needle in by_first.get(token, ()):
+                if needle == key or len(tokens[needle]) < _MERGE_MIN_NEEDLE_TOKENS:
+                    continue
+                if not _contains_run(toks, tokens[needle]):
+                    continue
+                current = container.get(needle)
+                if current is None or (-len(toks), key) < (
+                    -len(tokens[current]),
+                    current,
+                ):
+                    container[needle] = key
+
+    def root(key: str) -> str:
+        while key in container:
+            key = container[key]
+        return key
+
+    best: dict[str, str] = {}
+    for key in tokens:
+        top = root(key)
+        current = best.get(top)
+        rank = (len(tokens[key]), key)
+        if current is None or rank < (len(tokens[current]), current):
+            best[top] = key
+    return {key: best[root(key)] for key in tokens}
+
+
+@lru_cache(maxsize=4096)
+def _parsed_ordinals(
+    human_name: str, reference_year: int
+) -> tuple[int | None, str | None]:
+    parsed = parse(human_name, reference_year=reference_year)
+    issue = parsed.issue.display if parsed.issue is not None else None
+    return parsed.volume_ordinal, issue
+
+
+def sort_ordinals(human_name: str) -> tuple[int | None, str | None]:
+    """A store title's ``(volume_ordinal, issue_number)`` for review ordering.
+
+    The ONE parser (FRG-IMP-003/012) reads the ordinals, exactly as the import
+    pipeline's FRG-PP-022 derivation does — the client never re-parses a name,
+    because a second regex over the same titles is a second fold that would
+    disagree with the first the moment either changed. Either component is
+    ``None`` when the title carries no such evidence; the client orders unknowns
+    last.
+
+    The issue number is the parser's DISPLAY form (``"3"``, ``"1.5"``, ``"007"``
+    as written), not a number: it is rendered beside the row, and the review list
+    orders within a group where a lossy numeric coercion would silently merge
+    distinguishable issues.
+
+    The reference year only disambiguates a bare 4-digit token as a year rather
+    than an issue, so the current year is the same choice the download-tracking
+    parse makes; it is part of the cache key so the memo can never outlive it.
+    """
+    return _parsed_ordinals(human_name, utcnow().year)
 
 
 def title_confidence(term: str, name: str | None) -> float:
@@ -841,9 +968,11 @@ __all__ = [
     "ProposedMatch",
     "compute_proposed_match",
     "group_key",
+    "merge_display_groups",
     "query_term",
     "rank_library",
     "shares_token",
+    "sort_ordinals",
     "stripped_key",
     "stripped_tokens",
     "title_confidence",

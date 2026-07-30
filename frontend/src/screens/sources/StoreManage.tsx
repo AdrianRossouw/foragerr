@@ -27,7 +27,7 @@ import { queryKeys } from '../../api/queryKeys';
 import type { EntitlementResource, StoreSourceResource } from '../../api/types';
 import styles from './sources.module.css';
 
-type Filter = 'all' | 'new' | 'matched' | 'ignored';
+type Filter = 'all' | 'new' | 'matched' | 'ignored' | 'duplicate';
 
 /** One row's failure inside a bulk accept, named for the operator. */
 interface BulkFailure {
@@ -44,6 +44,13 @@ interface BulkFailure {
  * coherent under test.
  */
 const ROW_ESTIMATE_PX = 78;
+
+/**
+ * Stable stand-in for "no entitlements loaded yet". A fresh `[]` per render
+ * would give the scoping memo below a new dependency identity every time and
+ * defeat the whole grouping cache while the query is in flight.
+ */
+const NO_ENTITLEMENTS: EntitlementResource[] = [];
 
 /**
  * Viewport height assumed when the scroll container reports none, IN TESTS ONLY.
@@ -76,8 +83,10 @@ const BULK_VERBS = {
 /**
  * Connected-store manage view (FRG-UI-029): account bar (auto-sync toggle, Sync
  * now, Disconnect), the publisher-rules editor (FRG-SRC-012), the count line +
- * All/New/Matched/Ignored filter segments and a non-comic reveal, and the
- * reviewable entitlement list.
+ * All/New/Matched/Ignored/Duplicates filter segments and a non-comic reveal,
+ * and the reviewable entitlement list. "All" and the pending counts exclude
+ * `duplicate` rows (FRG-SRC-015) — a parked copy was already reviewed once as
+ * its canonical row, so the Duplicates filter is its only home.
  *
  * The list is the at-scale surface (the dogfood first sync is 1,318 rows): it
  * virtualizes, same-title runs fold into expandable groups keyed by the
@@ -147,20 +156,35 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
   });
   const syncing = syncNow.isPending || syncWatch.running;
 
-  const all = entitlementsQuery.data ?? [];
+  const all = entitlementsQuery.data ?? NO_ENTITLEMENTS;
   // The non-comic toggle scopes the whole surface; segment counts + the count
   // line are computed over the same scope so they always agree with the list.
-  const scoped = all.filter((e) => showOther || e.classification === 'comic');
-  const count = (s: EntitlementResource['review_status']) =>
-    scoped.filter((e) => e.review_status === s).length;
-  const counts = {
-    all: scoped.length,
-    new: count('new'),
-    matched: count('matched'),
-    ignored: count('ignored'),
-  };
-  const visible =
-    filter === 'all' ? scoped : scoped.filter((e) => e.review_status === filter);
+  // Memoized down the whole chain because `visible` feeds the grouping and
+  // bundle memos below: a fresh array identity on every render misses those
+  // caches, so every unrelated state change re-folds the entire inventory.
+  const scoped = useMemo(
+    () => all.filter((e) => showOther || e.classification === 'comic'),
+    [all, showOther],
+  );
+  const counts = useMemo(() => {
+    // "All" is the default view (FRG-SRC-015): a duplicate set was already
+    // reviewed once as its canonical row, so its parked copies stay out of
+    // both this count and the default list — the Duplicates filter is their
+    // only home.
+    const tally = { all: 0, new: 0, matched: 0, ignored: 0, duplicate: 0 };
+    for (const e of scoped) {
+      tally[e.review_status] += 1;
+      if (e.review_status !== 'duplicate') tally.all += 1;
+    }
+    return tally;
+  }, [scoped]);
+  const visible = useMemo(
+    () =>
+      filter === 'all'
+        ? scoped.filter((e) => e.review_status !== 'duplicate')
+        : scoped.filter((e) => e.review_status === filter),
+    [scoped, filter],
+  );
 
   // Same-title collapse (FRG-UI-029): rows fold into groups by the SERVER's
   // group_key and the list becomes ONE flat array of headers and rows. Every
@@ -561,6 +585,7 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
               { value: 'new', label: `New ${counts.new}`, testId: 'filter-new' },
               { value: 'matched', label: `Matched ${counts.matched}`, testId: 'filter-matched' },
               { value: 'ignored', label: `Ignored ${counts.ignored}`, testId: 'filter-ignored' },
+              { value: 'duplicate', label: `Duplicates ${counts.duplicate}`, testId: 'filter-duplicate' },
             ]}
           />
           <label className={styles.otherToggle}>

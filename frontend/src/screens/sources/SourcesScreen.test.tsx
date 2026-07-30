@@ -45,6 +45,7 @@ function makeSource(
 function ent(
   o: Partial<EntitlementResource> & Pick<EntitlementResource, 'id'>,
 ): EntitlementResource {
+  const groupKey = o.group_key ?? `item-${o.id}`;
   return {
     source_id: 5,
     machine_name: `m-${o.id}`,
@@ -55,7 +56,10 @@ function ent(
     // the fixture states it as a LITERAL per row rather than re-implementing
     // the fold, which is the whole point of it being server-side. The default
     // is unique per row, so a fixture only groups when it says so.
-    group_key: `item-${o.id}`,
+    group_key: groupKey,
+    // Defaults to `group_key` (unmerged, FRG-SRC-015/FRG-UI-029 contract) — a
+    // test proving the containment-merge sets this explicitly.
+    display_group_key: o.display_group_key ?? groupKey,
     classification: 'comic',
     review_status: 'new',
     download_state: null,
@@ -66,6 +70,11 @@ function ent(
     proposed_series_id: null,
     matched_series_id: null,
     proposed_match: null,
+    duplicate_of: null,
+    duplicate_count: 0,
+    duplicate_bundles: [],
+    volume_ordinal: null,
+    issue_number: null,
     ...o,
   };
 }
@@ -109,6 +118,13 @@ interface FetcherState {
   /** Row-search autosuggest resolver; defaults to a quiet empty dropdown so
    * the debounced accelerator never surfaces an unexpected-path throw. */
   suggest?: (path: string) => unknown;
+  /**
+   * Row-search id-path resolver (FRG-UI-039 / FRG-API-026), keyed by the
+   * numeric ComicVine volume id `GET /series/lookup/volume/{id}` was called
+   * with. Returning `undefined` (the default) models an unknown id — the
+   * fetcher throws the 404-shaped `ApiRequestError` the real endpoint would.
+   */
+  volume?: (id: number) => unknown;
   /** When present, every READ path is recorded here (writes go to `calls`). */
   reads?: string[];
 }
@@ -122,6 +138,7 @@ function candidate(
     start_year: number | null;
     count_of_issues: number | null;
     have_it: boolean;
+    collected_cues: boolean;
   }> & { cv_volume_id: number },
 ) {
   return {
@@ -135,6 +152,7 @@ function candidate(
     year_proximity: null,
     target_issue_plausible: null,
     have_it: false,
+    collected_cues: false,
     ...o,
   };
 }
@@ -247,6 +265,23 @@ function makeFetcher(state: FetcherState): Fetcher {
     state.reads?.push(path);
     if (path.startsWith('/api/v1/series/lookup/suggest?term=')) {
       return state.suggest?.(path) ?? { records: [], complete: true };
+    }
+    // The volume-id path (FRG-API-026) is matched BEFORE the plain term
+    // lookup below — both start with '/api/v1/series/lookup', and a picker
+    // regression that fell back to a name search would otherwise be masked
+    // by the term route silently answering it.
+    const volumeMatch = path.match(/^\/api\/v1\/series\/lookup\/volume\/(\d+)$/);
+    if (volumeMatch) {
+      const id = Number(volumeMatch[1]);
+      const found = state.volume?.(id);
+      if (found === undefined) {
+        throw new ApiRequestError(
+          404,
+          { message: 'ComicVine volume not found', errors: [] },
+          path,
+        );
+      }
+      return found;
     }
     if (path.startsWith('/api/v1/series/lookup?term=')) {
       return (
@@ -506,6 +541,165 @@ describe('FRG-UI-029: manage view review', () => {
     const body = bulk.init!.body as { action: string; entitlement_ids: number[] };
     expect(body.action).toBe('ignore');
     expect(body.entitlement_ids.sort()).toEqual([10, 11, 12]);
+  });
+});
+
+/*
+ * FRG-SRC-015 / FRG-UI-029 (review-experience-2) — md5-duplicate presentation:
+ * a Duplicates filter, parked copies dimmed with Restore (mirroring Ignored),
+ * a copies chip on the canonical row, and pending counts / the default "All"
+ * view excluding duplicates.
+ */
+describe('FRG-SRC-015: duplicate-set presentation', () => {
+  const source = makeSource({ id: 5, connection_state: 'connected' });
+  const entitlements = [
+    ent({
+      id: 20,
+      human_name: 'Example Saga, Vol. 1',
+      review_status: 'new',
+      duplicate_count: 1,
+      duplicate_bundles: ['Example Bundle #1'],
+    }),
+    ent({
+      id: 21,
+      human_name: 'Example Saga, Vol. 1 (Choice copy)',
+      review_status: 'duplicate',
+      duplicate_of: 20,
+    }),
+    ent({ id: 22, human_name: 'Unrelated Item', review_status: 'new' }),
+  ];
+
+  it('FRG-SRC-015 — the Duplicates filter narrows to parked copies, which are dimmed with Restore', async () => {
+    const user = userEvent.setup();
+    renderScreen({ sources: [source], entitlements, calls: [] });
+
+    // "All" is the default view: the copy stays out of it (only its canonical
+    // row and the unrelated item show).
+    await screen.findByTestId('entitlement-row-20');
+    expect(screen.queryByTestId('entitlement-row-21')).toBeNull();
+    expect(screen.getByTestId('entitlement-row-22')).toBeInTheDocument();
+
+    await user.click(screen.getByTestId('filter-duplicate'));
+    expect(screen.getByTestId('entitlement-row-21')).toBeInTheDocument();
+    expect(screen.queryByTestId('entitlement-row-20')).toBeNull();
+    expect(screen.queryByTestId('entitlement-row-22')).toBeNull();
+
+    expect(screen.getByTestId('entitlement-row-21').className).toMatch(/rowIgnored/);
+    expect(screen.getByTestId('restore-21')).toBeInTheDocument();
+  });
+
+  it('FRG-SRC-015 — the canonical row shows a copies chip naming the bundle(s)', async () => {
+    renderScreen({ sources: [source], entitlements, calls: [] });
+    const chip = await screen.findByTestId('copies-20');
+    expect(chip).toHaveTextContent('1 copy');
+    expect(chip).toHaveTextContent('Example Bundle #1');
+    expect(chip).toHaveAttribute('title', expect.stringContaining('Example Bundle #1'));
+    // The copy itself carries no chip (duplicate_count is 0 on a non-canonical row).
+    expect(screen.queryByTestId('copies-21')).toBeNull();
+  });
+
+  it('FRG-SRC-015 — the chip states the copies it cannot name instead of appearing to have listed them all', async () => {
+    // A copy whose bundle the store never named counts but cannot be listed,
+    // so `duplicate_bundles` is SHORTER than `duplicate_count`.
+    renderScreen({
+      sources: [source],
+      entitlements: [
+        ent({
+          id: 30,
+          human_name: 'Example Saga, Vol. 1',
+          duplicate_count: 3,
+          duplicate_bundles: ['Example Bundle #1'],
+        }),
+      ],
+      calls: [],
+    });
+
+    const chip = await screen.findByTestId('copies-30');
+    expect(chip).toHaveTextContent('3 copies');
+    expect(chip).toHaveTextContent('Example Bundle #1');
+    expect(chip).toHaveTextContent('+ 2 more');
+  });
+
+  it('FRG-SRC-015 — a bulk accept over a duplicate row surfaces its own refusal in the errors panel', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [
+        ent({
+          id: 40,
+          human_name: 'Unrelated Item',
+          proposed_match: {
+            kind: 'library',
+            series_id: 1,
+            cv_volume_id: null,
+            title: 'Driftwood',
+            year: null,
+            confidence: 0.9,
+          },
+        }),
+        ent({
+          id: 41,
+          human_name: 'Example Saga, Vol. 1 (Choice copy)',
+          review_status: 'duplicate',
+          duplicate_of: 40,
+        }),
+      ],
+      calls: [],
+      bulkResult: (body) => {
+        expect(body.action).toBe('accept');
+        state.entitlements = state.entitlements.map((e) =>
+          e.id === 40
+            ? { ...e, review_status: 'matched' as const, matched_series_id: 1 }
+            : e,
+        );
+        return {
+          applied: 1,
+          skipped: 1,
+          errors: {
+            '41':
+              'entitlement 41 is a copy of a byte-identical item already in ' +
+              'review — restore it first to review it on its own',
+          },
+        };
+      },
+    };
+    renderScreen(state);
+
+    // The copy is reachable through its own filter, where "select all" picks
+    // it up alongside rows that ARE acceptable.
+    await user.click(await screen.findByTestId('filter-duplicate'));
+    await user.click(await screen.findByTestId('select-41'));
+    await user.click(screen.getByTestId('filter-all'));
+    await user.click(await screen.findByTestId('select-40'));
+    await user.click(screen.getByTestId('bulk-accept'));
+
+    const toggle = await screen.findByTestId('bulk-errors-toggle');
+    expect(toggle).toHaveTextContent('1 item could not be accepted');
+    await user.click(toggle);
+    const failure = await screen.findByTestId('bulk-error-41');
+    // The row's OWN refusal, naming the one way out — not a generic skip.
+    expect(failure).toHaveTextContent('byte-identical');
+    expect(failure).toHaveTextContent('restore it first');
+  });
+
+  it('FRG-SRC-015 — a bulk Restore applies to a selected duplicate row exactly like an ignored one', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = { sources: [source], entitlements, calls: [] };
+    renderScreen(state);
+
+    await user.click(await screen.findByTestId('filter-duplicate'));
+    await user.click(await screen.findByTestId('select-21'));
+    await user.click(screen.getByTestId('bulk-restore'));
+
+    await waitFor(() =>
+      expect(state.calls.find((c) => c.path.endsWith('/bulk'))).toBeTruthy(),
+    );
+    const body = state.calls.find((c) => c.path.endsWith('/bulk'))!.init!.body as {
+      action: string;
+      entitlement_ids: number[];
+    };
+    expect(body.action).toBe('restore');
+    expect(body.entitlement_ids).toEqual([21]);
   });
 });
 
@@ -1089,6 +1283,195 @@ describe('FRG-UI-039: per-row ComicVine search', () => {
       'href',
       '/settings/general',
     );
+  });
+});
+
+/*
+ * FRG-UI-039 (review-experience-2) — the picker's own advertised id paste: a
+ * pasted ComicVine volume URL / `4050-XXXX` id resolves through the volume-id
+ * lookup (FRG-API-026) instead of silently becoming a name search that finds
+ * nothing.
+ */
+describe('FRG-UI-039: pasted volume id resolves through the id lookup', () => {
+  const source = makeSource({ id: 5, connection_state: 'connected' });
+  const orphan = ent({ id: 55, human_name: 'Some Unmatched Item' });
+
+  it('FRG-UI-039 — a bare 4050-XXXX id resolves and renders a pickable candidate, firing NO name-search request', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [orphan],
+      calls: [],
+      reads: [],
+      volume: (id) =>
+        id === 1234 ? candidate({ cv_volume_id: 1234, name: 'Widget Chronicles' }) : undefined,
+    };
+    renderScreen(state);
+
+    await user.click(await screen.findByTestId('search-55'));
+    const panel = await screen.findByTestId('row-search-55');
+    const input = within(panel).getByTestId('row-search-input-55');
+    await user.clear(input);
+    await user.type(input, '4050-1234');
+    await user.click(within(panel).getByRole('button', { name: 'Search' }));
+
+    const resolved = await screen.findByTestId('cand-55-1234');
+    expect(resolved).toHaveTextContent('Widget Chronicles');
+    // The dead path the picker used to advertise-and-not-honor: never a
+    // /series/lookup?term= request for an id.
+    expect(
+      state.reads!.some((p) => p.startsWith('/api/v1/series/lookup?term=')),
+    ).toBe(false);
+    expect(
+      state.reads!.some((p) => p.startsWith('/api/v1/series/lookup/volume/1234')),
+    ).toBe(true);
+
+    await user.click(resolved);
+    await waitFor(() =>
+      expect(state.calls.find((c) => c.path.endsWith('/55/add'))).toBeTruthy(),
+    );
+    expect(
+      (state.calls.find((c) => c.path.endsWith('/55/add'))!.init!.body as {
+        cv_volume_id: number;
+      }).cv_volume_id,
+    ).toBe(1234);
+  });
+
+  it('FRG-UI-039 — a full ComicVine volume URL normalizes to the same id path', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [orphan],
+      calls: [],
+      reads: [],
+      volume: (id) =>
+        id === 9999
+          ? candidate({ cv_volume_id: 9999, name: 'Driftwood', have_it: true })
+          : undefined,
+    };
+    renderScreen(state);
+
+    await user.click(await screen.findByTestId('search-55'));
+    const panel = await screen.findByTestId('row-search-55');
+    const input = within(panel).getByTestId('row-search-input-55');
+    await user.clear(input);
+    await user.type(
+      input,
+      'https://comicvine.gamespot.com/driftwood/4050-9999/',
+    );
+    await user.click(within(panel).getByRole('button', { name: 'Search' }));
+
+    const resolved = await screen.findByTestId('cand-55-9999');
+    expect(within(resolved).getByTestId('cand-55-9999-have')).toHaveTextContent(
+      'In library',
+    );
+  });
+
+  it('FRG-UI-039 — an unknown id shows the honest not-found note instead of empty name-search results', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [orphan],
+      calls: [],
+      reads: [],
+      volume: () => undefined,
+    };
+    renderScreen(state);
+
+    await user.click(await screen.findByTestId('search-55'));
+    const panel = await screen.findByTestId('row-search-55');
+    const input = within(panel).getByTestId('row-search-input-55');
+    await user.clear(input);
+    await user.type(input, '4050-4242');
+    await user.click(within(panel).getByRole('button', { name: 'Search' }));
+
+    expect(
+      await screen.findByTestId('row-search-volume-note-55'),
+    ).toHaveTextContent('No ComicVine volume matches that id.');
+    expect(
+      state.reads!.some((p) => p.startsWith('/api/v1/series/lookup?term=')),
+    ).toBe(false);
+    expect(screen.queryByTestId(/^cand-55-/)).toBeNull();
+  });
+
+  it('FRG-UI-039 — editing the box away from a resolved id drops the candidate and re-enables suggest', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [orphan],
+      calls: [],
+      reads: [],
+      volume: (id) =>
+        id === 1234
+          ? candidate({ cv_volume_id: 1234, name: 'Widget Chronicles' })
+          : undefined,
+      suggest: () => ({
+        records: [candidate({ cv_volume_id: 7777, name: 'Vane' })],
+        complete: true,
+        truncated: false,
+      }),
+    };
+    renderScreen(state);
+
+    await user.click(await screen.findByTestId('search-55'));
+    const panel = await screen.findByTestId('row-search-55');
+    const input = within(panel).getByTestId('row-search-input-55');
+    await user.clear(input);
+    await user.type(input, '4050-1234');
+    await user.click(within(panel).getByRole('button', { name: 'Search' }));
+    await screen.findByTestId('cand-55-1234');
+
+    // The operator gives up on the id and types a name instead. The resolved
+    // volume is no longer what the box says, so it must not stay on screen —
+    // and the accelerator, gated off while an id was live, must come back.
+    await user.clear(input);
+    await user.type(input, 'Vane');
+    await afterSuggestDebounce();
+
+    expect(screen.queryByTestId('cand-55-1234')).toBeNull();
+    expect(await screen.findByTestId('cand-55-7777')).toBeInTheDocument();
+  });
+});
+
+/*
+ * FRG-UI-039 (review-experience-2) — the collected-edition title-cue badge: a
+ * soft hint on a candidate, never a gate/filter/re-rank.
+ */
+describe('FRG-UI-039: collected-edition title-cue badge', () => {
+  const source = makeSource({ id: 5, connection_state: 'connected' });
+  const orphan = ent({ id: 56, human_name: 'Some Unmatched Item' });
+
+  it('FRG-UI-039 — a candidate with collected_cues is badged; a plain candidate is not, and neither is reordered', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [orphan],
+      calls: [],
+      lookup: () => ({
+        records: [
+          candidate({ cv_volume_id: 4050_1111, name: 'Widget Vol. 1 TP', collected_cues: true }),
+          candidate({ cv_volume_id: 4050_2222, name: 'Widget' }),
+        ],
+        complete: true,
+        truncated: false,
+      }),
+    };
+    renderScreen(state);
+
+    await user.click(await screen.findByTestId('search-56'));
+    await user.click(within(screen.getByTestId('row-search-56')).getByRole('button', { name: 'Search' }));
+
+    const collected = await screen.findByTestId('cand-56-40501111');
+    expect(within(collected).getByTestId('cand-56-40501111-collected')).toBeInTheDocument();
+    const plain = screen.getByTestId('cand-56-40502222');
+    expect(within(plain).queryByTestId('cand-56-40502222-collected')).toBeNull();
+
+    // Both remain pickable and in the SERVER's given order (no client re-rank).
+    const results = screen.getByTestId('row-search-56').querySelectorAll('button[data-testid^="cand-56-"]');
+    expect(Array.from(results).map((el) => el.getAttribute('data-testid'))).toEqual([
+      'cand-56-40501111',
+      'cand-56-40502222',
+    ]);
   });
 });
 

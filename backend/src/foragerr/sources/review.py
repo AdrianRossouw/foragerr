@@ -131,9 +131,29 @@ async def _queue_grab(db, entitlement_id: int, commands) -> None:
 
 #: Review states an ACCEPT may act on. Accept applies a row's own *proposal*,
 #: and a proposal only governs a row still in the automatic matcher's hands — a
-#: matched row is already resolved and an ignored row is a withdrawal. Neither
-#: may be silently re-decided by a bulk selection (FRG-SRC-011).
+#: matched row is already resolved, an ignored row is a withdrawal, and a
+#: ``duplicate`` row is a copy whose bytes another row already represents
+#: (FRG-SRC-015). None may be silently re-decided by a bulk selection
+#: (FRG-SRC-011), which is why ``duplicate`` is a review STATE: it inherits
+#: every guard keyed on this tuple instead of needing one of its own.
 _ACCEPTABLE_REVIEW_STATES = ("new",)
+
+
+def _duplicate_refusal(entitlement_id: int) -> EntitlementActionError:
+    """The ONE refusal every write path gives a parked copy (FRG-SRC-015).
+
+    A ``duplicate`` row's bytes are already represented by its canonical, so
+    resolving it — by its own proposal, by an operator-chosen series, or by an
+    add — would queue a byte-identical grab the canonical's own decision covers,
+    and would leave the row ``matched`` while still pointing at a canonical it
+    is supposedly no longer a copy of. Restore is the one documented way out,
+    and this is the wording that says so wherever the refusal is raised.
+    """
+    return EntitlementActionError(
+        f"entitlement {entitlement_id} is a copy of a byte-identical item "
+        "already in review — restore it first to review it on its own",
+        status=409,
+    )
 
 
 def _accept_precondition_error(
@@ -142,7 +162,7 @@ def _accept_precondition_error(
     """The per-row error for accepting a row that is no longer in review.
 
     ``None`` when the row is acceptable. The messages are the operator-facing
-    text of the two refusals, and they are per-ROW (a bulk accept reports them
+    text of the refusals, and they are per-ROW (a bulk accept reports them
     against the id and keeps going) — never a failure of the whole request.
     """
     if review_status in _ACCEPTABLE_REVIEW_STATES:
@@ -152,6 +172,8 @@ def _accept_precondition_error(
             f"entitlement {entitlement_id} is ignored — restore it first",
             status=409,
         )
+    if review_status == "duplicate":
+        return _duplicate_refusal(entitlement_id)
     return EntitlementActionError(
         f"entitlement {entitlement_id} is already matched — accept applies "
         "only to items still in review",
@@ -205,6 +227,10 @@ async def match_entitlement(
     OPERATOR's explicit match action leaves it ``False``: choosing a series for
     an already-decided row is a legitimate re-decision, and that is the action
     the operator took.
+
+    A ``duplicate`` row is refused whatever ``require_new`` says (FRG-SRC-015) —
+    see :func:`_duplicate_refusal`. In a bulk run that lands as that row's
+    per-row error and the rest of the selection still applies.
     """
     from foragerr.library.models import SeriesRow
     from foragerr.library.read_only import refuse_read_only_series
@@ -216,6 +242,14 @@ async def match_entitlement(
             raise EntitlementActionError(
                 f"entitlement {entitlement_id} not found", status=404
             )
+        if row.review_status == "duplicate":
+            # UNCONDITIONAL, and inside the transaction that would stamp
+            # ``matched`` (FRG-SRC-015). ``require_new`` is off for the
+            # operator's own match — re-deciding a matched or ignored row is a
+            # legitimate action — but a parked copy is not a decision to
+            # revisit: matching it queues the same bytes the canonical already
+            # represents and leaves ``duplicate_of`` set on a matched row.
+            raise _duplicate_refusal(entitlement_id)
         if require_new:
             refusal = _accept_precondition_error(entitlement_id, row.review_status)
             if refusal is not None:
@@ -325,6 +359,13 @@ async def add_entitlement(
         raise EntitlementActionError(
             f"entitlement {entitlement_id} not found", status=404
         )
+    if row.review_status == "duplicate":
+        # Unconditional, like the match path's own guard (FRG-SRC-015): an add
+        # ends in a match, so a parked copy would otherwise be resolved — and
+        # its byte-identical grab queued — by the direct add endpoint whatever
+        # ``require_new`` says. Raised BEFORE ``add_series`` so the refusal
+        # costs no refresh + scan.
+        raise _duplicate_refusal(entitlement_id)
     if require_new:
         # Cheap pre-check so an accept of a withdrawn row never pays for an
         # ``add_series`` (refresh + scan) it will then refuse to link. The
@@ -649,6 +690,12 @@ async def ignore_entitlement(db, entitlement_id: int) -> SourceEntitlementRow:
             )
         )
         row.review_status = "ignored"
+        # An ignore on a PARKED copy (FRG-SRC-015) wins over its parking and
+        # takes it out of the set: the operator withdrawing this purchase is a
+        # stronger statement than "another row carries the same bytes", and a
+        # row left pointing at a canonical it no longer sits behind would count
+        # in that canonical's copies chip while displaying as ignored.
+        row.duplicate_of = None
         # Cancel any queued / in-flight / completed grab on the download axis so
         # the item is fully excluded; an in-flight grab aborts at its re-read guard.
         row.download_state = None
@@ -657,18 +704,52 @@ async def ignore_entitlement(db, entitlement_id: int) -> SourceEntitlementRow:
     return await _reload(db, entitlement_id)
 
 
+#: Review states RESTORE may act on (FRG-SRC-004, extended by FRG-SRC-015).
+#: Both are parked states — excluded from pending counts and default views,
+#: listed under their own filter — and restore is the one documented way out of
+#: either. ``matched`` and ``new`` are excluded for the reasons in
+#: :func:`restore_entitlement`.
+_RESTORABLE_REVIEW_STATES = ("ignored", "duplicate")
+
+
+def _restore_precondition_error(
+    entitlement_id: int, review_status: str
+) -> EntitlementActionError | None:
+    """The per-row error for restoring a row that is not parked, else ``None``.
+
+    The message names the ignored case alone because that is the state an
+    operator reaches this refusal from — a ``matched`` or ``new`` row offers no
+    Restore affordance, so the text is a bulk-selection explanation, and naming
+    the duplicate filter in it would describe a path the refused row was never
+    on.
+    """
+    if review_status in _RESTORABLE_REVIEW_STATES:
+        return None
+    return EntitlementActionError(
+        f"entitlement {entitlement_id} is {review_status}, not ignored — "
+        "restore applies only to an ignored item",
+        status=409,
+    )
+
+
 async def restore_entitlement(
     db, entitlement_id: int, *, cv_client=None, cv_configured: bool = False
 ) -> SourceEntitlementRow:
-    """Return an IGNORED item to ``new`` with its proposed match recomputed.
+    """Return a PARKED item to ``new`` with its proposed match recomputed.
 
-    **Ignored-only** (FRG-SRC-004). Restore is the inverse of ignore, and it is
-    destructive to everything else: it clears ``matched_series_id`` and
-    ``matched_via`` and overwrites the proposal. Applied to a ``matched`` row it
-    silently unmakes the operator's match (and, in a mixed bulk restore over a
-    selection that spans buckets, unmakes several at once); applied to a ``new``
-    row it throws away a proposal for no gain. So both are per-row errors and
-    nothing is written.
+    **Parked-only** — ``ignored`` (FRG-SRC-004) or ``duplicate`` (FRG-SRC-015).
+    Restore is the inverse of both parkings and it is destructive to everything
+    else: it clears ``matched_series_id``, ``matched_via`` and ``duplicate_of``,
+    and overwrites the proposal. Applied to a ``matched`` row it silently unmakes
+    the operator's match (and, in a mixed bulk restore over a selection that
+    spans buckets, unmakes several at once); applied to a ``new`` row it throws
+    away a proposal for no gain. So both are per-row errors and nothing is
+    written.
+
+    Restoring a copy is what makes the md5 parking recoverable rather than a
+    hidden drop: the row returns to independent review with a freshly computed
+    proposal, and the linking pass will only ever re-park it once its whole
+    md5 set is ``new`` again (:mod:`foragerr.sources.dedupe`).
 
     **ComicVine is consulted when it is available** (FRG-SRC-010). Restore is an
     operator-initiated, one-row action, so the single CV call it costs is
@@ -697,12 +778,9 @@ async def restore_entitlement(
         raise EntitlementActionError(
             f"entitlement {entitlement_id} not found", status=404
         )
-    if row.review_status != "ignored":
-        raise EntitlementActionError(
-            f"entitlement {entitlement_id} is {row.review_status}, not ignored — "
-            "restore applies only to an ignored item",
-            status=409,
-        )
+    refusal = _restore_precondition_error(entitlement_id, row.review_status)
+    if refusal is not None:
+        raise refusal
     async with db.read_session() as session:
         series = await library_repo.list_series(session)
     library = [
@@ -744,14 +822,21 @@ async def restore_entitlement(
             raise EntitlementActionError(
                 f"entitlement {entitlement_id} not found", status=404
             )
-        if fresh.review_status != "ignored":
-            raise EntitlementActionError(
-                f"entitlement {entitlement_id} is {fresh.review_status}, not "
-                "ignored — restore applies only to an ignored item",
-                status=409,
-            )
+        refusal = _restore_precondition_error(entitlement_id, fresh.review_status)
+        if refusal is not None:
+            raise refusal
+        if fresh.review_status == "duplicate":
+            # Restoring a copy is a DECISION about the parking, not a one-off
+            # nudge (FRG-SRC-015): without the flag the next linking pass finds
+            # the same md5 set and parks the row straight back, so the operator
+            # would have to restore it after every sync forever. Only ever set
+            # here, so an ignore/restore round trip later keeps it.
+            fresh.dedupe_opt_out = True
         fresh.review_status = "new"
         fresh.matched_series_id = None
+        # The row leaves its duplicate set (FRG-SRC-015): it is back in
+        # independent review, so it can no longer be one of a canonical's copies.
+        fresh.duplicate_of = None
         # The match target is dropped, so its provenance goes with it — a later
         # re-match stamps its own ``matched_via`` (FRG-PP-022 guard 3).
         fresh.matched_via = None
@@ -775,12 +860,14 @@ async def bulk_ignore(db, entitlement_ids: list[int]) -> BulkResult:
 async def bulk_restore(
     db, entitlement_ids: list[int], *, cv_client=None, cv_configured: bool = False
 ) -> BulkResult:
-    """Restore each ignored row in the selection (per-row errors, FRG-SRC-011).
+    """Restore each parked row in the selection (per-row errors, FRG-SRC-011).
 
-    A selection that spans review buckets — the natural result of "select all"
-    over a filtered list — reports the non-ignored rows as per-row errors and
-    leaves their state untouched, rather than stripping matched rows of their
-    match on the way past."""
+    Parked is ``ignored`` OR ``duplicate`` (FRG-SRC-015), so a "select all" over
+    the Duplicates filter restores the whole set in one action. A selection that
+    spans review buckets — the natural result of "select all" over any filtered
+    list — reports the non-parked rows as per-row errors and leaves their state
+    untouched, rather than stripping matched rows of their match on the way
+    past."""
     return await _bulk(
         db,
         entitlement_ids,
@@ -970,13 +1057,18 @@ async def bulk_apply_to_group(
 
     * an **in-library** pick (``series_id`` given) MATCHES every ``new`` member
       (``require_new`` — ``matched`` / ``ignored`` members are per-row skips),
-      then runs the same-group sibling sweep ONCE for the whole group;
+      then runs the same-group sibling sweep ONCE PER FOLD KEY the group carries;
     * a **not-yet-added** pick (``cv_volume_id`` given, no ``series_id``) ADDS the
       series once for the first ``new`` member through the ordinary add path,
-      whose group-key sweep re-proposes the remaining members. Only the added
-      member is committed here; the rest stay ``new`` with swept proposals for a
-      single follow-up bulk accept — nothing else downloads without a further
-      operator action.
+      then runs that same sweep so the remaining members are re-proposed onto it.
+      Only the added member is committed here; the rest stay ``new`` with swept
+      proposals for a single follow-up bulk accept — nothing else downloads
+      without a further operator action.
+
+    "Once per fold key" and not once per member: a DISPLAY group can merge
+    several exact ``group_key`` values (FRG-UI-029), and sweeping only the acting
+    row's key left the other fold's members holding stale proposals under a
+    header that claimed the rest were proposed.
 
     Returns the shared :class:`BulkResult` per-id outcome shape either way.
     Exactly one target is required (neither, or both, is a 422).
@@ -990,7 +1082,7 @@ async def bulk_apply_to_group(
     if not entitlement_ids:
         return BulkResult(applied=0, skipped=0, errors={})
 
-    new_ids, group_key, source_id = await _new_group_members(db, entitlement_ids)
+    new_ids, group_keys, source_id = await _new_group_members(db, entitlement_ids)
 
     if series_id is not None:
         # Match only the ``new`` members (require_new skips matched/ignored),
@@ -1008,15 +1100,14 @@ async def bulk_apply_to_group(
                 sweep_group=False,
             ),
         )
-        if new_ids and group_key:
+        if new_ids and group_keys and source_id is not None:
             series_title = await _series_title(db, series_id)
-            await _reresolve_sibling_proposals_by_group(
+            await _sweep_group_keys(
                 db,
                 source_id=source_id,
-                group_key=group_key,
+                group_keys=group_keys,
                 series_id=series_id,
                 series_title=series_title,
-                exclude_entitlement_id=None,
             )
         return result
 
@@ -1025,8 +1116,13 @@ async def bulk_apply_to_group(
         return BulkResult(applied=0, skipped=len(entitlement_ids), errors={})
     first = new_ids[0]
     errors: dict[int, str] = {}
+    added = None
     try:
-        await add_entitlement(
+        # The add's own group sweep is suppressed: it keys on the ACTING row's
+        # fold key alone, which on a display-merged group leaves the other
+        # fold's members holding stale proposals. The sweep below covers every
+        # key the request's own membership carries instead.
+        added = await add_entitlement(
             db,
             settings,
             first,
@@ -1035,12 +1131,86 @@ async def bulk_apply_to_group(
             root_folder_id=root_folder_id,
             cv_volume_id=cv_volume_id,
             matched_via=matched_via,
+            sweep_group=False,
         )
     except EntitlementActionError as exc:
         errors[first] = str(exc)
+    if (
+        added is not None
+        and added.matched_series_id is not None
+        and source_id is not None
+    ):
+        await _sweep_group_keys(
+            db,
+            source_id=source_id,
+            group_keys=group_keys,
+            series_id=added.matched_series_id,
+            series_title=await _series_title(db, added.matched_series_id),
+        )
     return BulkResult(
         applied=0 if errors else 1, skipped=len(errors), errors=errors
     )
+
+
+async def _sweep_group_keys(
+    db,
+    *,
+    source_id: int,
+    group_keys: list[str],
+    series_id: int,
+    series_title: str | None,
+    exclude_entitlement_id: int | None = None,
+) -> int:
+    """Run the FRG-SRC-014 sibling sweep for every fold key a group carries.
+
+    A DISPLAY group can span several exact ``group_key`` values (the FRG-UI-029
+    containment merge), and each one is a separate sweep SCOPE — but not a
+    separate scan. ``group_key`` has no stored column, so the source's ``new``
+    rows are read ONCE, folded once, and bucketed in memory; a key the request
+    did not carry is simply skipped. Reading per key instead re-scanned the whole
+    open review queue for each one, in its own transaction.
+
+    All keys are rewritten inside ONE write transaction so a display group moves
+    together: a partial sweep would leave one fold's members holding stale
+    proposals under a header claiming the rest were re-proposed.
+
+    An empty key sweeps nothing (an ungroupable title shares no evidence of being
+    the same series as any other). Returns the total number of rows rewritten.
+    """
+    from sqlalchemy import select
+
+    wanted = {key for key in group_keys if key}
+    if not wanted:
+        return 0
+
+    per_key: dict[str, int] = {}
+    async with db.write_session() as session:
+        stmt = select(SourceEntitlementRow).where(
+            SourceEntitlementRow.source_id == source_id,
+            SourceEntitlementRow.review_status == "new",
+        )
+        if exclude_entitlement_id is not None:
+            stmt = stmt.where(SourceEntitlementRow.id != exclude_entitlement_id)
+        rows = (await session.execute(stmt)).scalars().all()
+        now = utcnow()
+        for row in rows:
+            key = _group_key(row.human_name)
+            if key not in wanted:
+                continue
+            if _rewrite_proposal_as_match(
+                row, series_id=series_id, series_title=series_title, now=now
+            ):
+                per_key[key] = per_key.get(key, 0) + 1
+    for key, count in per_key.items():
+        logger.info(
+            "sources.review: re-resolved %d sibling proposal(s) in group %r "
+            "(source %d) onto series %d",
+            count,
+            key,
+            source_id,
+            series_id,
+        )
+    return sum(per_key.values())
 
 
 async def _bulk(db, entitlement_ids: list[int], action) -> BulkResult:
@@ -1142,15 +1312,26 @@ async def _series_title(db, series_id: int) -> str | None:
 
 async def _new_group_members(
     db, entitlement_ids: list[int]
-) -> tuple[list[int], str, int | None]:
-    """The subset of ``entitlement_ids`` still in review, plus the group's fold
-    key and source (from the first existing row). A group-apply matches/adds only
-    ``new`` rows — a header spans decided rows the operator didn't individually
-    pick, and reversing those is the FRG-SRC-011 hazard."""
+) -> tuple[list[int], list[str], int | None]:
+    """The subset of ``entitlement_ids`` still in review, plus the DISTINCT fold
+    keys the listed rows carry and their source.
+
+    A group-apply matches/adds only ``new`` rows — a header spans decided rows
+    the operator didn't individually pick, and reversing those is the
+    FRG-SRC-011 hazard.
+
+    The keys are a list, not one key, because a DISPLAY group can span more than
+    one exact ``group_key`` (the FRG-UI-029 containment merge). Sweeping only the
+    first member's key left the other fold's members holding stale proposals
+    while the header said the rest were proposed. The list is bounded by the
+    request's own membership — a handful of keys at most — so the sweep is still
+    once per key, never once per member.
+    """
     from sqlalchemy import select
 
     new_ids: list[int] = []
-    group_key = ""
+    group_keys: list[str] = []
+    seen_keys: set[str] = set()
     source_id: int | None = None
     async with db.read_session() as session:
         rows = (
@@ -1171,10 +1352,13 @@ async def _new_group_members(
             continue
         if source_id is None:
             source_id = row.source_id
-            group_key = _group_key(row.human_name)
+        key = _group_key(row.human_name)
+        if key and key not in seen_keys:
+            seen_keys.add(key)
+            group_keys.append(key)
         if row.review_status == "new":
             new_ids.append(eid)
-    return new_ids, group_key, source_id
+    return new_ids, group_keys, source_id
 
 
 async def _reresolve_sibling_proposals(
@@ -1219,8 +1403,6 @@ async def _reresolve_sibling_proposals(
     SQLite build we ship against, and the residual Python check below stays as
     the correctness guard.
     """
-    import json
-
     from sqlalchemy import func, select
 
     rewritten = 0
@@ -1248,20 +1430,9 @@ async def _reresolve_sibling_proposals(
             data = _loads_proposal(row.proposed_match_json)
             if data is None or data.get("cv_volume_id") != cv_volume_id:
                 continue
-            if data.get("kind") == "library" and data.get("series_id") == series_id:
-                continue  # already resolved (a re-run) — leave it alone
-            data.update(
-                {
-                    "kind": "library",
-                    "series_id": series_id,
-                    "title": series_title or data.get("title"),
-                    "auto": False,
-                }
+            rewritten += _rewrite_proposal_as_match(
+                row, series_id=series_id, series_title=series_title, now=now
             )
-            row.proposed_match_json = json.dumps(data, sort_keys=True)
-            row.proposed_series_id = series_id
-            row.updated_at = now
-            rewritten += 1
     if rewritten:
         logger.info(
             "sources.review: re-resolved %d sibling proposal(s) for cv volume %d "
@@ -1273,6 +1444,44 @@ async def _reresolve_sibling_proposals(
     return rewritten
 
 
+def _rewrite_proposal_as_match(
+    row: SourceEntitlementRow,
+    *,
+    series_id: int,
+    series_title: str | None,
+    now,
+) -> bool:
+    """Rewrite one row's stored proposal into a ``library``-kind MATCH.
+
+    The shared body of both sibling sweeps — each picks its own rows, this
+    decides what a rewritten proposal says. ``auto`` is forced ``False`` (a
+    rewrite is a convenience, never a licence for the auto-sync path to accept
+    without review) and the ranked ``candidates`` list survives verbatim, so the
+    UI still offers the alternatives.
+
+    Returns ``False`` for a row already resolved onto this series (a re-run),
+    which leaves its ``updated_at`` alone.
+    """
+    import json
+
+    data = _loads_proposal(row.proposed_match_json) or {}
+    if data.get("kind") == "library" and data.get("series_id") == series_id:
+        return False
+    data.update(
+        {
+            "kind": "library",
+            "series_id": series_id,
+            "title": series_title or data.get("title"),
+            "auto": False,
+        }
+    )
+    # A prior "nothing plausible" marker is now a match; drop it so the proposal
+    # reads consistently as a library match.
+    data.pop("verdict", None)
+    row.proposed_match_json = json.dumps(data, sort_keys=True)
+    row.proposed_series_id = series_id
+    row.updated_at = now
+    return True
 
 
 async def _reresolve_sibling_proposals_by_group(
@@ -1311,59 +1520,14 @@ async def _reresolve_sibling_proposals_by_group(
 
     Runs as ONE write transaction and returns the number of rows rewritten.
     """
-    import json
-
-    from sqlalchemy import select
-
-    if not group_key:
-        return 0
-    rewritten = 0
-    async with db.write_session() as session:
-        rows = (
-            (
-                await session.execute(
-                    select(SourceEntitlementRow).where(
-                        SourceEntitlementRow.source_id == source_id,
-                        SourceEntitlementRow.review_status == "new",
-                        SourceEntitlementRow.id != exclude_entitlement_id,
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-        now = utcnow()
-        for row in rows:
-            if _group_key(row.human_name) != group_key:
-                continue
-            data = _loads_proposal(row.proposed_match_json) or {}
-            if data.get("kind") == "library" and data.get("series_id") == series_id:
-                continue  # already resolved (a re-run) — leave it alone
-            data.update(
-                {
-                    "kind": "library",
-                    "series_id": series_id,
-                    "title": series_title or data.get("title"),
-                    "auto": False,
-                }
-            )
-            # A prior "nothing plausible" marker is now a match; drop it so the
-            # proposal reads consistently as a library match.
-            data.pop("verdict", None)
-            row.proposed_match_json = json.dumps(data, sort_keys=True)
-            row.proposed_series_id = series_id
-            row.updated_at = now
-            rewritten += 1
-    if rewritten:
-        logger.info(
-            "sources.review: re-resolved %d sibling proposal(s) in group %r "
-            "(source %d) onto series %d",
-            rewritten,
-            group_key,
-            source_id,
-            series_id,
-        )
-    return rewritten
+    return await _sweep_group_keys(
+        db,
+        source_id=source_id,
+        group_keys=[group_key],
+        series_id=series_id,
+        series_title=series_title,
+        exclude_entitlement_id=exclude_entitlement_id,
+    )
 
 
 def _loads_proposal(raw: str | None) -> dict | None:

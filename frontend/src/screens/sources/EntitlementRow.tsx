@@ -36,6 +36,25 @@ function pct(confidence: number): string {
   return `${Math.round(confidence * 100)}%`;
 }
 
+/**
+ * The copies chip's text on a duplicate set's canonical row (FRG-SRC-015 /
+ * FRG-UI-029): "2 copies · also in Example Bundle #1, Example Bundle #2" —
+ * doubles as the chip's title/tooltip so the full bundle list is available
+ * even when the inline text truncates.
+ *
+ * A copy the store never named contributes to `count` but not to `bundles`, so
+ * the named list can be SHORTER than the count. The unnamed remainder is stated
+ * ("+ 1 more") rather than left implicit: a chip reading "3 copies · also in
+ * Example Bundle #1" otherwise looks like it has listed them all and lost two.
+ */
+export function copiesLabel(count: number, bundles: readonly string[]): string {
+  const noun = count === 1 ? 'copy' : 'copies';
+  if (bundles.length === 0) return `${count} ${noun}`;
+  const unnamed = count - bundles.length;
+  const more = unnamed > 0 ? `, + ${unnamed} more` : '';
+  return `${count} ${noun} · also in ${bundles.join(', ')}${more}`;
+}
+
 /** The reconcile explanation + issue chips for one expanded entitlement. */
 function ReconcileDetail({ entitlement }: { entitlement: EntitlementResource }) {
   const { data, isLoading } = useEntitlementDetail(entitlement.id, true);
@@ -48,6 +67,9 @@ function ReconcileDetail({ entitlement }: { entitlement: EntitlementResource }) 
       'Linked to your library — this collected edition fills the issues below.';
   } else if (entitlement.review_status === 'ignored') {
     explain = 'Ignored — excluded from review. Restore to bring it back.';
+  } else if (entitlement.review_status === 'duplicate') {
+    explain =
+      'A byte-identical copy of another entitlement you already reviewed — parked, never grabbed. Restore to review it on its own.';
   } else if (proposal?.kind === 'library') {
     explain = `Proposed match: ${proposal.title ?? 'a library series'} (in your library, ${pct(proposal.confidence)} confidence). Match to link this edition to it.`;
   } else if (proposal?.kind === 'comicvine') {
@@ -248,8 +270,12 @@ export function EntitlementRow({
           ? 'Match not computed yet — search ComicVine for the right volume.'
           : 'No plausible automatic match — search ComicVine for the right volume.';
 
+  // Duplicate rows are parked exactly like Ignored ones (D3, FRG-SRC-015):
+  // dimmed, offering only Restore back to independent `new` review.
+  const isParked = status === 'ignored' || status === 'duplicate';
+
   let actions;
-  if (status === 'ignored') {
+  if (isParked) {
     actions = (
       <button
         type="button"
@@ -354,6 +380,10 @@ export function EntitlementRow({
       <span className={`${styles.statusTag} ${styles.tagIgnored}`}>
         <i className="fa-solid fa-eye-slash" aria-hidden /> Ignored
       </span>
+    ) : status === 'duplicate' ? (
+      <span className={`${styles.statusTag} ${styles.tagIgnored}`}>
+        <i className="fa-solid fa-clone" aria-hidden /> Duplicate
+      </span>
     ) : (
       <span className={`${styles.statusTag} ${styles.tagNew}`}>
         <i className="fa-solid fa-sparkles" aria-hidden /> New
@@ -363,7 +393,7 @@ export function EntitlementRow({
   return (
     <>
       <div
-        className={`${styles.row} ${status === 'ignored' ? styles.rowIgnored : ''}`}
+        className={`${styles.row} ${isParked ? styles.rowIgnored : ''}`}
         data-testid={`entitlement-row-${entitlement.id}`}
         data-status={status}
       >
@@ -390,6 +420,21 @@ export function EntitlementRow({
                   {entitlement.preferred_format.toUpperCase()}
                 </Chip>
               )
+            )}
+            {/* The canonical row of an md5-duplicate set (FRG-SRC-015) names
+                its copies rather than hiding them — the count and the
+                title/tooltip both name every bundle a copy came from. */}
+            {entitlement.duplicate_count > 0 && (
+              <Chip
+                tone="muted"
+                testId={`copies-${entitlement.id}`}
+                title={copiesLabel(
+                  entitlement.duplicate_count,
+                  entitlement.duplicate_bundles,
+                )}
+              >
+                {copiesLabel(entitlement.duplicate_count, entitlement.duplicate_bundles)}
+              </Chip>
             )}
           </div>
           <div className={styles.rowSub}>

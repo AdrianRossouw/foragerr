@@ -1,10 +1,18 @@
 import { useState, type FormEvent } from 'react';
 import { Chip } from '../../components/Chip';
-import { useLookup, useSuggest, SUGGEST_MIN_TERM_LENGTH } from '../../api/hooks';
+import {
+  useLookup,
+  useLookupVolume,
+  useSuggest,
+  SUGGEST_MIN_TERM_LENGTH,
+} from '../../api/hooks';
+import { isComicVineAuthError } from '../../api/fetcher';
 import {
   lookupOutcomeNote,
   normalizeLookupTerm,
   OutcomeErrorText,
+  parseVolumeId,
+  VOLUME_ID_PATTERN,
 } from '../add/AddSeries';
 import type { LookupCandidate, SuggestCandidate } from '../../api/types';
 import styles from './sources.module.css';
@@ -79,6 +87,19 @@ function CandidateButton({
             .join(' · ')}
         </span>
       </span>
+      {/* A title-cue hint (FRG-UI-039 / design D6), never a gate or a
+          re-rank: ComicVine has no booktype field, so this reads a
+          collected-edition volume from the SAME title heuristic the
+          library's own booktype badge uses — soft wording on purpose. */}
+      {candidate.collected_cues && (
+        <Chip
+          tone="muted"
+          testId={`${testId}-collected`}
+          title="Collected-edition title cues — a heuristic, not a confirmed book type"
+        >
+          Collected-edition cues
+        </Chip>
+      )}
       {/* The library overlay (FRG-UI-039): an already-owned volume is the
           cheapest possible answer — it links, it never creates. */}
       {candidate.have_it && (
@@ -128,9 +149,18 @@ export function EntitlementSearch({
 }) {
   const [input, setInput] = useState(seedTerm);
   const [term, setTerm] = useState('');
+  // A resolved-by-id volume (FRG-UI-039 / FRG-API-026), mutually exclusive
+  // with `term`: submitting an id clears `term` (so the name lookup stays
+  // disabled and fires no request), submitting a name clears this.
+  const [volumeId, setVolumeId] = useState<number | null>(null);
   const [showIgnored, setShowIgnored] = useState(false);
   const lookup = useLookup(term, showIgnored);
-  const suggest = useSuggest(input);
+  const volume = useLookupVolume(volumeId);
+  // A pasted id/URL is recognizable BEFORE submit — the debounced accelerator
+  // must never fire a name search for it either (design D6: never a name
+  // search for an id, not even the passive one).
+  const isIdInput = VOLUME_ID_PATTERN.test(normalizeLookupTerm(input));
+  const suggest = useSuggest(isIdInput ? '' : input);
 
   // An error must never leak stale candidates from a previous outcome: the
   // results and the note both derive from this one value.
@@ -138,12 +168,31 @@ export function EntitlementSearch({
   const note = lookupOutcomeNote(lookup.isError, lookup.error, results, term);
   const hiddenByIgnore = results?.hidden_by_ignore_list ?? 0;
 
+  // The id path's own outcome (FRG-UI-039): a resolved volume renders through
+  // the SAME candidate list below; an unknown id or an upstream failure
+  // renders an honest note INSTEAD of the empty name-search results the
+  // picker used to submit for a pasted id. Credential failures reuse the
+  // structural discriminator (never message-sniffed) so the Settings link
+  // reads identically everywhere this classifier is used.
+  const volumeCandidate =
+    volumeId !== null && !volume.isError ? volume.data : undefined;
+  const volumeAuthError = volumeId !== null && isComicVineAuthError(volume.error);
+  const volumeNote: { tone: 'error' | 'plain'; text: string } | null =
+    volumeId === null || !volume.isError
+      ? null
+      : volumeAuthError
+        ? { tone: 'error', text: 'ComicVine API key missing or invalid — check Settings.' }
+        : { tone: 'plain', text: 'No ComicVine volume matches that id.' };
+
   // Suggest gating, identical in spirit to the add screen: the dropdown shows
   // only for a settled (debounced) term that still matches what is typed, and
-  // retires the moment the authoritative lookup covers the same term.
+  // retires the moment the authoritative lookup (or an id resolution) covers
+  // the current input.
   const suggestTerm = input.trim();
   const lookupSubmittedForInput = term.length > 0 && suggestTerm === term;
   const showSuggest =
+    !isIdInput &&
+    volumeId === null &&
     suggestTerm.length >= SUGGEST_MIN_TERM_LENGTH &&
     !lookupSubmittedForInput &&
     suggest.settledTerm === suggestTerm;
@@ -159,6 +208,16 @@ export function EntitlementSearch({
   const submit = (e: FormEvent) => {
     e.preventDefault();
     const next = normalizeLookupTerm(input);
+    if (VOLUME_ID_PATTERN.test(next)) {
+      // The id path (FRG-API-026): route straight to the volume-id lookup
+      // instead of the name search this term would otherwise become — the
+      // exact dead end the picker used to advertise and never honor.
+      setVolumeId(parseVolumeId(next));
+      setTerm('');
+      setShowIgnored(false);
+      return;
+    }
+    setVolumeId(null);
     // A same-term re-submit after an error or a degraded/capped outcome must
     // retry for real; complete, uncapped lookups stay cached (rate-limited
     // upstream — FRG-META-016).
@@ -194,13 +253,44 @@ export function EntitlementSearch({
           aria-label="Search ComicVine for this item"
           placeholder="Series name, or a ComicVine volume URL / 4050-XXXX id"
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => {
+            const next = e.target.value;
+            setInput(next);
+            // A resolved volume is the answer to the id that produced it. The
+            // moment the box stops naming that id, the resolved candidate is
+            // stale — drop it, which also re-enables the passive suggest (it is
+            // gated on `volumeId === null`). Without this the picker sat on one
+            // volume while the operator typed a series name at it, exactly the
+            // dead end the id path was added to remove.
+            if (
+              volumeId !== null &&
+              !VOLUME_ID_PATTERN.test(normalizeLookupTerm(next))
+            ) {
+              setVolumeId(null);
+            }
+          }}
           data-testid={`row-search-input-${instanceId}`}
         />
         <button type="submit" className={styles.linkBtn}>
           Search
         </button>
       </form>
+
+      {volumeId !== null && volume.isLoading && (
+        <p className={styles.searchState} data-testid={`row-search-volume-loading-${instanceId}`}>
+          Looking up that volume…
+        </p>
+      )}
+      {volumeNote?.tone === 'error' && (
+        <p className={styles.searchError} role="alert">
+          <OutcomeErrorText error={volume.error} text={volumeNote.text} />
+        </p>
+      )}
+      {volumeNote?.tone === 'plain' && (
+        <p className={styles.searchState} data-testid={`row-search-volume-note-${instanceId}`}>
+          {volumeNote.text}
+        </p>
+      )}
 
       {lookup.isLoading && <p className={styles.searchState}>Searching ComicVine…</p>}
       {note?.tone === 'error' && (
@@ -235,22 +325,38 @@ export function EntitlementSearch({
         </p>
       )}
 
-      {(suggestCandidates.length > 0 || (results?.records.length ?? 0) > 0) && (
+      {(volumeCandidate ||
+        suggestCandidates.length > 0 ||
+        (results?.records.length ?? 0) > 0) && (
         <div className={styles.searchResults}>
-          {/* The full lookup, once submitted, is authoritative for its term —
-              the accelerator's rows are suppressed so the two never stack. */}
-          {(results && results.records.length > 0
-            ? results.records
-            : suggestCandidates
-          ).map((candidate) => (
+          {volumeCandidate ? (
+            // The id path resolves to exactly ONE volume — rendered through
+            // the SAME CandidateButton/onPick path as a name search, so
+            // in-library marking and add-and-match behave identically
+            // (design D6).
             <CandidateButton
-              key={candidate.cv_volume_id}
-              candidate={candidate}
-              testId={`cand-${instanceId}-${candidate.cv_volume_id}`}
+              key={volumeCandidate.cv_volume_id}
+              candidate={volumeCandidate}
+              testId={`cand-${instanceId}-${volumeCandidate.cv_volume_id}`}
               busy={busy}
-              onPick={() => onPick(candidate)}
+              onPick={() => onPick(volumeCandidate)}
             />
-          ))}
+          ) : (
+            // The full lookup, once submitted, is authoritative for its term —
+            // the accelerator's rows are suppressed so the two never stack.
+            (results && results.records.length > 0
+              ? results.records
+              : suggestCandidates
+            ).map((candidate) => (
+              <CandidateButton
+                key={candidate.cv_volume_id}
+                candidate={candidate}
+                testId={`cand-${instanceId}-${candidate.cv_volume_id}`}
+                busy={busy}
+                onPick={() => onPick(candidate)}
+              />
+            ))
+          )}
         </div>
       )}
     </div>

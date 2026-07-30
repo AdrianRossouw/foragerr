@@ -197,6 +197,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.state.startup_hooks.append(publisher_rules_migration_startup_hook)
 
+    # The one-time link of pre-existing byte-identical entitlement sets
+    # (FRG-SRC-015). Same placement constraint as the migration above — it needs
+    # the db area and must run AHEAD of the scheduler area, which can dispatch a
+    # due source-sync immediately: on an auto-sync source that sync could accept
+    # and download both copies of a set the backfill was about to collapse.
+    from foragerr.sources.dedupe import duplicate_backfill_startup_hook
+
+    app.state.startup_hooks.append(duplicate_backfill_startup_hook)
+
     # Startup integrity quick_check (FRG-DB-012) runs AFTER the db area above
     # has prepared/opened the database, so it checks the live file.
     app.state.startup_hooks.append(quick_check_startup_hook)

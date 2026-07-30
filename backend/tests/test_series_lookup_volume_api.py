@@ -367,3 +367,31 @@ def test_object_not_found_101_does_not_trip_the_auth_failure_health_dimension(
     assert response.status_code == 404
     # The 101 response cleared the auth-failure flag — it is not an auth failure.
     assert ratelimit.gate().is_auth_failed() is False
+
+
+@pytest.mark.req("FRG-UI-039")
+def test_a_resolved_volume_carries_the_collected_edition_title_cue(
+    client, monkeypatch
+):
+    """The picker's soft badge (FRG-UI-039): derived from the ONE shared
+    booktype cue vocabulary applied to the candidate's own title, and nothing
+    else — ComicVine ships no booktype field, so the flag never claims one."""
+    factory, _transport = _volume_factory(
+        client.app.state.settings,
+        _volume_handler(
+            {
+                101: {"id": 101, "name": "Example Saga: The Graphic Novel"},
+                102: {"id": 102, "name": "Example Saga"},
+            }
+        ),
+    )
+    monkeypatch.setattr("foragerr.api.series.comicvine_factory", lambda _settings: factory)
+
+    collected = client.get("/api/v1/series/lookup/volume/101").json()
+    singles = client.get("/api/v1/series/lookup/volume/102").json()
+
+    assert collected["collected_cues"] is True
+    assert singles["collected_cues"] is False
+    # A hint, never a gate: both resolutions are equally pickable candidates.
+    assert collected["cv_volume_id"] == 101
+    assert singles["cv_volume_id"] == 102

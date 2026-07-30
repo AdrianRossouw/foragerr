@@ -1235,3 +1235,56 @@ def test_cover_endpoint_serves_cached_file(client):
     response = client.get("/api/v1/series/55/cover")
     assert response.status_code == 200
     assert response.content == b"\xff\xd8\xff\xe0JPEGBYTES"
+
+
+# --- collected-edition title cue on both candidate shapes (FRG-UI-039) --------
+
+
+@pytest.mark.req("FRG-UI-039")
+def test_lookup_badges_collected_edition_title_cues_without_reordering(
+    client, monkeypatch
+):
+    """The row picker's soft badge: a title-cue hint on the candidate, derived
+    from the ONE shared booktype vocabulary. It is not a gate, not a filter, and
+    not a re-rank — the collected edition and the singles volume of the same name
+    both come back, in the order relevance put them."""
+    volumes = [
+        {"id": 101, "name": "Example Saga"},
+        {"id": 102, "name": "Example Saga Hardcover"},
+    ]
+    factory = build_factory(
+        settings=client.app.state.settings, handler=_search_handler(volumes)
+    )
+    monkeypatch.setattr("foragerr.api.series.comicvine_factory", lambda _settings: factory)
+
+    records = client.get(
+        "/api/v1/series/lookup", params={"term": "Example Saga"}
+    ).json()["records"]
+    by_id = {record["cv_volume_id"]: record for record in records}
+
+    assert by_id[101]["collected_cues"] is False
+    assert by_id[102]["collected_cues"] is True
+    # Same candidates, same relevance order the badge-free ranking produces.
+    assert [record["cv_volume_id"] for record in records] == sorted(
+        (101, 102), key=lambda cvid: -by_id[cvid]["name_similarity"]
+    )
+
+
+@pytest.mark.req("FRG-UI-039")
+def test_suggest_carries_the_same_collected_edition_cue(client, monkeypatch):
+    volumes = [
+        {"id": 101, "name": "Example Saga"},
+        {"id": 102, "name": "Example Saga: The Graphic Novel"},
+    ]
+    factory = build_factory(
+        settings=client.app.state.settings, handler=_search_handler(volumes)
+    )
+    monkeypatch.setattr("foragerr.api.series.comicvine_factory", lambda _settings: factory)
+
+    records = client.get(
+        "/api/v1/series/lookup/suggest", params={"term": "Example Saga"}
+    ).json()["records"]
+    by_id = {record["cv_volume_id"]: record for record in records}
+
+    assert by_id[101]["collected_cues"] is False
+    assert by_id[102]["collected_cues"] is True

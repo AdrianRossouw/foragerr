@@ -9,6 +9,40 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.19.0] — 2026-07-30
+
+Duplicate-aware review, groups that reunite a renamed series in reading
+order, and a match picker that understands pasted ComicVine ids.
+
+### Added
+- Byte-identical copies of the same file bought in different bundles now
+  review once and import once: the extra copies park under a new
+  Duplicates filter (dimmed, restorable — and a restore is permanent:
+  later syncs never re-park a row you chose to review independently),
+  the kept row shows how many copies exist and in which bundles, and no
+  path — accept, match, add, bulk, or automatic — can download a parked
+  copy. Upgrading tidies existing all-new duplicate pairs at first
+  start. (FRG-SRC-015, FRG-SRC-004)
+- The row and group match pickers resolve a pasted ComicVine volume URL
+  or 4050-form id to that exact volume (unknown ids say so honestly),
+  and candidates whose titles read like collected editions carry a soft
+  hint badge. The add-series screen honors a typed id the same way.
+  (FRG-UI-039)
+
+### Changed
+- Review groups merge a series the store names two different ways
+  (title-containment, display-only — bulk sweeps keep their narrow
+  exact-title scope) and rows inside a group render in volume/issue
+  order instead of sync order. (FRG-UI-029)
+- A parked copy whose stored file identity later changes or disappears
+  returns to independent review automatically. (FRG-SRC-015)
+
+### Upgrade notes
+- Migration 0032 adds duplicate-tracking columns and indexes; the
+  duplicate backfill runs once at first start, links only sets whose
+  members are all still New, and never touches a set containing a
+  decided row.
+
 ## [v0.18.1] — 2026-07-30
 
 Add-flow covers load reliably.

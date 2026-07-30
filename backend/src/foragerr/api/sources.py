@@ -37,7 +37,7 @@ from foragerr.sources.commands import (
     SOURCE_SYNC_TASK,
     make_humble_factory,
 )
-from foragerr.sources.matching import group_key
+from foragerr.sources.matching import group_key, merge_display_groups, sort_ordinals
 from foragerr.sources.models import MATCHED_VIA_OPERATOR, SourceRow
 from foragerr.sources.registry import (
     UnknownSourceTypeError,
@@ -48,6 +48,7 @@ from foragerr.sources.registry import (
 from foragerr.sources.models import SourceEntitlementRow
 from foragerr.sources.repo import (
     delete_source,
+    duplicate_copies,
     get_entitlement,
     get_source,
     list_entitlements,
@@ -427,8 +428,39 @@ class EntitlementResource(BaseModel):
     #: string stays and the invariant is pinned by a test rather than by a
     #: convention. It is always a ``str``: never ``None``, never omitted.
     group_key: str
+    #: The DISPLAY group this row renders under (FRG-UI-029, design D4): the
+    #: containment merge of the listing's :attr:`group_key` values, so a
+    #: franchise split across two title forms reads as one group. Equal to
+    #: :attr:`group_key` whenever nothing merged — and on a single-row response,
+    #: where there is no listing to merge against (a merge is a property of a
+    #: set, never of a row).
+    #:
+    #: Presentation only. The FRG-SRC-014 sibling sweep keeps operating on the
+    #: exact :attr:`group_key`; see ``sources.matching.group_key``.
+    display_group_key: str
+    #: Parsed ordinals for the within-group order (FRG-UI-029), from the ONE
+    #: parser — the client sorts by these and never re-parses the title.
+    #: ``None`` where the title carries no such evidence (those rows sort last).
+    volume_ordinal: int | None
+    #: The parser's DISPLAY issue number ("3", "1.5"), not a numeric value.
+    issue_number: str | None
     classification: str
     review_status: str
+    #: The canonical row this one is a byte-identical copy of (FRG-SRC-015);
+    #: set only while :attr:`review_status` is ``duplicate``.
+    duplicate_of: int | None
+    #: How many copies are parked behind this row. Non-zero only on a CANONICAL
+    #: row still on the review surface — a copy reports 0, because the chip
+    #: discloses a set from the row that represents it and a copy showing its
+    #: siblings' count would read as a second set; an IGNORED canonical reports 0
+    #: too, because a withdrawn row represents nothing and a chip on it would
+    #: advertise a set the operator has already excluded.
+    duplicate_count: int
+    #: Those copies' bundle identities, in a stable order (FRG-SRC-015). A copy
+    #: whose bundle the store never named is omitted from the NAMES while still
+    #: counting in :attr:`duplicate_count` — the chip lists what it can name and
+    #: the count stays honest about the rest.
+    duplicate_bundles: list[str]
     download_state: str | None
     download_error: str | None
     preferred_format: str | None
@@ -439,7 +471,27 @@ class EntitlementResource(BaseModel):
     proposed_match: dict[str, Any] | None
 
     @classmethod
-    def from_row(cls, row: SourceEntitlementRow) -> "EntitlementResource":
+    def from_row(
+        cls,
+        row: SourceEntitlementRow,
+        *,
+        display_group_key: str | None = None,
+        copies: list[str | None] | None = None,
+        fold_key: str | None = None,
+    ) -> "EntitlementResource":
+        """Build the resource for one row.
+
+        ``display_group_key`` and ``copies`` are the two fields a row cannot
+        answer alone — one is a property of the listing it appears in, the other
+        of the rows pointing at it — so a caller that has the set supplies them
+        and a single-row response omits them. Omitted, they degrade to the row's
+        own exact fold key and to no copies: the honest answer for a response
+        that carries no set to disclose, never a claim that none exists.
+
+        ``fold_key`` is the row's own ``group_key`` when the caller already
+        folded it to build the display merge — passing it back keeps the whole
+        listing at one fold per row instead of two.
+        """
         import json
 
         proposed = None
@@ -448,6 +500,13 @@ class EntitlementResource(BaseModel):
                 proposed = json.loads(row.proposed_match_json)
             except ValueError:
                 proposed = None
+        key = fold_key if fold_key is not None else group_key(row.human_name)
+        volume_ordinal, issue_number = sort_ordinals(row.human_name)
+        # The chip discloses a set only from a row still ON the review surface
+        # (FRG-SRC-015): a matched canonical still represents its copies, but an
+        # ignored one is a withdrawal, and a chip on it would invite the operator
+        # into a set whose representative they have already taken out of review.
+        copies = (copies or []) if row.review_status in ("new", "matched") else []
         return cls(
             id=row.id,
             source_id=row.source_id,
@@ -455,9 +514,15 @@ class EntitlementResource(BaseModel):
             human_name=row.human_name,
             publisher=row.publisher,
             bundle_human_name=row.bundle_human_name,
-            group_key=group_key(row.human_name),
+            group_key=key,
+            display_group_key=display_group_key or key,
+            volume_ordinal=volume_ordinal,
+            issue_number=issue_number,
             classification=row.classification,
             review_status=row.review_status,
+            duplicate_of=row.duplicate_of,
+            duplicate_count=len(copies),
+            duplicate_bundles=[name for name in copies if name],
             download_state=row.download_state,
             download_error=row.download_error,
             preferred_format=row.preferred_format,
@@ -512,14 +577,41 @@ async def list_entitlements_endpoint(
     classification: str | None = None,
     review_status: str | None = None,
 ) -> list[EntitlementResource]:
-    """List a source's entitlements, filterable by classification/review status."""
+    """List a source's entitlements, filterable by classification/review status.
+
+    ``review_status`` accepts any value of the review vocabulary, ``duplicate``
+    (FRG-SRC-015) included — that filter IS the Duplicates view, and the default
+    (unfiltered) listing carries the parked copies too so the client can count
+    and bucket them exactly as it does ignored rows.
+
+    The two set-derived fields are computed HERE, over this response's rows: the
+    display-group merge (FRG-UI-029) needs every key in the listing, and the
+    copies chip needs the rows pointing at each canonical. Both are one pass /
+    one query for the whole listing rather than per row.
+    """
     db = request.app.state.db
     if await get_source(db, source_id) is None:
         raise ApiError(404, f"source {source_id} not found")
     rows = await list_entitlements(
         db, source_id, classification=classification, review_status=review_status
     )
-    return [EntitlementResource.from_row(r) for r in rows]
+    keys = {row.id: group_key(row.human_name) for row in rows}
+    # The merge is computed over the FETCHED set's keys, which is sound only
+    # because the client fetches the source unfiltered and buckets client-side:
+    # the response therefore carries every key the source has. A future
+    # server-side filter or pagination must merge over the source's FULL key set
+    # instead, or a row's display group would change with the page it lands on.
+    display = merge_display_groups(keys.values())
+    copies = await duplicate_copies(db, [row.id for row in rows])
+    return [
+        EntitlementResource.from_row(
+            row,
+            fold_key=keys[row.id],
+            display_group_key=display.get(keys[row.id], keys[row.id]),
+            copies=copies.get(row.id),
+        )
+        for row in rows
+    ]
 
 
 @router.get("/entitlements/{entitlement_id}", response_model=EntitlementDetail)
@@ -532,7 +624,7 @@ async def entitlement_detail_endpoint(
     if row is None:
         raise ApiError(404, f"entitlement {entitlement_id} not found")
     fill_sets = await _fill_sets(db, row.matched_series_id)
-    detail = EntitlementDetail(**EntitlementResource.from_row(row).model_dump())
+    detail = EntitlementDetail(**(await _entitlement_resource(db, row)).model_dump())
     detail.fill_sets = fill_sets
     return detail
 
@@ -578,7 +670,7 @@ async def add_entitlement_endpoint(
         )
     except EntitlementActionError as exc:
         raise ApiError(exc.status, str(exc)) from exc
-    return EntitlementResource.from_row(row)
+    return await _entitlement_resource(db, row)
 
 
 @router.post(
@@ -599,13 +691,17 @@ async def ignore_entitlement_endpoint(
 async def restore_entitlement_endpoint(
     entitlement_id: int, request: Request
 ) -> EntitlementResource:
-    """Restore an ignored entitlement to ``new`` with a recomputed proposal.
+    """Restore a PARKED entitlement to ``new`` with a recomputed proposal.
+
+    Parked is ``ignored`` (FRG-SRC-004) or ``duplicate`` (FRG-SRC-015); any
+    other review state is a 409, because restoring a ``matched`` row would
+    silently unmake the operator's match. Restoring a copy also opts it out of
+    future md5 parking, so the next sync leaves it independently reviewable.
 
     The recomputation is ComicVine-backed when a key is configured
     (FRG-SRC-010): restore is operator-initiated and single-row, so it costs one
     CV call, and without it the row was stamped with a ``library-fallback``
-    proposal that the review screen renders as a catalog verdict. Ignored-only
-    — any other review state is a 409."""
+    proposal that the review screen renders as a catalog verdict."""
     async with _operator_cv_client(request) as (cv_client, cv_configured):
         return await _run_action(
             request,
@@ -742,7 +838,18 @@ async def _run_action(request: Request, action) -> EntitlementResource:
         row = await action(db, commands)
     except EntitlementActionError as exc:
         raise ApiError(exc.status, str(exc)) from exc
-    return EntitlementResource.from_row(row)
+    return await _entitlement_resource(db, row)
+
+
+async def _entitlement_resource(db, row: SourceEntitlementRow) -> EntitlementResource:
+    """One acted-on row as a resource, with its copies chip filled in.
+
+    A single-row response answers the same question the listing does — the
+    client writes it straight into the row it just actioned — so the copies
+    (FRG-SRC-015) are looked up here too. Omitting them reported 0 copies for a
+    canonical that has them, and the chip vanished until the next refetch."""
+    copies = (await duplicate_copies(db, [row.id])).get(row.id)
+    return EntitlementResource.from_row(row, copies=copies)
 
 
 async def _fill_sets(db, series_id: int | None) -> list[dict[str, Any]]:

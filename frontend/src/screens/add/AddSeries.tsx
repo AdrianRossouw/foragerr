@@ -58,6 +58,22 @@ export function normalizeLookupTerm(raw: string): string {
 }
 
 /**
+ * `normalizeLookupTerm`'s bare-id output shape. Test the NORMALIZED term
+ * against it, which is what makes a pasted URL or `cv:` idiom take the id path
+ * too — the normalizer has already reduced them to this.
+ */
+export const VOLUME_ID_PATTERN = /^4050-\d+$/;
+
+/**
+ * "4050-1234" -> 1234. The "4050-" is ComicVine's volume TYPE prefix, not part
+ * of the id: the volume-id endpoint takes the bare number, and the backend
+ * re-adds the prefix upstream.
+ */
+export function parseVolumeId(normalized: string): number {
+  return Number(normalized.slice('4050-'.length));
+}
+
+/**
  * Defensive display strip of a ComicVine deck/description (FRG-UI-005): CV
  * deck text is user-editable wiki content (sanitized server-side, but treated
  * as untrusted here too — FRG-META-014). Reduce any residual markup to its
@@ -582,7 +598,13 @@ export function AddSeries() {
   // While one id is resolving (or resolved) the passive autosuggest stays off:
   // an id-first hand-off spends exactly one interactive ComicVine acquisition,
   // and the resolved candidate is already the answer the dropdown would offer.
-  const suggest = useSuggest(volumeId !== null && !volumeDegraded ? '' : input);
+  // An id-shaped input is recognizable before submit, so the passive
+  // accelerator must not fire a name search for it either (design D6: never a
+  // name search for an id, not even the silent one).
+  const isIdInput = VOLUME_ID_PATTERN.test(normalizeLookupTerm(input));
+  const suggest = useSuggest(
+    isIdInput || (volumeId !== null && !volumeDegraded) ? '' : input,
+  );
 
   // Consume a prefilled term (FRG-UI-019 -> FRG-UI-005) via an effect rather
   // than a mount-time initializer: a SECOND navigation to the already-mounted
@@ -651,6 +673,7 @@ export function AddSeries() {
   // still-open panel from a candidate that no longer belongs to the input.
   const suggestSettledForInput = suggest.settledTerm === suggestTerm;
   const showSuggest =
+    !isIdInput &&
     suggestTerm.length >= 3 &&
     selectedId === null &&
     !lookupSubmittedForInput &&
@@ -686,21 +709,38 @@ export function AddSeries() {
     ? null
     : volumeAuthError
       ? lookupOutcomeNote(true, volume.error, undefined, input)
-      : {
-          tone: 'status' as const,
-          text:
-            'That release’s ComicVine volume could not be resolved — ' +
-            'searching by name instead.',
-        };
+      : isIdInput
+        ? {
+            // A hand-typed id has no name beside it to fall back to, so the
+            // note says what happened rather than promising a search that
+            // cannot run.
+            tone: 'status' as const,
+            text: 'No ComicVine volume matches that id.',
+          }
+        : {
+            tone: 'status' as const,
+            text:
+              'That release’s ComicVine volume could not be resolved — ' +
+              'searching by name instead.',
+          };
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    // A typed search supersedes any handed-over id (and its notice).
-    setVolumeId(null);
     setSelectedId(null);
     setSelectedSuggestionId(null);
     setShowIgnored(false);
     const next = normalizeLookupTerm(input);
+    if (VOLUME_ID_PATTERN.test(next)) {
+      // A HAND-TYPED or pasted id takes the same id path a Calendar hand-off
+      // does (FRG-API-026): submitting it as a name search asks ComicVine for a
+      // series literally called "4050-1234" and always comes back empty — the
+      // dead end the picker already stopped advertising.
+      setTerm('');
+      setVolumeId(parseVolumeId(next));
+      return;
+    }
+    // A typed search supersedes any handed-over id (and its notice).
+    setVolumeId(null);
     // A same-term re-submit after an error or a degraded/capped outcome must
     // retry for real (FRG-UI-005): setting an identical term re-renders
     // nothing and never refetches, so refire explicitly. Complete, uncapped

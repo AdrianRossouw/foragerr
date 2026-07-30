@@ -37,6 +37,7 @@ __all__ = [
     "clear_publisher_rules",
     "create_source",
     "delete_source",
+    "duplicate_copies",
     "get_entitlement",
     "get_source",
     "list_entitlements",
@@ -99,6 +100,41 @@ async def list_entitlements(
         for row in rows:
             session.expunge(row)
         return list(rows)
+
+
+async def duplicate_copies(
+    db, canonical_ids: list[int]
+) -> dict[int, list[str | None]]:
+    """Each canonical id's parked copies as their bundle identities (FRG-SRC-015).
+
+    Keyed by ``duplicate_of``, valued by the copies' ``bundle_human_name`` in
+    copy-id order — a stable order the canonical row's copies chip can render
+    without re-sorting. A canonical with no copies is ABSENT from the mapping
+    rather than present-and-empty, so a caller reading it with ``.get`` gets the
+    same answer for "not a canonical" and "no copies left".
+
+    A copy whose bundle the store never named contributes ``None``: the count is
+    still honest about how many copies exist, which a silently dropped entry
+    would not be.
+    """
+    if not canonical_ids:
+        return {}
+    stmt = (
+        select(
+            SourceEntitlementRow.duplicate_of,
+            SourceEntitlementRow.bundle_human_name,
+        )
+        .where(
+            SourceEntitlementRow.duplicate_of.in_(canonical_ids),
+            SourceEntitlementRow.review_status == "duplicate",
+        )
+        .order_by(SourceEntitlementRow.id)
+    )
+    copies: dict[int, list[str | None]] = {}
+    async with db.read_session() as session:
+        for canonical_id, bundle in (await session.execute(stmt)).all():
+            copies.setdefault(canonical_id, []).append(bundle)
+    return copies
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,6 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import { buildReviewItems, itemIds, bundlesInView } from './reviewGroups';
+import type { ReviewItem } from './reviewGroups';
 import type { EntitlementResource } from '../../api/types';
+
+/** Entitlement ids of the flat item list's ROW entries, in list order. */
+function rowIdsOf(items: ReviewItem[]): number[] {
+  const ids: number[] = [];
+  for (const item of items) {
+    if (item.kind === 'row') ids.push(item.entitlement.id);
+  }
+  return ids;
+}
 
 /*
  * FRG-UI-029 — the same-title collapse's pure core, tested directly rather than
@@ -12,13 +22,17 @@ import type { EntitlementResource } from '../../api/types';
 function ent(
   o: Partial<EntitlementResource> & Pick<EntitlementResource, 'id'>,
 ): EntitlementResource {
+  const groupKey = o.group_key ?? `item-${o.id}`;
   return {
     source_id: 5,
     machine_name: `m-${o.id}`,
     human_name: `Item ${o.id}`,
     publisher: 'Image',
     bundle_human_name: null,
-    group_key: `item-${o.id}`,
+    group_key: groupKey,
+    // Defaults to `group_key` (unmerged, review-experience-2 contract) — a
+    // test that wants a containment-merged group sets this explicitly.
+    display_group_key: o.display_group_key ?? groupKey,
     classification: 'comic',
     review_status: 'new',
     download_state: null,
@@ -29,6 +43,11 @@ function ent(
     proposed_series_id: null,
     matched_series_id: null,
     proposed_match: null,
+    duplicate_of: null,
+    duplicate_count: 0,
+    duplicate_bundles: [],
+    volume_ordinal: null,
+    issue_number: null,
     ...o,
   };
 }
@@ -189,6 +208,7 @@ describe('FRG-UI-029: buildReviewItems', () => {
       new: 2,
       matched: 1,
       ignored: 0,
+      duplicate: 0,
       failed: 1,
     });
     // One shared bundle names itself; a mixed group names none.
@@ -210,6 +230,88 @@ describe('FRG-UI-029: buildReviewItems', () => {
     expect(buildReviewItems(pair, new Set(), 2).items.map((i) => i.key)).toEqual(
       ['g:vane'],
     );
+  });
+});
+
+describe('FRG-UI-029 (review-experience-2): containment-merged display groups', () => {
+  it('FRG-UI-029 — rows with different group_key but the same display_group_key bucket into ONE group', () => {
+    const rows = [
+      ent({ id: 70, human_name: 'Series Vol. 3', group_key: 'series-vol-3', display_group_key: 'series' }),
+      ent({ id: 71, human_name: 'THE FIRST ADVENTURE OF SERIES', group_key: 'the-first-adventure-of-series', display_group_key: 'series' }),
+      ent({ id: 72, human_name: 'Series Vol. 5', group_key: 'series-vol-5', display_group_key: 'series' }),
+    ];
+    const { items, groups } = buildReviewItems(rows, new Set());
+
+    expect(groups).toHaveLength(1);
+    expect(items.map((i) => i.key)).toEqual(['g:series']);
+    expect(groups[0].rows.map((r) => r.id).sort()).toEqual([70, 71, 72]);
+  });
+
+  it('FRG-UI-029 — a merged group with no shared prefix labels itself from the shortest member, suffix stripped', () => {
+    const rows = [
+      ent({ id: 80, human_name: 'Series Vol. 3', group_key: 'a', display_group_key: 'merged' }),
+      ent({ id: 81, human_name: 'THE FIRST ADVENTURE OF SERIES', group_key: 'b', display_group_key: 'merged' }),
+      ent({ id: 82, human_name: 'Series Vol. 5', group_key: 'a', display_group_key: 'merged' }),
+    ];
+    const { groups } = buildReviewItems(rows, new Set());
+    // "Series Vol. 3" (shortest) stripped of its volume suffix -> "Series" —
+    // never the empty/degenerate cut an ordinary shared-prefix fold would hit.
+    expect(groups[0].title).toBe('Series');
+  });
+
+  it('FRG-UI-029 — an UNMERGED group (single group_key) keeps the ordinary first-member fallback', () => {
+    // Same degenerate-prefix shape as the merged case, but every row shares
+    // ONE group_key — the containment-merge fallback must not fire here.
+    const rows = [
+      ent({ id: 90, human_name: 'Rook', group_key: 'k' }),
+      ent({ id: 91, human_name: 'Vane', group_key: 'k' }),
+      ent({ id: 92, human_name: 'Driftwood', group_key: 'k' }),
+    ];
+    const { groups } = buildReviewItems(rows, new Set());
+    expect(groups[0].title).toBe('Rook');
+  });
+
+  it('FRG-UI-029 (design D5) — members order by volume_ordinal then numeric-aware issue_number, unknowns last', () => {
+    const rows = [
+      ent({ id: 100, human_name: 'Series #10', group_key: 'k', volume_ordinal: null, issue_number: '10' }),
+      ent({ id: 101, human_name: 'Series Vol. 2', group_key: 'k', volume_ordinal: 2, issue_number: null }),
+      ent({ id: 102, human_name: 'Series #2', group_key: 'k', volume_ordinal: null, issue_number: '2' }),
+      ent({ id: 103, human_name: 'Series Vol. 1', group_key: 'k', volume_ordinal: 1, issue_number: null }),
+    ];
+    const { groups } = buildReviewItems(rows, new Set());
+    // ordinal 1, ordinal 2, then the unordinalled issues (numeric-aware: 2
+    // before 10), never a lexical "10" < "2" mistake.
+    expect(groups[0].rows.map((r) => r.id)).toEqual([103, 101, 102, 100]);
+
+    // The expanded item list renders in that SAME sorted order, not arrival
+    // order — buildReviewItems must read the sorted `group.rows`, not the
+    // arrival-order slot, when it expands a group.
+    const expanded = buildReviewItems(rows, new Set(['k']));
+    expect(rowIdsOf(expanded.items)).toEqual([103, 101, 102, 100]);
+  });
+
+  it('FRG-UI-029 (design D5) — a sub-threshold same-key run is ordered by the SAME comparator', () => {
+    // Two rows share a title but never earn a header. Within-key order is a
+    // property of the key, not of whether the run grew big enough for chrome —
+    // otherwise the pair silently re-sorts the day a third row arrives.
+    const pair = [
+      ent({ id: 200, human_name: 'Series Vol. 2', group_key: 'k', volume_ordinal: 2 }),
+      ent({ id: 201, human_name: 'Series Vol. 1', group_key: 'k', volume_ordinal: 1 }),
+    ];
+    const { items, groups } = buildReviewItems(pair, new Set());
+
+    expect(groups).toHaveLength(0); // still no header
+    expect(rowIdsOf(items)).toEqual([201, 200]);
+    // …and the order it renders in is the order it keeps once a third arrival
+    // pushes the run over the threshold.
+    const grown = buildReviewItems(
+      [
+        ...pair,
+        ent({ id: 202, human_name: 'Series Vol. 3', group_key: 'k', volume_ordinal: 3 }),
+      ],
+      new Set(['k']),
+    );
+    expect(rowIdsOf(grown.items)).toEqual([201, 200, 202]);
   });
 });
 
