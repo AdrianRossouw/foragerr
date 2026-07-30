@@ -1986,22 +1986,24 @@ attacker, but tampering all the same if a write path is missed.
   uses, and a read-only series is never monitored, so no read-only-
   specific conditional was needed there. The calendar/pull-source
   projection (`pull/projection.py`) is a **separate** surface with its
-  own predicate; a gate review found it did NOT exclude read-only series
-  — a stored pull-source entry matching a read-only series' issue could
-  surface live Want/Skip/Search controls that then 409 on use, and the
-  matching frontend has no read-only awareness either. Fix in flight:
-  exclude read-only series in that projection's issue lookup so the same
-  invariant holds there by construction (matching the FRG-SER-019/020
-  pattern of proving an invariant by exclusion at the projection) rather
-  than by UI-only suppression.
+  own predicate, and it did not originally inherit the exclusion: a
+  stored pull-source entry matching a read-only series' issue reached the
+  week as a linked entry carrying live Want/Skip/Search controls that
+  refuse on use. It now joins `root_folders` and filters
+  `read_only.is_(False)` in the issue lookup, an inner join so an
+  unresolvable root fails closed. A read-only series' issue is therefore
+  **absent from the week**, not present-without-controls. The invariant
+  holds by construction at the projection — the FRG-SER-019/020 pattern —
+  rather than by UI-only suppression.
 - **UI marking is convenience, not the boundary (FRG-UI-045)**: read-only
   roots and their series are marked read-only and the monitor toggle,
   search/grab, and file-mutating actions are hidden or disabled — so the
   operator is never offered an action the backend will refuse — but the
   backend guard above is what actually enforces the boundary; a UI bug
-  or a direct API call is still caught fail-closed. A gate review found
-  several affordances (series edit, add-series root picker, the rename
-  picker) not yet gated this way; closing those is UI-layer convenience
+  or a direct API call is still caught fail-closed. Several affordances (series edit, add-series root picker, the rename
+  picker) were not gated this way initially and are now closed, together
+  with the mutation-error surfacing that had let a refusal read as a dead
+  click; that work is UI-layer convenience
   work tracked against the same requirement, not a boundary gap — the
   backend guard already refuses every one of them.
 - **Information disclosure — `read_only` on `RootFolderResource` /
