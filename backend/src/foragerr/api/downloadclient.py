@@ -52,7 +52,7 @@ from foragerr.downloads.repo import (
     update_download_client,
 )
 from foragerr.indexers.schema import schema_for
-from foragerr.providers.backoff import ProviderBackoff
+from foragerr.providers.backoff import ProviderBackoff, TransientBackoff
 
 router = APIRouter(prefix="/downloadclient", tags=["downloadclient"])
 
@@ -326,7 +326,7 @@ async def downloadclient_test(
         settings=settings_model,
         db=db,
         http_factory=_factory(request),
-        backoff=ProviderBackoff(db),
+        backoff=TransientBackoff(db),
         mappings=[],
         app_settings=request.app.state.settings,
     )

@@ -278,3 +278,31 @@ class ProviderBackoff:
             remaining_seconds=remaining,
             last_failure_at=row.last_failure_at,
         )
+
+
+class TransientBackoff(ProviderBackoff):
+    """A no-write back-off for connectivity tests.
+
+    A test probe must persist nothing — including ladder state. The
+    transient test row's id (0) is shared by every pre-save test, so a
+    recorded failure there would throttle unrelated future tests and
+    violate the test endpoints' nothing-persists contract. Reads keep
+    the parent's semantics (always healthy: no stored row for id 0 is
+    ever written).
+    """
+
+    async def record_success(
+        self, provider_type: str, provider_id: int
+    ) -> None:
+        return None
+
+    async def record_failure(
+        self,
+        provider_type: str,
+        provider_id: int,
+        *,
+        reason: str,
+        retry_after: float | None = None,
+        fast_forward: bool = False,
+    ) -> BackoffStatus | None:
+        return None

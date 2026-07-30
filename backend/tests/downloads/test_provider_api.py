@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -226,6 +227,87 @@ def test_test_endpoint_prefers_a_retyped_secret_and_persists_nothing(settings):
         )
     assert again.status_code == 200
     assert _probe_keys(fixture) == {STORED_KEY}
+
+
+async def _backoff_health(app):
+    from foragerr.providers.backoff import ProviderBackoff
+
+    return await ProviderBackoff(app.state.db).health()
+
+
+@pytest.mark.req("FRG-DL-002")
+def test_test_endpoint_failure_leaves_the_backoff_ladder_untouched(settings):
+    """A failed probe must not feed the shared back-off ladder: every pre-save
+    test shares the transient id 0 (TransientBackoff, FRG-NFR-005), so a
+    recorded failure here would throttle an unrelated future probe."""
+    fixture = SabFixture()
+    fixture.sab_status = 503
+    with _client(settings, fixture) as client:
+        resp = client.post("/api/v1/downloadclient/test", json=_test_body())
+        assert resp.status_code == 400
+        assert client.portal.call(_backoff_health, client.app) == []
+
+
+@pytest.mark.req("FRG-DL-002")
+@pytest.mark.req("FRG-API-009")
+def test_merge_over_stored_keeps_blank_secret_but_overrides_blank_non_secret():
+    """``_merge_over_stored``'s own contract: blank means "keep stored" ONLY
+    for a secret field (write-only, so a form cannot resend it); every other
+    submitted value — including a blank one — replaces the stored value. Unit
+    level, not round-tripped through the live endpoint: SABnzbd's own
+    ``category`` field further rejects an empty string (a downstream field
+    constraint unrelated to the merge contract under test here)."""
+    from foragerr.api.downloadclient import _merge_over_stored
+    from foragerr.indexers.repo import serialize_settings
+
+    from downloads_support import sab_settings
+
+    stored_json = serialize_settings(
+        sab_settings(api_key=STORED_KEY, category="custom-cat")
+    )
+    merged = _merge_over_stored(
+        "sabnzbd",
+        stored_json,
+        {"base_url": SAB_BASE, "api_key": "", "category": ""},
+    )
+    # The secret fell back to the stored (still-encrypted) value...
+    assert merged["api_key"] == json.loads(stored_json)["api_key"]
+    assert merged["api_key"] != ""
+    # ...but the non-secret blank value won over the stored "custom-cat".
+    assert merged["category"] == ""
+
+
+@pytest.mark.req("FRG-DL-002")
+@pytest.mark.req("FRG-API-009")
+def test_test_endpoint_maps_an_undecryptable_stored_secret_to_400(settings):
+    """A saved client whose stored secret the CURRENT key cannot decrypt (key
+    rotated/changed) must fail the field-precise way (400), not 500 — the
+    same fail-soft contract already proven for PUT (FRG-AUTH-012)."""
+    from cryptography.fernet import Fernet, MultiFernet
+
+    from foragerr import keystore as keystore_mod
+
+    fixture = SabFixture()
+    with _client(settings, fixture) as client:
+        client_id = _create_sab(client)
+
+        wrong = keystore_mod.derive_fernet_key(
+            "a-different-passphrase", b"0123456789abcdef"
+        )
+        keystore_mod.install_keystore(
+            keystore_mod.Keystore(MultiFernet([Fernet(wrong)]), available=False)
+        )
+
+        resp = client.post(
+            "/api/v1/downloadclient/test",
+            json={
+                "implementation": "sabnzbd",
+                "settings": {"base_url": SAB_BASE},
+                "client_id": client_id,
+            },
+        )
+    assert resp.status_code == 400
+    assert "decrypt" in resp.json()["message"]
 
 
 @pytest.mark.req("FRG-DL-002")
