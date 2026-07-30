@@ -232,12 +232,14 @@ root: confirmed and skipped decisions carry forward, and files that imported
 are never staged again.
 
 **Importing under a read-only root** (see `library.md` §Read-only / reference
-libraries) always behaves as in-place, and renaming is force-disabled for that
-series, regardless of your `library_import_mode` and `rename_enabled`
-settings — files are indexed at their existing paths and never renamed,
-moved, or copied. The series this creates is browse-only: metadata still
-refreshes and the series still serves over OPDS, but it is never monitored,
-searched, or downloaded into.
+libraries) always behaves as in-place, and renaming, ComicInfo tagging, and
+CBR→CBZ conversion are all force-disabled for that series, regardless of
+your `library_import_mode`, `rename_enabled`, `comicinfo_tag_on_import`, and
+`convert_cbr_to_cbz` settings — files are indexed at their existing paths and
+never renamed, moved, copied, or rewritten. The series this creates is
+browse-only: metadata still refreshes and the series still serves over OPDS,
+but it is never monitored, searched, or downloaded into, and on-demand
+conversion (Settings/series "Convert to CBZ") is refused for it the same way.
 
 If importing a group fails before any of its files are attached — a metadata
 fetch that could not complete, or every file blocked — foragerr leaves nothing

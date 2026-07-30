@@ -105,9 +105,13 @@ its chained refresh → scan → optional search.
 On a fresh install with no root folder registered yet, the add panel offers a
 path input to register one **inline** — enter your comics folder, add it, and the
 dialog picks it up as the selected root so you can finish the add without leaving
-for the settings screen and losing your search. A path the server refuses (for
-example one that is not writable) shows the reason verbatim so you can correct it;
-root folders can still be managed from **Media Management** settings.
+for the settings screen and losing your search. This inline path only registers
+an ordinary (writable) root; a path the server refuses (not writable, missing, a
+duplicate, or nested under an existing root) shows the reason verbatim so you can
+correct it. Root folders — including registering a **read-only** reference
+library — can also be managed from **Media Management** settings; see
+`../admin/configuration.md` §Root folders and `library.md` §Read-only /
+reference libraries.
 
 As you type (three characters or more) a debounced autosuggest dropdown offers up
 to about ten candidates straight from ComicVine, without waiting for the full
@@ -324,6 +328,11 @@ existing-library import mode, the recycle bin (path + retention), and duplicate
 handling (the same-rank constraint and optional duplicate-dump folder —
 `import.md` §Duplicate handling). Template
 edits show their effect immediately; nothing changes on disk until you save.
+
+The **Root Folders** list on this page is also where you register a root as
+**read-only**: a "Read-only" checkbox on the add row (offering it only needs to
+be readable, not writable) and a "Read-only" badge on each registered row that
+has it set — see `library.md` §Read-only / reference libraries.
 
 From here (or from a series' **Rename Files** toolbar button) you can open the
 **rename preview**: a list of exactly which files would move from their current

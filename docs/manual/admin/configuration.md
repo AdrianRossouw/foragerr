@@ -315,14 +315,20 @@ See `deployment.md` → "Restoring from a backup" for how to use these files.
 
 Root folders (the library locations series live under) are registered in the web
 UI under **Settings → Media Management**, or inline from the Add Series dialog on
-a fresh install — they are not a config-file setting. **A root folder must be
-writable**: foragerr registers folders through a validated API that refuses a
-path it cannot write to, naming the reason (for example `path '/x' is not
-writable`). This applies even in the existing-library "in place" import mode,
-which still records imports and can move replaced files to the recycle bin.
-Read-only mounts (a read-only NAS export, for instance) are therefore not
-supported as root folders — mount the library read-write, or point foragerr at a
-writable copy.
+a fresh install — they are not a config-file setting. An ordinary root folder
+must be **writable**: foragerr registers folders through a validated API that
+refuses a path it cannot write to, naming the reason (for example `path '/x' is
+not writable`).
+
+A root can also be registered **read-only** (Media Management only — the
+inline Add Series path input does not offer this option) for an existing,
+already-organized collection you don't want foragerr to reorganize: check
+"Read-only" when registering it, and it only needs to be **readable**, not
+writable, so a read-only mount (a read-only NAS export, for instance) works
+fine. foragerr indexes files under a read-only root in place and never renames,
+moves, downloads into, or deletes from it — series on it are browse/serve-only.
+See `../user/library.md` §Read-only / reference libraries for the full
+behavior.
 
 ## Weekly pull
 

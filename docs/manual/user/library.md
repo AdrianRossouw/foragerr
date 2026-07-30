@@ -164,14 +164,27 @@ A read-only root is for reading and serving, not managing:
   normally, and the series still serves over OPDS to your reader apps exactly
   like any other series.
 - Files on a read-only root are never renamed, moved, or deleted by
-  foragerr — not during import, not during a rescan, not through the delete
-  action on a series or issue. Any of those actions is refused with a clear
-  reason instead of silently doing nothing.
+  foragerr. Import and rescan never rename or move them; a manual rescan of a
+  read-only series' folder is skipped rather than attempted (nothing to
+  reconcile — the files are already indexed at their real paths). The
+  delete-files option (removing a series or issue and its files from disk) is
+  refused with a clear reason instead of silently doing nothing.
+- Removing a read-only series or issue **without** deleting files — the
+  ordinary "remove from foragerr, leave the files alone" action — still
+  works, because it never touches the root; only the file-deleting variant is
+  blocked.
+- The **missing** count on a read-only series' detail page always reads 0,
+  even when it holds fewer issues than ComicVine lists for the volume: a
+  read-only series is never monitored, and "missing" counts monitored,
+  released, file-less issues — an unmonitored series has none by definition.
+  The have/total figures still reflect exactly what's indexed.
 
 The UI marks a read-only root and its series accordingly, and hides the
-monitor toggle, search, and delete actions on them so you're never offered
-something foragerr won't actually do. Reading a read-only series and pulling
-it over OPDS work exactly as they do for any other series.
+monitor toggle and search action on them; the delete-files option is hidden
+or disabled while removing the series/issue itself (without files) stays
+available — so you're never offered a file-mutating action foragerr will
+refuse. Reading a read-only series and pulling it over OPDS work exactly as
+they do for any other series.
 
 ## Series statistics
 
