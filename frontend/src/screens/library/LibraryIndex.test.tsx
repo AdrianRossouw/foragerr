@@ -970,3 +970,89 @@ describe('FRG-UI-022: collected-edition surfacing', () => {
     expect(screen.getByText('Batman (2011)')).toBeInTheDocument();
   });
 });
+
+/**
+ * FRG-UI-045 — a read-only series must not browse identically to one the
+ * operator deliberately unmonitored: nothing is ever acquired into it and its
+ * files are never touched, so every list view marks it.
+ */
+describe('FRG-UI-045: read-only series carry a marker in every library view', () => {
+  const MIXED: SeriesResource[] = [
+    makeSeriesResource({
+      id: 1,
+      title: 'Example Owned Series',
+      sort_title: 'example owned series',
+    }),
+    makeSeriesResource({
+      id: 2,
+      title: 'Example Reference Run',
+      sort_title: 'example reference run',
+      read_only: true,
+    }),
+  ];
+
+  it('FRG-UI-045 — the poster card marks a read-only series and leaves a writable one unmarked', async () => {
+    renderLibrary(MIXED);
+
+    await waitFor(() => expect(screen.getAllByTestId('series-card')).toHaveLength(2));
+    expect(screen.getByTestId('series-read-only-2')).toHaveTextContent('Read-only');
+    expect(screen.queryByTestId('series-read-only-1')).not.toBeInTheDocument();
+  });
+
+  it('FRG-UI-045 — the overview row marks a read-only series and leaves a writable one unmarked', async () => {
+    renderLibrary(MIXED);
+    const user = userEvent.setup();
+
+    await waitFor(() => expect(screen.getAllByTestId('series-card')).toHaveLength(2));
+    await user.click(screen.getByRole('button', { name: 'Overview' }));
+
+    expect(screen.getByTestId('series-read-only-2')).toHaveTextContent('Read-only');
+    expect(screen.queryByTestId('series-read-only-1')).not.toBeInTheDocument();
+  });
+
+  it('FRG-UI-045 — the table row marks a read-only series and leaves a writable one unmarked', async () => {
+    renderLibrary(MIXED);
+    const user = userEvent.setup();
+
+    await waitFor(() => expect(screen.getAllByTestId('series-card')).toHaveLength(2));
+    await user.click(screen.getByRole('button', { name: 'Table' }));
+
+    const table = screen.getByTestId('library-table');
+    expect(within(table).getByTestId('series-read-only-2')).toHaveTextContent(
+      'Read-only',
+    );
+    expect(within(table).queryByTestId('series-read-only-1')).not.toBeInTheDocument();
+  });
+
+  it('FRG-UI-045 — a franchise member row marks a read-only run', async () => {
+    const members: SeriesResource[] = [
+      makeSeriesResource({
+        id: 1,
+        title: 'Example Franchise (2011)',
+        sort_title: 'example franchise (2011)',
+        start_year: 2011,
+        series_group_id: 1,
+      }),
+      makeSeriesResource({
+        id: 2,
+        title: 'Example Franchise (2016)',
+        sort_title: 'example franchise (2016)',
+        start_year: 2016,
+        series_group_id: 1,
+        read_only: true,
+      }),
+    ];
+    renderGrouped(members, [GROUPED_GROUPS[0]]);
+    const user = userEvent.setup();
+
+    await waitFor(() => expect(screen.getAllByTestId('series-card')).toHaveLength(2));
+    await user.click(screen.getByRole('button', { name: 'Overview' }));
+    await toggleGrouping(user);
+
+    const rows = await screen.findByTestId('franchise-members');
+    expect(within(rows).getByTestId('series-read-only-2')).toHaveTextContent(
+      'Read-only',
+    );
+    expect(within(rows).queryByTestId('series-read-only-1')).not.toBeInTheDocument();
+  });
+});
