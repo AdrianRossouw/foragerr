@@ -12,8 +12,11 @@
 export const COMPACT_CROSSOVER_PX = 900;
 
 /**
- * `max-width` is exclusive of the crossover itself, and the 0.02px shave keeps
- * fractional viewport widths (browser zoom, hidpi scaling) from falling into a
- * band that matches neither presentation.
+ * The one query `useCompactViewport` matches on. It must be EXCLUSIVE of the
+ * crossover itself — at 900px the frame is wide — and the shave is sub-pixel
+ * rather than a whole pixel so that fractional widths just under the crossover
+ * (browser zoom, hidpi scaling) still resolve as compact instead of as the wide
+ * frame. Compact is a single boolean derived from this query, so a width that
+ * fails it is wide by definition; no width can fall between the two.
  */
 export const COMPACT_MEDIA_QUERY = `(max-width: ${COMPACT_CROSSOVER_PX - 0.02}px)`;
