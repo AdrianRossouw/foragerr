@@ -477,7 +477,8 @@ def merge_display_groups(keys: Iterable[str]) -> dict[str, str]:
     for key, toks in tokens.items():
         by_first.setdefault(toks[0], []).append(key)
 
-    # needle -> its single longest container. Strictly length-decreasing, so
+    # needle -> its single longest container. Every edge is strictly
+    # length-INCREASING (a container has more tokens than what it contains), so
     # following the edges always terminates and can never form a cycle.
     container: dict[str, str] = {}
     for key, toks in tokens.items():

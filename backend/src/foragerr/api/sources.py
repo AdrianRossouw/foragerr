@@ -450,7 +450,7 @@ class EntitlementResource(BaseModel):
     #: set only while :attr:`review_status` is ``duplicate``.
     duplicate_of: int | None
     #: How many copies are parked behind this row. Non-zero only on a CANONICAL
-    #: row that is still reviewable — a copy reports 0, because the chip
+    #: row still on the review surface — a copy reports 0, because the chip
     #: discloses a set from the row that represents it and a copy showing its
     #: siblings' count would read as a second set; an IGNORED canonical reports 0
     #: too, because a withdrawn row represents nothing and a chip on it would
@@ -477,6 +477,7 @@ class EntitlementResource(BaseModel):
         *,
         display_group_key: str | None = None,
         copies: list[str | None] | None = None,
+        fold_key: str | None = None,
     ) -> "EntitlementResource":
         """Build the resource for one row.
 
@@ -486,6 +487,10 @@ class EntitlementResource(BaseModel):
         and a single-row response omits them. Omitted, they degrade to the row's
         own exact fold key and to no copies: the honest answer for a response
         that carries no set to disclose, never a claim that none exists.
+
+        ``fold_key`` is the row's own ``group_key`` when the caller already
+        folded it to build the display merge — passing it back keeps the whole
+        listing at one fold per row instead of two.
         """
         import json
 
@@ -495,12 +500,13 @@ class EntitlementResource(BaseModel):
                 proposed = json.loads(row.proposed_match_json)
             except ValueError:
                 proposed = None
-        key = group_key(row.human_name)
+        key = fold_key if fold_key is not None else group_key(row.human_name)
         volume_ordinal, issue_number = sort_ordinals(row.human_name)
-        # An ignored canonical discloses nothing (FRG-SRC-015): the row is a
-        # withdrawal, so a "2 copies" chip on it would invite the operator into a
-        # set whose representative they have already taken out of review.
-        copies = [] if row.review_status == "ignored" else (copies or [])
+        # The chip discloses a set only from a row still ON the review surface
+        # (FRG-SRC-015): a matched canonical still represents its copies, but an
+        # ignored one is a withdrawal, and a chip on it would invite the operator
+        # into a set whose representative they have already taken out of review.
+        copies = (copies or []) if row.review_status in ("new", "matched") else []
         return cls(
             id=row.id,
             source_id=row.source_id,
@@ -590,11 +596,17 @@ async def list_entitlements_endpoint(
         db, source_id, classification=classification, review_status=review_status
     )
     keys = {row.id: group_key(row.human_name) for row in rows}
+    # The merge is computed over the FETCHED set's keys, which is sound only
+    # because the client fetches the source unfiltered and buckets client-side:
+    # the response therefore carries every key the source has. A future
+    # server-side filter or pagination must merge over the source's FULL key set
+    # instead, or a row's display group would change with the page it lands on.
     display = merge_display_groups(keys.values())
     copies = await duplicate_copies(db, [row.id for row in rows])
     return [
         EntitlementResource.from_row(
             row,
+            fold_key=keys[row.id],
             display_group_key=display.get(keys[row.id], keys[row.id]),
             copies=copies.get(row.id),
         )
@@ -612,10 +624,7 @@ async def entitlement_detail_endpoint(
     if row is None:
         raise ApiError(404, f"entitlement {entitlement_id} not found")
     fill_sets = await _fill_sets(db, row.matched_series_id)
-    copies = (await duplicate_copies(db, [row.id])).get(row.id)
-    detail = EntitlementDetail(
-        **EntitlementResource.from_row(row, copies=copies).model_dump()
-    )
+    detail = EntitlementDetail(**(await _entitlement_resource(db, row)).model_dump())
     detail.fill_sets = fill_sets
     return detail
 
@@ -661,7 +670,7 @@ async def add_entitlement_endpoint(
         )
     except EntitlementActionError as exc:
         raise ApiError(exc.status, str(exc)) from exc
-    return EntitlementResource.from_row(row)
+    return await _entitlement_resource(db, row)
 
 
 @router.post(
@@ -829,7 +838,18 @@ async def _run_action(request: Request, action) -> EntitlementResource:
         row = await action(db, commands)
     except EntitlementActionError as exc:
         raise ApiError(exc.status, str(exc)) from exc
-    return EntitlementResource.from_row(row)
+    return await _entitlement_resource(db, row)
+
+
+async def _entitlement_resource(db, row: SourceEntitlementRow) -> EntitlementResource:
+    """One acted-on row as a resource, with its copies chip filled in.
+
+    A single-row response answers the same question the listing does — the
+    client writes it straight into the row it just actioned — so the copies
+    (FRG-SRC-015) are looked up here too. Omitting them reported 0 copies for a
+    canonical that has them, and the chip vanished until the next refetch."""
+    copies = (await duplicate_copies(db, [row.id])).get(row.id)
+    return EntitlementResource.from_row(row, copies=copies)
 
 
 async def _fill_sets(db, series_id: int | None) -> list[dict[str, Any]]:

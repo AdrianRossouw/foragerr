@@ -270,10 +270,12 @@ export function EntitlementRow({
           ? 'Match not computed yet — search ComicVine for the right volume.'
           : 'No plausible automatic match — search ComicVine for the right volume.';
 
-  let actions;
   // Duplicate rows are parked exactly like Ignored ones (D3, FRG-SRC-015):
   // dimmed, offering only Restore back to independent `new` review.
-  if (status === 'ignored' || status === 'duplicate') {
+  const isParked = status === 'ignored' || status === 'duplicate';
+
+  let actions;
+  if (isParked) {
     actions = (
       <button
         type="button"
@@ -391,7 +393,7 @@ export function EntitlementRow({
   return (
     <>
       <div
-        className={`${styles.row} ${status === 'ignored' || status === 'duplicate' ? styles.rowIgnored : ''}`}
+        className={`${styles.row} ${isParked ? styles.rowIgnored : ''}`}
         data-testid={`entitlement-row-${entitlement.id}`}
         data-status={status}
       >
