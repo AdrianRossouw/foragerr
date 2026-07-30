@@ -28,8 +28,12 @@ hostnames) belong in a gitignored local denylist
 with ``--denylist`` or ``FORAGERR_COMMENT_DENYLIST``), one Python
 regex per line. That pass needs no comment extraction, so it runs over
 the full text of every tracked text file — fixture corpora included.
-When no denylist is present the tool notes it, skips that pass, and
-exits on the generic pass alone, so fresh clones and CI stay green.
+When the *default* denylist path is absent the tool notes it, skips
+that pass, and exits on the generic pass alone, so fresh clones and CI
+stay green. A denylist named explicitly via ``--denylist`` or
+``FORAGERR_COMMENT_DENYLIST`` is a promise that the file is there: if
+it is missing, that is a configuration error (exit 2), not a silent
+skip.
 
 Legitimate hits are declared in ``tools/comment_check_allow.txt``
 (path glob + explicitly enumerated rule names + rationale). Exits 0
@@ -611,10 +615,25 @@ def _excerpt(text: str) -> str:
     return flat if len(flat) <= 110 else flat[:107] + "..."
 
 
-def check(root: Path = ROOT, denylist_path: Path | None = None) -> Report:
-    """Scan `root` and report. Pure: no printing and no exit."""
+def check(
+    root: Path = ROOT,
+    denylist_path: Path | None = None,
+    denylist_explicit: bool = False,
+) -> Report:
+    """Scan `root` and report. Pure: no printing and no exit.
+
+    `denylist_explicit` marks a path that came from `--denylist` or
+    `FORAGERR_COMMENT_DENYLIST` rather than the default location: an operator
+    who names a denylist is promising it exists, so a missing explicit path
+    is a ConfigError (exit 2) rather than the default path's tolerated
+    notice-and-continue.
+    """
     allowlist = Allowlist.load(root)
     denylist_path = denylist_path or root / LOCAL_DENYLIST
+    if denylist_explicit and not denylist_path.is_file():
+        raise ConfigError(
+            f"{denylist_path}: --denylist/{DENYLIST_ENV} names a file that does not exist"
+        )
     denylist = load_local_denylist(denylist_path)
     report = Report(counts={"text_files": 0, "files": 0, "units": 0, "skipped": 0})
     # The denylist holds the very literals it hunts for, so it is never its
@@ -677,10 +696,15 @@ def check(root: Path = ROOT, denylist_path: Path | None = None) -> Report:
     return report
 
 
-def resolve_denylist(root: Path, override: str | None) -> Path:
-    """Denylist location: explicit flag, then environment, then the default."""
+def resolve_denylist(root: Path, override: str | None) -> tuple[Path, bool]:
+    """Denylist location and whether it was explicitly named (flag/env, not default).
+
+    Precedence: explicit flag, then environment, then the default path.
+    """
     chosen = override or os.environ.get(DENYLIST_ENV)
-    return Path(chosen).expanduser().resolve() if chosen else root / LOCAL_DENYLIST
+    if chosen:
+        return Path(chosen).expanduser().resolve(), True
+    return root / LOCAL_DENYLIST, False
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -701,9 +725,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"comment_check: {root} is not a directory", file=sys.stderr)
         return 2
 
-    denylist_path = resolve_denylist(root, args.denylist)
+    denylist_path, denylist_explicit = resolve_denylist(root, args.denylist)
     try:
-        report = check(root, denylist_path=denylist_path)
+        report = check(root, denylist_path=denylist_path, denylist_explicit=denylist_explicit)
     except ConfigError as exc:
         print(f"comment_check: configuration error: {exc}", file=sys.stderr)
         return 2

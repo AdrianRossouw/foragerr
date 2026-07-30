@@ -345,12 +345,33 @@ def test_local_denylist_covers_files_with_no_comment_syntax(tree: Path):
 @pytest.mark.req("FRG-PROC-023")
 def test_denylist_never_scans_itself(tree: Path):
     """The denylist holds the literals it hunts for; scanning it would make
-    every operator's file report itself and the gate unusable."""
+    every operator's file report itself and the gate unusable.
+
+    The default path already sits outside `text_files()` via the EXCLUDED
+    glob list, so this alone does not exercise the self-skip guard in
+    `check()`; the override case below does, since an in-tree
+    `--denylist` path has no such structural exclusion."""
     (tree / "tools").mkdir()
     (tree / "tools" / "comment_check_local_denylist.txt").write_text("A Real Shelf Title\n")
 
     report = comment_check.check(tree)
 
+    assert report.findings == []
+
+
+@pytest.mark.req("FRG-PROC-023")
+def test_denylist_override_never_scans_itself(tree: Path):
+    """An in-tree `--denylist` override is not covered by the EXCLUDED glob
+    list, so without the `own_denylist` guard in `check()` this file would
+    be scanned like any other tracked text file — and its own literal would
+    match itself, reporting the denylist against itself."""
+    custom = tree / "shared-denylist.txt"
+    custom.write_text("A Real Shelf Title\n")
+    (tree / "clean.py").write_text("# One writer holds the lock for the whole rename.\n")
+
+    report = comment_check.check(tree, denylist_path=custom, denylist_explicit=True)
+
+    assert report.has_denylist is True
     assert report.findings == []
 
 
@@ -414,6 +435,31 @@ def test_denylist_location_is_overridable(tree: Path, tmp_path_factory, monkeypa
     monkeypatch.delenv(comment_check.DENYLIST_ENV)
     assert comment_check.main([str(tree)]) == 0
     assert "local-literal pass skipped" in capsys.readouterr().err
+
+
+@pytest.mark.req("FRG-PROC-023")
+def test_missing_explicit_denylist_flag_is_a_configuration_error(tree: Path):
+    """The default path staying absent is the tolerated fresh-clone case, but
+    `--denylist` names a specific file: an operator asking for one that isn't
+    there made a configuration mistake, and the gate must fail loudly (exit
+    2) rather than silently run the generic pass alone."""
+    (tree / "clean.py").write_text("# One writer holds the lock for the whole rename.\n")
+    missing = tree / "no-such-denylist.txt"
+
+    with pytest.raises(comment_check.ConfigError):
+        comment_check.check(tree, denylist_path=missing, denylist_explicit=True)
+    assert comment_check.main([str(tree), "--denylist", str(missing)]) == 2
+
+
+@pytest.mark.req("FRG-PROC-023")
+def test_missing_explicit_denylist_env_is_a_configuration_error(tree: Path, monkeypatch):
+    """Same fail-closed contract via the environment variable, the CLI's other
+    route to an explicitly requested denylist."""
+    (tree / "clean.py").write_text("# One writer holds the lock for the whole rename.\n")
+    missing = tree / "no-such-denylist.txt"
+    monkeypatch.setenv(comment_check.DENYLIST_ENV, str(missing))
+
+    assert comment_check.main([str(tree)]) == 2
 
 
 @pytest.mark.req("FRG-PROC-023")
