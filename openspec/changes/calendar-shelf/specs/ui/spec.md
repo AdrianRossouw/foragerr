@@ -36,10 +36,10 @@ SHALL provide:
     cover** of approximately 66×99 CSS px (the stored cover or its
     publisher-tinted spine fallback, FRG-UI-042), then a content block —
     line one is the series title with its issue number (and the debut badge
-    per FRG-PULL-008) beside a **fixed-position publisher chip** (color
-    swatch + normalized publisher name); line two is the entry's principal
-    creators (writer/artist, absent roles omitted); then up to **two
-    clamped lines of the stored description** — and the row's state and
+    per FRG-PULL-008); line two is a **fixed-position publisher chip**
+    (color swatch + normalized publisher name) leading the entry's
+    principal creators (writer/artist, absent roles omitted); then up to
+    **two clamped lines of the stored description** — and the row's state and
     actions right-aligned on a rail. The publisher SHALL be identifiable
     without horizontal scanning: the chip holds a fixed x-position in the
     content block and is never carried only as text trailing the
