@@ -1159,23 +1159,58 @@ async def _sweep_group_keys(
     group_keys: list[str],
     series_id: int,
     series_title: str | None,
-) -> None:
-    """Run the FRG-SRC-014 sibling sweep once for each of a group's fold keys.
+    exclude_entitlement_id: int | None = None,
+) -> int:
+    """Run the FRG-SRC-014 sibling sweep for every fold key a group carries.
 
     A DISPLAY group can span several exact ``group_key`` values (the FRG-UI-029
-    containment merge), and each one is a separate sweep scope. Once per key,
-    never once per member — the keys come from the request's own membership, so
-    the scan count is bounded by how many title forms the group actually mixes.
+    containment merge), and each one is a separate sweep SCOPE — but not a
+    separate scan. ``group_key`` has no stored column, so the source's ``new``
+    rows are read ONCE, folded once, and bucketed in memory; a key the request
+    did not carry is simply skipped. Reading per key instead re-scanned the whole
+    open review queue for each one, in its own transaction.
+
+    All keys are rewritten inside ONE write transaction so a display group moves
+    together: a partial sweep would leave one fold's members holding stale
+    proposals under a header claiming the rest were re-proposed.
+
+    An empty key sweeps nothing (an ungroupable title shares no evidence of being
+    the same series as any other). Returns the total number of rows rewritten.
     """
-    for key in group_keys:
-        await _reresolve_sibling_proposals_by_group(
-            db,
-            source_id=source_id,
-            group_key=key,
-            series_id=series_id,
-            series_title=series_title,
-            exclude_entitlement_id=None,
+    from sqlalchemy import select
+
+    wanted = {key for key in group_keys if key}
+    if not wanted:
+        return 0
+
+    per_key: dict[str, int] = {}
+    async with db.write_session() as session:
+        stmt = select(SourceEntitlementRow).where(
+            SourceEntitlementRow.source_id == source_id,
+            SourceEntitlementRow.review_status == "new",
         )
+        if exclude_entitlement_id is not None:
+            stmt = stmt.where(SourceEntitlementRow.id != exclude_entitlement_id)
+        rows = (await session.execute(stmt)).scalars().all()
+        now = utcnow()
+        for row in rows:
+            key = _group_key(row.human_name)
+            if key not in wanted:
+                continue
+            if _rewrite_proposal_as_match(
+                row, series_id=series_id, series_title=series_title, now=now
+            ):
+                per_key[key] = per_key.get(key, 0) + 1
+    for key, count in per_key.items():
+        logger.info(
+            "sources.review: re-resolved %d sibling proposal(s) in group %r "
+            "(source %d) onto series %d",
+            count,
+            key,
+            source_id,
+            series_id,
+        )
+    return sum(per_key.values())
 
 
 async def _bulk(db, entitlement_ids: list[int], action) -> BulkResult:
@@ -1368,8 +1403,6 @@ async def _reresolve_sibling_proposals(
     SQLite build we ship against, and the residual Python check below stays as
     the correctness guard.
     """
-    import json
-
     from sqlalchemy import func, select
 
     rewritten = 0
@@ -1397,20 +1430,9 @@ async def _reresolve_sibling_proposals(
             data = _loads_proposal(row.proposed_match_json)
             if data is None or data.get("cv_volume_id") != cv_volume_id:
                 continue
-            if data.get("kind") == "library" and data.get("series_id") == series_id:
-                continue  # already resolved (a re-run) — leave it alone
-            data.update(
-                {
-                    "kind": "library",
-                    "series_id": series_id,
-                    "title": series_title or data.get("title"),
-                    "auto": False,
-                }
+            rewritten += _rewrite_proposal_as_match(
+                row, series_id=series_id, series_title=series_title, now=now
             )
-            row.proposed_match_json = json.dumps(data, sort_keys=True)
-            row.proposed_series_id = series_id
-            row.updated_at = now
-            rewritten += 1
     if rewritten:
         logger.info(
             "sources.review: re-resolved %d sibling proposal(s) for cv volume %d "
@@ -1422,6 +1444,44 @@ async def _reresolve_sibling_proposals(
     return rewritten
 
 
+def _rewrite_proposal_as_match(
+    row: SourceEntitlementRow,
+    *,
+    series_id: int,
+    series_title: str | None,
+    now,
+) -> bool:
+    """Rewrite one row's stored proposal into a ``library``-kind MATCH.
+
+    The shared body of both sibling sweeps — each picks its own rows, this
+    decides what a rewritten proposal says. ``auto`` is forced ``False`` (a
+    rewrite is a convenience, never a licence for the auto-sync path to accept
+    without review) and the ranked ``candidates`` list survives verbatim, so the
+    UI still offers the alternatives.
+
+    Returns ``False`` for a row already resolved onto this series (a re-run),
+    which leaves its ``updated_at`` alone.
+    """
+    import json
+
+    data = _loads_proposal(row.proposed_match_json) or {}
+    if data.get("kind") == "library" and data.get("series_id") == series_id:
+        return False
+    data.update(
+        {
+            "kind": "library",
+            "series_id": series_id,
+            "title": series_title or data.get("title"),
+            "auto": False,
+        }
+    )
+    # A prior "nothing plausible" marker is now a match; drop it so the proposal
+    # reads consistently as a library match.
+    data.pop("verdict", None)
+    row.proposed_match_json = json.dumps(data, sort_keys=True)
+    row.proposed_series_id = series_id
+    row.updated_at = now
+    return True
 
 
 async def _reresolve_sibling_proposals_by_group(
@@ -1460,59 +1520,14 @@ async def _reresolve_sibling_proposals_by_group(
 
     Runs as ONE write transaction and returns the number of rows rewritten.
     """
-    import json
-
-    from sqlalchemy import select
-
-    if not group_key:
-        return 0
-    rewritten = 0
-    async with db.write_session() as session:
-        rows = (
-            (
-                await session.execute(
-                    select(SourceEntitlementRow).where(
-                        SourceEntitlementRow.source_id == source_id,
-                        SourceEntitlementRow.review_status == "new",
-                        SourceEntitlementRow.id != exclude_entitlement_id,
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-        now = utcnow()
-        for row in rows:
-            if _group_key(row.human_name) != group_key:
-                continue
-            data = _loads_proposal(row.proposed_match_json) or {}
-            if data.get("kind") == "library" and data.get("series_id") == series_id:
-                continue  # already resolved (a re-run) — leave it alone
-            data.update(
-                {
-                    "kind": "library",
-                    "series_id": series_id,
-                    "title": series_title or data.get("title"),
-                    "auto": False,
-                }
-            )
-            # A prior "nothing plausible" marker is now a match; drop it so the
-            # proposal reads consistently as a library match.
-            data.pop("verdict", None)
-            row.proposed_match_json = json.dumps(data, sort_keys=True)
-            row.proposed_series_id = series_id
-            row.updated_at = now
-            rewritten += 1
-    if rewritten:
-        logger.info(
-            "sources.review: re-resolved %d sibling proposal(s) in group %r "
-            "(source %d) onto series %d",
-            rewritten,
-            group_key,
-            source_id,
-            series_id,
-        )
-    return rewritten
+    return await _sweep_group_keys(
+        db,
+        source_id=source_id,
+        group_keys=[group_key],
+        series_id=series_id,
+        series_title=series_title,
+        exclude_entitlement_id=exclude_entitlement_id,
+    )
 
 
 def _loads_proposal(raw: str | None) -> dict | None:

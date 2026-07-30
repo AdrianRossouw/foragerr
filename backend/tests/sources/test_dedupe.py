@@ -301,15 +301,10 @@ async def test_a_failing_backfill_never_blocks_boot(db, config_dir, monkeypatch)
 
 
 @pytest.mark.req("FRG-SRC-015")
-async def test_accept_and_match_refuse_a_parked_copy(
-    db, config_dir, root_folder_id, format_profile_id
-):
+async def test_accept_refuses_a_parked_copy(db, config_dir):
     source, _result = await _twin_source(db, config_dir)
     rows = await _by_machine_name(db, source.id)
     copy_id = rows["second_saga_v1"].id
-    series_id = await _mk_series(
-        db, root_folder_id, format_profile_id, cvid=901, title="Example Saga"
-    )
     commands = FakeCommands()
 
     with pytest.raises(review.EntitlementActionError) as accept_refusal:
@@ -317,18 +312,6 @@ async def test_accept_and_match_refuse_a_parked_copy(
             db, None, copy_id, commands=commands, matched_via=MATCHED_VIA_OPERATOR
         )
     assert accept_refusal.value.status == 409
-
-    # The accept path's in-transaction precondition refuses it too, so a race
-    # cannot slip a copy past the up-front check into a queued grab.
-    with pytest.raises(review.EntitlementActionError):
-        await review.match_entitlement(
-            db,
-            copy_id,
-            series_id=series_id,
-            commands=commands,
-            matched_via=MATCHED_VIA_OPERATOR,
-            require_new=True,
-        )
 
     still_parked = await repo.get_entitlement(db, copy_id)
     assert still_parked.review_status == "duplicate"

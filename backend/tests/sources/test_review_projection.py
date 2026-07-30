@@ -447,7 +447,12 @@ async def test_an_ignored_canonical_stops_advertising_its_copies(app_client):
     before = (await app_client.get(f"/api/v1/sources/{source_id}/entitlements")).json()
     assert {r["machine_name"]: r["duplicate_count"] for r in before}["saga_v2"] == 1
 
-    await app_client.post(f"/api/v1/sources/entitlements/{canonical_id}/ignore")
+    ignored = (
+        await app_client.post(f"/api/v1/sources/entitlements/{canonical_id}/ignore")
+    ).json()
+    # The action's OWN response is the row the client writes back into the list,
+    # so it has to answer the copies question the same way the listing does.
+    assert ignored["duplicate_count"] == 0
 
     listing = (
         await app_client.get(f"/api/v1/sources/{source_id}/entitlements")
@@ -461,3 +466,12 @@ async def test_an_ignored_canonical_stops_advertising_its_copies(app_client):
         await app_client.get(f"/api/v1/sources/entitlements/{canonical_id}")
     ).json()
     assert detail["duplicate_count"] == 0
+
+    # Back on the review surface, the same action response carries the chip
+    # again — the copies are looked up per response, never assumed absent.
+    restored = (
+        await app_client.post(f"/api/v1/sources/entitlements/{canonical_id}/restore")
+    ).json()
+    assert restored["review_status"] == "new"
+    assert restored["duplicate_count"] == 1
+    assert restored["duplicate_bundles"] == ["Example Bundle"]

@@ -134,7 +134,7 @@ function sharedTitle(rows: EntitlementResource[], merged: boolean): string {
   }
   // A one- or two-character sliver is noise, not a title — name the group after
   // its first member instead (still honest: the count says how many follow).
-  return trimmed.length >= 3 ? trimmed : (names[0] ?? '');
+  return names[0] ?? '';
 }
 
 function countStatuses(rows: EntitlementResource[]): GroupCounts {

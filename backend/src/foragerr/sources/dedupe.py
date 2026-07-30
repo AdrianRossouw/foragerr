@@ -53,6 +53,7 @@ from collections import defaultdict
 from sqlalchemy import select
 
 from foragerr.db.base import utcnow
+from foragerr.sources import repo
 from foragerr.sources.models import SourceEntitlementRow
 
 logger = logging.getLogger("foragerr.sources.dedupe")
@@ -87,16 +88,8 @@ async def link_duplicate_entitlements(db, source_id: int | None = None) -> int:
     """
     if source_id is None:
         parked = 0
-        async with db.read_session() as session:
-            source_ids = list(
-                (
-                    await session.execute(
-                        select(SourceEntitlementRow.source_id).distinct()
-                    )
-                ).scalars()
-            )
-        for sid in sorted(source_ids):
-            parked += await link_duplicate_entitlements(db, sid)
+        for source in await repo.list_sources(db):
+            parked += await link_duplicate_entitlements(db, source.id)
         return parked
 
     parked = 0
@@ -158,9 +151,18 @@ async def link_duplicate_entitlements(db, source_id: int | None = None) -> int:
             if any(member.review_status in _DECIDED_STATES for member in members):
                 continue
             canonical = next(
-                (m for m in members if m.review_status != "duplicate"), None
+                (m for m in members if m.review_status == "new"), None
             )
-            if canonical is None:  # pragma: no cover — unparking leaves one
+            if canonical is None:
+                # Every member is parked, so the set has no row the operator can
+                # act on. Leave it alone and say so: the unpark pass above should
+                # have freed one, and a set that reaches here is hidden entirely.
+                logger.warning(
+                    "sources.dedupe: md5 set of %d entitlement(s) in source %d "
+                    "has no reviewable member; leaving it unchanged",
+                    len(members),
+                    source_id,
+                )
                 continue
             for member in members:
                 if member.id == canonical.id:
