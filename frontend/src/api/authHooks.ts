@@ -125,7 +125,7 @@ export function useChangePassword(): UseMutationResult<
   return useMutation({
     // gcTime: 0 so the submitted current password does not linger in the
     // MutationCache (state.variables) after the observer unmounts — a secret in
-    // memory outliving its use (gate finding). Cards also .reset() on success.
+    // memory outliving its use. Cards also .reset() on success.
     gcTime: 0,
     mutationFn: (payload) =>
       fetcher<void>('/api/v1/auth/password', { method: 'POST', body: payload }),

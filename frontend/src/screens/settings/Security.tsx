@@ -441,7 +441,7 @@ function ApiKeyCard() {
           // mutation's cached copy of both the raw key (state.data) and the
           // admin password (state.variables) — display-once means the only
           // surviving reference is `rawKey`, cleared when the modal closes
-          // (FRG-AUTH-007 confinement; gate finding).
+          // (FRG-AUTH-007 confinement).
           rotateApiKey.reset();
         },
         onError: (error) => {

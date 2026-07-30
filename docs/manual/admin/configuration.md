@@ -101,10 +101,10 @@ under the top level of `config.yaml`.
 | `import_transfer_mode` | `FORAGERR_IMPORT_TRANSFER_MODE` | `move` | How download imports place files: `move`, `copy`, or `hardlink` (falls back to copy across volumes). |
 | `library_import_mode` | `FORAGERR_LIBRARY_IMPORT_MODE` | `in_place` | How the existing-library import treats files already under a root: `in_place` (never moved) or `move`. |
 | `duplicate_constraint` | `FORAGERR_DUPLICATE_CONSTRAINT` | `larger-size` | Same-format-rank duplicate arbitration: `larger-size` or `preferred-format`. Fixed-release markers (`(f1)`/`(f2)`) always win. Profile-rank upgrades/downgrades are unaffected. |
-| `duplicate_dump_path` | `FORAGERR_DUPLICATE_DUMP_PATH` | *(empty)* | Directory losing duplicate files are moved to (dated subfolders). **Empty = the normal recycle/delete path applies.** Never pruned by recycle-bin retention. |
+| `duplicate_dump_path` | `FORAGERR_DUPLICATE_DUMP_PATH` | *(empty)* | Directory losing duplicate files are moved to (dated subfolders). **Empty = the normal recycle/delete path applies.** Never pruned by recycle-bin retention. May not resolve inside a read-only root (see `recycle_bin_path`). |
 | `library_import_proposal_cap` | `FORAGERR_LIBRARY_IMPORT_PROPOSAL_CAP` | `50` | Max ComicVine match proposals one library-import scan performs (each is a rate-limited live search). Deferred groups keep their place and are proposed on later re-scans. |
 | `library_import_similarity_floor` | `FORAGERR_LIBRARY_IMPORT_SIMILARITY_FLOOR` | `0.5` | Minimum name similarity (0–1) for a scan to attach a ComicVine proposal; below it the group stages as no-match for manual choice. |
-| `recycle_bin_path` | `FORAGERR_RECYCLE_BIN_PATH` | *(empty)* | Directory upgrade-replaced and user-deleted files are moved to. **Empty = permanently delete.** Must be writable when set; destinations are confinement-checked. |
+| `recycle_bin_path` | `FORAGERR_RECYCLE_BIN_PATH` | *(empty)* | Directory upgrade-replaced and user-deleted files are moved to. **Empty = permanently delete.** Must be writable when set; destinations are confinement-checked, and the path may not resolve inside a read-only root (rejected on save; any disposal that would use it is refused and it is reported in health). |
 | `recycle_bin_retention_days` | `FORAGERR_RECYCLE_BIN_RETENTION_DAYS` | `0` | Days before housekeeping permanently prunes bin entries. `0` = keep forever. |
 | `config_backup_retention` | `FORAGERR_CONFIG_BACKUP_RETENTION` | `3` | Pre-migration `config.yaml` backups kept under `backups/`. |
 | `comicinfo_tag_on_import` | `FORAGERR_COMICINFO_TAG_ON_IMPORT` | `false` | Write ComicInfo.xml into imported cbz archives from the matched ComicVine record (atomic rewrite; a tagging failure never fails the import). |
@@ -315,14 +315,20 @@ See `deployment.md` → "Restoring from a backup" for how to use these files.
 
 Root folders (the library locations series live under) are registered in the web
 UI under **Settings → Media Management**, or inline from the Add Series dialog on
-a fresh install — they are not a config-file setting. **A root folder must be
-writable**: foragerr registers folders through a validated API that refuses a
-path it cannot write to, naming the reason (for example `path '/x' is not
-writable`). This applies even in the existing-library "in place" import mode,
-which still records imports and can move replaced files to the recycle bin.
-Read-only mounts (a read-only NAS export, for instance) are therefore not
-supported as root folders — mount the library read-write, or point foragerr at a
-writable copy.
+a fresh install — they are not a config-file setting. An ordinary root folder
+must be **writable**: foragerr registers folders through a validated API that
+refuses a path it cannot write to, naming the reason (for example `path '/x' is
+not writable`).
+
+A root can also be registered **read-only** (Media Management only — the
+inline Add Series path input does not offer this option) for an existing,
+already-organized collection you don't want foragerr to reorganize: check
+"Read-only" when registering it, and it only needs to be **readable**, not
+writable, so a read-only mount (a read-only NAS export, for instance) works
+fine. foragerr indexes files under a read-only root in place and never renames,
+moves, downloads into, or deletes from it — series on it are browse/serve-only.
+See `../user/library.md` §Read-only / reference libraries for the full
+behavior.
 
 ## Weekly pull
 

@@ -14,7 +14,11 @@ networks:
     driver: bridge
     ipam:
       config:
-        - subnet: 203.0.113.0/24
+        # Overridable alongside FORAGERR_E2E_PROJECT: docker refuses a second
+        # network on an overlapping pool, so a concurrent run needs its own.
+        # Any replacement MUST stay outside RFC-1918 for the reason below —
+        # TEST-NET-2 (198.51.100.0/24) and TEST-NET-1 (192.0.2.0/24) qualify.
+        - subnet: ${FORAGERR_E2E_SUBNET:-203.0.113.0/24}
 
 services:
   foragerr:
@@ -91,6 +95,15 @@ services:
     volumes:
       - ${FORAGERR_E2E_RUN}/config:/config
       - ${FORAGERR_E2E_RUN}/library:/library
+      # A second library location for the read-only reference tier
+      # (FRG-SER-021). Mounted WRITABLE on purpose: the root is registered
+      # read-only through the API, so every refusal and every untouched byte is
+      # the boundary's own doing and not the filesystem's.
+      - ${FORAGERR_E2E_RUN}/reference:/reference
+      # A genuinely unwritable mount: registering it read-only must succeed
+      # (readability replaces writability) while an ordinary registration of the
+      # same path must still be refused.
+      - ${FORAGERR_E2E_RUN}/unwritable:/unwritable:ro
       - ${FORAGERR_E2E_RUN}/certs/ca.pem:/certs/ca.pem:ro
     networks:
       - e2e

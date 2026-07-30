@@ -334,3 +334,69 @@ def test_read_only_no_mutation_possible(client, tmp_path):
     for method in ("post", "put", "patch", "delete"):
         resp = getattr(client, method)(f"/api/v1/pull?week={WEEK}")
         assert resp.status_code in (404, 405)
+
+
+async def _seed_read_only_week(db, tmp_path) -> dict[str, int]:
+    """A reference-root series with an issue due this week, plus a stored pull
+    entry matched to that issue."""
+    profile_id = await _format_profile_id(db)
+    root = tmp_path / "reference-library"
+    root.mkdir(exist_ok=True)
+    async with db.write_session() as session:
+        rf = await library_repo.create_root_folder(session, str(root), read_only=True)
+        series = await library_repo.create_series(
+            session,
+            cv_volume_id=77,
+            title="Example Reference Series",
+            start_year=2024,
+            format_profile_id=profile_id,
+            root_folder_id=rf.id,
+            path=str(root / "Example Reference Series"),
+            monitored=False,
+            publisher="Example Press",
+        )
+        await session.flush()
+        issue = await library_repo.create_issue(
+            session,
+            series_id=series.id,
+            cv_issue_id=7701,
+            issue_number="1",
+            store_date=IN_WEEK,
+            monitored=False,
+        )
+        await session.flush()
+        series_id, issue_id = series.id, issue.id
+    async with db.write_session() as session:
+        rows = await pull_repo.replace_week(
+            session,
+            WEEK,
+            [
+                ParsedPullEntry(
+                    series_name="Example Reference Series",
+                    issue_number="1",
+                    release_date=IN_WEEK,
+                    publisher="Example Press",
+                    cv_series_id=77,
+                    cv_issue_id=7701,
+                )
+            ],
+        )
+        entry_id = rows[0].id
+    async with db.write_session() as session:
+        await pull_repo.update_match(
+            session, entry_id, matched_issue_id=issue_id, match_type="id"
+        )
+    return {"series_id": series_id, "issue_id": issue_id, "entry_id": entry_id}
+
+
+@pytest.mark.req("FRG-SER-022")
+def test_week_carries_no_linked_row_for_a_read_only_series(client, tmp_path):
+    """The calendar's live want / skip / search controls key on a row's linked
+    issue, so a browse-only series must not produce one — the endpoint returns
+    no row carrying that issue id, matched pull entry or not."""
+    ids = client.portal.call(_seed_read_only_week, client.app.state.db, tmp_path)
+
+    body = client.get(f"/api/v1/pull?week={WEEK}&pageSize=200").json()
+
+    assert [r for r in body["records"] if r["matchedIssueId"] == ids["issue_id"]] == []
+    assert [r for r in body["records"] if r["seriesId"] == ids["series_id"]] == []

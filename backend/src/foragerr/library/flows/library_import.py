@@ -83,8 +83,10 @@ from foragerr.importer.evidence import aggregate
 from foragerr.importer.context import DEFAULT_MAX_WALK_DEPTH
 from foragerr.library import matching
 from foragerr.library.flows import reconcile
+from foragerr.library.repo import root_is_read_only
 from foragerr.library.flows._common import SeriesValidationError, comicvine_factory
 from foragerr.library.flows.add import add_series
+from foragerr.library.flows.edit_delete import delete_series
 from foragerr.library.flows.refresh import refresh_series
 from foragerr.library.models import (
     IssueFileRow,
@@ -759,6 +761,21 @@ async def _issue_count(db: Database, series_id: int) -> int:
     return int(count or 0)
 
 
+async def _series_has_issue_files(db: Database, series_id: int) -> bool:
+    """Whether a series holds at least one imported issue file — the
+    ground-truth keep/rollback test for FRG-IMP-027. Counts files however they
+    attached (this import, or the scan-series the refresh chained), so a series
+    with a real file is never rolled back and an empty shell always is."""
+    async with db.read_session() as session:
+        found = await session.scalar(
+            select(IssueFileRow.id)
+            .join(IssueRow, IssueFileRow.issue_id == IssueRow.id)
+            .where(IssueRow.series_id == series_id)
+            .limit(1)
+        )
+    return found is not None
+
+
 async def _refresh_before_import(
     db: Database,
     settings: Settings | None,
@@ -811,9 +828,18 @@ async def _import_group(
     (FRG-IMP-023).
     """
     assert group.confirmed_cv_volume_id is not None
+    async with db.read_session() as session:
+        read_only_root = await root_is_read_only(session, group.root_folder_id)
     in_place = (
         getattr(settings, "library_import_mode", "in_place") if settings else "in_place"
     ) != "move"
+    # A read-only reference root (FRG-IMP-028) is indexed IN PLACE with no
+    # rename/move, regardless of the global mode/rename settings — the files are
+    # the operator's originals and must not be touched. Forcing both here means
+    # the placement step is a pure register (the pipeline's in-place branch);
+    # the pipeline's fail-closed guard refuses any move that slips through.
+    if read_only_root:
+        in_place = True
 
     # Safety rail: a group whose folder IS the root folder (loose files at the
     # root, groups spanning sibling folders) must never become a series whose
@@ -844,6 +870,7 @@ async def _import_group(
     # through the ONE add flow (CV fetch, path build; refresh handled below —
     # enqueue_refresh=False so the group gets EXACTLY one refresh).
     series = await _series_for_volume(db, group.confirmed_cv_volume_id)
+    created_series_id: int | None = None
     if series is not None:
         same_folder = bool(group.folder) and os.path.realpath(
             series.path
@@ -880,104 +907,161 @@ async def _import_group(
             )
             return "add-failed"
         series = result.series
+        # This group created the series in THIS run (FRG-IMP-027). If the group
+        # then attaches no file — a refresh failure, an error, or every file
+        # blocked — the series is rolled back below rather than left as a
+        # monitored, issueless shell the scheduled refresh + backlog search
+        # would silently "complete" behind an operator who saw the group fail.
+        # A reused / pre-existing series is never rolled back (created stays 0).
+        created_series_id = series.id
 
-    # Populate the issue list DETERMINISTICALLY before importing: files can
-    # only match issues that exist. Runs for a just-created series (always
-    # issueless) and for a reused series whose add-enqueued refresh is still
-    # pending — never for a series that already has its issues (no double
-    # fetch/scan).
-    if await _issue_count(db, series.id) == 0:
-        if not await _refresh_before_import(
-            db, settings, commands, group.id, series.id, factory
-        ):
-            return "refresh-failed"
+    try:
+        # Populate the issue list DETERMINISTICALLY before importing: files can
+        # only match issues that exist. Runs for a just-created series (always
+        # issueless) and for a reused series whose add-enqueued refresh is still
+        # pending — never for a series that already has its issues (no double
+        # fetch/scan).
+        if await _issue_count(db, series.id) == 0:
+            if not await _refresh_before_import(
+                db, settings, commands, group.id, series.id, factory
+            ):
+                return "refresh-failed"
 
-    ctx = ImportContext(
-        library_root=series.path,
-        config_dir=str(settings.config_dir) if settings is not None else ".",
-        reference_year=series.start_year or now.year,
-        now=now,
-        offload=offload,
-        **media_management_fields(settings),
-    )
-    source = LibraryImportSource(
-        series_id=series.id,
-        files=tuple(path for path, _size in decode_group_files(group.files)),
-        container_root=group.folder or None,
-    )
+        mm_fields = media_management_fields(settings)
+        if read_only_root:
+            # Force EVERY disk-mutating seam off for a read-only root, so the
+            # pipeline never renders a move, a rename, or a post-import archive
+            # rewrite even when the global settings enable them (FRG-IMP-028).
+            # The two rewrite toggles matter as much as the mode: they run AFTER
+            # placement on the file that was just registered, which for an
+            # index-in-place import is the operator's own original.
+            mm_fields["rename_enabled"] = False
+            mm_fields["library_import_mode"] = "in_place"
+            mm_fields["comicinfo_tag_enabled"] = False
+            mm_fields["convert_cbr_to_cbz"] = False
+        ctx = ImportContext(
+            library_root=series.path,
+            config_dir=str(settings.config_dir) if settings is not None else ".",
+            reference_year=series.start_year or now.year,
+            now=now,
+            offload=offload,
+            **mm_fields,
+        )
+        source = LibraryImportSource(
+            series_id=series.id,
+            files=tuple(path for path, _size in decode_group_files(group.files)),
+            container_root=group.folder or None,
+        )
 
-    imported = 0
-    blocked_reasons: list[str] = []
-    all_already_registered = False
-    async with db.write_session() as session:
-        candidates = await gather(source, session, ctx)
-        if not candidates:
-            # Distinguish "everything vanished" from "everything already
-            # imported" (the source filters registered paths): a re-run of a
-            # fully-imported group is a success, not a scan problem.
-            staged = [path for path, _size in decode_group_files(group.files)]
-            registered = set(
-                (
-                    await session.execute(
-                        select(IssueFileRow.path).where(
-                            IssueFileRow.path.in_(staged)
+        imported = 0
+        blocked_reasons: list[str] = []
+        all_already_registered = False
+        async with db.write_session() as session:
+            candidates = await gather(source, session, ctx)
+            if not candidates:
+                # Distinguish "everything vanished" from "everything already
+                # imported UNDER THIS SERIES" (the source filters registered
+                # paths): a re-run of a fully-imported group is a success. Scoped
+                # to THIS series — a file registered under ANOTHER series is not
+                # this group's import, so it must not read as "already imported"
+                # and keep an otherwise-empty shell (FRG-IMP-027).
+                staged = [path for path, _size in decode_group_files(group.files)]
+                registered = set(
+                    (
+                        await session.execute(
+                            select(IssueFileRow.path)
+                            .join(IssueRow, IssueFileRow.issue_id == IssueRow.id)
+                            .where(
+                                IssueFileRow.path.in_(staged),
+                                IssueRow.series_id == series.id,
+                            )
                         )
                     )
+                    .scalars()
+                    .all()
                 )
-                .scalars()
-                .all()
-            )
-            all_already_registered = bool(staged) and all(
-                path in registered for path in staged
-            )
-        for candidate in candidates:
-            outcome = await import_candidate(session, candidate, ctx)
-            if outcome.status is ImportStatus.IMPORTED:
-                imported += 1
-            else:
-                blocked_reasons.append(
-                    f"{candidate.file_name}: "
-                    + "; ".join(outcome.reasons or ("blocked",))
+                all_already_registered = bool(staged) and all(
+                    path in registered for path in staged
                 )
+            for candidate in candidates:
+                outcome = await import_candidate(session, candidate, ctx)
+                if outcome.status is ImportStatus.IMPORTED:
+                    imported += 1
+                else:
+                    blocked_reasons.append(
+                        f"{candidate.file_name}: "
+                        + "; ".join(outcome.reasons or ("blocked",))
+                    )
 
-    if not candidates:
-        if all_already_registered:
+        if not candidates:
+            if all_already_registered:
+                await _set_group_outcome(
+                    db,
+                    group.id,
+                    state="imported",
+                    message="all staged files are already imported",
+                    rejections=[],
+                )
+                return "imported"
             await _set_group_outcome(
                 db,
                 group.id,
-                state="imported",
-                message="all staged files are already imported",
+                state=None,
+                message="no staged files remain on disk; re-run the scan",
                 rejections=[],
             )
-            return "imported"
+            return "empty"
+        if blocked_reasons:
+            await _set_group_outcome(
+                db,
+                group.id,
+                state=None,  # stays confirmed → re-runnable after the user fixes it
+                message=(
+                    f"imported={imported} blocked={len(blocked_reasons)}: "
+                    + _shorten(blocked_reasons)
+                ),
+                rejections=blocked_reasons,
+            )
+            return "partial" if imported else "blocked"
         await _set_group_outcome(
             db,
             group.id,
-            state=None,
-            message="no staged files remain on disk; re-run the scan",
+            state="imported",
+            message=f"imported={imported}",
             rejections=[],
         )
-        return "empty"
-    if blocked_reasons:
-        await _set_group_outcome(
-            db,
-            group.id,
-            state=None,  # stays confirmed → re-runnable after the user fixes it
-            message=(
-                f"imported={imported} blocked={len(blocked_reasons)}: "
-                + _shorten(blocked_reasons)
-            ),
-            rejections=blocked_reasons,
-        )
-        return "partial" if imported else "blocked"
-    await _set_group_outcome(
-        db,
-        group.id,
-        state="imported",
-        message=f"imported={imported}",
-        rejections=[],
-    )
-    return "imported"
+        return "imported"
+    finally:
+        # Roll back a series THIS group created that ended up with no files of
+        # its own (FRG-IMP-027). The keep/rollback test is GROUND TRUTH — does
+        # the series actually hold an issue file now — not the body's imported
+        # counter: a file may have been attached by the scan-series the refresh
+        # chained (so the counter is 0 but the series is real → keep), and a
+        # "files already registered" verdict is only a keep when they are
+        # registered under THIS series, not another. Runs on the exception
+        # path too (the body raised) — the shell is undone and the original
+        # error still propagates.
+        if created_series_id is not None:
+            # The whole rollback — the ground-truth read AND the delete — is
+            # guarded: on the exception path the finally must never let its own
+            # failure (a read or delete error, e.g. the same DB fault that
+            # failed the body) replace the original error still in flight.
+            try:
+                if not await _series_has_issue_files(db, created_series_id):
+                    # Metadata-only (delete_files False): removes the shell's
+                    # issue/file rows and its cached cover, never an on-disk
+                    # library file. A scan-series the refresh enqueued no-ops on
+                    # the now-gone series.
+                    await delete_series(
+                        db, created_series_id, delete_files=False, settings=settings
+                    )
+            except Exception:  # noqa: BLE001 - cleanup must not mask the real error
+                logger.warning(
+                    "library-import: rollback of shell series %d failed",
+                    created_series_id,
+                    exc_info=True,
+                )
+
 
 
 #: Execute outcomes that leave a group failed or blocked with a visible reason

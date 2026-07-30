@@ -346,7 +346,7 @@ def test_opds_base_path_rejects_reserved_mount_paths(config_dir, reserved):
 @pytest.mark.req("FRG-META-001")
 def test_comicvine_base_url_requires_https(config_dir):
     """The API key rides every CV request; a plaintext base would exfiltrate
-    it (change-8 gate finding). https passes, http is refused at startup,
+    it. https passes, http is refused at startup,
     and the e2e fixture opts in explicitly."""
     from foragerr.config import Settings
 

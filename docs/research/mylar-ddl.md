@@ -1,11 +1,11 @@
 # Mylar3 DDL Downloader (GetComics provider) — Research Report
 
-Source studied: `/Users/adrian/Projects/foragerr/.reference/mylar3/mylar/getcomics.py`
+Source studied: `.reference/mylar3/mylar/getcomics.py`
 (1677 lines), queue/worker plumbing in `helpers.py` (`ddl_downloader`), integration in
 `search.py`, `search_filer.py`, `webserve.py` (retry/requeue UI), mirror downloaders in
 `mylar/downloaders/` (mega, mediafire, pixeldrain, external_server), and config in
 `config.py` / `__init__.py`. Citations relative to
-`/Users/adrian/Projects/foragerr/.reference/mylar3/mylar/`.
+`.reference/mylar3/mylar/`.
 
 ## 1. Behavioral catalogue
 

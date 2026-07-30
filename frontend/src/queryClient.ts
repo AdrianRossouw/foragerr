@@ -14,6 +14,15 @@ export function createQueryClient(): QueryClient {
         retry: false,
         refetchOnWindowFocus: false,
       },
+      mutations: {
+        // `always`, not the default `online`: a mutation started while the
+        // browser reports itself offline would otherwise be PAUSED, and a paused
+        // mutation's promise never settles. Every caller that awaits one — and
+        // every optimistic value released in its `finally` — would be stranded
+        // on a control that stays busy forever. Failing fast reaches the
+        // revert-and-report path instead.
+        networkMode: 'always',
+      },
     },
   });
 }

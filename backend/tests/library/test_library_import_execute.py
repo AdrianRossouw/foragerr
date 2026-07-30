@@ -21,6 +21,7 @@ from foragerr.library import repo
 from foragerr.library.flows import library_import
 from foragerr.library.flows.library_import import (
     decode_rejections,
+    encode_group_files,
     execute_library_import,
     scan_library_root,
 )
@@ -678,8 +679,8 @@ async def test_add_failed_group_also_logs_a_warning(
 ):
     """The other named outcome: two flat-folder groups confirmed to distinct
     volumes collide on the shared series path — the second add-fails, and that
-    group too must emit its WARNING with the verbatim reason (gate finding:
-    only `blocked` was covered)."""
+    group too must emit its WARNING with the verbatim reason, not only the
+    `blocked` outcome."""
     import logging
 
     flat = root_folder_path / "flat"
@@ -722,3 +723,283 @@ async def test_add_failed_group_also_logs_a_warning(
     assert len(warned) == 1
     assert "'fables'" in warned[0]  # the group identity
     assert "already used by another series" in warned[0]  # verbatim reason
+
+
+# --- FRG-IMP-027: per-group import atomicity (no zombie series shell) --------
+
+
+async def _series_count(db, cv_volume_id: int) -> int:
+    async with db.read_session() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(SeriesRow).where(SeriesRow.cv_volume_id == cv_volume_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    return len(rows)
+
+
+@pytest.mark.req("FRG-IMP-027")
+async def test_refresh_failure_rolls_back_the_created_series(
+    db, settings, root_folder_id, root_folder_path, monkeypatch
+):
+    """A group that creates a NEW series but then fails its pre-import refresh
+    leaves no series behind — not a monitored, issueless shell the scheduled
+    refresh + backlog search would silently complete. The staging row still
+    shows the failure."""
+    make_large_cbz(root_folder_path / "Ember (2015)" / "Ember 001 (2015).cbz")
+    cv = FakeCV().volume(701, name="Ember", start_year=2015)
+    factory = build_factory(settings, cv.handler())
+    commands = CommandService(db, settings)
+    await scan_library_root(db, settings, root_folder_id, factory=factory)
+    group = (await _groups_by_key(db, root_folder_id))["ember"]
+    await _confirm(db, group.id, 701)
+
+    # The add's CV existence check succeeds and the series is created; the
+    # pre-import refresh then fails — the zombie-shell scenario.
+    async def _fail_refresh(*a, **k):
+        await library_import._set_group_outcome(
+            a[0], a[3], state=None, message="metadata refresh failed before import: boom"
+        )
+        return False
+
+    monkeypatch.setattr(library_import, "_refresh_before_import", _fail_refresh)
+
+    summary = await execute_library_import(
+        db, settings, [group.id], commands=commands, factory=factory
+    )
+    assert "refresh-failed" in summary
+    assert await _series_count(db, 701) == 0  # no shell left behind
+    assert await _issue_file_paths(db, 701) == []
+    reloaded = (await _groups_by_key(db, root_folder_id))["ember"]
+    assert reloaded.state != "imported"
+    assert "refresh failed" in (reloaded.message or "")
+
+
+@pytest.mark.req("FRG-IMP-027")
+async def test_genuine_import_keeps_the_created_series(
+    db, settings, root_folder_id, root_folder_path
+):
+    """A group that attaches at least one file keeps its series (the rollback
+    fires only when nothing landed)."""
+    make_large_cbz(root_folder_path / "Ember (2015)" / "Ember 001 (2015).cbz")
+    cv = (
+        FakeCV()
+        .volume(701, name="Ember", start_year=2015)
+        .issues(701, [issue(9701, "1", cover_date="2015-03-01")])
+    )
+    factory = build_factory(settings, cv.handler())
+    commands = CommandService(db, settings)
+    await scan_library_root(db, settings, root_folder_id, factory=factory)
+    group = (await _groups_by_key(db, root_folder_id))["ember"]
+    await _confirm(db, group.id, 701)
+
+    summary = await execute_library_import(
+        db, settings, [group.id], commands=commands, factory=factory
+    )
+    assert "imported" in summary
+    assert await _series_count(db, 701) == 1
+    assert len(await _issue_file_paths(db, 701)) == 1
+
+
+@pytest.mark.req("FRG-IMP-027")
+async def test_reused_series_is_never_deleted_by_a_failed_group(
+    db, settings, root_folder_id, root_folder_path, monkeypatch
+):
+    """A pre-existing series (reused in place) is never rolled back — only a
+    shell THIS group created is undone."""
+    from foragerr.library.flows.add import add_series
+
+    folder = root_folder_path / "Ember (2015)"
+    make_large_cbz(folder / "Ember 001 (2015).cbz")
+    cv = FakeCV().volume(701, name="Ember", start_year=2015)
+    factory = build_factory(settings, cv.handler())
+    commands = CommandService(db, settings)
+    # Pre-create the series at the group's folder, issueless (enqueue_refresh
+    # False), so the import reuses it in place and reaches the refresh step.
+    await add_series(
+        db, settings, cv_volume_id=701, root_folder_id=root_folder_id,
+        commands=commands, path_override=str(folder), enqueue_refresh=False,
+        factory=factory,
+    )
+    assert await _series_count(db, 701) == 1
+
+    await scan_library_root(db, settings, root_folder_id, factory=factory)
+    group = (await _groups_by_key(db, root_folder_id))["ember"]
+    await _confirm(db, group.id, 701)
+
+    async def _fail_refresh(*a, **k):
+        await library_import._set_group_outcome(
+            a[0], a[3], state=None, message="metadata refresh failed before import: boom"
+        )
+        return False
+
+    monkeypatch.setattr(library_import, "_refresh_before_import", _fail_refresh)
+    summary = await execute_library_import(
+        db, settings, [group.id], commands=commands, factory=factory
+    )
+    assert "refresh-failed" in summary
+    # The pre-existing series survives — it was reused, not created here.
+    assert await _series_count(db, 701) == 1
+
+
+@pytest.mark.req("FRG-IMP-027")
+async def test_rolled_back_group_reimports_cleanly_as_a_first_run(
+    db, settings, root_folder_id, root_folder_path, monkeypatch
+):
+    """After a rollback leaves no shell, re-running the import creates the
+    series and imports the file — never blocked as a duplicate by a leftover
+    shell."""
+    make_large_cbz(root_folder_path / "Ember (2015)" / "Ember 001 (2015).cbz")
+    cv = (
+        FakeCV()
+        .volume(701, name="Ember", start_year=2015)
+        .issues(701, [issue(9701, "1", cover_date="2015-03-01")])
+    )
+    factory = build_factory(settings, cv.handler())
+    commands = CommandService(db, settings)
+    await scan_library_root(db, settings, root_folder_id, factory=factory)
+    group = (await _groups_by_key(db, root_folder_id))["ember"]
+    await _confirm(db, group.id, 701)
+
+    calls = {"n": 0}
+    real_refresh = library_import._refresh_before_import
+
+    async def _fail_first(*a, **k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            await library_import._set_group_outcome(
+                a[0], a[3], state=None, message="metadata refresh failed before import: boom"
+            )
+            return False
+        return await real_refresh(*a, **k)
+
+    monkeypatch.setattr(library_import, "_refresh_before_import", _fail_first)
+
+    first = await execute_library_import(
+        db, settings, [group.id], commands=commands, factory=factory
+    )
+    assert "refresh-failed" in first
+    assert await _series_count(db, 701) == 0
+
+    # Re-stage (the row is not 'imported') and re-run: the refresh now succeeds.
+    await _confirm(db, group.id, 701)
+    second = await execute_library_import(
+        db, settings, [group.id], commands=commands, factory=factory
+    )
+    assert "imported" in second
+    assert await _series_count(db, 701) == 1
+    assert len(await _issue_file_paths(db, 701)) == 1
+
+
+@pytest.mark.req("FRG-IMP-027")
+async def test_all_files_blocked_rolls_back_the_created_series(
+    db, settings, root_folder_id, root_folder_path
+):
+    """Refresh succeeds and issues are created, but every file blocks (its
+    issue number is absent from the volume) so nothing attaches — the created
+    series is still rolled back (no attach => no shell)."""
+    make_large_cbz(root_folder_path / "Ember (2015)" / "Ember 001 (2015).cbz")
+    # The volume has only issue #5, so the #1 file matches nothing and blocks.
+    cv = (
+        FakeCV()
+        .volume(701, name="Ember", start_year=2015)
+        .issues(701, [issue(9705, "5", cover_date="2015-07-01")])
+    )
+    factory = build_factory(settings, cv.handler())
+    commands = CommandService(db, settings)
+    await scan_library_root(db, settings, root_folder_id, factory=factory)
+    group = (await _groups_by_key(db, root_folder_id))["ember"]
+    await _confirm(db, group.id, 701)
+
+    summary = await execute_library_import(
+        db, settings, [group.id], commands=commands, factory=factory
+    )
+    assert "blocked" in summary
+    assert await _series_count(db, 701) == 0  # nothing attached => no shell
+    assert await _issue_file_paths(db, 701) == []
+
+
+@pytest.mark.req("FRG-IMP-027")
+async def test_exception_after_create_rolls_back_and_marks_errored(
+    db, settings, root_folder_id, root_folder_path, monkeypatch
+):
+    """An unexpected error after series creation still rolls the shell back (the
+    finally runs) and the group is marked errored — never a surviving shell."""
+    make_large_cbz(root_folder_path / "Ember (2015)" / "Ember 001 (2015).cbz")
+    cv = FakeCV().volume(701, name="Ember", start_year=2015)
+    factory = build_factory(settings, cv.handler())
+    commands = CommandService(db, settings)
+    await scan_library_root(db, settings, root_folder_id, factory=factory)
+    group = (await _groups_by_key(db, root_folder_id))["ember"]
+    await _confirm(db, group.id, 701)
+
+    async def _boom(*a, **k):
+        raise RuntimeError("boom after create")
+
+    monkeypatch.setattr(library_import, "_refresh_before_import", _boom)
+    summary = await execute_library_import(
+        db, settings, [group.id], commands=commands, factory=factory
+    )
+    assert "errored" in summary
+    assert await _series_count(db, 701) == 0  # finally rolled the shell back
+
+
+
+@pytest.mark.req("FRG-IMP-027")
+async def test_stale_group_whose_file_belongs_to_another_series_rolls_back(
+    db, tmp_path, root_folder_id, root_folder_path
+):
+    """The keep check is scoped to THIS series: a stale staged group whose file
+    is already an issue-file of a DIFFERENT series creates a shell with no files
+    of its own and is rolled back — not kept on a global 'already registered'
+    read."""
+    # Series 801 genuinely imports the file (in-place, default settings).
+    settings = flows_settings(tmp_path / "cfg-ip")
+    path = make_large_cbz(root_folder_path / "Ember (2015)" / "Ember 001 (2015).cbz")
+    cv = (
+        FakeCV()
+        .volume(801, name="Ember", start_year=2015)
+        .issues(801, [issue(9801, "1", cover_date="2015-03-01")])
+        .volume(802, name="Ember Alt", start_year=2016)
+    )
+    factory = build_factory(settings, cv.handler())
+    commands = CommandService(db, settings)
+    await scan_library_root(db, settings, root_folder_id, factory=factory)
+    g1 = (await _groups_by_key(db, root_folder_id))["ember"]
+    await _confirm(db, g1.id, 801)
+    await execute_library_import(db, settings, [g1.id], commands=commands, factory=factory)
+    assert await _series_count(db, 801) == 1
+
+    # Directly stage a STALE group for a DIFFERENT volume (802) pointing at the
+    # SAME file — the file is now registered under 801, so a re-scan would drop
+    # it; the stale row is what a scan-then-register-elsewhere interleave leaves.
+    from foragerr.db import utcnow
+
+    async with db.write_session() as session:
+        session.add(
+            LibraryImportGroupRow(
+                matching_key="ember-stale",
+                root_folder_id=root_folder_id,
+                folder=str(path.parent),
+                files=encode_group_files([(str(path), path.stat().st_size)]),
+                state="confirmed",
+                confirmed_cv_volume_id=802,
+                scanned_at=utcnow(),
+            )
+        )
+    stale = next(
+        g for g in (await _groups_by_key(db, root_folder_id)).values()
+        if g.matching_key == "ember-stale"
+    )
+    # Move mode so 802 gets its own path (no collision with 801's in-place folder).
+    move_settings = flows_settings(tmp_path / "cfg-move", library_import_mode="move")
+    summary = await execute_library_import(
+        db, move_settings, [stale.id], commands=commands, factory=factory
+    )
+    assert await _series_count(db, 802) == 0  # cross-series shell rolled back
+    assert await _series_count(db, 801) == 1  # the real owner untouched
+    assert len(await _issue_file_paths(db, 801)) == 1

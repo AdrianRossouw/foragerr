@@ -56,7 +56,15 @@ import {
  */
 
 const COMPOSE_FILE = fileURLToPath(new URL('../compose.yaml', import.meta.url));
-const COMPOSE = ['compose', '-f', COMPOSE_FILE, '-p', 'foragerr-e2e'];
+// The project name run.sh exports — overridable so two concurrent runs on the
+// shared docker daemon do not reach into each other's stacks.
+const COMPOSE = [
+  'compose',
+  '-f',
+  COMPOSE_FILE,
+  '-p',
+  process.env.FORAGERR_E2E_PROJECT ?? 'foragerr-e2e',
+];
 
 // A distinctive, never-correct password used only by this file's burst tests —
 // distinctive so the credential-leak negative check (test 2) can search the

@@ -47,12 +47,18 @@ class RootFolderResource(BaseModel):
     id: int
     path: str
     free_space: int | None
+    #: A read-only reference library (FRG-SER-021): indexed in place, served,
+    #: never written to. The UI marks it and suppresses write/acquire actions.
+    read_only: bool = False
 
 
 class RootFolderCreate(BaseModel):
     """Request body for ``POST /api/v1/rootfolder`` (FRG-SER-008)."""
 
     path: str
+    #: Register the root read-only (FRG-SER-021) — validated for readability
+    #: rather than writability; its series become browse/serve-only.
+    read_only: bool = False
 
 
 class FormatProfileResource(BaseModel):
@@ -72,7 +78,10 @@ async def list_root_folders_endpoint(request: Request) -> list[RootFolderResourc
         rows = await repo.list_root_folders(session)
     return [
         RootFolderResource(
-            id=row.id, path=row.path, free_space=await _free_space(row.path)
+            id=row.id,
+            path=row.path,
+            free_space=await _free_space(row.path),
+            read_only=row.read_only,
         )
         for row in rows
     ]
@@ -92,10 +101,16 @@ async def create_root_folder_endpoint(
     db = request.app.state.db
     async with db.write_session() as session:
         existing = await repo.list_root_folders(session)
-        await run_in_threadpool(_validate_new_root, body.path, existing)
-        row = await repo.create_root_folder(session, body.path)
-        rid, path = row.id, row.path
-    return RootFolderResource(id=rid, path=path, free_space=await _free_space(path))
+        await run_in_threadpool(
+            _validate_new_root, body.path, existing, read_only=body.read_only
+        )
+        row = await repo.create_root_folder(
+            session, body.path, read_only=body.read_only
+        )
+        rid, path, ro = row.id, row.path, row.read_only
+    return RootFolderResource(
+        id=rid, path=path, free_space=await _free_space(path), read_only=ro
+    )
 
 
 @router.delete("/rootfolder/{root_folder_id}", status_code=204)
@@ -195,33 +210,83 @@ async def _fail_if_import_command_pending(session, root_folder_id: int) -> None:
             )
 
 
-def _validate_new_root(path: str, existing: list) -> None:
+def _validate_new_root(path: str, existing: list, *, read_only: bool = False) -> None:
     """Reject a bad root-folder registration with a field-precise
     :class:`ApiError` (400, ``field="path"``) naming the exact problem.
 
     Runs the blocking ``os.path`` stats in the thread pool (a wedged network
     mount must not freeze the loop). ``existing`` are the already-registered
-    :class:`RootFolderRow`s to compare against for duplicate/nesting."""
+    :class:`RootFolderRow`s to compare against for duplicate/nesting.
+
+    A ``read_only`` root (FRG-SER-021) is validated for **readability** instead
+    of writability — foragerr never writes to it — so a read-only-mounted real
+    collection registers; every other check (absolute, existing directory,
+    duplicate/nesting) is unchanged."""
     if not os.path.isabs(path):
         _reject(f"path {path!r} must be absolute")
     if not os.path.isdir(path):
         _reject(f"path {path!r} is not an existing directory")
-    if not os.access(path, os.W_OK):
+    if read_only:
+        if not os.access(path, os.R_OK):
+            _reject(f"path {path!r} is not readable")
+    elif not os.access(path, os.W_OK):
         _reject(f"path {path!r} is not writable")
 
     candidate = os.path.realpath(path)
+    fold = _case_insensitive_filesystem(candidate)
     for root in existing:
         root_real = os.path.realpath(root.path)
-        if candidate == root_real:
+        if _same_directory(candidate, root_real):
             _reject(f"path {path!r} is already registered as a root folder")
-        if _is_within(root_real, candidate):
+        fold_pair = fold or _case_insensitive_filesystem(root_real)
+        if _is_within(root_real, candidate, fold=fold_pair):
             _reject(f"path {path!r} is inside an existing root folder ({root.path})")
-        if _is_within(candidate, root_real):
+        if _is_within(candidate, root_real, fold=fold_pair):
             _reject(f"path {path!r} contains an existing root folder ({root.path})")
 
 
-def _is_within(ancestor: str, candidate: str) -> bool:
-    """True if ``candidate`` sits at or beneath ``ancestor`` (segment-aware)."""
+def _same_directory(candidate: str, root_real: str) -> bool:
+    """Whether two realpaths name the same physical directory.
+
+    String equality is not sufficient: on a case-insensitive volume ``<root>``
+    and ``<Root>`` are the SAME directory but different strings, so both would
+    register — and a read-only root re-registered under a different case would
+    hand out write access to the very files the flag protects. ``samestat``
+    (device+inode) answers for the actual filesystem, and also catches a bind
+    mount or hard-linked directory spelling the same place two ways."""
+    if candidate == root_real:
+        return True
+    try:
+        return os.path.samestat(os.stat(candidate), os.stat(root_real))
+    except OSError:
+        return False
+
+
+def _case_insensitive_filesystem(path: str) -> bool:
+    """Whether ``path``'s filesystem resolves names case-insensitively.
+
+    PROBED, not inferred from the platform: the same host can mount both kinds,
+    and ``os.path.normcase`` only folds on Windows. A case-swapped spelling of
+    the path is stat'd and compared by device+inode; a path with no cased
+    characters (or an unreadable one) is reported case-SENSITIVE, which only
+    ever makes the nesting comparison below stricter about nothing."""
+    swapped = path.swapcase()
+    if swapped == path:
+        return False
+    try:
+        return os.path.samestat(os.stat(path), os.stat(swapped))
+    except OSError:
+        return False
+
+
+def _is_within(ancestor: str, candidate: str, *, fold: bool = False) -> bool:
+    """True if ``candidate`` sits at or beneath ``ancestor`` (segment-aware).
+
+    ``fold`` case-folds both sides, for the nesting comparison on a
+    case-insensitive volume where ``<root>/sub`` and ``<ROOT>`` overlap
+    physically while differing as strings."""
+    if fold:
+        ancestor, candidate = ancestor.casefold(), candidate.casefold()
     if candidate == ancestor:
         return True
     try:

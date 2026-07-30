@@ -37,8 +37,16 @@ These already exist in the frontend and are treated as a contract by the suite:
   `ft-manual-rejections-<name>`); `manual-embedded-<name>`; footer
   `manual-command-status`, `manual-import-error`, `manual-import-confirm`.
 - **Library index** (`/`): series links by title; `library-poster-grid` /
-  `library-table`.
+  `library-table`; `series-read-only-<seriesId>` marker chip.
 - **Settings → indexers** (`/settings/indexers`): `provider-card-<id>`, button
   "Edit \<name\>".
+- **Settings → media management** (`/settings/media-management`):
+  `root-folders-section`, `root-folder-<id>`, `root-folder-read-only-<id>`.
+- **Read-only treatment** (FRG-UI-045): `add-read-only-note` on the add-options
+  panel; `series-read-only-badge` on series detail, where the suppressed
+  affordances are asserted by ABSENCE of their accessible names (buttons
+  "Search Monitored" / "Search All" / "Edit", menu item "Rename Files",
+  per-issue "Interactive search for issue \<n\>", the delete dialog's
+  "Also delete files from disk" checkbox).
 - **OPDS** (server-rendered, no testids): `/opds`, `/opds/series`,
   `/opds/series/<id>`, `/opds/file/<issueFileId>`.

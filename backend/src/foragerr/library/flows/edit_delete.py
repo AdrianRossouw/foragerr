@@ -35,6 +35,12 @@ from foragerr.library.models import (
     SeriesRow,
 )
 from foragerr.library.paths import PathNotUnderRootError, validate_under_root
+from foragerr.library.read_only import (
+    ReadOnlySeriesError,
+    refuse_read_only_disposal,
+    refuse_read_only_series,
+    series_is_read_only,
+)
 from foragerr.quality.models import FormatProfileRow
 
 from foragerr.library.flows._common import (
@@ -118,6 +124,15 @@ async def edit_series(
         if series is None:
             raise SeriesNotFoundError(f"no series {series_id}")
 
+        await _refuse_read_only_edits(
+            session,
+            series,
+            monitored=monitored,
+            monitor_new_items=monitor_new_items,
+            root_folder_id=root_folder_id,
+            path=path,
+        )
+
         # Apply (and thereby validate) the group op FIRST — BEFORE the
         # irreversible on-disk path rename below. A bad op (e.g. reassign to a
         # nonexistent group) must raise while the transaction can still roll
@@ -155,11 +170,21 @@ async def edit_series(
             series.root_folder_id = root_folder_id
 
         if path is not None:
-            roots = await repo.list_root_folders(session)
+            # Confined to the series' OWN root (its new one when this same edit
+            # reassigns the root), not to "any registered root": accepting a
+            # path under a different root would leave ``root_folder_id`` naming
+            # one root while the directory this edit MOVES sits in another, and
+            # every per-root policy — the read-only boundary first — reads the
+            # key (FRG-SER-021, FRG-SEC-004). This mirrors the symmetric check
+            # the root-folder-only branch above already performs.
+            own_root = await _require_root_folder(session, series.root_folder_id)
             try:
-                validated = validate_under_root(path, [r.path for r in roots])
+                validated = validate_under_root(path, [own_root.path])
             except PathNotUnderRootError as exc:
-                raise SeriesValidationError(str(exc)) from exc
+                raise SeriesValidationError(
+                    f"path {path!r} does not resolve under root folder "
+                    f"{series.root_folder_id} ({own_root.path}): {exc}"
+                ) from exc
             new_path = str(validated)
             old_path = series.path
             if new_path != old_path:
@@ -192,6 +217,86 @@ async def edit_series(
             series.aliases = encode_aliases(aliases)
 
     return series
+
+
+async def _refuse_read_only_edits(
+    session,
+    series: SeriesRow,
+    *,
+    monitored: bool | None,
+    monitor_new_items: str | None,
+    root_folder_id: int | None,
+    path: str | None,
+) -> None:
+    """Refuse the edits a read-only reference library forbids (FRG-SER-021/022).
+
+    Runs BEFORE any field is touched and before the on-disk directory rename, so
+    a refusal leaves both the row and the disk exactly as they were. Two
+    directions are closed:
+
+    - a series ALREADY on a read-only root refuses monitoring changes (it is
+      browse-only), a ``path`` change (an on-disk directory rename), and a
+      ``root_folder_id`` change (which would silently reclassify a
+      browse-only series without re-deriving its monitoring state);
+    - any series refuses a move ONTO a read-only root, which would place a
+      managed series where nothing can ever be written.
+
+    Display metadata — aliases, franchise group, book-type — stays editable:
+    those touch database columns only, never the root.
+
+    Each field is judged on the STATE it asks for, not on its mere presence: a
+    value that restates the browse-only invariant (unmonitored, new items not
+    monitored, the same folder under the same root) asks for nothing and is
+    accepted; anything that would leave that invariant is refused. Refusing on
+    presence alone would 409 the whole-resource read-modify-write shape a form
+    submits, making a browse-only series impossible to edit at all — including
+    the display metadata that IS meant to stay editable.
+    """
+    if root_folder_id is not None and root_folder_id != series.root_folder_id:
+        # Existence is NOT resolved here (``_require_root_folder`` reports an
+        # unknown id as its own 400 later): only a root row that exists AND
+        # carries the flag refuses, so an unknown id keeps its precise error
+        # instead of being reported as a read-only conflict.
+        new_root = await session.get(RootFolderRow, root_folder_id)
+        if new_root is not None and new_root.read_only:
+            raise ReadOnlySeriesError(
+                f"root folder {root_folder_id} is a read-only reference library; "
+                f"a series cannot be moved onto it"
+            )
+
+    if not await series_is_read_only(session, series.id):
+        return
+    # ``series.path`` is stored resolved, so the submitted path is resolved too
+    # before comparing: re-sending the same directory under a symlinked spelling
+    # asks for no move.
+    refused = [
+        name
+        for name, leaves_invariant in (
+            # Judged against the invariant, not against the row: a request to
+            # turn monitoring ON is asking to acquire into a library nothing can
+            # be written to, and stays refused even for a row that somehow
+            # already carries the flag.
+            ("monitored", monitored is True),
+            ("monitor_new_items", monitor_new_items not in (None, "none")),
+            (
+                "path",
+                path is not None
+                and os.path.realpath(path) != os.path.realpath(series.path),
+            ),
+            (
+                "root_folder_id",
+                root_folder_id is not None
+                and root_folder_id != series.root_folder_id,
+            ),
+        )
+        if leaves_invariant
+    ]
+    if refused:
+        raise ReadOnlySeriesError(
+            f"series {series.id} is on a read-only reference library "
+            f"(browse and serve only); editing {', '.join(refused)} is not "
+            f"available for it"
+        )
 
 
 async def _apply_group_edit(session, series: SeriesRow, op: GroupEdit) -> None:
@@ -272,8 +377,10 @@ async def delete_series(
 
     ``delete_files=False`` (default) removes the series row — cascading to its
     issue and issue-file rows — while leaving library files on disk untouched.
-    ``delete_files=True`` first routes every issue file through the recycle
-    bin with the same ordering guarantees as :func:`delete_issue_file`:
+    ``delete_files=True`` is refused fail-closed for a series on a read-only
+    reference root (FRG-SER-021) — nothing is moved, unlinked, or removed. It
+    otherwise routes every issue file through the recycle bin with the same
+    ordering guarantees as :func:`delete_issue_file`:
 
     - **Recycle bin configured** — EVERY present file is moved to the bin
       (reversible) FIRST; only when all moves succeeded are the rows removed
@@ -351,6 +458,21 @@ async def _delete_series_and_files(
         series = await repo.get_series(session, series_id)
         if series is None:
             raise SeriesNotFoundError(f"no series {series_id}")
+        # Fail-closed write boundary (FRG-SER-021), checked before the file list
+        # is even read: a read-only reference library's files are the operator's
+        # originals and are never recycled or unlinked, whatever route reached
+        # here (this arm also runs as the ``delete-series-files`` command, which
+        # can be enqueued directly).
+        await refuse_read_only_series(
+            session, series_id, action="deleting library files"
+        )
+        # ...and the other direction: a MANAGED series' files must not be
+        # recycled INTO a reference library either, which the series-keyed guard
+        # above cannot see (the series is writable; the destination is not).
+        if settings is not None:
+            await refuse_read_only_disposal(
+                session, settings.recycle_bin_path, setting="recycle_bin_path"
+            )
         result = await session.execute(
             select(IssueFileRow)
             .join(IssueRow, IssueRow.id == IssueFileRow.issue_id)
@@ -552,6 +674,18 @@ async def delete_issue_file(
         issue_id = row.issue_id
         issue = await session.get(IssueRow, issue_id)
         series_id = issue.series_id if issue is not None else None
+        if series_id is not None:
+            # Fail-closed write boundary (FRG-SER-021): a file indexed in place
+            # under a read-only reference root is never recycled or unlinked.
+            await refuse_read_only_series(
+                session, series_id, action="deleting a library file"
+            )
+        if settings is not None:
+            # The destination direction: a managed file is never recycled into a
+            # reference library (see ``_delete_series_and_files``).
+            await refuse_read_only_disposal(
+                session, settings.recycle_bin_path, setting="recycle_bin_path"
+            )
 
     file_present = os.path.exists(path)
     use_bin = bool(settings is not None and settings.recycle_bin_path and file_present)

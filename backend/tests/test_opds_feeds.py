@@ -454,8 +454,8 @@ def test_series_cover_route_serves_cached_bytes_with_head_parity(client, tmp_pat
 def test_pageless_file_falls_back_to_series_cover_not_a_broken_link(client, tmp_path):
     """A file with no renderable first page (page_count 0 — image-less/legacy)
     cannot have a per-issue cover, so a cached-cover series falls back to the
-    series cover rather than advertising a /opds/cover link that would 404
-    (gate finding); with no cached cover it advertises no image at all."""
+    series cover rather than advertising a /opds/cover link that would 404;
+    with no cached cover it advertises no image at all."""
     data = _seed(client, tmp_path, [simple_series(n_issues=1)])
     series_id = data["series"][0]["id"]
     file_id = data["series"][0]["issues"][0]["files"][0]["id"]

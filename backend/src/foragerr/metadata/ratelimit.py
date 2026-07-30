@@ -389,7 +389,7 @@ class _RateGate:
         (FRG-META-016) is enforced FIRST — and BEFORE queueing on the gate
         lock, so an exhausted-path caller is refused immediately even while
         another caller holds the lock sleeping out a spacing interval or a
-        429 cool-down (gate finding, cv-budget-caching review; the check has
+        429 cool-down (the check has
         no ``await``, so it is atomic on the event loop). The same check
         re-runs under the lock as the authoritative admission decision. A
         refusal raises :class:`ComicVineBudgetExhausted` — no sleep, no wire

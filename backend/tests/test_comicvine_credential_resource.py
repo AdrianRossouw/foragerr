@@ -591,7 +591,7 @@ def test_auth_failure_flips_comicvine_health_and_success_clears_it(
 def test_json_envelope_auth_rejection_also_flips_health(client, monkeypatch):
     """ComicVine can reject a key INSIDE an HTTP 200 (envelope status_code
     100); that path must set auth_failed too, and a 200 alone must NOT clear
-    it — only a confirmed-success envelope does (Codex gate finding)."""
+    it — only a confirmed-success envelope does."""
     from foragerr.metadata.ratelimit import comicvine_health
 
     class _EnvelopeAuthFail(_CVRecorder):

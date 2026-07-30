@@ -169,7 +169,7 @@ async def test_client_completed_classifies_as_import_pending(db):
     """The requirement's WHEN clause end-to-end at the tracking seam: the
     download CLIENT reporting an item complete is what produces the
     ``import_pending`` state the queue lists as "Awaiting import" — not a
-    hand-seeded row (gate finding: the queue-payload test alone was a proxy).
+    hand-seeded row (a queue-payload assertion alone is only a proxy).
     The pre-first-poll window (SAB completes between ticks) persists by
     design; once the tick classifies, the item is never invisible."""
     await insert_grab_history(db, download_id="d9", series_id=1, issue_id=10)

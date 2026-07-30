@@ -142,6 +142,11 @@
   --layout-header-height: 60px;
   --layout-toolbar-height: 62px;
   --layout-content-max-width: 1450px;
+  /* WCAG 2.5.8 pointer-target floor. An icon control sized only by its glyph
+   * plus padding falls under it, so control rules set this as a minimum box.
+   * (The compact crossover has no token here: CSS media queries cannot read a
+   * custom property, so it lives once in theme/layout.ts — see that file.) */
+  --layout-touch-target-min: 24px;
 
   /* --- Radius / elevation / iconography --- */
   --radius-sm: 3px;

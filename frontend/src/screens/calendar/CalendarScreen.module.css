@@ -16,6 +16,12 @@
   padding: var(--spacing-lg) var(--spacing-lg) var(--spacing-xl);
 }
 
+/* Below the crossover every horizontal pixel belongs to the entry, not the
+ * screen's gutters (the crossover itself lives once in theme/layout.ts). */
+.screen[data-compact='true'] {
+  padding: var(--spacing-md) var(--spacing-md) var(--spacing-xl);
+}
+
 /* --- Week navigation row --- */
 .weekBar {
   display: flex;
@@ -33,9 +39,13 @@
   overflow: hidden;
 }
 
+/* 34px clears the WCAG 2.5.8 24x24 floor; the minimum is stated so a later size
+ * change cannot silently drop under it (FRG-UI-047). */
 .navBtn {
   width: 34px;
   height: 34px;
+  min-width: var(--layout-touch-target-min);
+  min-height: var(--layout-touch-target-min);
   border: none;
   background: transparent;
   color: var(--text-secondary);
@@ -48,8 +58,15 @@
   color: var(--text-primary);
 }
 
+.navBtn:focus-visible,
+.thisWeek:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
 .thisWeek {
   height: 34px;
+  min-height: var(--layout-touch-target-min);
   padding: 0 var(--spacing-md);
   border: none;
   border-left: 1px solid var(--surface-border);
@@ -76,8 +93,11 @@
   white-space: nowrap;
 }
 
+/* 34px clears the WCAG 2.5.8 24x24 floor; the minimum is stated so a later size
+ * change cannot silently drop under it (FRG-UI-047). */
 .pubSelect {
   height: 34px;
+  min-height: var(--layout-touch-target-min);
   padding: 0 var(--spacing-lg) 0 var(--spacing-sm);
   background: var(--surface-input);
   border: 1px solid var(--surface-border);
@@ -87,8 +107,12 @@
   cursor: pointer;
 }
 
-.pubSelect:focus {
-  outline: none;
+/* A border-colour change alone is not a focus indicator; the ring is the
+ * indicator every other control on this screen carries (FRG-UI-047), and
+ * :focus-visible so a mouse click does not draw it. */
+.pubSelect:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
   border-color: var(--color-accent);
 }
 
@@ -111,6 +135,13 @@
   color: var(--color-warning, var(--color-accent));
   font-size: var(--font-size-lg);
   flex: none;
+}
+
+/* --- Refused want/skip or search (FRG-UI-045) --- */
+.actionError {
+  margin: 0 0 var(--spacing-md);
+  color: var(--color-danger-text);
+  font-size: var(--font-size-sm);
 }
 
 /* --- Reality banner --- */
@@ -192,31 +223,18 @@
   border-radius: var(--radius-sm);
 }
 
-.addBtn {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--spacing-xs);
-  flex: none;
-  padding: var(--spacing-xs) var(--spacing-sm);
-  border: 1px solid var(--color-accent);
-  border-radius: var(--radius-sm);
-  background: var(--color-accent-tint);
-  color: var(--color-accent-light);
-  font: inherit;
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
-  cursor: pointer;
-}
-
-.addBtn:hover {
-  background: var(--color-accent-selected-bg);
-}
-
 /* --- Day group --- */
 .day {
   display: grid;
   grid-template-columns: 72px 1fr;
   gap: 20px;
+  margin-bottom: var(--spacing-lg);
+}
+
+/* Below the compact crossover the gutter is gone (the date moves into the day
+ * header), so the day is a single full-width column. */
+.dayCompact {
+  display: block;
   margin-bottom: var(--spacing-lg);
 }
 
@@ -276,11 +294,26 @@
   border-left-color: var(--color-accent);
 }
 
+/* No gutter to hang off, so no rule and no inset: the stream is the viewport. */
+.streamCompact {
+  min-width: 0;
+}
+
+/* The folded gutter: weekday + date + month as one inline label. */
+.dayInlineDate {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-bright);
+}
+
+/* An `<h2>`, so the day groups are navigable structure; the UA heading type
+ * scale and margins are replaced by the header's own cluster rhythm. */
 .dayHeader {
   display: flex;
   align-items: center;
   gap: 11px;
-  margin-bottom: 13px;
+  margin: 0 0 13px;
+  font: inherit;
   flex-wrap: wrap;
 }
 
@@ -321,44 +354,228 @@
   color: var(--color-accent-light);
 }
 
-.cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(228px, 1fr));
-  gap: 10px;
+/* Stated once per day rather than per entry: the store date that makes an entry
+ * unreleased is the day group's own. Full contrast — it is the words that carry
+ * the state (FRG-UI-047), so it is never dimmed. */
+.unreleased {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
 }
 
-/* --- Release card --- */
+/* --- Agenda rows: the wide presentation (FRG-UI-018) --- */
+/*
+ * Density is the requirement, not a preference: a single-issue drop day runs to
+ * dozens of entries, so a row is a ~29px band separated by a hairline rather
+ * than a gapped card — FRG-UI-018 caps a single-line entry at 36 CSS px of
+ * vertical rhythm. Every dimension below is load-bearing for that: the
+ * thumbnail is the row's tallest element, so it caps how dense the band can be.
+ */
+.rows {
+  display: flex;
+  flex-direction: column;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* The same hairline every other dense list in the app separates rows with. */
+.row {
+  border-bottom: 1px solid var(--surface-row-border);
+}
+
+.row:last-child {
+  border-bottom: none;
+}
+
+.row:hover {
+  background: var(--surface-card-hover);
+}
+
+/*
+ * The title is the ONLY flexible column: the thumbnail and the action cluster
+ * are fixed, so every pixel the row does not spend elsewhere goes to the title's
+ * measure. An action must never be given `1fr` here — that is how the shipped
+ * card grid starved the title.
+ *
+ * The title's track carries a DEFINITE minimum, because a meta track that sizes
+ * to its own content is not bounded by anything: a long publisher name plus a
+ * state chip is wider than the title at the crossover, and the flexible track is
+ * the one grid sacrifices. 25ch of digit width measures ~31 characters of
+ * mixed-case text at the body size, clearing FRG-UI-018's ~30-character floor;
+ * the meta track
+ * shrinks below its content instead, and its issue · publisher text ellipsises.
+ * `min()` keeps the minimum from ever exceeding the row, so a narrower container
+ * cannot overflow.
+ */
+.rowFace {
+  display: grid;
+  grid-template-columns: auto minmax(min(25ch, 100%), 1fr) minmax(0, auto) auto;
+  align-items: center;
+  gap: var(--spacing-sm);
+  min-height: 28px;
+  padding: 2px var(--spacing-xs) 2px 2px;
+}
+
+.rowTitle {
+  display: flex;
+  align-items: baseline;
+  gap: var(--spacing-xs);
+  min-width: 0;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+}
+
+/*
+ * No clamp, no ellipsis: a title wraps onto another line rather than losing
+ * characters. `break-word` is the last-resort guard for a single unbroken token
+ * wider than the column — it does not break at arbitrary points the way
+ * `anywhere` does, so ordinary multi-word titles still break only at spaces.
+ */
+.rowTitleText {
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+/* Shrinkable: `min-width: 0` is what lets the meta go below its own content
+ * width so the title's minimum is reachable at the crossover. The state chip
+ * keeps its size — it is the entry's state — and the issue · publisher text is
+ * the part that yields. */
+.rowMeta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.rowMeta .metaText {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rowActions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  flex: none;
+}
+
+/* --- Quiet cards: the compact presentation (FRG-UI-018) --- */
+.cards {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
 .card {
   background: var(--surface-card);
   border: 1px solid var(--surface-border);
   border-radius: var(--radius-md);
-  padding: 8px 11px 8px 8px;
-}
-
-/* The card's face: cover, title block, actions. The detail expando stacks
- * under it, so the flex row lives here rather than on the card itself. */
-.cardRow {
-  display: flex;
-  gap: 11px;
-  align-items: center;
+  padding: var(--spacing-sm);
 }
 
 .card:hover {
   border-color: var(--surface-border-soft);
 }
 
-/* Unmatched rows read one step quieter than followed rows. */
-.cardUnlinked {
-  background: var(--surface-page);
+/* Cover + title block. The action rail stacks BENEATH this, so nothing competes
+ * with the title for horizontal space. */
+.cardFace {
+  display: flex;
+  gap: 11px;
+  align-items: flex-start;
 }
 
-.cardFuture {
+.cardBody {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The rail: icon-only controls under the title block, right-aligned, with a
+ * hairline above so it reads as the card's action zone rather than more meta. */
+.cardRail {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-sm);
+  padding-top: var(--spacing-xs);
+  border-top: 1px solid var(--surface-border);
+}
+
+/* An empty rail (no add, no detail, no linked actions) must not draw its rule. */
+.cardRail:empty {
+  display: none;
+}
+
+.cardTitle {
+  display: flex;
+  align-items: baseline;
+  gap: var(--spacing-xs);
+  flex-wrap: wrap;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+  min-width: 0;
+}
+
+/* Full card width, wrapped at word boundaries, unclamped — see `.rowTitleText`
+ * for why `break-word` rather than `anywhere`. */
+.cardTitleText {
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+.cardMeta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+  margin-top: 3px;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+/* --- Shared entry chrome --- */
+/* Unmatched entries read one step quieter than followed ones. */
+.entryUnlinked .metaText {
+  color: var(--text-muted);
+}
+
+/*
+ * A future-dated entry reads one step back — but the dimming is confined to the
+ * artwork. Applied to the whole entry it multiplies through every text colour
+ * inside it: --text-secondary meta drops from 5.79:1 to 3.68:1 and the status
+ * chip from 5.24:1 to 3.43:1 against the page, under the 4.5:1 WCAG 1.4.3 AA
+ * floor — and since FRG-UI-047 makes that text the ONLY carrier of state, the
+ * dimming would be applied to the one thing that must stay readable. The day
+ * header's "Not yet released" token carries the affordance in words.
+ */
+.entryFuture .cover,
+.entryFuture .spine {
   opacity: 0.72;
 }
 
+.metaText {
+  white-space: nowrap;
+}
+
+.stateChip {
+  flex: none;
+}
+
 .spine {
-  width: 36px;
-  height: 54px;
   flex: none;
   border-radius: var(--radius-sm);
   background-size: cover;
@@ -369,64 +586,38 @@
  * week of covered and uncovered entries keeps one agenda rhythm. The spine
  * style rides underneath as the letterbox while the image loads. */
 .cover {
-  width: 36px;
-  height: 54px;
   flex: none;
   border-radius: var(--radius-sm);
   object-fit: cover;
 }
 
-.cardBody {
-  flex: 1;
-  min-width: 0;
+/* A row's thumbnail is the band's tallest element, so it sets the density
+ * ceiling: at 24px tall it is the same height as the row's controls, which is
+ * the floor a 24px minimum target imposes anyway. The card has the vertical room
+ * for the larger cover. */
+.thumbRow {
+  width: 16px;
+  height: 24px;
 }
 
-.cardTitle {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-xs);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
-  color: var(--text-primary);
-  min-width: 0;
+.thumbCard {
+  width: 36px;
+  height: 54px;
 }
 
-.cardTitleText {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.cardSub {
-  margin-top: 3px;
-  font-size: var(--font-size-xs);
-  color: var(--text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.unreleased {
-  margin-top: 3px;
-  font-size: var(--font-size-xs);
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.actions {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--spacing-xs);
-  flex: none;
-}
-
+/*
+ * Real controls (FRG-UI-047): at least the WCAG 2.5.8 24x24 CSS-px target, and a
+ * visible focus-visible outline. A 14px glyph in 4px padding is 22px, which is
+ * why the minimum box is set explicitly rather than left to the padding.
+ */
 .iconBtn {
   appearance: none;
   font: inherit;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  min-width: var(--layout-touch-target-min);
+  min-height: var(--layout-touch-target-min);
   padding: var(--spacing-xs);
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
@@ -435,13 +626,18 @@
   cursor: pointer;
 }
 
-.iconBtn:hover:not(:disabled) {
+.iconBtn:hover:not(:disabled):not([aria-disabled='true']) {
   background: var(--surface-card-hover);
   color: var(--text-primary);
 }
 
-.iconBtn:disabled {
-  opacity: 0.5;
+/* Unavailable but still focusable: a control that leaves keyboard order while
+ * the operator is on it drops focus to the document body. The quieting is a
+ * colour change on the glyph, never opacity — opacity multiplies through the
+ * focus ring too, and this control can be the focused one (FRG-UI-047). */
+.iconBtn:disabled,
+.iconBtn[aria-disabled='true'] {
+  color: var(--text-muted);
   cursor: default;
 }
 
@@ -450,10 +646,27 @@
   outline-offset: 1px;
 }
 
-.stateGlyph {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
+/* The add hand-off stays the entry's primary action without a text label: the
+ * accent tint carries the emphasis the removed word used to. */
+.iconBtnPrimary {
+  border-color: var(--color-accent);
+  background: var(--color-accent-tint);
+  color: var(--color-accent-light);
+}
+
+.iconBtnPrimary:hover:not(:disabled) {
+  background: var(--color-accent-selected-bg);
+  color: var(--color-accent-light);
+}
+
+/* In flight (FRG-UI-048): the control already draws the REQUESTED state, and
+ * `aria-busy` — not a visual dimming — is what says it is working. The cursor is
+ * the whole treatment: two classes deep so it outranks the aria-disabled rule
+ * the in-flight control also matches, and nothing here touches opacity, which
+ * would dim the focus ring of a control that stays keyboard-reachable. The
+ * duplicate mutation is suppressed in the handler. */
+.iconBtn.iconBtnBusy {
+  cursor: progress;
 }
 
 /* --- Entry detail expando (FRG-UI-042) --- */
@@ -502,27 +715,6 @@
   overflow-wrap: anywhere;
   max-height: 4.5em;
   overflow-y: auto;
-}
-
-/* --- Derived-state tones (projection of `state`, never a stored value) --- */
-.toneSuccess {
-  color: var(--color-success-text);
-}
-
-.toneInfo {
-  color: var(--color-info-text);
-}
-
-.toneAccent {
-  color: var(--color-accent);
-}
-
-.toneWait {
-  color: var(--color-accent-light);
-}
-
-.toneMuted {
-  color: var(--text-faint);
 }
 
 /* --- Hidden-count / empty / state messages --- */

@@ -622,8 +622,8 @@ async def test_budget_refusal_mid_walk_leaves_stamp_and_issues_untouched(
     it got and must therefore clear the stamp — nothing was reconciled here,
     so the stored stamp still describes the last COMPLETE walk and keeping it
     is correct: the next refresh either short-circuits back to exactly that
-    state or full-walks on the changed date (gate finding, cv-budget-caching
-    review — pins the stamp-lifecycle distinction)."""
+    state or full-walks on the changed date — the stamp-lifecycle distinction
+    this pins."""
     config_dir = Path(settings.config_dir)
     series_id = await _make_series(db, root_folder_path, format_profile_id)
 

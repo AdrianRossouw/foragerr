@@ -17,6 +17,7 @@ import type {
   LookupCandidate,
   ManualImportEntry,
   MediaManagementConfig,
+  PullEntryRecord,
   QueuePageResponse,
   QueueResourceRaw,
   ReleaseDecision,
@@ -201,6 +202,7 @@ export function makeSeriesResource(
     aliases: [],
     series_group_id: null,
     booktype: null,
+    read_only: false,
     statistics: makeStats(),
     ...overrides,
   };
@@ -380,8 +382,8 @@ export const mockSuggestCandidates: SuggestCandidate[] = [
 
 /** `GET /api/v1/rootfolder` rows; null free_space = unreadable path. */
 export const mockRootFolders: RootFolderResource[] = [
-  { id: 1, path: '/comics', free_space: 250_000_000_000 },
-  { id: 2, path: '/mnt/archive/comics', free_space: null },
+  { id: 1, path: '/comics', free_space: 250_000_000_000, read_only: false },
+  { id: 2, path: '/mnt/archive/comics', free_space: null, read_only: false },
 ];
 
 /** `GET /api/v1/formatprofile` rows (id 1 is the seeded default). */
@@ -788,4 +790,72 @@ export function makeCreatorBibliography(
   state: CreatorBibliography['state'] = 'fresh',
 ): CreatorBibliography {
   return { state, records };
+}
+
+/**
+ * ---------------------------------------------------------------------------
+ * Weekly-pull mocks (FRG-UI-018 / FRG-UI-047 / FRG-PULL-007..009) — camelCase
+ * wire records as GET /api/v1/pull serializes them.
+ * ---------------------------------------------------------------------------
+ */
+
+/** The fixed ISO week the Calendar scenarios pin, so "today" never interferes. */
+export const PULL_WEEK = '2026-W27';
+/**
+ * The Wednesday of `PULL_WEEK`. It MUST fall inside that week: the screen groups
+ * entries by matching `releaseDate` against the days of the week it was routed
+ * to, so a day outside it renders in no group at all.
+ */
+export const PULL_DAY = '2026-07-01';
+
+/**
+ * One GET /api/v1/pull row. Only `seriesName` is required; the defaults describe
+ * an unlinked, unenriched entry on `PULL_DAY` — the shape a scenario narrows by
+ * overriding, rather than restates.
+ */
+export function makePullEntry(
+  overrides: Partial<PullEntryRecord> & Pick<PullEntryRecord, 'seriesName'>,
+): PullEntryRecord {
+  return {
+    id: null,
+    week: PULL_WEEK,
+    publisher: 'Umbral Press',
+    issueNumber: '1',
+    releaseDate: PULL_DAY,
+    cvSeriesId: null,
+    cvIssueId: null,
+    matchType: null,
+    matchedIssueId: null,
+    state: null,
+    series: null,
+    issue: null,
+    coverUrl: null,
+    description: null,
+    upc: null,
+    creators: [],
+    characters: [],
+    ...overrides,
+  };
+}
+
+/**
+ * A pull row linked to a library issue — the only shape that carries a real
+ * monitor toggle. The linked issue's own id follows `matchedIssueId`, so a
+ * scenario that moves one row off the default cannot end up with two rows
+ * claiming the same issue.
+ */
+export function makeLinkedPullEntry(
+  name: string,
+  overrides: Partial<PullEntryRecord> = {},
+): PullEntryRecord {
+  const issueId = overrides.matchedIssueId ?? 500;
+  return makePullEntry({
+    seriesName: name,
+    matchType: 'id',
+    matchedIssueId: issueId,
+    state: 'missing_wanted',
+    series: { id: 7, title: name },
+    issue: { id: issueId, issueNumber: '1', title: null },
+    ...overrides,
+  });
 }

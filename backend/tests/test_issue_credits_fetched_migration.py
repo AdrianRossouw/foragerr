@@ -32,7 +32,7 @@ def test_credits_fetched_at_column_present_nullable_unindexed(tmp_path):
         assert cols["credits_fetched_at"][3] == 0  # notnull flag off
 
         # No dedicated index: a partial ``IS NULL`` index cannot serve the
-        # actual per-series ``IS NOT NULL`` read (gate finding) and would be
+        # actual per-series ``IS NOT NULL`` read and would be
         # dead weight. The series-scoped read rides ix_issues_series_id.
         indexes = {row[1] for row in conn.execute("PRAGMA index_list(issues)")}
         assert "ix_issues_credits_needed" not in indexes

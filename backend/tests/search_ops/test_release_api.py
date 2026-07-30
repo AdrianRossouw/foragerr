@@ -293,3 +293,48 @@ def test_get_release_unknown_issue_is_404(client):
     resp = client.get("/api/v1/release", params={"issueId": 999999})
     assert resp.status_code == 404
     assert set(resp.json()) == {"message", "errors"}
+
+
+@pytest.mark.req("FRG-SER-022")
+def test_post_release_is_refused_for_a_read_only_series_even_with_force(
+    client, tmp_path
+):
+    """``force`` overrides the QUALITY rules only, never the read-only
+    reference-library boundary (FRG-SER-022): a browse-only series has nowhere
+    to download into. The root is flipped AFTER the search, which is also the
+    real ordering hazard — a cache entry outlives the search that filled it, so
+    the boundary is re-checked at grab time rather than trusted from cache."""
+    from foragerr.library.models import RootFolderRow
+
+    db = client.app.state.db
+    _series_id, issue_id, _indexer_id = client.portal.call(partial(_setup, db, None))
+    _inject_feed(client, tmp_path, feed_handler("Saga 007 (2012)"))
+    approved = next(
+        r
+        for r in client.get(
+            "/api/v1/release", params={"issueId": issue_id}
+        ).json()["releases"]
+        if r["approved"]
+    )
+
+    async def _mark_read_only(db):
+        async with db.write_session() as session:
+            await session.execute(update(RootFolderRow).values(read_only=True))
+
+    client.portal.call(partial(_mark_read_only, db))
+
+    resp = client.post(
+        "/api/v1/release",
+        json={
+            "indexer_id": approved["indexer_id"],
+            "guid": approved["guid"],
+            "force": True,
+        },
+    )
+
+    assert resp.status_code == 409
+    body = resp.json()
+    assert "read-only reference library" in body["message"]
+    assert [e["field"] for e in body["errors"]] == ["read_only"]
+    # The refusal is fail-closed: nothing was handed off to a downloader.
+    assert client.portal.call(partial(grab_rows, db)) == []

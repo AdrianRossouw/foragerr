@@ -247,8 +247,8 @@ with the owner.
 
 ## Test-run state (for reproducing/cleanup)
 
-Container `foragerr-m9sim` on `127.0.0.1:8791` (bound loopback-only), image `foragerr:m9sim`
-(main @ 21ba049), config/library under the session scratchpad (`m9sim/`). Library: Saga
+A session-built image (main @ 21ba049) in a container bound to loopback only, with
+config/library under the session scratchpad. Library: Saga
 (0 files, 72 wanted), Carthago (wrong 1-issue HC volume — F9 exhibit), The Incal (6 files,
 readable), Ultimate Spider-Man 2024 (#24 downloaded + imported + OPDS-verified). Indexers
 deliberately left **interactive-only** (auto-search + RSS off) so the idle instance cannot

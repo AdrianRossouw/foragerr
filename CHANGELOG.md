@@ -9,6 +9,116 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.17.0] — 2026-07-30
+
+Calendar legibility: the week reads as an agenda on desktop and as quiet
+cards on narrow screens, status stops dressing up as controls, and the
+whole shell becomes usable at phone width. Delivers FRG-UI-047, FRG-UI-048,
+FRG-UI-049 and modifies FRG-UI-018.
+
+### Added
+- Responsive Calendar presentation (FRG-UI-018, FRG-UI-049): agenda rows at
+  or above the 900px crossover, single-column quiet cards below it, with an
+  identical action set in both modes and a per-entry density bound that
+  keeps a dense day scannable.
+- Off-canvas navigation drawer below the crossover (FRG-UI-049): the
+  sidebar collapses behind a toggle; the drawer is keyboard-operable —
+  focus moves in on open, Escape/backdrop/nav-item dismiss it and return
+  focus to the toggle — and the page behind it is genuinely inert.
+- Honest status indicators (FRG-UI-047): non-interactive state renders as a
+  labelled chip, never as a control-shaped glyph; the bookmark toggle
+  appears only where a real monitor toggle exists, and every interactive
+  target meets a 24px minimum enforced from one token.
+- In-flight monitor feedback (FRG-UI-048): the toggle renders the requested
+  state immediately, announces busy state to assistive technology,
+  suppresses duplicate activations, settles to the re-projected state, and
+  explains — rather than silently reverting — a write the projection does
+  not honour (for example an issue whose series is unmonitored).
+
+### Changed
+- Mutations now fail fast when the browser is offline instead of pausing
+  indefinitely, so in-flight controls cannot latch busy forever.
+- Screen-reader output of the Calendar's day groups no longer announces
+  each date twice.
+
+### Fixed
+- A monitor toggle refused by the backend (including read-only series) now
+  reports its reason in the Calendar's alert region in every case; a
+  successful toggle no longer triggers two overlapping refetches.
+
+No migrations. No upgrade steps.
+
+Read-only library roots: point foragerr at a collection you own and want
+indexed, browsed and served, but never written to.
+
+### Added
+
+- A root folder can be registered **read-only** (FRG-SER-021). Registration
+  requires the directory to be readable but not writable, and the health surface
+  stops treating unwritability as an error for such a root.
+- Series under a read-only root are **browse-and-serve only** (FRG-SER-022):
+  created unmonitored, excluded from the wanted/missing and calendar
+  projections, and refused — fail-closed, with a uniform 409 carrying
+  `errors[].field == "read_only"` — for monitor changes, search, grab (including
+  a forced grab), store-entitlement acquisition, rename, delete-files,
+  single-file delete, and path or root edits. Refusals are enforced in the flow
+  bodies, so enqueuing a command directly is refused identically.
+- Importing files already inside a read-only root **indexes them in place**
+  (FRG-IMP-028): no move, no rename, and no post-placement archive rewrite
+  (ComicInfo tagging and CBR-to-CBZ conversion are both forced off).
+- A configured recycle-bin or duplicate-dump directory that resolves inside a
+  read-only root is refused at use as well as at submission, and the health
+  surface reports the offending setting.
+- The web UI marks read-only roots and series and withdraws every affordance the
+  backend refuses (FRG-UI-045). Mutations that previously failed silently now
+  surface their reason.
+
+### Changed
+
+- Read-only series no longer appear on the release calendar at all, rather than
+  appearing as entries whose controls refuse on use.
+
+### Security
+
+- New threat-model section and RISK-054. The read-only guarantee is stated as a
+  bounded, enumerated set of six enforced write paths, asserted by test so a new
+  disk-write path cannot ship outside the set; no coverage is claimed for paths
+  outside it. Residuals recorded on RISK-019 and RISK-054.
+
+### Upgrade notes
+
+- Migration 0031 adds `root_folders.read_only`, defaulting existing roots to
+  writable. No action required; forward-only per FRG-DB-002.
+
+## [v0.15.2] — 2026-07-29
+
+Calendar title legibility fix.
+
+### Fixed
+
+- Calendar entry titles now wrap to two lines at the base font size instead of
+  truncating to a few characters, keeping long series titles readable on the
+  release calendar (FRG-UI-018). Long unbroken titles break mid-word rather
+  than overflowing; titles longer than two lines are clamped with an ellipsis.
+  Card heights within a day group may now vary between one- and two-line
+  titles.
+
+No upgrade or migration steps.
+
+## [v0.15.1] — 2026-07-29
+
+### Fixed
+- **A failed library import no longer leaves a half-added series**
+  (`FRG-IMP-027`): if importing a group could not attach any of its files
+  — a metadata fetch that failed, or every file blocked — foragerr now
+  rolls back the series it had created, instead of leaving an empty,
+  monitored series that quietly started searching for issues on its own
+  (the behavior behind an import that "showed an error but then completed
+  behind the scenes"). A group that imports at least one file keeps its
+  series, and a series that already existed is never removed by a failed
+  import — only one this import created and could not populate. The files
+  on disk are never touched by the rollback.
+
 ## [v0.15.0] — 2026-07-29
 
 M11 import-intelligence, review refinements: acting on a whole group, and

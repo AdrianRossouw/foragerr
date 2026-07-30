@@ -85,7 +85,7 @@ function WorkCard({
           />
         </span>
       </span>
-      <span className={styles.srOnly}>{`Open ${work.title} — credited as ${roleList(
+      <span className="sr-only">{`Open ${work.title} — credited as ${roleList(
         work.roles,
       )}`}</span>
     </button>

@@ -76,6 +76,19 @@ preserved — files already in quarantine are swept into the bin, and nothing is
 deleted by the upgrade. Fresh installs start with no bin (permanent delete)
 until you set one in Settings → Media Management.
 
+**Neither the recycle bin nor the duplicate-dump folder may sit inside a
+read-only reference library** (see `library.md` §Read-only / reference
+libraries). Files are *moved into* those directories and retention pruning
+*deletes* from them, so a bin pointed inside a read-only root would write to
+the very collection the read-only flag protects. Settings → Media Management
+rejects such a path when you save it, and any delete or upgrade that would use
+it is refused with a message naming the setting to fix — including when the
+directory was configured before the root was registered read-only, or supplied
+through `FORAGERR_RECYCLE_BIN_PATH` / the config file rather than the UI. A
+misconfigured disposal directory also shows up as a health warning, so you see
+it before a delete is refused. Point the setting outside every read-only root
+and deletes resume; nothing is lost in the meantime.
+
 ### Renaming existing files
 
 Changing the naming template does not touch files by itself. Use the **rename
@@ -230,6 +243,26 @@ nothing is moved or renamed unless renaming is enabled; with `move` they route
 through the normal placement/renaming path. Re-running the scan re-checks the
 root: confirmed and skipped decisions carry forward, and files that imported
 are never staged again.
+
+**Importing under a read-only root** (see `library.md` §Read-only / reference
+libraries) always behaves as in-place, and renaming, ComicInfo tagging, and
+CBR→CBZ conversion are all force-disabled for that series, regardless of
+your `library_import_mode`, `rename_enabled`, `comicinfo_tag_on_import`, and
+`convert_cbr_to_cbz` settings — files are indexed at their existing paths and
+never renamed, moved, copied, or rewritten. The series this creates is
+browse-only: metadata still refreshes and the series still serves over OPDS,
+but it is never monitored, searched, or downloaded into, and on-demand
+conversion (Settings/series "Convert to CBZ") is refused for it the same way.
+
+If importing a group fails before any of its files are attached — a metadata
+fetch that could not complete, or every file blocked — foragerr leaves nothing
+half-added: the series it would have created is rolled back, so the library
+does not gain an empty, monitored series that quietly starts searching for
+issues on its own. The group keeps its failure reason on the review screen, and
+re-running it once the cause is fixed imports it cleanly as a first run. A group
+that imports at least one file keeps its series, exactly as before. A series
+that already existed is never removed by a failed import — only a series this
+import created and then could not populate.
 
 ## Duplicate handling
 

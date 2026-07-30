@@ -8,7 +8,8 @@
 // code guarantee + the minimal manifest — NOT by the sandbox. This scan is a
 // tripwire against an accidental future edit, not a proof: a determined author
 // can obfuscate egress (bracket/aliased identifiers) past any denylist. Real
-// assurance comes from code review of a small, reproducible bundle.
+// assurance comes from the bundle staying small and reproducible enough to
+// read end to end.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

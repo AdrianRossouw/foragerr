@@ -63,6 +63,21 @@ feature-bearing changes bump the minor, starting a fresh v0.10 sequence;
 fixes bump the patch — applied with judgment, not a rigid
 milestone-to-minor mapping. No id renumbered.
 
+`FRG-PROC-020`..`FRG-PROC-022` are reserved on the unmerged
+`change/m10-release-pipeline` branch (release-level gate, scoped release
+credentials, change control for official releases — awaiting FRG-PROC-009
+approval as of 2026-07-29) and do not yet appear in this baseline table.
+`comment-hygiene` (`process/comment-hygiene`, proposed 2026-07-29) allocates
+the next free id after that branch's reservation: `FRG-PROC-023`. No id is
+renumbered when `m10-release-pipeline` lands.
+
+`FRG-UI-046` (publisher-filtering settings panel,
+`change/publisher-filtering`) is likewise reserved on an unmerged branch and
+does not yet appear in this baseline table. `FRG-UI-045` landed with
+`read-only-library`, and `calendar-legibility` allocated the next free ids
+after the 046 reservation — `FRG-UI-047`..`FRG-UI-049` — leaving the 046 gap
+in the table below until that branch lands. No id is renumbered when it does.
+
 | ID | Title | Spec | Status | Milestone |
 |----|-------|------|--------|-----------|
 | FRG-PROC-001 | Commit traceability: Conventional Commits + Refs trailer | dev-process | active | — |
@@ -84,6 +99,7 @@ milestone-to-minor mapping. No id renumbered.
 | FRG-PROC-017 | Regenerable README screenshots | dev-process | implemented | M4 |
 | FRG-PROC-018 | Roadmap single source of truth | dev-process | implemented | M4 |
 | FRG-PROC-019 | Accessibility scan in the e2e gate | dev-process | implemented | M9 |
+| FRG-PROC-023 | Comment hygiene: deployment-neutral, provenance-free committed text | dev-process | implemented | — |
 | FRG-SER-001 | Series entity from ComicVine volume | ser | implemented | M1 |
 | FRG-SER-002 | Issue entity | ser | implemented | M1 |
 | FRG-SER-003 | Two-level monitored flags | ser | implemented | M1 |
@@ -104,6 +120,8 @@ milestone-to-minor mapping. No id renumbered.
 | FRG-SER-018 | Series collected-edition (trade) typing | ser | implemented | M3 |
 | FRG-SER-019 | Trades never suppress single-issue wanted | ser | implemented | M3 |
 | FRG-SER-020 | Trade containment model (declared, display-only) | ser | implemented | M4 |
+| FRG-SER-021 | Read-only library root | ser | implemented | B |
+| FRG-SER-022 | Read-only series are browse/serve-only | ser | implemented | B |
 | FRG-META-001 | ComicVine client fundamentals | meta | implemented | M1 |
 | FRG-META-002 | API key handling | meta | implemented | M1 |
 | FRG-META-003 | Client-side rate limiting with 429 handling | meta | implemented | M1 |
@@ -243,6 +261,8 @@ milestone-to-minor mapping. No id renumbered.
 | FRG-IMP-024 | Embedded metadata read during import | imp | implemented | M2 |
 | FRG-IMP-025 | Story-arc reading-order prefix | imp | approved | B |
 | FRG-IMP-026 | Issue-word filler stripping | imp | implemented | M11 |
+| FRG-IMP-027 | Per-group import atomicity (no zombie series shell) | imp | implemented | B |
+| FRG-IMP-028 | Index-in-place import for read-only roots | imp | implemented | B |
 | FRG-PP-001 | Single shared import pipeline | pp | implemented | M1 |
 | FRG-PP-002 | Completed-download handling state machine | pp | implemented | M1 |
 | FRG-PP-003 | Grab reconciliation by download ID | pp | implemented | M1 |
@@ -335,7 +355,11 @@ milestone-to-minor mapping. No id renumbered.
 | FRG-UI-042 | Calendar covers and enrichment detail | ui | implemented | M11 |
 | FRG-UI-043 | Group-header search/match affordance | ui | implemented | M11 |
 | FRG-UI-044 | Force-grab affordance for rejected releases | ui | implemented | M11 |
+| FRG-UI-045 | Read-only library treatment | ui | implemented | B |
 | FRG-UI-046 | Publisher-filtering settings panel | ui | proposed | B |
+| FRG-UI-047 | Status indicators are never shaped like controls | ui | implemented | B |
+| FRG-UI-048 | In-flight feedback for the calendar's monitor toggle | ui | implemented | B |
+| FRG-UI-049 | Responsive application chrome below the compact crossover | ui | implemented | B |
 | FRG-SRC-001 | store-source model and connection lifecycle | sources | implemented | M6 |
 | FRG-SRC-002 | Humble session-cookie authentication | sources | implemented | M6 |
 | FRG-SRC-003 | entitlement sync | sources | implemented | M6 |

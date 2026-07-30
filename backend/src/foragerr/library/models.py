@@ -41,6 +41,7 @@ from sqlalchemy import (
     Index,
     Text,
     UniqueConstraint,
+    false,
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -95,6 +96,14 @@ class RootFolderRow(Base):
 
     id: Mapped[int] = mapped_column(StrictInteger, primary_key=True, autoincrement=True)
     path: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    #: A read-only reference library (FRG-SER-021): registered against an
+    #: existing readable directory, indexed in place (never renamed/moved), and
+    #: its series are browse/serve-only (never monitored/searched/acquired,
+    #: files never mutated). Every disk-write path is refused fail-closed for a
+    #: series whose root carries this flag.
+    read_only: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=false(), default=False
+    )
 
 
 class SeriesGroupRow(Base):

@@ -81,6 +81,12 @@ from foragerr.importer.sources import (
 from foragerr.library import matching, repo
 from foragerr.library.booktype import COLLECTED_BOOKTYPES
 from foragerr.library.models import IssueFileRow, IssueRow, SeriesRow
+from foragerr.library.read_only import (
+    ReadOnlySeriesError,
+    path_is_read_only,
+    refuse_read_only_disposal,
+    series_is_read_only,
+)
 from foragerr.metadata.comicinfo import (
     EmbeddedMetadata,
     build_comicinfo_bytes,
@@ -94,6 +100,7 @@ from foragerr.security.archives import inspect_archive
 from foragerr.security.paths import safe_join
 
 logger = logging.getLogger("foragerr.importer.pipeline")
+
 
 # --- outcome types -----------------------------------------------------------
 
@@ -1109,11 +1116,30 @@ async def execute(
     quarantine_path: str | None = None
     upgraded = False
 
+    async def _disposal_target() -> tuple[str, str]:
+        """The directory ``_dispose_existing`` would move the loser into, with
+        the setting that named it — empty when neither is configured, which means
+        a permanent delete and disposes into no directory at all.
+
+        Resolving the target is where the read-only disposal boundary is checked
+        (FRG-SER-021), so no disposal can pick a directory without it: the series
+        being imported into may be perfectly writable while the configured
+        disposal directory sits inside a reference library."""
+        if duplicate_resolution and ctx.duplicate_dump_path:
+            target = (ctx.duplicate_dump_path, "duplicate_dump_path")
+        else:
+            target = (ctx.recycle_bin_path, "recycle_bin_path")
+        await refuse_read_only_disposal(session, target[0], setting=target[1])
+        return target
+
     async def _dispose_existing() -> str | None:
         """Dump / recycle / permanently delete the replaced file (FRG-PP-013/014).
 
         Returns the quarantine destination, or ``None`` for a permanent delete
-        (recorded on the history event with no recycle path)."""
+        (recorded on the history event with no recycle path). Resolving the
+        target is what checks the read-only disposal boundary, so every branch
+        below inherits it."""
+        await _disposal_target()
         if duplicate_resolution and ctx.duplicate_dump_path:
             return str(
                 await _run_fs(
@@ -1130,6 +1156,55 @@ async def execute(
             )
         await _run_fs(ctx, os.remove, existing)
         return None
+
+    # Fail-closed write boundary (FRG-SER-021), decided BEFORE either branch
+    # because BOTH of them mutate the disk. The in-place branch places nothing,
+    # but it disposes of a superseded file (recycle / duplicate dump / — with no
+    # bin configured — an outright ``os.remove``), so a read-only root reached
+    # through the in-place branch could still destroy the operator's original:
+    # two copies of one issue in a reference folder (a .cbr and a .cbz of the
+    # same issue, or two scans) evaluate as a duplicate/upgrade and the loser is
+    # the file already indexed. The ONLY thing permitted for a read-only target
+    # is therefore a pure registration — a candidate that displaces nothing.
+    #
+    # ``_disposes_a_file`` is exactly the disposal condition both branches
+    # apply below: a tracked file that is PRESENT on disk and is not the
+    # candidate itself (an aliased path naming the same inode is the file being
+    # registered, so re-registering it writes nothing). A tracked row whose file
+    # has vanished is not a disposal — only its stale row is dropped.
+    disposes_a_file = existing_present and not source_is_existing
+    if not in_place or disposes_a_file:
+        if await series_is_read_only(session, series.id):
+            raise ReadOnlySeriesError(
+                f"series {series.id} is on a read-only reference library "
+                f"(browse and serve only); importing {candidate.file_name} "
+                f"would {'replace an indexed file in' if in_place else 'place a file under'} "
+                f"it, which is not available for it"
+            )
+        # The SOURCE side of the same boundary: the candidate's own file may be
+        # one of the operator's read-only originals even when the destination
+        # series is perfectly writable (a manual import browsing a reference
+        # root, a rescan pointed at one). In move mode the placement below is an
+        # ``os.replace`` that REMOVES that original from the reference library,
+        # so it is refused regardless of destination. Copy mode leaves the
+        # source untouched and is allowed.
+        if not in_place and ctx.transfer_mode is fileops.TransferMode.MOVE:
+            if await path_is_read_only(session, candidate.local_path):
+                raise ReadOnlySeriesError(
+                    f"{candidate.local_path} is inside a read-only reference "
+                    f"library (browse and serve only); moving it out of that "
+                    f"library is not available for it"
+                )
+
+    # The DESTINATION side of the disposal boundary, resolved above both branches
+    # so it refuses before ``place_file`` moves a byte — one of the three disposal
+    # sites below runs AFTER placement, and a refusal there would already have
+    # written the incoming file. ``disposes_a_file`` is exactly the union of the
+    # three sites' conditions; ``_disposal_target`` is where the check lives, so
+    # a disposal site added without this hoist still cannot pick a directory
+    # inside a reference library — only the before-any-byte property is lost.
+    if disposes_a_file:
+        await _disposal_target()
 
     if in_place:
         # In-place library import (FRG-IMP-023): the candidate is registered at
@@ -1255,6 +1330,23 @@ def _source_provenance(candidate: ImportCandidate) -> str:
     return _PROVENANCE_BY_KIND.get(candidate.source_kind, history.SOURCE_DOWNLOAD)
 
 
+async def _read_only_target(
+    session: AsyncSession, ev: ImportEvaluation, result: ExecuteResult
+) -> bool:
+    """Whether the just-imported file must never be rewritten (FRG-SER-021).
+
+    The shared gate for both post-import archive rewrites (ComicInfo tagging and
+    CBR→CBZ conversion), which run AFTER placement on ``result.imported_path``
+    and so are the two write paths ``execute``'s placement boundary does not
+    cover. Read-only is derived from the target series AND from where the file
+    actually landed, so a rewrite is refused even if some caller re-enables the
+    toggles for a read-only import (the library-import flow forces them off, but
+    the boundary must not depend on that)."""
+    if ev.series_id is not None and await series_is_read_only(session, ev.series_id):
+        return True
+    return await path_is_read_only(session, result.imported_path)
+
+
 async def _tag_comicinfo(
     session: AsyncSession,
     candidate: ImportCandidate,
@@ -1274,6 +1366,12 @@ async def _tag_comicinfo(
     A tagging failure is swallowed here: the file lands untagged and a
     ``comicinfo_tag_failed`` warning event is recorded — the import still
     succeeded. This never raises.
+
+    A read-only reference target is skipped outright (FRG-SER-021): this rewrites
+    the file the import just registered, which for an index-in-place import IS
+    the operator's original inside the read-only library. The import itself
+    stands — indexing without mutating is the whole point of FRG-IMP-028 — so
+    the tag is skipped rather than the registration refused.
     """
     archive = ev.archive
     if not (
@@ -1282,6 +1380,12 @@ async def _tag_comicinfo(
         and archive.safe_to_extract
         and result.imported_path.lower().endswith(".cbz")
     ):
+        return
+    if await _read_only_target(session, ev, result):
+        logger.info(
+            "comicinfo: %s is in a read-only reference library; not tagged",
+            result.imported_path,
+        )
         return
     try:
         series = await session.get(SeriesRow, ev.series_id)
@@ -1337,6 +1441,11 @@ async def _convert_placed_cbr(
     verify-before-discard swap lives in :func:`convert.apply_conversion`, which
     records the ``converted``/``convert_failed`` event and never raises — the
     import still succeeds either way (a failed verification keeps the .cbr).
+
+    A read-only reference target is skipped outright (FRG-SER-021) for the same
+    reason tagging is: the conversion writes a new .cbz beside the source and
+    then DELETES the source, which for an index-in-place import is the
+    operator's original.
     """
     archive = ev.archive
     if not (
@@ -1345,6 +1454,12 @@ async def _convert_placed_cbr(
         and archive.kind == "rar"
         and archive.safe_to_extract
     ):
+        return
+    if await _read_only_target(session, ev, result):
+        logger.info(
+            "convert: %s is in a read-only reference library; not converted",
+            result.imported_path,
+        )
         return
     await convert.apply_conversion(
         session,
@@ -1476,7 +1591,14 @@ async def import_candidate(
             candidate.file_name,
             exc,
         )
-        reason = f"import failed placing the file on disk: {exc}"
+        # A boundary refusal is not an IO failure: it placed nothing and the
+        # reason IS the operator-facing explanation, so it is reported verbatim
+        # rather than wrapped in placement-failure wording (FRG-SER-021).
+        reason = (
+            str(exc)
+            if isinstance(exc, ReadOnlySeriesError)
+            else f"import failed placing the file on disk: {exc}"
+        )
         # Deduped like the rejection path above (RISK-040): a persistent IO
         # failure re-blocks identically on every retry cycle.
         await history.record_event_deduped(

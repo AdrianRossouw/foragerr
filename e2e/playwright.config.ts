@@ -34,6 +34,10 @@ export default defineConfig({
   use: {
     baseURL,
     headless: true,
+    // Containers cap /dev/shm well below what a full run's trace + screenshot
+    // capture needs; without this the renderer exhausts it and the target
+    // crashes mid-test. Chromium then allocates shared memory from /tmp.
+    launchOptions: { args: ['--disable-dev-shm-usage'] },
     ignoreHTTPSErrors: true,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
