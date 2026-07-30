@@ -56,10 +56,11 @@ tasks for the approved change to execute.
   "Non-negotiable process rules", consistent with how FRG-PROC-004/006 are
   already summarized there.
 - `tools/comment_check.py` (implementation task, not drafted here): scans
-  committed text for a committed set of generic patterns (localhost/PORT
-  literals, private-IP ranges, common container-name shapes, filesystem
-  paths under known home-directory prefixes, review-provenance phrases
-  like "per review"/"gate feedback"/"fixed in review") plus, optionally, a
+  committed text for a committed set of generic patterns — host:port
+  literals (`localhost` in any case, `[::1]`, IPv4, `*.ts.net`) and `PORT=`
+  literals, private/CGNAT/link-local IP ranges, home-directory and OS-user
+  filesystem paths, email addresses, review-provenance phrases like "per
+  review"/"gate feedback"/"fixed in review" — plus, optionally, a
   **gitignored local denylist file** of sensitive literals (real titles,
   hostnames) that the operator maintains locally — the tool warns but still
   exits 0 when that local file is absent, so CI and other clones keep
@@ -114,6 +115,13 @@ None — this extends the existing `dev-process` capability.
 - A general secret scanner — that is FRG-PROC-015 (gitleaks) and stays
   separate; comment hygiene is about neutrality and provenance, not
   credential leakage.
+- Mechanical detectors for container names, bare port numbers or session
+  dates. These were sketched in the original design but are deliberately
+  **not** implemented: a container name is a name and a date is a date, so
+  those patterns fire overwhelmingly on legitimate text. A gate authors
+  learn to ignore is worse than one that admits its limits, so those values
+  stay with the gate's human/agent pass and the local denylist, and the
+  requirement's scenarios say so explicitly.
 
 ## Approval
 
