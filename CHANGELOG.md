@@ -9,6 +9,41 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.18.0] — 2026-07-30
+
+Non-comic publisher filtering now works out of the box, in one place: a
+single library-wide list in Settings, seeded with curated removable
+defaults.
+
+### Added
+- The publisher classification list ships with curated defaults — RPG/game
+  houses (Paizo, Pelgrane Press, Green Ronin, Kobold Press, Free League,
+  Modiphius, Chaosium, Cubicle 7, Evil Hat, Monte Cook Games, Goodman
+  Games, Onyx Path, Steve Jackson Games, R. Talsorian, Renegade Game
+  Studios) and tech/textbook houses (O'Reilly, No Starch, Manning, Packt,
+  Pragmatic Bookshelf, Apress, Wiley, Addison-Wesley, Pearson, CRC Press,
+  Mercury Learning) — so a fresh install files common non-comic bundle
+  content as Other with no setup. Every default is removable; filtered
+  items stay retained and recoverable, never dropped. (FRG-SRC-012)
+- Settings gains a plain-language publisher-filtering panel beside the
+  ComicVine ignore list, with add/remove editing, comma and misplaced-`*`
+  input guards, and honest feedback for duplicates. `FORAGERR_NON_COMIC_PUBLISHERS`
+  pins the list read-only. (FRG-UI-046)
+
+### Changed
+- Publisher rules are library-wide: the per-source rule list and its
+  Sources-screen panel are gone (the PATCH field is refused, connect and
+  reconnect strip it). Existing per-source rules migrate into the
+  library-wide list on first start after upgrade — before any sync can
+  run — preserving wildcard reach and comma-bearing entries, and never
+  clobbering a restored config backup. (FRG-SRC-012)
+
+### Upgrade notes
+- The migration is one-time and idempotent; a failure logs and retries on
+  the next start without blocking boot. If `FORAGERR_NON_COMIC_PUBLISHERS`
+  is set, stored per-source rules are no longer applied and merge only
+  after the variable is unset.
+
 ## [v0.17.0] — 2026-07-30
 
 Calendar legibility: the week reads as an agenda on desktop and as quiet
