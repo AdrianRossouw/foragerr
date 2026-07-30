@@ -47,7 +47,6 @@ from foragerr.sources.registry import (
 )
 from foragerr.sources.models import SourceEntitlementRow
 from foragerr.sources.repo import (
-    SourceSettingsUnavailable,
     delete_source,
     get_entitlement,
     get_source,
@@ -56,7 +55,6 @@ from foragerr.sources.repo import (
     load_source_settings,
     public_settings,
     set_auto_sync,
-    update_publisher_rules,
 )
 from foragerr.sources.review import (
     EntitlementActionError,
@@ -138,15 +136,13 @@ class SourceUpdate(BaseModel):
     an unknown key is a 400 rather than silently ignored. Every field is optional;
     a body that sets nothing is rejected.
 
-    ``publisher_rules`` is a WHOLE-LIST replace (FRG-SRC-012): the operator's
-    rule editor sends the list it wants, and ``[]`` clears the rules. It rides
-    the source's existing encrypted settings envelope, so no new storage and no
-    new credential surface."""
+    Publisher rules are NOT here: they are one library-wide setting
+    (``non_comic_publishers``, FRG-SRC-012) written through the General config
+    resource, not a per-source control."""
 
     model_config = ConfigDict(extra="forbid")
 
     auto_sync: bool | None = None
-    publisher_rules: list[str] | None = None
 
 
 class ConnectResponse(BaseModel):
@@ -275,62 +271,26 @@ async def reconnect_source_endpoint(
 async def update_source_endpoint(
     source_id: int, body: SourceUpdate, request: Request
 ) -> SourceResource:
-    """Change a source's mutable controls post-connect (FRG-SRC-004/012).
+    """Change a source's mutable controls post-connect (FRG-SRC-004).
 
-    Two controls today: the ``auto_sync`` toggle (ships OFF; changeable here —
-    flipping it ON persists the flag only, it NEVER retroactively auto-accepts
-    existing entitlements; auto-accept fires exclusively on a subsequent sync's
-    confident matches, ``sources.enrich``) and the ``publisher_rules`` list
-    (ships EMPTY; a whole-list replace that takes effect on the NEXT sync, which
-    reclassifies only rows still in the automatic classifier's hands). Returns
-    the source with its PUBLIC settings."""
-    if body.auto_sync is None and body.publisher_rules is None:
-        raise ApiError(
-            400, "supply auto_sync or publisher_rules", field="auto_sync"
-        )
+    One control today: the ``auto_sync`` toggle (ships OFF; flipping it ON
+    persists the flag only, it NEVER retroactively auto-accepts existing
+    entitlements; auto-accept fires exclusively on a subsequent sync's confident
+    matches, ``sources.enrich``). Returns the source with its PUBLIC settings."""
+    if body.auto_sync is None:
+        raise ApiError(400, "supply auto_sync", field="auto_sync")
     db = request.app.state.db
     row = await get_source(db, source_id)
     if row is None:
         raise ApiError(404, f"source {source_id} not found")
-    if body.publisher_rules is not None:
-        row = await _write_publisher_rules(db, source_id, body.publisher_rules)
-    if body.auto_sync is not None:
-        row = await set_auto_sync(db, source_id, body.auto_sync)
-        if row is None:
-            raise ApiError(404, f"source {source_id} not found")
+    row = await set_auto_sync(db, source_id, body.auto_sync)
+    if row is None:
+        raise ApiError(404, f"source {source_id} not found")
     try:
         model = load_source_settings(row.type, row.settings)
     except Exception:  # noqa: BLE001 — a disconnected/blank row loads no secret
         model = None
     return SourceResource.from_row(row, model)
-
-
-async def _write_publisher_rules(db, source_id: int, rules: list[str]) -> SourceRow:
-    """Replace a source's publisher rules (FRG-SRC-012) — HTTP mapping only.
-
-    The read-modify-write itself belongs to
-    :func:`foragerr.sources.repo.update_publisher_rules`, which performs it as a
-    single write transaction that never touches ``connection_state``; doing it
-    here, across three transactions and echoing back a stale connection state,
-    is what let a concurrent ``disconnect`` be silently reversed (credential and
-    all). This function now only translates that call's outcomes into the
-    surface's error shapes: unknown id → 404, no settings envelope to write into
-    (a disconnected source) → 409, a rule list the contract rejects → the
-    uniform field-precise 400."""
-    try:
-        written = await update_publisher_rules(db, source_id, rules)
-    except SourceSettingsUnavailable as exc:
-        raise ApiError(
-            409,
-            f"source {source_id} has no stored settings to update — reconnect "
-            "it before editing its publisher rules",
-            field="publisher_rules",
-        ) from exc
-    except ValidationError as exc:
-        raise _validation_error(exc) from exc
-    if written is None:
-        raise ApiError(404, f"source {source_id} not found")
-    return written
 
 
 @router.post("/{source_id}/disconnect", response_model=SourceResource)
