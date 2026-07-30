@@ -79,6 +79,23 @@ def _image_url(value: Any) -> str | None:
     return None
 
 
+def _display_image_url(value: Any) -> str | None:
+    """Pull a display-sized cover URL from a CV ``image`` object.
+
+    Small candidate cards (~150-230px) never need an original — the cover
+    proxy's byte cap is sized for a display variant, so this prefers
+    ComicVine's smaller variants and only falls back to the original when
+    none exist.
+    """
+    if not isinstance(value, dict):
+        return None
+    for key in ("medium_url", "super_url", "small_url", "original_url"):
+        url = value.get(key)
+        if isinstance(url, str) and url.strip():
+            return url.strip()
+    return None
+
+
 def _nested_name(value: Any) -> str | None:
     """Sanitized ``name`` from a nested CV object (publisher, etc.)."""
     if isinstance(value, dict):
@@ -199,5 +216,6 @@ def map_volume(payload: dict[str, Any]) -> SeriesRecord:
         ),
         first_issue=map_issue_ref(payload.get("first_issue")),
         image_url=_image_url(payload.get("image")),
+        display_image_url=_display_image_url(payload.get("image")),
         date_last_updated=_text(payload.get("date_last_updated")),
     )

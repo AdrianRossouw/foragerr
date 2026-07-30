@@ -45,7 +45,16 @@ class SeriesRecord:
     description: str | None
     site_url: str | None
     first_issue: IssueRef | None
+    #: Original-resolution cover URL (2-3+ MB is common) — the library cover
+    #: cache and OPDS page rendering want full quality, so this stays
+    #: original-first (FRG-META-021).
     image_url: str | None
+    #: A display-sized cover URL for UI surfaces that render a small card
+    #: (lookup/suggest candidates) — the cover proxy's byte cap is sized for a
+    #: display variant, not an original (FRG-META-021), so this field prefers
+    #: ComicVine's smaller variants and only falls back to the original when
+    #: none exist.
+    display_image_url: str | None = None
     #: ComicVine's ``date_last_updated`` for the volume as served, after the
     #: standard CV-string sanitizer (FRG-META-014 covers every CV string), or
     #: ``None``. Used only for equality against the stored stamp to decide the

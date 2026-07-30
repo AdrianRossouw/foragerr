@@ -806,7 +806,10 @@ async def lookup_series(
                 publisher=candidate.series.publisher,
                 start_year=candidate.series.start_year,
                 count_of_issues=candidate.series.count_of_issues,
-                image_url=candidate.series.image_url,
+                # Sized variant: candidate cards render small, and the cover
+                # proxy's byte cap is sized for a display image, not an
+                # original (FRG-META-021).
+                image_url=candidate.series.display_image_url or candidate.series.image_url,
                 description=_candidate_description(candidate.series.description),
                 name_similarity=candidate.plausibility.name_similarity,
                 year_proximity=candidate.plausibility.year_proximity,
@@ -873,7 +876,8 @@ async def suggest_series(term: str, request: Request) -> SuggestResponse:
                 publisher=record.publisher,
                 start_year=record.start_year,
                 count_of_issues=record.count_of_issues,
-                image_url=record.image_url,
+                # Sized variant, same rationale as the /lookup candidate above.
+                image_url=record.display_image_url or record.image_url,
                 description=_candidate_description(record.description),
                 have_it=record.cv_volume_id in have,
             )
@@ -938,7 +942,8 @@ async def lookup_volume(cv_volume_id: int, request: Request) -> LookupCandidateR
         publisher=record.publisher,
         start_year=record.start_year,
         count_of_issues=record.count_of_issues,
-        image_url=record.image_url,
+        # Sized variant, same rationale as the /lookup candidate above.
+        image_url=record.display_image_url or record.image_url,
         description=_candidate_description(record.description),
         # Not applicable to a direct id fetch (no term to score against) —
         # see the docstring above.
