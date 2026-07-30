@@ -82,14 +82,130 @@ export function roleChip(role: string): FormatChipColor {
   return ROLE_CHIP[role] ?? ROLE_CHIP.other;
 }
 
-/** Resolve a publisher's cover tint, falling back to the neutral tint. */
-export function publisherTint(publisher: string | null | undefined): string {
-  if (!publisher) return PUBLISHER_TINT_DEFAULT;
-  return PUBLISHER_TINT[publisher] ?? PUBLISHER_TINT_DEFAULT;
+/**
+ * Corporate suffix words folded off a publisher name before the palette lookup
+ * (FRG-UI-042). Feeds deliver "Marvel Comics" / "BOOM! Studios" / "IDW
+ * Publishing" where the palette is keyed by the imprint alone, so an
+ * exact-match lookup resolves nothing on real data.
+ *
+ * The list is deliberately short and holds only words that carry no identity of
+ * their own. "Press" is excluded: it is identity-bearing — folding it collapses
+ * "Oni Press" and "Kobold Press" onto names their publishers do not use.
+ */
+const CORPORATE_SUFFIXES = new Set([
+  'comics',
+  'studios',
+  'entertainment',
+  'publishing',
+  'productions',
+]);
+
+/**
+ * Fold trailing corporate suffixes off a publisher name. TRAILING only: the
+ * words are suffixes, and stripping them mid-name would rewrite an imprint
+ * whose own title contains one. A name made of nothing but suffix words keeps
+ * its whole self rather than folding away to nothing.
+ */
+function foldCorporateSuffixes(name: string): string {
+  const words = name.split(/\s+/);
+  while (words.length > 1 && CORPORATE_SUFFIXES.has(words[words.length - 1].toLowerCase())) {
+    words.pop();
+  }
+  return words.join(' ');
 }
 
-/** Resolve a publisher's spine/bar accent, falling back to the brand green. */
+/**
+ * Case-insensitive index over the named maps, so "dc comics" finds "DC". Built
+ * from the union of both maps: a key present in only one of them still has to
+ * resolve to its canonical casing, or that map's entry becomes unreachable.
+ */
+const NAMED_KEYS = new Map(
+  [...Object.keys(PUBLISHER_TINT), ...Object.keys(PUBLISHER_ACCENT)].map((key) => [
+    key.toLowerCase(),
+    key,
+  ]),
+);
+
+/**
+ * The publisher's palette identity: the named palette's own key when the
+ * normalized name matches one, otherwise the normalized name itself. This is
+ * also what the Calendar's publisher chip prints, so the label and the color
+ * always answer to the same string.
+ */
+export function publisherKey(publisher: string | null | undefined): string | null {
+  const trimmed = publisher?.trim();
+  if (!trimmed) return null;
+  const folded = foldCorporateSuffixes(trimmed);
+  return NAMED_KEYS.get(folded.toLowerCase()) ?? folded;
+}
+
+/**
+ * The brand accent's hue, and the arc around it a derived hue may never land
+ * in. A publisher outside the named palette must be distinguishable from the
+ * app's own accent (FRG-UI-042) — a hash that happened to land on green would
+ * read as "foragerr", not as a publisher. `BRAND_HUE` is
+ * `PUBLISHER_ACCENT_DEFAULT`'s own hue (#57b877 ≈ 139.79°), asserted against
+ * that color in palettes.test.ts so the two cannot drift apart.
+ *
+ * The guard is a PERCEPTUAL band, not just the minimum that keeps a derived
+ * hue from being read as literally the same color: a hue only 15° off green
+ * ("Heavy Metal" hashed to 164°) still reads as near-green at this surface's
+ * saturation/lightness, not as its own distinct publisher color. 35° is wide
+ * enough to clear that.
+ */
+const BRAND_HUE = 140;
+const BRAND_HUE_GUARD = 35;
+
+/**
+ * FNV-1a over the normalized name: a derived hue must be STABLE — the same
+ * publisher takes the same color on every surface and across reloads — so the
+ * hash may not depend on insertion order, list position, or anything but the
+ * name itself.
+ */
+function stableHue(key: string): number {
+  // Casefolded, because the named lookup is: a feed that switches to
+  // "TITAN COMICS" mid-week must not repaint the publisher.
+  const seed = key.toLowerCase();
+  let hash = 2166136261;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash ^= seed.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  const arc = 360 - 2 * BRAND_HUE_GUARD;
+  return (BRAND_HUE + BRAND_HUE_GUARD + ((hash >>> 0) % arc)) % 360;
+}
+
+/*
+ * Saturation/lightness bands for derived colors, fixed so a derived pair sits
+ * at the same weight as the named palette on the dark shell: the accent reads
+ * against the page at text weight, the tint stays a background wash a cover can
+ * letterbox onto. Only the hue varies — the bands are what keep 300 unknown
+ * publishers from rendering as 300 different intensities.
+ */
+const DERIVED_ACCENT_SATURATION = 38;
+const DERIVED_ACCENT_LIGHTNESS = 62;
+const DERIVED_TINT_SATURATION = 20;
+const DERIVED_TINT_LIGHTNESS = 17;
+
+/** Resolve a publisher's cover tint, deriving a stable one when unnamed. */
+export function publisherTint(publisher: string | null | undefined): string {
+  const key = publisherKey(publisher);
+  if (key === null) return PUBLISHER_TINT_DEFAULT;
+  const named = PUBLISHER_TINT[key];
+  if (named !== undefined) return named;
+  return `hsl(${stableHue(key)} ${DERIVED_TINT_SATURATION}% ${DERIVED_TINT_LIGHTNESS}%)`;
+}
+
+/**
+ * Resolve a publisher's spine/bar accent. A named publisher takes its palette
+ * accent, an unnamed one a stable derived hue, and only a null publisher falls
+ * back to the brand green — a real publisher drawn in the brand accent is the
+ * defect this resolution exists to end.
+ */
 export function publisherAccent(publisher: string | null | undefined): string {
-  if (!publisher) return PUBLISHER_ACCENT_DEFAULT;
-  return PUBLISHER_ACCENT[publisher] ?? PUBLISHER_ACCENT_DEFAULT;
+  const key = publisherKey(publisher);
+  if (key === null) return PUBLISHER_ACCENT_DEFAULT;
+  const named = PUBLISHER_ACCENT[key];
+  if (named !== undefined) return named;
+  return `hsl(${stableHue(key)} ${DERIVED_ACCENT_SATURATION}% ${DERIVED_ACCENT_LIGHTNESS}%)`;
 }

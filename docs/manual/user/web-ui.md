@@ -191,25 +191,44 @@ already track. Switch to **Following** to narrow to just your library, where a
 "+N more titles shipping" note stands in for everything else; either scope is
 publisher-filterable.
 
-**How an entry is presented depends on the window width**, because a week at real
-library scale is a long list and the title is the thing you are scanning for. On a
-window 900 pixels wide or wider each entry is a single dense **agenda row**: a
-small fixed cover thumbnail, then the series title taking all the width that is
-left, then the issue number, publisher, and state, with the entry's buttons
-right-aligned. The title is never shortened with an ellipsis and never clamped to
-a fixed number of lines — a long title wraps onto another line at a space rather
-than losing its end. Below 900 pixels each entry becomes a full-width **card**:
-the title spans the whole card and wraps, and the entry's buttons move to a row of
-icons underneath it so nothing competes with the title for horizontal space. The
-day's date, a column of its own on a wide window, folds into the day's heading on
-a narrow one. Both layouts show the same information and offer exactly the same
-actions — only their placement changes.
+**How an entry is presented depends on the window width.** On a window 900 pixels
+wide or wider each entry is a **shelf row** you browse rather than scan, laid out
+left to right:
 
-Every entry carries a cover thumbnail, loading lazily and falling back to the
-familiar tinted spine when no cover is stored for that entry or it fails to load —
-never a broken image. Opening an entry's detail view shows whatever the pull
-source supplied for that release: description, creators (with their roles),
-characters, and UPC, each shown only when present.
+- a **cover** large enough to recognize a book by, on the left;
+- the **series title** and its issue number on the first line, with the "New"
+  badge for a debut. The title is never shortened with an ellipsis and never
+  clamped to a fixed number of lines — a long title wraps onto another line at a
+  space rather than losing its end;
+- a **publisher chip** — a colored swatch and the publisher's name — leading the
+  line below the title. It sits at the same place on every row, so you find the
+  publisher by looking down one column instead of reading to the end of each
+  title. Names arrive from the source in their corporate form ("Marvel Comics",
+  "BOOM! Studios") and are shortened to the imprint on the chip. Publishers
+  foragerr has no house color for are given one derived from their name, so a
+  small press keeps the same color everywhere and on every reload;
+- the release's **writer and artist** beside the chip, when the source supplied
+  them;
+- up to **two lines of the description**, as a teaser — the full text is in the
+  entry's detail view;
+- the entry's **state and buttons**, right-aligned on their own rail.
+
+Lines with nothing to show are left out rather than shown empty, so an entry the
+source told us little about is simply a shorter row.
+
+Below 900 pixels each entry becomes a full-width **card**: the title spans the
+whole card and wraps, the cover shrinks to a thumbnail, and the entry's buttons
+move to a row of icons underneath it so nothing competes with the title for
+horizontal space. The day's date, a column of its own on a wide window, folds into
+the day's heading on a narrow one. Both layouts offer exactly the same actions and
+put the same information within reach — only their placement changes, and on the
+card the creators and description live in the detail view.
+
+Covers load lazily and fall back to the familiar tinted spine when no cover is
+stored for that entry or it fails to load — never a broken image. Opening an
+entry's detail view shows whatever the pull source supplied for that release:
+description, creators (with their roles), characters, and UPC, each shown only
+when present.
 
 Every entry also shows its state as a small **status label** — *Wanted*,
 *Downloading*, *Downloaded*, *Not tracked*, *Pending refresh*, or *Not in library*

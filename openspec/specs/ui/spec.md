@@ -623,28 +623,39 @@ SHALL provide:
 - **Entry presentation, responsive**: the same entry data SHALL be presented
   in one of two modes selected by viewport width at a **single documented
   crossover of 900px**, shared with the shell's compact mode (FRG-UI-049):
-  - **At or above the crossover — agenda rows.** One full-width row per
-    entry inside the day's stream: a fixed-size cover thumbnail (the stored
-    cover or its publisher-tinted spine fallback, FRG-UI-042), the series
-    title as the row's primary column taking all width remaining after the
-    thumbnail, meta and actions, the issue number · publisher · state meta
-    after it, and the row's actions right-aligned. The title SHALL render at
+  - **At or above the crossover — shelf rows.** One full-width row per
+    entry inside the day's stream, sized by its cover: a **shelf-scale
+    cover** of approximately 66×99 CSS px (the stored cover or its
+    publisher-tinted spine fallback, FRG-UI-042), then a content block —
+    line one is the series title with its issue number (and the debut badge
+    per FRG-PULL-008); line two is a **fixed-position publisher chip**
+    (color swatch + normalized publisher name) leading the entry's
+    principal creators (writer/artist, absent roles omitted); then up to
+    **two clamped lines of the stored description** — and the row's state and
+    actions right-aligned on a rail. The publisher SHALL be identifiable
+    without horizontal scanning: the chip holds a fixed x-position in the
+    content block and is never carried only as text trailing the
+    variable-length title. The title SHALL render at
     the body base type size, SHALL wrap at word boundaries rather than
     truncate at realistic title lengths, and no action's footprint and no
     other column's content SHALL reduce its measure below approximately 30
-    characters per line — the title's column SHALL therefore carry a definite
-    minimum, and the meta column SHALL yield to it. Rows SHALL be dense
-    enough that an entry whose title fits one line occupies **no more than 36
-    CSS px of vertical rhythm**, so a day of roughly 60 entries reads in
-    roughly two viewport heights rather than the four the card grid produced.
+    characters per line — the title SHALL therefore carry a definite
+    minimum, and the description/creator lines SHALL yield (clamp) to it.
+    An entry whose title fits one line SHALL occupy no more vertical
+    rhythm than its cover plus spacing (approximately 110 CSS px; a
+    wrapped title adds its own lines and nothing else), the deliberate trade of v0.17.0's
+    row density for discoverability: the cover and the on-row metadata are
+    the browsing surface (owner decision, design session 2).
   - **Below the crossover — quiet cards.** A single column of cards in which
     the title spans the card's full width and wraps at word boundaries, every
     action is an **icon-only** control on an action rail beneath the title
     block (no labelled button competes with the title for horizontal space),
     and the day's gutter folds into an inline day header so the card keeps the
     viewport's width.
-  - Both modes SHALL render the same entry data and expose the same actions:
-    nothing SHALL be reachable in one mode and unreachable in the other.
+  - Both modes SHALL expose the same actions and make the same entry data
+    reachable (the card face defers creators and description to the detail
+    surface; the shelf row surfaces them inline): nothing SHALL be
+    reachable in one mode and unreachable in the other.
 - **Derived-state display**: each entry's state SHALL be a projection of the
   entry's `state` (missing/wanted, downloading, downloaded, unmonitored,
   pending-refresh) — never a status stored on the pull entry (D4) — and SHALL
@@ -670,7 +681,9 @@ in-flight behavior by FRG-UI-048.
   mylar-feature-surface.md §1 weekly pull; sonarr-architecture.md §7.1
   Calendar; FRG-API-019 (the read surface). Modified in calendar-legibility on
   the owner's report — twice — that the shipped screen is unusable at real
-  library density.
+  library density; reshaped to shelf rows in calendar-shelf (owner pick,
+  design session 2, 2026-07-30 — the calendar is a discovery surface, so
+  cover art and on-row metadata outrank row density).
 - **Notes**: Shape decision unchanged: date-grouped agenda, not a Mylar
   pull-list table nor a Sonarr month grid — comics ship in one Wednesday drop,
   a grid piles everything on one column. Scope/publisher filtering stays
@@ -679,7 +692,8 @@ in-flight behavior by FRG-UI-048.
   (non-goal).
 
   The responsive presentation replaces the previous unconditional "release
-  cards" wording. The 900px crossover is derived from the screen's own
+  cards" wording; the shelf-row mode replaces calendar-legibility's agenda
+  rows and retires that change's 36px density ceiling. The 900px crossover is derived from the screen's own
   geometry, not a device table: fixed chrome to the left of the entry area
   (sidebar, screen padding, day gutter, gap, stream border and padding) plus a
   row's own cover and action cluster leave a row about 396px to divide between
@@ -731,19 +745,19 @@ in-flight behavior by FRG-UI-048.
   the viewed week with correct derived state, and no error state replaces
   the agenda
 
-#### Scenario: A wide viewport renders agenda rows whose titles survive
+#### Scenario: A wide viewport renders shelf rows with fixed-position publishers
 
 - **WHEN** the Calendar renders a week at or above the 900px crossover,
   including an entry whose title is long enough to have truncated in the card
-  grid
-- **THEN** each entry is a single full-width row (thumbnail, title column,
-  issue · publisher · state meta, right-aligned actions), the title renders at
-  the body base type size and wraps at word boundaries with no mid-word break
-  and no ellipsis, and its measure is not reduced below approximately 30
-  characters (measured in the browser-driven tier at the crossover width) by
-  any action present on the row, by the length of the publisher name beside
-  it, or by any other column — the meta's own text ellipsises instead, and the
-  frame does not scroll sideways to make the measure fit
+  grid, on a viewport wide enough that inline meta would trail far from the
+  title
+- **THEN** each entry is a single full-width shelf row (shelf-scale cover,
+  title + issue with the publisher chip at its fixed position, creators line,
+  clamped description, right-aligned state/actions), the title wraps at word
+  boundaries with no mid-word break and no ellipsis at a measure of at least
+  approximately 30 characters, and the publisher chip's x-position does not
+  vary with the title's length — the eye finds every row's publisher at one
+  place without scanning to the line's end
 
 #### Scenario: A narrow viewport renders quiet cards with an icon rail
 
@@ -757,19 +771,20 @@ in-flight behavior by FRG-UI-048.
 #### Scenario: Neither mode hides an action the other offers
 
 - **WHEN** the same week is rendered on either side of the crossover
-- **THEN** each entry exposes the identical set of actions and the identical
-  entry data in both modes, differing only in placement and in whether an
-  action's label is rendered as text
+- **THEN** each entry exposes the identical set of actions, and the
+  identical entry data is reachable in both modes (inline on the shelf
+  row, via the detail surface on the card), differing only in placement
+  and in whether an action's label is rendered as text
 
-#### Scenario: A dense day stays scannable
+#### Scenario: A dense day browses by cover
 
 - **WHEN** a single day of roughly 60 entries is rendered at or above the
   crossover
-- **THEN** every entry whose title fits one line occupies no more than 36 CSS
-  px of vertical rhythm — thumbnail, controls, padding and separator included
-  (measured in the browser-driven tier) — so the day reads in roughly two
-  viewport heights rather than the four the card grid produced; a title long
-  enough to wrap adds its own extra line and nothing else
+- **THEN** every entry renders its shelf-scale cover and on-row metadata with
+  no entry exceeding approximately 110 CSS px of vertical rhythm for a
+  single-line title (measured in the browser-driven tier), covers below the
+  viewport load lazily, and the frame never scrolls sideways — the day is a
+  browsable shelf rather than a table, by design
 
 ### Requirement: FRG-UI-019 — Global header quick-search over the local library
 
@@ -1492,16 +1507,29 @@ quietly (no alarm chrome for the normal case).
 ### Requirement: FRG-UI-042 — Calendar covers and enrichment detail
 
 The Calendar screen (FRG-UI-018) SHALL render each pull entry's stored
-cover as a lazy-loaded thumbnail served same-origin through the
-authenticated cover proxy (FRG-META-021), falling back to the existing
+cover as a lazy-loaded image served same-origin through the
+authenticated cover proxy (FRG-META-021) — at shelf scale
+(approximately 66×99 CSS px) at or above the layout crossover, card
+scale below it — falling back to the
 publisher-tinted spine when the cover is absent or fails to load —
-never a broken image. An entry detail surface SHALL expose the stored
+never a broken image. The shelf row SHALL surface the entry's
+principal creators (writer/artist) and up to two clamped lines of the
+stored description inline; an entry detail surface SHALL expose the full stored
 enrichment — description, creators (role and name), characters, and
-UPC — omitting absent fields. Rendering pull imagery and enrichment
+UPC — omitting absent fields. Publisher tint and accent resolution
+SHALL match the feed's publisher names by normalized comparison
+(corporate suffixes such as "Comics", "Studios", "Entertainment",
+"Publishing" fold away before the palette lookup), and a publisher
+outside the named palette SHALL derive a stable, deterministic accent
+hue distinct from the brand accent — every publisher is
+distinguishable at a glance, on the Calendar and on every other
+surface resolving through the shared palette helpers. Rendering pull imagery and enrichment
 SHALL issue no ComicVine requests: the Calendar's imagery is
 budget-free by design (FRG-META-022's lanes are not involved).
 
-- **Milestone**: M11 (m11-discovery-surface).
+- **Milestone**: M11 (m11-discovery-surface); reshaped to shelf scale
+  with on-row enrichment and normalized publisher resolution in
+  calendar-shelf.
 - **Source**: rig finding #17 (Calendar covers never built) + the
   2026-07-23 cover-URL facts; FRG-PULL-011 supplies the stored data.
 - **Notes**: First cover-proxy consumer outside the add/import
@@ -1536,6 +1564,23 @@ budget-free by design (FRG-META-022's lanes are not involved).
   entries
 - **THEN** no ComicVine API request is issued on behalf of pull
   imagery or enrichment
+
+
+#### Scenario: The shelf row carries creators and a clamped description
+
+- **WHEN** a week renders at or above the crossover with an entry storing
+  creators and a long description
+- **THEN** the row shows the writer/artist line and at most two lines of
+  description (clamped, full text in the detail surface), and an entry
+  missing those fields simply omits the lines — never empty placeholders
+
+#### Scenario: Live publisher names resolve to their palette colors
+
+- **WHEN** the feed delivers publishers as "Marvel Comics", "DC Comics",
+  or "BOOM! Studios"
+- **THEN** their chips and spines carry the Marvel/DC/BOOM! palette
+  colors (normalized match), and a publisher with no palette entry
+  renders a stable derived hue that is not the brand accent
 
 ### Requirement: FRG-UI-043 — Group-header search/match affordance
 

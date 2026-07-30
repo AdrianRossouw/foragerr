@@ -9,6 +9,27 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.20.0] — 2026-07-30
+
+The calendar becomes a browsable shelf.
+
+### Changed
+- Above the layout crossover, calendar entries render as shelf rows: a
+  legible 66×99 cover, the title and issue, a fixed-position publisher
+  chip (color swatch + name — no more scanning to the end of the line),
+  the release's writer and artist, and two lines of the description,
+  with actions on the right. Below the crossover the quiet cards are
+  unchanged, and everything reachable before is still reachable.
+  (FRG-UI-018, FRG-UI-042)
+
+### Fixed
+- Publisher colors now work on live data: palette lookup folds corporate
+  suffixes ("Marvel Comics" matches Marvel), and publishers outside the
+  named palette get a stable derived color instead of the brand green —
+  on the calendar, library posters, and every other tinted surface. The
+  calendar's publisher filter matches the same normalized names.
+  (FRG-UI-042)
+
 ## [v0.19.1] — 2026-07-30
 
 Testing a saved download client or indexer works without retyping its

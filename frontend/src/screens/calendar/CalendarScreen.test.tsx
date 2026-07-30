@@ -19,6 +19,11 @@ import type {
   PullEntryRecord,
 } from '../../api/types';
 import { addWeeks, currentIsoWeek, isoDateKey, weekDates, weekRangeLabel } from '../../utils/isoWeek';
+import {
+  PUBLISHER_ACCENT,
+  PUBLISHER_ACCENT_DEFAULT,
+  publisherAccent,
+} from '../../theme/palettes';
 import { CalendarScreen } from './CalendarScreen';
 
 /**
@@ -801,6 +806,191 @@ describe('FRG-UI-042: Calendar covers and enrichment detail', () => {
   });
 });
 
+describe('FRG-UI-042: the shelf row carries the publisher, creators and a teaser', () => {
+  /** The chip's swatch — the element the palette accent is painted on. */
+  function swatchOf(chip: HTMLElement): HTMLElement {
+    return chip.querySelector('[aria-hidden]') as HTMLElement;
+  }
+
+  it('FRG-UI-042 — a live publisher name renders normalized on the chip in its palette color', async () => {
+    // The feed says "Marvel Comics"; the palette is keyed "Marvel". Before the
+    // normalized lookup this row drew the brand accent like every other one.
+    const records = [
+      makePullEntry({
+        id: 6001,
+        seriesName: 'Meridian Signal',
+        publisher: 'Marvel Comics',
+        releaseDate: '2026-07-01',
+        matchType: 'unmatched',
+      }),
+    ];
+    const { fetcher } = fakeFetcher(() => pageOf(records, { pageSize: 200 }));
+    renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
+
+    await screen.findByText('Meridian Signal');
+    const chip = screen.getByTestId('calendar-publisher-6001');
+    expect(chip).toHaveTextContent('Marvel');
+    expect(chip).not.toHaveTextContent('Comics');
+    expect(swatchOf(chip)).toHaveStyle({
+      backgroundColor: PUBLISHER_ACCENT.Marvel,
+    });
+  });
+
+  it('FRG-UI-042 — a publisher outside the named palette still gets its own swatch color', async () => {
+    const records = [
+      makePullEntry({
+        id: 6002,
+        seriesName: 'Tidewrack Survey',
+        publisher: 'Umbral Press',
+        releaseDate: '2026-07-01',
+        matchType: 'unmatched',
+      }),
+    ];
+    const { fetcher } = fakeFetcher(() => pageOf(records, { pageSize: 200 }));
+    renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
+
+    await screen.findByText('Tidewrack Survey');
+    const chip = screen.getByTestId('calendar-publisher-6002');
+    expect(chip).toHaveTextContent('Umbral Press');
+    // Its own derived hue, never the app's accent standing in for a publisher.
+    expect(swatchOf(chip)).toHaveStyle({
+      backgroundColor: publisherAccent('Umbral Press'),
+    });
+    expect(swatchOf(chip)).not.toHaveStyle({
+      backgroundColor: PUBLISHER_ACCENT_DEFAULT,
+    });
+  });
+
+  it('FRG-UI-042 — the creator line names the writer then the artist, at most two apiece', async () => {
+    const records = [
+      makePullEntry({
+        id: 6003,
+        seriesName: 'Tidewrack Survey',
+        releaseDate: '2026-07-01',
+        matchType: 'unmatched',
+        creators: [
+          { role: 'Letterer', name: 'D. Quill' },
+          { role: 'Writer', name: 'A. Marlowe' },
+          { role: 'Writer', name: 'B. Osgood' },
+          { role: 'Writer', name: 'C. Hale' },
+          { role: 'Penciller', name: 'R. Vance' },
+        ],
+      }),
+    ];
+    const { fetcher } = fakeFetcher(() => pageOf(records, { pageSize: 200 }));
+    renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
+
+    await screen.findByText('Tidewrack Survey');
+    const line = screen.getByTestId('calendar-creators-6003');
+    expect(line).toHaveTextContent('A. Marlowe · B. Osgood · R. Vance');
+    // Third writer cut, and a role the browse line does not carry stays off it.
+    expect(line).not.toHaveTextContent('C. Hale');
+    expect(line).not.toHaveTextContent('D. Quill');
+  });
+
+  it('FRG-UI-042 — a duplicate credit does not consume a role slot a later real creator needed', async () => {
+    // Regression: the role-slot counter used to increment on every MATCHED
+    // credit, including one already folded into `seen` as a duplicate — so
+    // "Cover Artist" repeating the "Artist" name above it consumed the second
+    // artist slot and the row's real second creator (the penciller) never
+    // printed at all.
+    const records = [
+      makePullEntry({
+        id: 6006,
+        seriesName: 'Cinder Route',
+        releaseDate: '2026-07-01',
+        matchType: 'unmatched',
+        creators: [
+          { role: 'Artist', name: 'X. Reyes' },
+          { role: 'Cover Artist', name: 'X. Reyes' },
+          { role: 'Penciller', name: 'Y. Okafor' },
+        ],
+      }),
+    ];
+    const { fetcher } = fakeFetcher(() => pageOf(records, { pageSize: 200 }));
+    renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
+
+    await screen.findByText('Cinder Route');
+    expect(screen.getByTestId('calendar-creators-6006')).toHaveTextContent(
+      'X. Reyes · Y. Okafor',
+    );
+  });
+
+  it('FRG-UI-042 — a cover-credited artist never outranks the penciller on stored order', async () => {
+    // "Cover Artist" contains the substring "artist", so an unfiltered match
+    // would take the artist/penciller slot ahead of a real interior
+    // penciller purely because the cover credit was stored first. The cover
+    // credit is not on the browse line at all — it stays on the detail
+    // surface with the rest of the credit list.
+    const records = [
+      makePullEntry({
+        id: 6007,
+        seriesName: 'Gallows Fen',
+        releaseDate: '2026-07-01',
+        matchType: 'unmatched',
+        creators: [
+          { role: 'Cover Artist', name: 'V. Odom' },
+          { role: 'Penciller', name: 'R. Song' },
+          { role: 'Writer', name: 'A. Bright' },
+        ],
+      }),
+    ];
+    const { fetcher } = fakeFetcher(() => pageOf(records, { pageSize: 200 }));
+    renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
+
+    await screen.findByText('Gallows Fen');
+    const line = screen.getByTestId('calendar-creators-6007');
+    expect(line).toHaveTextContent('A. Bright · R. Song');
+    expect(line).not.toHaveTextContent('V. Odom');
+  });
+
+  it('FRG-UI-042 — an entry storing no creators and no description omits both lines rather than reserving them', async () => {
+    const records = [
+      makePullEntry({
+        id: 6004,
+        seriesName: 'Hollow Signal',
+        releaseDate: '2026-07-01',
+        matchType: 'unmatched',
+      }),
+    ];
+    const { fetcher } = fakeFetcher(() => pageOf(records, { pageSize: 200 }));
+    renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
+
+    await screen.findByText('Hollow Signal');
+    expect(screen.queryByTestId('calendar-creators-6004')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('calendar-deck-6004')).not.toBeInTheDocument();
+    // The publisher chip is not enrichment — it renders for every entry.
+    expect(screen.getByTestId('calendar-publisher-6004')).toBeInTheDocument();
+  });
+
+  it('FRG-UI-042 — the row description is stripped of markup and clamped to two lines', async () => {
+    // A maximal (backend-capped 4000-char) description must not push the row
+    // past its rhythm, and the untrusted ComicVine deck never reaches the DOM
+    // as markup.
+    const records = [
+      makePullEntry({
+        id: 6005,
+        seriesName: 'Marrow Line',
+        releaseDate: '2026-07-01',
+        matchType: 'unmatched',
+        description: '<b>x</b>' + ' filler word'.repeat(200),
+      }),
+    ];
+    const { fetcher } = fakeFetcher(() => pageOf(records, { pageSize: 200 }));
+    renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
+
+    await screen.findByText('Marrow Line');
+    const deck = screen.getByTestId('calendar-deck-6005');
+    expect(deck.innerHTML).not.toContain('<b>');
+    expect(deck.textContent?.startsWith('x filler word')).toBe(true);
+    expect(deck.className).toMatch(/rowDeck/);
+    // The full text stays on the detail surface — the row carries a teaser.
+    expect(
+      screen.getByRole('button', { name: 'Show details for Marrow Line' }),
+    ).toBeInTheDocument();
+  });
+});
+
 describe('FRG-PULL-007: search completion re-projects the week', () => {
   it('FRG-PULL-007 — a search command reaching completed refetches the pull week', async () => {
     const week = '2026-W27';
@@ -890,6 +1080,43 @@ describe('FRG-UI-018: publisher filter + banner', () => {
     expect(banner()).toHaveTextContent('the 1 issue from series you follow');
     expect(banner()).toHaveTextContent('0 more titles ship this week from DC');
     expect(banner()).not.toHaveTextContent('across every publisher');
+  });
+
+  it('FRG-UI-018 — two feed spellings of one publisher collapse to a single filter option', async () => {
+    // The feed is free to spell one publisher two ways within the same week
+    // ("Marvel Comics" on one row, "Marvel" on another). Building the option
+    // list from the raw string — rather than the normalized key the chip
+    // prints — used to fork this into two options, one of which matched no
+    // row a filter selection could ever be applied to.
+    const records = [
+      makePullEntry({
+        id: 6101,
+        seriesName: 'Ashfall Ledger',
+        publisher: 'Marvel Comics',
+        releaseDate: '2026-07-01',
+        matchType: 'unmatched',
+      }),
+      makePullEntry({
+        id: 6102,
+        seriesName: 'Nightfall Depot',
+        publisher: 'Marvel',
+        releaseDate: '2026-07-01',
+        matchType: 'unmatched',
+      }),
+    ];
+    const { fetcher } = fakeFetcher(() => pageOf(records, { pageSize: 200 }));
+    const user = userEvent.setup();
+    renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
+
+    await screen.findByText('Ashfall Ledger');
+    const select = screen.getByLabelText('Filter by publisher') as HTMLSelectElement;
+    const marvelOptions = within(select).getAllByRole('option', { name: 'Marvel' });
+    expect(marvelOptions).toHaveLength(1);
+
+    await user.selectOptions(select, 'Marvel');
+    // Both rows carry the one normalized publisher, so both stay visible.
+    expect(screen.getByText('Ashfall Ledger')).toBeInTheDocument();
+    expect(screen.getByText('Nightfall Depot')).toBeInTheDocument();
   });
 });
 

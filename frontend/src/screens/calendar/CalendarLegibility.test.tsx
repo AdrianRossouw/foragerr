@@ -22,9 +22,10 @@ import { COMPACT_CROSSOVER_PX } from '../../theme/layout';
 import { CalendarScreen } from './CalendarScreen';
 
 /**
- * FRG-UI-018 / FRG-UI-047 / FRG-UI-048 — the Calendar at real-library density:
- * two entry presentations either side of one crossover, status indicators that
- * are not shaped or announced as controls, and a monitor toggle that
+ * FRG-UI-018 / FRG-UI-042 / FRG-UI-047 / FRG-UI-048 — the Calendar as a
+ * browsable shelf: two entry presentations either side of one crossover, a
+ * publisher the eye finds at one x-position down the day, status indicators
+ * that are not shaped or announced as controls, and a monitor toggle that
  * acknowledges activation instead of looking dead until a refetch lands.
  */
 
@@ -85,7 +86,7 @@ function accessibleText(root: HTMLElement): string {
 }
 
 describe('FRG-UI-018: responsive entry presentation', () => {
-  it('FRG-UI-018 — at or above the crossover an entry is an agenda row whose long title is neither clamped nor truncated', async () => {
+  it('FRG-UI-018 — at or above the crossover an entry is a shelf row whose long title is neither clamped nor truncated', async () => {
     setViewportWidth(WIDE);
     renderWeek([makePullEntry({ id: 1, seriesName: LONG_TITLE, matchType: 'unmatched' })]);
 
@@ -261,6 +262,84 @@ describe('FRG-UI-018: responsive entry presentation', () => {
         'card',
       ),
     );
+  });
+});
+
+describe('FRG-UI-018: the shelf row is browsed, not scanned', () => {
+  /** The chip's own box, and the cluster it leads. */
+  function chipOf(card: HTMLElement, key: string | number) {
+    const chip = within(card).getByTestId(`calendar-publisher-${key}`);
+    return { chip, cluster: chip.parentElement as HTMLElement };
+  }
+
+  it('FRG-UI-018 — the publisher chip holds one x-position whatever the title length', async () => {
+    // The defect this replaces: the publisher trailed the title inline, so on a
+    // wide viewport its x moved with every row and finding it meant reading to
+    // the end of each line.
+    setViewportWidth(WIDE);
+    renderWeek([
+      makePullEntry({ id: 1, seriesName: 'Ash', matchType: 'unmatched' }),
+      makePullEntry({ id: 2, seriesName: LONG_TITLE, matchType: 'unmatched' }),
+    ]);
+    await screen.findByTestId('calendar-card-1');
+
+    const short = chipOf(screen.getByTestId('calendar-card-1'), 1);
+    const long = chipOf(screen.getByTestId('calendar-card-2'), 2);
+    // Same cluster class, and FIRST in it, in both rows: the chip starts at the
+    // content block's own left edge rather than after a variable-length run of
+    // text, so its x cannot depend on the title.
+    expect(short.cluster.className).toBe(long.cluster.className);
+    expect(short.cluster.firstElementChild).toBe(short.chip);
+    expect(long.cluster.firstElementChild).toBe(long.chip);
+    // And it is not carried inside the title line at all.
+    for (const [card, title] of [
+      [screen.getByTestId('calendar-card-1'), 'Ash'],
+      [screen.getByTestId('calendar-card-2'), LONG_TITLE],
+    ] as const) {
+      const titleEl = within(card as HTMLElement).getByText(title);
+      expect(titleEl.parentElement).not.toContainElement(
+        within(card as HTMLElement).getByTestId(/^calendar-publisher-/),
+      );
+    }
+  });
+
+  it('FRG-UI-018 — the cover is shelf-scale above the crossover and card-scale below it', async () => {
+    const record = makePullEntry({
+      id: 1,
+      seriesName: 'Tidewrack Survey',
+      matchType: 'unmatched',
+      coverUrl: 'https://example.com/covers/tidewrack.jpg',
+    });
+
+    setViewportWidth(WIDE);
+    const wide = renderWeek([record]);
+    const shelfCover = await screen.findByRole('img', {
+      name: 'Tidewrack Survey cover',
+    });
+    expect(shelfCover.className).toMatch(/thumbRow/);
+    expect(shelfCover.className).not.toMatch(/thumbCard/);
+    wide.unmount();
+
+    setViewportWidth(NARROW);
+    renderWeek([record]);
+    const cardCover = await screen.findByRole('img', {
+      name: 'Tidewrack Survey cover',
+    });
+    expect(cardCover.className).toMatch(/thumbCard/);
+    expect(cardCover.className).not.toMatch(/thumbRow/);
+  });
+
+  it('FRG-UI-018 — the row states its entry once: the state chip is on the rail, not repeated in the meta', async () => {
+    setViewportWidth(WIDE);
+    renderWeek([makeLinkedPullEntry('Meridian Signal', { id: 1 })]);
+
+    const card = await screen.findByTestId('calendar-card-1');
+    const state = within(card).getByTestId('calendar-state-1');
+    // The rail is the row face's last child — state and actions together, right
+    // of the content block, so neither eats the title's measure.
+    const face = card.firstElementChild as HTMLElement;
+    expect(face.lastElementChild).toContainElement(state);
+    expect(within(card).getAllByTestId('calendar-state-1')).toHaveLength(1);
   });
 });
 
