@@ -85,14 +85,28 @@ DEFAULT_IGNORED_PUBLISHERS = (
 #: (``Paizo*`` covers "Paizo Inc." / "Paizo Publishing"), every other entry
 #: matches the folded publisher exactly. Seeds fresh installs ONLY — a config.yaml
 #: that already carries a value (including the empty string) keeps it.
+#:
+#: Every entry is a wildcard because stores report corporate suffixes the house's
+#: trading name does not carry ("Monte Cook Games, LLC", "Pelgrane Press Ltd"),
+#: which an exact rule cannot reach. The FULL trading name is kept in each
+#: wildcard rather than a shorter stem: a bare ``Renegade*`` would also catch the
+#: comics house Renegade Arts Entertainment.
 DEFAULT_NON_COMIC_PUBLISHERS = (
-    "Paizo*, Pelgrane Press, Green Ronin*, Kobold Press, Free League*, "
-    "Modiphius*, Chaosium*, Cubicle 7*, Evil Hat*, Monte Cook Games, "
-    "Goodman Games, Onyx Path*, Steve Jackson Games, R. Talsorian*, "
-    "Renegade Game Studios, O'Reilly*, No Starch*, Manning Publications*, "
-    "Packt*, Pragmatic Bookshelf, Apress, Wiley*, Addison-Wesley*, Pearson*, "
-    "CRC Press, Mercury Learning*"
+    "Paizo*, Pelgrane Press*, Green Ronin*, Kobold Press*, Free League*, "
+    "Modiphius*, Chaosium*, Cubicle 7*, Evil Hat*, Monte Cook Games*, "
+    "Goodman Games*, Onyx Path*, Steve Jackson Games*, R. Talsorian*, "
+    "Renegade Game Studios*, O'Reilly*, No Starch*, Manning Publications*, "
+    "Packt*, Pragmatic Bookshelf*, Apress*, Wiley*, Addison-Wesley*, Pearson*, "
+    "CRC Press*, Mercury Learning*"
 )
+
+#: Bounds on the stored ``non_comic_publishers`` list. Deliberately far above any
+#: hand-curated list AND above what a migration union of every per-source rule
+#: could produce, so the cap only ever fires on a corrupted or pasted-in value —
+#: never on a legitimate upgrade, which would otherwise fail config validation at
+#: startup.
+MAX_NON_COMIC_PUBLISHERS = 1000
+MAX_NON_COMIC_PUBLISHER_LENGTH = 200
 
 #: The environment variable that supplies ``non_comic_publishers`` and, by
 #: pydantic's env-over-file source ordering, shadows the config-file value. Named
@@ -1275,6 +1289,47 @@ class Settings(BaseSettings):
                 clamped,
             )
         return clamped
+
+    @field_validator("non_comic_publishers")
+    @classmethod
+    def _clean_non_comic_publishers(cls, value: str) -> str:
+        """Normalize the stored rule list: trim, drop empties, drop entries that
+        duplicate one already kept, and bound the whole thing.
+
+        Two entries are the same rule when they agree on BOTH the shared fold
+        (FRG-IMP-005, what the classifier matches on) and on carrying a trailing
+        ``*`` — "Paizo" and "Paizo*" are different rules with different reach, so
+        only the fold is not enough of a key. The first spelling of a rule wins,
+        so an operator edit never reorders or rewrites the list it was applied to.
+
+        The bounds exist so a pasted or corrupted value cannot make every sync
+        compile a pathological rule set; they are set far above any real list, so
+        an upgrade that unions genuine per-source rules never trips them.
+        """
+        from foragerr.parser.normalize import matching_key
+
+        seen: set[tuple[str, bool]] = set()
+        kept: list[str] = []
+        for raw in value.split(","):
+            entry = raw.strip()
+            if not entry:
+                continue
+            if len(entry) > MAX_NON_COMIC_PUBLISHER_LENGTH:
+                raise ValueError(
+                    f"publisher entry exceeds {MAX_NON_COMIC_PUBLISHER_LENGTH} "
+                    f"characters: {entry[:60]!r}…"
+                )
+            key = (matching_key(entry) or entry.casefold(), entry.endswith("*"))
+            if key in seen:
+                continue
+            seen.add(key)
+            kept.append(entry)
+        if len(kept) > MAX_NON_COMIC_PUBLISHERS:
+            raise ValueError(
+                f"at most {MAX_NON_COMIC_PUBLISHERS} publisher entries are "
+                f"allowed (got {len(kept)})"
+            )
+        return ", ".join(kept)
 
     @field_validator("log_level")
     @classmethod

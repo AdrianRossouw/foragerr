@@ -130,6 +130,115 @@ describe('FRG-UI-046: Settings publisher-filtering panel', () => {
     );
   });
 
+  it('FRG-UI-046 — removing every entry renders the empty state and saves an empty list', async () => {
+    const user = userEvent.setup();
+    const { spy, fetcher } = fakeFetcher(
+      resolver(
+        () => config(),
+        (init) => {
+          const body = init?.body as { non_comic_publishers?: string };
+          expect(body.non_comic_publishers).toBe('');
+          return config({
+            non_comic_publishers: { value: '', source: 'file' },
+          });
+        },
+      ),
+    );
+    renderWithProviders(<NonComicPublishers />, { fetcher });
+
+    await screen.findByTestId('non-comic-publisher-Example Games');
+    await user.click(screen.getByTestId('non-comic-publisher-remove-Example Games'));
+    await user.click(
+      screen.getByTestId('non-comic-publisher-remove-Example Tech Press'),
+    );
+
+    expect(
+      await screen.findByTestId('non-comic-publishers-empty'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId('non-comic-publishers-list'),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId('non-comic-publishers-save'));
+
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith(
+        '/api/v1/config/general',
+        expect.objectContaining({ method: 'PUT' }),
+      ),
+    );
+    expect(
+      await screen.findByTestId('non-comic-publishers-saved'),
+    ).toBeInTheDocument();
+  });
+
+  it('FRG-UI-046 — a comma in the draft is refused with a hint, not split into two entries', async () => {
+    const user = userEvent.setup();
+    const { spy, fetcher } = fakeFetcher(resolver(() => config()));
+    renderWithProviders(<NonComicPublishers />, { fetcher });
+
+    await screen.findByTestId('non-comic-publisher-Example Games');
+    await user.type(
+      screen.getByTestId('non-comic-publishers-input'),
+      'Example Games, Inc',
+    );
+    await user.click(screen.getByTestId('non-comic-publishers-add'));
+
+    const hint = await screen.findByTestId('non-comic-publishers-hint');
+    expect(hint).toHaveAttribute('role', 'alert');
+    expect(hint).toHaveTextContent('Commas separate entries');
+    expect(
+      screen.queryByTestId('non-comic-publisher-Example Games, Inc'),
+    ).not.toBeInTheDocument();
+    expect(spy).not.toHaveBeenCalledWith(
+      '/api/v1/config/general',
+      expect.objectContaining({ method: 'PUT' }),
+    );
+  });
+
+  it('FRG-UI-046 — a * that is not at the end is refused with a hint', async () => {
+    const user = userEvent.setup();
+    const { fetcher } = fakeFetcher(resolver(() => config()));
+    renderWithProviders(<NonComicPublishers />, { fetcher });
+
+    await screen.findByTestId('non-comic-publisher-Example Games');
+    await user.type(
+      screen.getByTestId('non-comic-publishers-input'),
+      '*Example Games',
+    );
+    await user.click(screen.getByTestId('non-comic-publishers-add'));
+
+    const hint = await screen.findByTestId('non-comic-publishers-hint');
+    expect(hint).toHaveAttribute('role', 'alert');
+    expect(hint).toHaveTextContent('Put * at the end');
+    expect(
+      screen.queryByTestId('non-comic-publisher-*Example Games'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('FRG-UI-046 — re-adding a listed publisher says so instead of looking like a success', async () => {
+    const user = userEvent.setup();
+    const { fetcher } = fakeFetcher(resolver(() => config()));
+    renderWithProviders(<NonComicPublishers />, { fetcher });
+
+    await screen.findByTestId('non-comic-publisher-Example Games');
+    await user.type(
+      screen.getByTestId('non-comic-publishers-input'),
+      'example games',
+    );
+    await user.click(screen.getByTestId('non-comic-publishers-add'));
+
+    const hint = await screen.findByTestId('non-comic-publishers-hint');
+    expect(hint).toHaveAttribute('role', 'status');
+    expect(hint).toHaveTextContent('already listed');
+    expect(screen.getByTestId('non-comic-publishers-input')).toHaveValue(
+      'example games',
+    );
+    expect(
+      screen.getAllByTestId(/^non-comic-publisher-Example Games$/),
+    ).toHaveLength(1);
+  });
+
   it('FRG-UI-046 — the panel describes non-comic filtering in plain user terms, with no per-genre or implementation framing', async () => {
     const { fetcher } = fakeFetcher(resolver(() => config()));
     renderWithProviders(<NonComicPublishers />, { fetcher });

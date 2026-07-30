@@ -43,6 +43,11 @@ export function NonComicPublishers() {
   const [dirty, setDirty] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Feedback on a draft that was NOT added. 'alert' is a rejection the operator
+  // has to act on; 'status' is a no-op they should not mistake for a success.
+  const [hint, setHint] = useState<{ kind: 'alert' | 'status'; text: string } | null>(
+    null,
+  );
 
   // Re-seed from the server whenever the persisted value changes underneath
   // an UNEDITED editor (initial load, a save's own response). An edited
@@ -65,12 +70,33 @@ export function NonComicPublishers() {
     e.preventDefault();
     const value = draft.trim();
     if (!value) return;
-    // Case-insensitive de-dupe mirrors the server's own list cleaning, so
-    // the editor never shows an entry the backend would silently drop.
-    if (entries.some((entry) => entry.toLowerCase() === value.toLowerCase())) {
-      setDraft('');
+    // The list is stored comma-separated, so a comma inside an entry would come
+    // back after a reload as two entries — and half a publisher name is a rule
+    // that matches things the operator never asked for.
+    if (value.includes(',')) {
+      setHint({
+        kind: 'alert',
+        text: 'Commas separate entries — add one publisher at a time, without the comma.',
+      });
       return;
     }
+    // Only a TRAILING * widens a rule; anywhere else it is part of the name and
+    // can never match a publisher, so the entry would sit there doing nothing.
+    const star = value.indexOf('*');
+    if (star !== -1 && star !== value.length - 1) {
+      setHint({
+        kind: 'alert',
+        text: 'Put * at the end to match anything containing the name.',
+      });
+      return;
+    }
+    // A client-side de-dupe keeps the editor from showing two rules that fold to
+    // the same match; the server enforces its own cleaning and bounds on save.
+    if (entries.some((entry) => entry.toLowerCase() === value.toLowerCase())) {
+      setHint({ kind: 'status', text: `${value} is already listed.` });
+      return;
+    }
+    setHint(null);
     edit([...entries, value]);
     setDraft('');
   };
@@ -154,7 +180,10 @@ export function NonComicPublishers() {
               aria-label="Publisher to always file as Other"
               placeholder="Publisher name"
               value={draft}
-              onChange={(e) => setDraft(e.target.value)}
+              onChange={(e) => {
+                setDraft(e.target.value);
+                setHint(null);
+              }}
               data-testid="non-comic-publishers-input"
             />
             <button
@@ -166,10 +195,25 @@ export function NonComicPublishers() {
             </button>
           </form>
 
+          {hint && (
+            <p
+              className={
+                hint.kind === 'alert'
+                  ? generalStyles.formError
+                  : generalStyles.sectionHelp
+              }
+              role={hint.kind}
+              data-testid="non-comic-publishers-hint"
+            >
+              {hint.text}
+            </p>
+          )}
+
           <p className={generalStyles.sectionHelp}>
             An entry ending in <code>*</code> matches anything containing the
             name (for example <code>Paizo*</code>); any other entry must
-            match exactly.
+            match exactly. Add one publisher at a time — commas separate
+            entries, so a name can&apos;t contain one.
           </p>
 
           <div className={styles.actions}>
