@@ -31,6 +31,7 @@ from foragerr.downloads.manual_import import (
     execute_roots,
     list_manual_candidates,
 )
+from foragerr.library.read_only import refuse_read_only_path
 
 router = APIRouter(tags=["manual-import"])
 
@@ -133,6 +134,17 @@ async def execute_manual_import_endpoint(
 
     roots = await execute_roots(db)
     payload_files: list[dict[str, object]] = []
+    async with db.read_session() as session:
+        for spec in body.files:
+            # A picked file inside a read-only reference library is refused with
+            # the uniform 409 before anything is enqueued (FRG-SER-021): moving
+            # it into a managed series would take it OUT of the operator's
+            # reference library, whatever destination the pick names. Checked for
+            # download-scoped picks too — a download's output path could itself
+            # be pointed inside a reference root.
+            await refuse_read_only_path(
+                session, spec.path, action="importing files out of it"
+            )
     for spec in body.files:
         if spec.downloadId:
             # A download-scoped pick is confined by the command to the download's

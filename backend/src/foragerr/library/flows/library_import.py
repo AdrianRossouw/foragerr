@@ -929,11 +929,16 @@ async def _import_group(
 
         mm_fields = media_management_fields(settings)
         if read_only_root:
-            # Force in-place register + no rename for a read-only root, so the
-            # pipeline never renders a move even if the global settings enable
-            # renaming or move mode (FRG-IMP-028).
+            # Force EVERY disk-mutating seam off for a read-only root, so the
+            # pipeline never renders a move, a rename, or a post-import archive
+            # rewrite even when the global settings enable them (FRG-IMP-028).
+            # The two rewrite toggles matter as much as the mode: they run AFTER
+            # placement on the file that was just registered, which for an
+            # index-in-place import is the operator's own original.
             mm_fields["rename_enabled"] = False
             mm_fields["library_import_mode"] = "in_place"
+            mm_fields["comicinfo_tag_enabled"] = False
+            mm_fields["convert_cbr_to_cbz"] = False
         ctx = ImportContext(
             library_root=series.path,
             config_dir=str(settings.config_dir) if settings is not None else ".",

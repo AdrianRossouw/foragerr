@@ -151,6 +151,29 @@ async def _library_roots(db: Database) -> list[str]:
         return [row.path for row in await repo.list_root_folders(session)]
 
 
+async def _read_only_roots(db: Database) -> list[str]:
+    """The read-only reference roots a manual import may never draw FROM
+    (FRG-SER-021).
+
+    Confinement asks whether a picked file is under a managed root; a read-only
+    root IS one, so without this a reference library reads as a legitimate
+    manual-import source and its files get moved out of it into a managed
+    series. Empty for an installation with no read-only root."""
+    async with db.read_session() as session:
+        return await repo.read_only_root_paths(session)
+
+
+def _under_read_only_root(raw_path: str, read_only_roots: list[str]) -> bool:
+    """Whether ``raw_path`` resolves at or under one of ``read_only_roots``."""
+    if not read_only_roots:
+        return False
+    try:
+        validate_under_root(raw_path, read_only_roots)
+    except (PathConfinementError, OSError):
+        return False
+    return True
+
+
 async def execute_roots(db: Database) -> list[str]:
     """Roots a manual-import execute may draw files from: registered library root
     folders plus every tracked download's own output path (so a blocked
@@ -253,6 +276,15 @@ async def _build_read_source(
     confined = confine_under_roots(path, await _library_roots(db))
     if confined is None:
         raise ManualImportError(400, "path is not under a managed library root")
+    if _under_read_only_root(confined, await _read_only_roots(db)):
+        # Refused at the LISTING, not only at execute: offering a reference
+        # library's files as import candidates is what makes moving them out of
+        # it ordinary UI use (FRG-SER-021).
+        raise ManualImportError(
+            409,
+            "path is inside a read-only reference library (browse and serve "
+            "only); it cannot be a manual-import source",
+        )
     return ManualImportSource(folder_path=confined)
 
 
@@ -421,6 +453,7 @@ async def execute_manual_import(
     now = now or utcnow()
     ctx = await build_import_context(db, settings, now=now, offload=offload)
     roots = await execute_roots(db)
+    read_only_roots = await _read_only_roots(db)
 
     # Partition: download-scoped specs group by their download id; the rest are
     # plain path picks.
@@ -451,6 +484,18 @@ async def execute_manual_import(
                 logger.warning(
                     "manual-import: dropping file outside any managed root: %s",
                     spec.path,
+                )
+                continue
+            if _under_read_only_root(confined, read_only_roots):
+                # Defence in depth behind the endpoint's 409 and the pipeline's
+                # own source-side refusal: a file inside a reference library is
+                # never imported OUT of it, whatever destination the pick names
+                # (FRG-SER-021).
+                dropped += 1
+                logger.warning(
+                    "manual-import: dropping file inside a read-only reference "
+                    "library: %s",
+                    confined,
                 )
                 continue
             resolved.append(confined)

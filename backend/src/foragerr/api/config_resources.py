@@ -22,12 +22,14 @@ from typing import Any
 
 import yaml
 from fastapi import APIRouter, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
 
 from foragerr.api.errors import ApiError, error_body
 from foragerr.config import CONFIG_FILENAME, Settings, render_documented_config
 from foragerr.config_migrations import atomic_write_text
+from foragerr.library import repo
 from foragerr.library.flows import comicvine_factory
 from foragerr.logging import register_secret
 from foragerr.metadata import ComicVineAuthError, ComicVineClient, ComicVineError
@@ -37,6 +39,7 @@ from foragerr.naming import (
     DEFAULT_FOLDER_TEMPLATE,
     _TOKEN_ALIASES,
 )
+from foragerr.security.paths import PathConfinementError, validate_under_root
 
 logger = logging.getLogger(__name__)
 
@@ -170,8 +173,49 @@ async def get_media_management(request: Request) -> MediaManagementConfig:
 
 @router.put("/mediamanagement", response_model=MediaManagementConfig)
 async def put_media_management(body: MediaManagementConfig, request: Request):
-    """Validate + persist media-management settings, re-loading app.state.settings."""
+    """Validate + persist media-management settings, re-loading app.state.settings.
+
+    The two disposal directories are additionally rejected when they resolve
+    inside a read-only reference root (FRG-SER-021): every replaced/deleted file
+    is MOVED into them and the housekeeping prune later deletes from them, so a
+    disposal path aimed inside a reference library turns the whole boundary into
+    a write path. Reported as a field-precise 400 rather than the boundary's 409
+    — this is a submitted value failing validation, which is what the config
+    resource's contract already expresses, not an operation being refused."""
+    await _reject_read_only_disposal_paths(request, body)
     return await _apply(request, body.model_dump(), MediaManagementConfig)
+
+
+#: The media-management fields naming a directory foragerr WRITES to and DELETES
+#: from, so neither may resolve inside a read-only reference root.
+_DISPOSAL_PATH_FIELDS = ("recycle_bin_path", "duplicate_dump_path")
+
+
+async def _reject_read_only_disposal_paths(
+    request: Request, body: MediaManagementConfig
+) -> None:
+    """Reject a disposal directory that resolves inside a read-only root."""
+    db = getattr(request.app.state, "db", None)
+    if db is None:  # pragma: no cover - the app always wires a database
+        return
+    async with db.read_session() as session:
+        read_only_roots = await repo.read_only_root_paths(session)
+    if not read_only_roots:
+        return
+    for field in _DISPOSAL_PATH_FIELDS:
+        value = getattr(body, field)
+        if not value:
+            continue
+        try:
+            await run_in_threadpool(validate_under_root, value, read_only_roots)
+        except (PathConfinementError, OSError):
+            continue
+        raise ApiError(
+            400,
+            f"{value!r} is inside a read-only reference library; foragerr never "
+            f"writes there, so it cannot hold replaced or deleted files",
+            field=f"settings.{field}",
+        )
 
 
 # --- ComicVine credential settings resource (FRG-API-018) -------------------

@@ -38,6 +38,7 @@ from foragerr.library.paths import PathNotUnderRootError, validate_under_root
 from foragerr.library.read_only import (
     ReadOnlySeriesError,
     refuse_read_only_series,
+    series_is_read_only,
 )
 from foragerr.quality.models import FormatProfileRow
 
@@ -168,11 +169,21 @@ async def edit_series(
             series.root_folder_id = root_folder_id
 
         if path is not None:
-            roots = await repo.list_root_folders(session)
+            # Confined to the series' OWN root (its new one when this same edit
+            # reassigns the root), not to "any registered root": accepting a
+            # path under a different root would leave ``root_folder_id`` naming
+            # one root while the directory this edit MOVES sits in another, and
+            # every per-root policy — the read-only boundary first — reads the
+            # key (FRG-SER-021, FRG-SEC-004). This mirrors the symmetric check
+            # the root-folder-only branch above already performs.
+            own_root = await _require_root_folder(session, series.root_folder_id)
             try:
-                validated = validate_under_root(path, [r.path for r in roots])
+                validated = validate_under_root(path, [own_root.path])
             except PathNotUnderRootError as exc:
-                raise SeriesValidationError(str(exc)) from exc
+                raise SeriesValidationError(
+                    f"path {path!r} does not resolve under root folder "
+                    f"{series.root_folder_id} ({own_root.path}): {exc}"
+                ) from exc
             new_path = str(validated)
             old_path = series.path
             if new_path != old_path:
@@ -231,25 +242,53 @@ async def _refuse_read_only_edits(
 
     Display metadata — aliases, franchise group, book-type — stays editable:
     those touch database columns only, never the root.
+
+    Each field is judged on the STATE it asks for, not on its mere presence: a
+    value that restates the browse-only invariant (unmonitored, new items not
+    monitored, the same folder under the same root) asks for nothing and is
+    accepted; anything that would leave that invariant is refused. Refusing on
+    presence alone would 409 the whole-resource read-modify-write shape a form
+    submits, making a browse-only series impossible to edit at all — including
+    the display metadata that IS meant to stay editable.
     """
     if root_folder_id is not None and root_folder_id != series.root_folder_id:
-        if await repo.root_is_read_only(session, root_folder_id):
+        # Existence is NOT resolved here (``_require_root_folder`` reports an
+        # unknown id as its own 400 later): only a root row that exists AND
+        # carries the flag refuses, so an unknown id keeps its precise error
+        # instead of being reported as a read-only conflict.
+        new_root = await session.get(RootFolderRow, root_folder_id)
+        if new_root is not None and new_root.read_only:
             raise ReadOnlySeriesError(
                 f"root folder {root_folder_id} is a read-only reference library; "
                 f"a series cannot be moved onto it"
             )
 
-    if not await repo.root_is_read_only(session, series.root_folder_id):
+    if not await series_is_read_only(session, series.id):
         return
+    # ``series.path`` is stored resolved, so the submitted path is resolved too
+    # before comparing: re-sending the same directory under a symlinked spelling
+    # asks for no move.
     refused = [
         name
-        for name, supplied in (
-            ("monitored", monitored is not None),
-            ("monitor_new_items", monitor_new_items is not None),
-            ("path", path is not None),
-            ("root_folder_id", root_folder_id is not None),
+        for name, leaves_invariant in (
+            # Judged against the invariant, not against the row: a request to
+            # turn monitoring ON is asking to acquire into a library nothing can
+            # be written to, and stays refused even for a row that somehow
+            # already carries the flag.
+            ("monitored", monitored is True),
+            ("monitor_new_items", monitor_new_items not in (None, "none")),
+            (
+                "path",
+                path is not None
+                and os.path.realpath(path) != os.path.realpath(series.path),
+            ),
+            (
+                "root_folder_id",
+                root_folder_id is not None
+                and root_folder_id != series.root_folder_id,
+            ),
         )
-        if supplied
+        if leaves_invariant
     ]
     if refused:
         raise ReadOnlySeriesError(
