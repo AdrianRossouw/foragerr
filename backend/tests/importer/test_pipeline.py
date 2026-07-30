@@ -266,7 +266,7 @@ async def test_grab_title_cannot_mask_a_filename_disagreement(db, seed, import_c
     ctx = import_ctx()
     # File names Daredevil but carries a stale Batman row-id tag; the grab title
     # agrees with the tag, so the AGGREGATE series is "batman" (grab outranks
-    # filename) — the masking Codex flagged.
+    # filename): the stale tag masks the filename's own series.
     file_name = f"Daredevil 404 (1987) [__{batman.issue_id}__].cbz"
     evidence = aggregate(
         grab_title="Batman 404 (1987)", file_name=file_name, reference_year=2026

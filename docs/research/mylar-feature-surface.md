@@ -7,7 +7,7 @@ in the capability map only.
 
 **Method**: six parallel read-only code surveys (weekly pull + arcs; search scheduling;
 post-processing; torrents/download clients; config + notifiers; core/API/DB/jobs). All file
-paths below are relative to `/Users/adrian/Projects/foragerr/.reference/mylar3/` unless
+paths below are relative to `.reference/mylar3/` unless
 absolute. No repo files were touched.
 
 **Scale reference**: ~56k lines in `mylar/` (webserve.py 9.7k, helpers.py 5k, search.py 4.3k,

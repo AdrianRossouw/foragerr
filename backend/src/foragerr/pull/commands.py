@@ -252,7 +252,7 @@ async def _handle_pull_refresh(command: PullRefreshCommand, ctx: HandlerContext)
     # ONE transaction for the whole run's storage + matching (FRG-DB-007):
     # replace-on-refresh and match writes for every derived week commit
     # together, so a mid-run failure rolls the entire run back — nothing is
-    # half-replaced, and (Codex gate finding, 2026-07-23) an interrupted
+    # half-replaced, and an interrupted
     # FIRST run can never leave a partial store that the FRG-PULL-010
     # empty-store gate would then read as "backfill already done".
     all_results = []

@@ -159,7 +159,7 @@ async def test_hydration_failure_preserves_cache_and_stamp(
     factory = build_factory(settings, fake.handler())
     # The handler RAISES so the command framework records status=failed — the
     # WS bridge invalidates only COMPLETED fetches, so a broken ComicVine
-    # cannot spin an invalidate→refetch→re-enqueue loop (gate finding).
+    # cannot spin an invalidate→refetch→re-enqueue loop.
     with pytest.raises(ComicVineError):
         await fetch_creator_bibliography(db, settings, creator_id, factory=factory)
 

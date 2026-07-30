@@ -140,8 +140,8 @@ async def fetch_creator_bibliography(
         # Fail the COMMAND (framework records status=failed + the verbatim
         # error): the WS bridge invalidates bibliography queries only on a
         # COMPLETED fetch, so a broken ComicVine cannot spin an
-        # invalidate → refetch → re-enqueue loop while a profile is open
-        # (gate finding, m5-creator-suggestions). The cache and stamp are
+        # invalidate → refetch → re-enqueue loop while a profile is open.
+        # The cache and stamp are
         # untouched — the next profile view retries via the normal
         # stale/cold enqueue, rate-bounded by the CV provider back-off.
         logger.warning(
@@ -150,7 +150,7 @@ async def fetch_creator_bibliography(
         raise
 
     # Defensive: a malformed hydration row can map with cv_volume_id=0 —
-    # never cache a suggestion without a positive CV id (gate finding).
+    # never cache a suggestion without a positive CV id.
     hydrated = tuple(r for r in hydrated if r.cv_volume_id and r.cv_volume_id > 0)
     rows = _rank_and_cap(hydrated, in_library)
 

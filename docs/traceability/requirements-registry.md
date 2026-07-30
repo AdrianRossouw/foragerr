@@ -63,6 +63,14 @@ feature-bearing changes bump the minor, starting a fresh v0.10 sequence;
 fixes bump the patch — applied with judgment, not a rigid
 milestone-to-minor mapping. No id renumbered.
 
+`FRG-PROC-020`..`FRG-PROC-022` are reserved on the unmerged
+`change/m10-release-pipeline` branch (release-level gate, scoped release
+credentials, change control for official releases — awaiting FRG-PROC-009
+approval as of 2026-07-29) and do not yet appear in this baseline table.
+`comment-hygiene` (`process/comment-hygiene`, proposed 2026-07-29) allocates
+the next free id after that branch's reservation: `FRG-PROC-023`. No id is
+renumbered when `m10-release-pipeline` lands.
+
 | ID | Title | Spec | Status | Milestone |
 |----|-------|------|--------|-----------|
 | FRG-PROC-001 | Commit traceability: Conventional Commits + Refs trailer | dev-process | active | — |
@@ -84,6 +92,7 @@ milestone-to-minor mapping. No id renumbered.
 | FRG-PROC-017 | Regenerable README screenshots | dev-process | implemented | M4 |
 | FRG-PROC-018 | Roadmap single source of truth | dev-process | implemented | M4 |
 | FRG-PROC-019 | Accessibility scan in the e2e gate | dev-process | implemented | M9 |
+| FRG-PROC-023 | Comment hygiene: deployment-neutral, provenance-free committed text | dev-process | implemented | — |
 | FRG-SER-001 | Series entity from ComicVine volume | ser | implemented | M1 |
 | FRG-SER-002 | Issue entity | ser | implemented | M1 |
 | FRG-SER-003 | Two-level monitored flags | ser | implemented | M1 |

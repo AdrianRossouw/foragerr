@@ -1,0 +1,17 @@
+# Committed exceptions for tools/comment_check.py (FRG-PROC-023).
+#
+# One entry per line:  <path glob>  <rule[,rule]>   # why this hit is legitimate
+#
+# Rule names are enumerated, never wildcarded: a blanket exemption also
+# licenses every rule added after it was written, which is the one shape a
+# review cannot check. Unknown rule names are a configuration error, and an
+# entry that never suppresses anything is reported as unused.
+#
+# An entry is a claim that the matched text is product fact or a deliberate
+# illustration — never a way to keep an environment-specific value. The
+# standard is docs/process/code-comments.md.
+
+tools/comment_check.py              provenance             # the provenance phrases it detects are its subject matter
+backend/tests/test_comment_check.py provenance             # fixtures must embed the violations they assert on
+docs/process/code-comments.md       host-port,private-ip   # the standard shows its own non-compliant examples
+.claude/skills/release/SKILL.md     local-path             # /tmp in a shell recipe is portable scratch, not one machine

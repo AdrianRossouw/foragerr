@@ -679,8 +679,8 @@ async def test_add_failed_group_also_logs_a_warning(
 ):
     """The other named outcome: two flat-folder groups confirmed to distinct
     volumes collide on the shared series path — the second add-fails, and that
-    group too must emit its WARNING with the verbatim reason (gate finding:
-    only `blocked` was covered)."""
+    group too must emit its WARNING with the verbatim reason, not only the
+    `blocked` outcome."""
     import logging
 
     flat = root_folder_path / "flat"
@@ -956,7 +956,7 @@ async def test_stale_group_whose_file_belongs_to_another_series_rolls_back(
     """The keep check is scoped to THIS series: a stale staged group whose file
     is already an issue-file of a DIFFERENT series creates a shell with no files
     of its own and is rolled back — not kept on a global 'already registered'
-    read (Codex gate finding)."""
+    read."""
     # Series 801 genuinely imports the file (in-place, default settings).
     settings = flows_settings(tmp_path / "cfg-ip")
     path = make_large_cbz(root_folder_path / "Ember (2015)" / "Ember 001 (2015).cbz")

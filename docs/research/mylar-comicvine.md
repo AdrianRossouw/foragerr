@@ -1,10 +1,10 @@
 # Mylar3 ComicVine Integration — Research Report
 
-Source studied: `/Users/adrian/Projects/foragerr/.reference/mylar3/mylar/cv.py` (1506 lines),
+Source studied: `.reference/mylar3/mylar/cv.py` (1506 lines),
 `mylar/mb.py` (search + arc lookup, 657 lines), plus callers in `importer.py`, `updater.py`,
 `librarysync.py`, `helpers.py`, `getimage.py`, `webserve.py`, and configuration in
 `config.py` / `__init__.py`. All file:line citations below are relative to
-`/Users/adrian/Projects/foragerr/.reference/mylar3/mylar/`.
+`.reference/mylar3/mylar/`.
 
 ## 1. Behavioral catalogue
 
