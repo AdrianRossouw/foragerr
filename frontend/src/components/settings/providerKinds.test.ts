@@ -40,6 +40,17 @@ describe('FRG-UI-009: every provider kind exposes its priority row field', () =>
     },
   );
 
+  it.each(KINDS)(
+    'FRG-UI-009 — the %s kind names the row-id key its own test endpoint accepts',
+    (_key, kind) => {
+      // A wrong key would be ignored server-side, silently dropping the saved
+      // provider back onto the "retype the secret to test" failure.
+      expect(kind.testIdField).toBe(
+        kind.key === 'indexer' ? 'indexer_id' : 'client_id',
+      );
+    },
+  );
+
   it('FRG-UI-009 — both kinds are actually covered (the audit cannot pass with an empty set)', () => {
     expect(KINDS.map(([key]) => key)).toEqual(['indexer', 'downloadclient']);
     expect(KINDS.map(([, kind]) => kind.key)).toEqual(['indexer', 'downloadclient']);

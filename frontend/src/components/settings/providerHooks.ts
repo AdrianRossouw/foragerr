@@ -24,8 +24,10 @@ import type {
  *   PUT    {apiBase}/{id}     -> partial update; omitted secret settings keys
  *                                mean "keep the stored value" (write-only)
  *   DELETE {apiBase}/{id}     -> remove
- *   POST   {apiBase}/test     -> pre-save connectivity test (never persists,
- *                                so it never invalidates)
+ *   POST   {apiBase}/test     -> connectivity test (never persists, so it never
+ *                                invalidates); a body carrying the kind's row
+ *                                id merges over that row's stored settings,
+ *                                the same write-only rule PUT follows
  */
 
 export function useProviders(
@@ -87,6 +89,14 @@ export function useDeleteProvider(
 export interface TestProviderVars {
   implementation: string;
   settings: FieldValues;
+  /**
+   * The saved row under test, named by the kind's `testIdField`. Present only
+   * when editing: it tells the backend to merge the submitted settings over
+   * the stored ones, which is the only way the write-only secret reaches the
+   * live probe. An add form has no row to merge with and omits both.
+   */
+  client_id?: number;
+  indexer_id?: number;
 }
 
 export function useTestProvider(

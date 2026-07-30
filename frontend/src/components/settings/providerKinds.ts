@@ -45,6 +45,7 @@ export const indexerKind: ProviderKindConfig = {
   title: 'Indexers',
   singular: 'Indexer',
   apiBase: '/api/v1/indexer',
+  testIdField: 'indexer_id',
   rowFields: [
     nameField,
     checkbox(
@@ -101,6 +102,7 @@ export const downloadClientKind: ProviderKindConfig = {
   title: 'Download Clients',
   singular: 'Download Client',
   apiBase: '/api/v1/downloadclient',
+  testIdField: 'client_id',
   rowFields: [
     nameField,
     checkbox(1, 'enabled', 'Enable', 'Enable this download client.'),
