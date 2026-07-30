@@ -131,8 +131,11 @@ async def _queue_grab(db, entitlement_id: int, commands) -> None:
 
 #: Review states an ACCEPT may act on. Accept applies a row's own *proposal*,
 #: and a proposal only governs a row still in the automatic matcher's hands — a
-#: matched row is already resolved and an ignored row is a withdrawal. Neither
-#: may be silently re-decided by a bulk selection (FRG-SRC-011).
+#: matched row is already resolved, an ignored row is a withdrawal, and a
+#: ``duplicate`` row is a copy whose bytes another row already represents
+#: (FRG-SRC-015). None may be silently re-decided by a bulk selection
+#: (FRG-SRC-011), which is why ``duplicate`` is a review STATE: it inherits
+#: every guard keyed on this tuple instead of needing one of its own.
 _ACCEPTABLE_REVIEW_STATES = ("new",)
 
 
@@ -150,6 +153,12 @@ def _accept_precondition_error(
     if review_status == "ignored":
         return EntitlementActionError(
             f"entitlement {entitlement_id} is ignored — restore it first",
+            status=409,
+        )
+    if review_status == "duplicate":
+        return EntitlementActionError(
+            f"entitlement {entitlement_id} is a copy of a byte-identical item "
+            "already in review — restore it first to review it on its own",
             status=409,
         )
     return EntitlementActionError(
@@ -649,6 +658,12 @@ async def ignore_entitlement(db, entitlement_id: int) -> SourceEntitlementRow:
             )
         )
         row.review_status = "ignored"
+        # An ignore on a PARKED copy (FRG-SRC-015) wins over its parking and
+        # takes it out of the set: the operator withdrawing this purchase is a
+        # stronger statement than "another row carries the same bytes", and a
+        # row left pointing at a canonical it no longer sits behind would count
+        # in that canonical's copies chip while displaying as ignored.
+        row.duplicate_of = None
         # Cancel any queued / in-flight / completed grab on the download axis so
         # the item is fully excluded; an in-flight grab aborts at its re-read guard.
         row.download_state = None
@@ -657,18 +672,52 @@ async def ignore_entitlement(db, entitlement_id: int) -> SourceEntitlementRow:
     return await _reload(db, entitlement_id)
 
 
+#: Review states RESTORE may act on (FRG-SRC-004, extended by FRG-SRC-015).
+#: Both are parked states — excluded from pending counts and default views,
+#: listed under their own filter — and restore is the one documented way out of
+#: either. ``matched`` and ``new`` are excluded for the reasons in
+#: :func:`restore_entitlement`.
+_RESTORABLE_REVIEW_STATES = ("ignored", "duplicate")
+
+
+def _restore_precondition_error(
+    entitlement_id: int, review_status: str
+) -> EntitlementActionError | None:
+    """The per-row error for restoring a row that is not parked, else ``None``.
+
+    The message names the ignored case alone because that is the state an
+    operator reaches this refusal from — a ``matched`` or ``new`` row offers no
+    Restore affordance, so the text is a bulk-selection explanation, and naming
+    the duplicate filter in it would describe a path the refused row was never
+    on.
+    """
+    if review_status in _RESTORABLE_REVIEW_STATES:
+        return None
+    return EntitlementActionError(
+        f"entitlement {entitlement_id} is {review_status}, not ignored — "
+        "restore applies only to an ignored item",
+        status=409,
+    )
+
+
 async def restore_entitlement(
     db, entitlement_id: int, *, cv_client=None, cv_configured: bool = False
 ) -> SourceEntitlementRow:
-    """Return an IGNORED item to ``new`` with its proposed match recomputed.
+    """Return a PARKED item to ``new`` with its proposed match recomputed.
 
-    **Ignored-only** (FRG-SRC-004). Restore is the inverse of ignore, and it is
-    destructive to everything else: it clears ``matched_series_id`` and
-    ``matched_via`` and overwrites the proposal. Applied to a ``matched`` row it
-    silently unmakes the operator's match (and, in a mixed bulk restore over a
-    selection that spans buckets, unmakes several at once); applied to a ``new``
-    row it throws away a proposal for no gain. So both are per-row errors and
-    nothing is written.
+    **Parked-only** — ``ignored`` (FRG-SRC-004) or ``duplicate`` (FRG-SRC-015).
+    Restore is the inverse of both parkings and it is destructive to everything
+    else: it clears ``matched_series_id``, ``matched_via`` and ``duplicate_of``,
+    and overwrites the proposal. Applied to a ``matched`` row it silently unmakes
+    the operator's match (and, in a mixed bulk restore over a selection that
+    spans buckets, unmakes several at once); applied to a ``new`` row it throws
+    away a proposal for no gain. So both are per-row errors and nothing is
+    written.
+
+    Restoring a copy is what makes the md5 parking recoverable rather than a
+    hidden drop: the row returns to independent review with a freshly computed
+    proposal, and the linking pass will only ever re-park it once its whole
+    md5 set is ``new`` again (:mod:`foragerr.sources.dedupe`).
 
     **ComicVine is consulted when it is available** (FRG-SRC-010). Restore is an
     operator-initiated, one-row action, so the single CV call it costs is
@@ -697,12 +746,9 @@ async def restore_entitlement(
         raise EntitlementActionError(
             f"entitlement {entitlement_id} not found", status=404
         )
-    if row.review_status != "ignored":
-        raise EntitlementActionError(
-            f"entitlement {entitlement_id} is {row.review_status}, not ignored — "
-            "restore applies only to an ignored item",
-            status=409,
-        )
+    refusal = _restore_precondition_error(entitlement_id, row.review_status)
+    if refusal is not None:
+        raise refusal
     async with db.read_session() as session:
         series = await library_repo.list_series(session)
     library = [
@@ -744,14 +790,14 @@ async def restore_entitlement(
             raise EntitlementActionError(
                 f"entitlement {entitlement_id} not found", status=404
             )
-        if fresh.review_status != "ignored":
-            raise EntitlementActionError(
-                f"entitlement {entitlement_id} is {fresh.review_status}, not "
-                "ignored — restore applies only to an ignored item",
-                status=409,
-            )
+        refusal = _restore_precondition_error(entitlement_id, fresh.review_status)
+        if refusal is not None:
+            raise refusal
         fresh.review_status = "new"
         fresh.matched_series_id = None
+        # The row leaves its duplicate set (FRG-SRC-015): it is back in
+        # independent review, so it can no longer be one of a canonical's copies.
+        fresh.duplicate_of = None
         # The match target is dropped, so its provenance goes with it — a later
         # re-match stamps its own ``matched_via`` (FRG-PP-022 guard 3).
         fresh.matched_via = None
@@ -775,12 +821,14 @@ async def bulk_ignore(db, entitlement_ids: list[int]) -> BulkResult:
 async def bulk_restore(
     db, entitlement_ids: list[int], *, cv_client=None, cv_configured: bool = False
 ) -> BulkResult:
-    """Restore each ignored row in the selection (per-row errors, FRG-SRC-011).
+    """Restore each parked row in the selection (per-row errors, FRG-SRC-011).
 
-    A selection that spans review buckets — the natural result of "select all"
-    over a filtered list — reports the non-ignored rows as per-row errors and
-    leaves their state untouched, rather than stripping matched rows of their
-    match on the way past."""
+    Parked is ``ignored`` OR ``duplicate`` (FRG-SRC-015), so a "select all" over
+    the Duplicates filter restores the whole set in one action. A selection that
+    spans review buckets — the natural result of "select all" over any filtered
+    list — reports the non-parked rows as per-row errors and leaves their state
+    untouched, rather than stripping matched rows of their match on the way
+    past."""
     return await _bulk(
         db,
         entitlement_ids,

@@ -34,7 +34,7 @@ from foragerr.api.errors import ApiError
 from foragerr.api.paging import paginate
 from foragerr.commands import CommandValidationError
 from foragerr.library import containment, repo
-from foragerr.library.booktype import COLLECTED_BOOKTYPES
+from foragerr.library.booktype import COLLECTED_BOOKTYPES, detect_series_booktype
 from foragerr.library.flows import (
     BOOKTYPE_EDIT_ACTIONS,
     GROUP_EDIT_ACTIONS,
@@ -332,6 +332,22 @@ def _candidate_description(raw: str | None) -> str | None:
     return (head or cut).rstrip() + "…"
 
 
+def _collected_cues(name: str | None) -> bool:
+    """Whether a candidate TITLE carries collected-edition cues (FRG-UI-039).
+
+    :func:`~foragerr.library.booktype.detect_series_booktype` over the ONE shared
+    cue vocabulary (``parser.vocab.BOOKTYPE_CUES``) — never a second list, so the
+    picker's badge can never claim something the series typing (FRG-SER-018) and
+    the parser would read differently from the same words.
+
+    A title cue is all this asserts. ComicVine carries no book-type field, so the
+    flag is a hint the operator weighs, and it is deliberately kept out of
+    ranking, gating and filtering: a collected edition and a singles volume of
+    the same name must both stay pickable, in the order relevance put them.
+    """
+    return name is not None and detect_series_booktype(name) is not None
+
+
 class LookupCandidateResource(BaseModel):
     """One ComicVine search candidate annotated with plausibility signals
     (FRG-META-007) and library membership (``have_it``)."""
@@ -357,6 +373,9 @@ class LookupCandidateResource(BaseModel):
     #: only present because the caller asked to include ignored results
     #: (FRG-META-007). Always ``False`` on the default (exclude) lookup.
     ignored: bool = False
+    #: Whether the candidate's TITLE carries collected-edition cues
+    #: (FRG-UI-039, via :func:`_collected_cues`). Presentation hint only.
+    collected_cues: bool = False
 
 
 class LookupResponse(BaseModel):
@@ -396,6 +415,9 @@ class SuggestCandidateResource(BaseModel):
     #: (FRG-META-007/014, via :func:`_candidate_description`).
     description: str | None
     have_it: bool
+    #: Same title-cue hint the lookup candidate carries (FRG-UI-039), so a
+    #: picker rendering both result shapes badges them identically.
+    collected_cues: bool = False
 
 
 class SuggestResponse(BaseModel):
@@ -813,6 +835,7 @@ async def lookup_series(
                 target_issue_plausible=candidate.plausibility.target_issue_plausible,
                 have_it=candidate.series.cv_volume_id in have,
                 ignored=candidate.ignored,
+                collected_cues=_collected_cues(candidate.series.name),
             )
             for candidate in candidates
         ],
@@ -876,6 +899,7 @@ async def suggest_series(term: str, request: Request) -> SuggestResponse:
                 image_url=record.image_url,
                 description=_candidate_description(record.description),
                 have_it=record.cv_volume_id in have,
+                collected_cues=_collected_cues(record.name),
             )
             for record in candidates
         ],
@@ -947,6 +971,7 @@ async def lookup_volume(cv_volume_id: int, request: Request) -> LookupCandidateR
         target_issue_plausible=None,
         have_it=have_it,
         ignored=False,
+        collected_cues=_collected_cues(record.name),
     )
 
 
