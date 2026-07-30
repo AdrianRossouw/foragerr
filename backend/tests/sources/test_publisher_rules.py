@@ -1,23 +1,41 @@
-"""Operator-owned publisher classification rules (FRG-SRC-012, design D8).
+"""The library-wide non-comic publisher rules (FRG-SRC-012).
 
-Format shape cannot tell a CBZ comic from a CBZ-shipped RPG sourcebook, so the
-operator owns a per-source list of publishers that force ``other``. The list
-ships EMPTY, lives in the source's existing (encrypted) settings envelope,
-matches on the shared folded key, and takes effect on the next sync —
-reclassifying only rows still in the automatic classifier's hands.
+Format shape cannot tell a CBZ comic from a CBZ-shipped RPG sourcebook, so a
+publisher rule list forces ``other`` whatever the formats say. The list is ONE
+library-wide setting (``non_comic_publishers``) managed in Settings beside the
+ComicVine ignore list — not a per-source control — it ships with a curated,
+removable default set, matches on the shared folded key with a trailing ``*`` for
+substring probes, and takes effect on the next sync, reclassifying only rows
+still in the automatic classifier's hands.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import pytest
+import yaml
+from cryptography.fernet import Fernet, MultiFernet
 
 from conftest import running_app
+from foragerr import keystore as keystore_mod
+from foragerr.config import (
+    CONFIG_FILENAME,
+    DEFAULT_NON_COMIC_PUBLISHERS,
+    NON_COMIC_PUBLISHERS_ENV_VAR,
+    load_settings,
+)
+from foragerr.sources import commands as source_commands
 from foragerr.sources import ratelimit, repo, review
-from foragerr.sources.classify import DownloadOption, classify
+from foragerr.sources.classify import DownloadOption, PublisherRuleSet, classify
+from foragerr.sources.commands import SourceSyncCommand, _handle_source_sync
 from foragerr.sources.models import MATCHED_VIA_OPERATOR
+from foragerr.sources.publisher_migration import (
+    publisher_rules_migration_startup_hook,
+    union_publisher_rules,
+)
 from foragerr.sources.registry import TYPE_HUMBLE
 from foragerr.sources.service import run_sync
 from foragerr.sources.settings import MAX_PUBLISHER_RULES, HumbleSettings
@@ -36,6 +54,10 @@ from sources_support import (  # noqa: F401 — imported fixtures
 #: The publisher the fixture's comics carry.
 COMIC_PUBLISHER = "Synthetic Comics"
 
+#: A synthetic non-comic house used wherever the assertion is about the MATCHER
+#: rather than about a shipped default.
+OTHER_PUBLISHER = "Example Games"
+
 
 @pytest.fixture(autouse=True)
 def _reset_gates():
@@ -50,11 +72,11 @@ def _opt(fmt: str, platform: str = "ebook") -> DownloadOption:
     )
 
 
-async def _source(db, *, publisher_rules=None):
+async def _source(db, *, name="Humble Bundle", publisher_rules=None):
     return await repo.create_source(
         db,
         source_type=TYPE_HUMBLE,
-        name="Humble Bundle",
+        name=name,
         settings=HumbleSettings(
             session_cookie="SYNTH-COOKIE", publisher_rules=publisher_rules or []
         ),
@@ -62,23 +84,8 @@ async def _source(db, *, publisher_rules=None):
     )
 
 
-async def _set_rules(db, source_id: int, rules: list[str]):
-    """Rewrite the source's rule list, then hand back the reloaded row (the sync
-    reads its settings off the row it is given)."""
-    row = await repo.get_source(db, source_id)
-    await repo.update_source_settings(
-        db,
-        source_id,
-        settings=HumbleSettings(
-            session_cookie="SYNTH-COOKIE", publisher_rules=rules
-        ),
-        connection_state=row.connection_state,
-    )
-    return await repo.get_source(db, source_id)
-
-
-async def _sync(db, config_dir, source):
-    factory = make_factory(
+def _sync_factory(config_dir):
+    return make_factory(
         config_dir,
         httpx.MockTransport(
             order_handler(
@@ -87,7 +94,30 @@ async def _sync(db, config_dir, source):
             )
         ),
     )
-    return await run_sync(db, factory, source, min_interval=0.0)
+
+
+async def _sync(db, config_dir, source, *, rules: str = ""):
+    """One source synced with the library-wide list ``rules`` in force."""
+    return await run_sync(
+        db,
+        _sync_factory(config_dir),
+        source,
+        min_interval=0.0,
+        publisher_rules=PublisherRuleSet.from_csv(rules),
+    )
+
+
+async def _sync_every_source(db, config_dir, monkeypatch, *, rules: str):
+    """Drive the REAL command handler, so the rules come from the effective
+    settings rather than from a hand-built rule set."""
+    factory = _sync_factory(config_dir)
+    monkeypatch.setattr(source_commands, "make_humble_factory", lambda s: factory)
+    ctx = SimpleNamespace(
+        db=db,
+        settings=make_settings(config_dir, non_comic_publishers=rules),
+        commands=None,
+    )
+    return await _handle_source_sync(SourceSyncCommand(), ctx)
 
 
 async def _classification(db, source_id: int, machine_name: str) -> str:
@@ -95,7 +125,16 @@ async def _classification(db, source_id: int, machine_name: str) -> str:
     return next(r for r in rows if r.machine_name == machine_name).classification
 
 
-# --- the rule itself ---------------------------------------------------------
+def _install_wrong_key() -> None:
+    """A keystore whose key cannot decrypt anything encrypted so far — the
+    wrong-key boot (FRG-AUTH-012), reused here to strand ONE source's envelope."""
+    wrong = keystore_mod.derive_fernet_key("a-different-passphrase", b"0123456789abcdef")
+    keystore_mod.install_keystore(
+        keystore_mod.Keystore(MultiFernet([Fernet(wrong)]), available=False)
+    )
+
+
+# --- the matcher --------------------------------------------------------------
 
 
 @pytest.mark.req("FRG-SRC-012")
@@ -103,9 +142,7 @@ def test_a_ruled_publisher_forces_other_over_every_format_signal():
     options = [_opt("CBZ"), _opt("PDF")]
     assert classify(options) == "comic"
     assert (
-        classify(
-            options, publisher="Modiphius", publisher_rules=["Modiphius"]
-        )
+        classify(options, publisher=OTHER_PUBLISHER, publisher_rules=[OTHER_PUBLISHER])
         == "other"
     )
 
@@ -116,99 +153,131 @@ def test_rule_matching_is_on_the_shared_folded_key():
     (FRG-IMP-005) does, so the operator types the publisher however they read
     it."""
     for spelling in (
-        "modiphius entertainment",
-        "MODIPHIUS ENTERTAINMENT",
-        "Modiphius  Entertainment.",
-        "The Modiphius Entertainment",
+        "example games",
+        "EXAMPLE GAMES",
+        "Example  Games.",
+        "The Example Games",
     ):
         assert (
             classify(
-                [_opt("CBZ")],
-                publisher=spelling,
-                publisher_rules=["Modiphius Entertainment"],
+                [_opt("CBZ")], publisher=spelling, publisher_rules=["Example Games"]
             )
             == "other"
         )
+
+
+@pytest.mark.req("FRG-SRC-012")
+def test_a_trailing_star_matches_as_a_substring_and_a_bare_name_matches_exactly():
+    """The one reconciliation with the ComicVine ignore list's semantics
+    (FRG-META-020): ``*`` widens a rule to a substring probe, everything else
+    stays an exact folded match, so a bare name can never over-catch."""
+    wide = ["Example Games*"]
+    for publisher in ("Example Games", "Example Games Inc.", "The Example Games LLC"):
+        assert classify([_opt("CBZ")], publisher=publisher, publisher_rules=wide) == "other"
+
+    narrow = ["Example Games"]
+    assert (
+        classify([_opt("CBZ")], publisher="Example Games Inc.", publisher_rules=narrow)
+        == "comic"
+    )
+
+
+@pytest.mark.req("FRG-SRC-012")
+def test_the_wildcard_is_read_off_the_raw_entry_not_the_folded_key():
+    """``matching_key`` folds ``*`` away as punctuation, so a probe derived from
+    the folded string alone could never be told from an exact name — the
+    substring rule has to be decided BEFORE the fold."""
+    from foragerr.parser.normalize import matching_key
+
+    assert matching_key("Example Games*") == matching_key("Example Games")
+    compiled = PublisherRuleSet.parse(["Example Games*", "Example Press"])
+    assert compiled.substrings == ("example games",)
+    assert compiled.exact == frozenset({"example press"})
 
 
 @pytest.mark.req("FRG-SRC-012")
 def test_an_unmatched_or_absent_publisher_is_untouched():
     assert (
-        classify([_opt("CBZ")], publisher="Image", publisher_rules=["Modiphius"])
+        classify([_opt("CBZ")], publisher="Image", publisher_rules=[OTHER_PUBLISHER])
         == "comic"
     )
     assert (
-        classify([_opt("CBZ")], publisher=None, publisher_rules=["Modiphius"])
+        classify([_opt("CBZ")], publisher=None, publisher_rules=[OTHER_PUBLISHER])
         == "comic"
     )
-    # Blank/whitespace rules fold away — an all-blank list is no rules at all.
-    assert (
-        classify([_opt("CBZ")], publisher="Image", publisher_rules=["", "  "])
-        == "comic"
-    )
+    # Blank/whitespace/punctuation-only entries fold away, and a bare "*" would
+    # match every publisher, so it is dropped rather than honoured.
+    for empty in (["", "  "], ["..."], ["*"], None):
+        assert classify([_opt("CBZ")], publisher="Image", publisher_rules=empty) == "comic"
+    assert not PublisherRuleSet.from_csv("")
+    assert not PublisherRuleSet.from_csv(None)
+    assert PublisherRuleSet.from_csv(DEFAULT_NON_COMIC_PUBLISHERS)
+
+
+# --- the curated defaults -----------------------------------------------------
 
 
 @pytest.mark.req("FRG-SRC-012")
-def test_rules_ship_empty_and_are_trimmed_deduped_and_bounded():
-    assert HumbleSettings(session_cookie="c").publisher_rules == []
-    settings = HumbleSettings(
-        session_cookie="c",
-        publisher_rules=["  Modiphius  ", "", "MODIPHIUS", "Chaosium"],
-    )
-    assert settings.publisher_rules == ["Modiphius", "Chaosium"]
-    with pytest.raises(ValueError):
-        HumbleSettings(
-            session_cookie="c",
-            publisher_rules=[f"pub-{i}" for i in range(MAX_PUBLISHER_RULES + 1)],
-        )
+def test_fresh_install_seeds_the_curated_non_comic_defaults(config_dir):
+    """A fresh install renders its documented config.yaml with the curated
+    default list, and the effective settings carry it — so a first sync files
+    common non-comic bundle content as Other with no setup."""
+    settings = load_settings()
+    parsed = yaml.safe_load((config_dir / CONFIG_FILENAME).read_text(encoding="utf-8"))
+    assert parsed["non_comic_publishers"] == DEFAULT_NON_COMIC_PUBLISHERS
+    assert settings.non_comic_publishers == DEFAULT_NON_COMIC_PUBLISHERS
+    # The default is a real, conservative list: wildcard entries are present, and
+    # publishers of genuine comics are deliberately absent.
+    assert "Paizo*" in DEFAULT_NON_COMIC_PUBLISHERS
+    for comic_house in ("Image", "Dark Horse", "IDW", "Boom", "Oni", "Dynamite"):
+        assert comic_house not in DEFAULT_NON_COMIC_PUBLISHERS
 
 
 @pytest.mark.req("FRG-SRC-012")
-def test_rule_dedupe_uses_the_same_fold_the_classifier_matches_on():
-    """Storage and matching must share ONE rule identity.
+def test_a_stored_non_comic_list_survives_upgrade(config_dir):
+    """An upgraded install that already carries a value — including the empty
+    string, meaning "filter nothing" — keeps it; the curated default seeds fresh
+    installs only and never overwrites a stored value."""
+    load_settings()  # first run seeds the documented default
+    config_file = config_dir / CONFIG_FILENAME
+    data = yaml.safe_load(config_file.read_text(encoding="utf-8"))
+    data["non_comic_publishers"] = ""
+    config_file.write_text(yaml.safe_dump(data), encoding="utf-8")
 
-    De-duplication was ``str.casefold``, a strictly narrower equivalence than
-    the classifier's ``matching_key``: these four spellings all match the same
-    publisher at classify time, but three of them survived as separate stored
-    rules — a list showing duplicates the operator cannot tell apart, where
-    deleting one changes nothing.
-    """
-    spellings = [
-        "Modiphius Entertainment",
-        "modiphius entertainment",
-        "Modiphius  Entertainment.",
-        "The Modiphius Entertainment",
-    ]
-    settings = HumbleSettings(session_cookie="c", publisher_rules=spellings)
-    assert settings.publisher_rules == ["Modiphius Entertainment"]
-    # ...and every spelling still classifies the same way through that one rule.
-    for spelling in spellings:
-        assert (
-            classify(
-                [_opt("CBZ")],
-                publisher=spelling,
-                publisher_rules=settings.publisher_rules,
-            )
-            == "other"
-        )
+    assert load_settings().non_comic_publishers == ""
 
 
 @pytest.mark.req("FRG-SRC-012")
-def test_a_rule_that_folds_to_nothing_keeps_its_own_identity():
-    """A punctuation-only rule can never match a publisher (``matching_key``
-    folds it away), so it must not collapse with every other such entry into a
-    single empty key."""
-    settings = HumbleSettings(session_cookie="c", publisher_rules=["...", "???"])
-    assert settings.publisher_rules == ["...", "???"]
+def test_the_defaults_match_realistic_publisher_spellings():
+    """Curation is only worth anything if the entries fire against the names the
+    store actually reports — the ``*`` probes have to survive the fold."""
+    rules = PublisherRuleSet.from_csv(DEFAULT_NON_COMIC_PUBLISHERS)
+    for publisher in (
+        "Paizo Inc.",
+        "Paizo Publishing",
+        "Free League Publishing",
+        "Green Ronin Publishing",
+        "O'Reilly Media",
+        "O’Reilly Media, Inc.",
+        "No Starch Press",
+        "Manning Publications Co.",
+        "Addison-Wesley Professional",
+        "John Wiley & Sons",
+        "R. Talsorian Games",
+        "The Pragmatic Bookshelf",
+        "Mercury Learning and Information",
+        "Steve Jackson Games",
+    ):
+        assert rules.matches(publisher), publisher
+    for comic_house in ("Image Comics", "Dark Horse Comics", COMIC_PUBLISHER):
+        assert not rules.matches(comic_house), comic_house
 
 
-# --- sync-time application + reclassification -------------------------------
+# --- sync-time application + reclassification ---------------------------------
 
 
 @pytest.mark.req("FRG-SRC-012")
-async def test_default_source_classifies_exactly_as_before(db, config_dir):
-    """Empty by default: no rule is pre-applied, so the format-shape verdict
-    stands untouched (no intent-presuming defaults)."""
+async def test_an_empty_list_classifies_by_file_shape_alone(db, config_dir):
     source = await _source(db)
     result = await _sync(db, config_dir, source)
     assert (result.comic, result.other) == (3, 3)
@@ -216,26 +285,27 @@ async def test_default_source_classifies_exactly_as_before(db, config_dir):
 
 
 @pytest.mark.req("FRG-SRC-012")
-async def test_a_new_rule_reclassifies_unreviewed_rows_on_the_next_sync(
-    db, config_dir
+async def test_a_library_wide_rule_reclassifies_new_rows_across_sources(
+    db, config_dir, monkeypatch
 ):
-    """Rule added AFTER the items were synced: the next sync moves the still-new
-    ones comic → other (previously synced and newly synced alike)."""
-    source = await _source(db)
-    await _sync(db, config_dir, source)
-    assert await _classification(db, source.id, "synth_singleissue_01") == "comic"
+    """ONE list, EVERY source: a publisher added to the library-wide list moves
+    the still-new rows of both sources on the next sync — previously synced and
+    newly synced alike."""
+    first = await _source(db, name="Humble A")
+    second = await _source(db, name="Humble B")
+    await _sync_every_source(db, config_dir, monkeypatch, rules="")
+    for source in (first, second):
+        assert await _classification(db, source.id, "synth_singleissue_01") == "comic"
 
-    source = await _set_rules(db, source.id, [COMIC_PUBLISHER])
-    result = await _sync(db, config_dir, source)
+    await _sync_every_source(db, config_dir, monkeypatch, rules=COMIC_PUBLISHER)
 
-    # Every item of that publisher moves, whatever its format shape said.
-    for machine_name in (
-        "synth_singleissue_01",
-        "synth_collected_edition_vol1",
-        "synth_artbook_pdf_only",
-    ):
-        assert await _classification(db, source.id, machine_name) == "other"
-    assert (result.comic, result.other) == (0, 6)  # counters report the rows
+    for source in (first, second):
+        for machine_name in (
+            "synth_singleissue_01",
+            "synth_collected_edition_vol1",
+            "synth_artbook_pdf_only",
+        ):
+            assert await _classification(db, source.id, machine_name) == "other"
 
 
 @pytest.mark.req("FRG-SRC-012")
@@ -244,30 +314,32 @@ async def test_a_rule_naming_a_different_publisher_changes_nothing(db, config_di
     imprint leaves the comic imprint's items exactly where they were."""
     source = await _source(db)
     await _sync(db, config_dir, source)
-    source = await _set_rules(db, source.id, ["Synthetic Press"])
-    result = await _sync(db, config_dir, source)
+    result = await _sync(db, config_dir, source, rules="Synthetic Press")
     assert await _classification(db, source.id, "synth_singleissue_01") == "comic"
     assert (result.comic, result.other) == (3, 3)
 
 
 @pytest.mark.req("FRG-SRC-012")
 async def test_a_rule_applies_at_first_sync_too(db, config_dir):
-    source = await _source(db, publisher_rules=[COMIC_PUBLISHER])
-    result = await _sync(db, config_dir, source)
+    source = await _source(db)
+    result = await _sync(db, config_dir, source, rules=COMIC_PUBLISHER)
     assert await _classification(db, source.id, "synth_singleissue_01") == "other"
     assert (result.comic, result.other) == (0, 6)
 
 
 @pytest.mark.req("FRG-SRC-012")
-async def test_removing_a_rule_reclassifies_back_on_the_next_sync(db, config_dir):
-    """The other direction — a rule the operator regrets is undone by deleting
-    it; nothing was destroyed, so the row simply returns to comic."""
-    source = await _source(db, publisher_rules=[COMIC_PUBLISHER])
-    await _sync(db, config_dir, source)
+async def test_removing_a_default_unfilters_that_publisher_on_the_next_sync(
+    db, config_dir
+):
+    """The safety valve: an operator who DOES collect one of the shipped houses
+    deletes that entry and its items return to comic — nothing was destroyed, so
+    the previously reclassified-but-unreviewed rows simply re-evaluate."""
+    shipped = f"{DEFAULT_NON_COMIC_PUBLISHERS}, {COMIC_PUBLISHER}"
+    source = await _source(db)
+    await _sync(db, config_dir, source, rules=shipped)
     assert await _classification(db, source.id, "synth_singleissue_01") == "other"
 
-    source = await _set_rules(db, source.id, [])
-    await _sync(db, config_dir, source)
+    await _sync(db, config_dir, source, rules=DEFAULT_NON_COMIC_PUBLISHERS)
     assert await _classification(db, source.id, "synth_singleissue_01") == "comic"
 
 
@@ -293,20 +365,167 @@ async def test_decided_rows_are_never_reclassified(
     )
     await review.ignore_entitlement(db, ignored.id)
 
-    source = await _set_rules(db, source.id, [COMIC_PUBLISHER])
-    await _sync(db, config_dir, source)
+    await _sync(db, config_dir, source, rules=COMIC_PUBLISHER)
 
     assert await _classification(db, source.id, "synth_singleissue_01") == "comic"
     assert (
-        await _classification(db, source.id, "synth_collected_edition_vol1")
-        == "comic"
+        await _classification(db, source.id, "synth_collected_edition_vol1") == "comic"
     )
     still = await repo.get_entitlement(db, matched.id)
     assert (still.review_status, still.matched_series_id) == ("matched", series_id)
     assert (await repo.get_entitlement(db, ignored.id)).review_status == "ignored"
 
 
-# --- the settings surface ----------------------------------------------------
+@pytest.mark.req("FRG-SRC-012")
+async def test_the_sync_reads_the_library_wide_list_not_the_source_envelope(
+    db, config_dir, monkeypatch
+):
+    """The envelope field is storage compatibility only. A leftover per-source
+    entry classifies NOTHING; the library-wide setting is the whole input."""
+    source = await _source(db, publisher_rules=[COMIC_PUBLISHER])
+    await _sync_every_source(db, config_dir, monkeypatch, rules="")
+    assert await _classification(db, source.id, "synth_singleissue_01") == "comic"
+
+
+# --- the one-time migration of per-source rules -------------------------------
+
+
+def _app(db, settings):
+    return SimpleNamespace(state=SimpleNamespace(db=db, settings=settings, commands=None))
+
+
+def _stored_value(config_dir: Path) -> str:
+    parsed = yaml.safe_load((config_dir / CONFIG_FILENAME).read_text(encoding="utf-8"))
+    return parsed["non_comic_publishers"]
+
+
+async def _rules_of(db, source_id: int) -> list[str]:
+    row = await repo.get_source(db, source_id)
+    return repo.load_source_settings(row.type, row.settings).publisher_rules
+
+
+@pytest.mark.req("FRG-SRC-012")
+def test_the_union_dedupes_on_the_folded_key_and_keeps_stored_spellings():
+    """A per-source "Paizo" and the shipped "Paizo*" are ONE rule; keeping the
+    entry already in the list preserves the broader wildcard reach."""
+    merged = union_publisher_rules(
+        "Paizo*, Example Press",
+        ["paizo", "Example  Press.", "Example Games", "Example Games"],
+    )
+    assert merged == "Paizo*, Example Press, Example Games"
+    assert union_publisher_rules("", ["Example Games"]) == "Example Games"
+    assert union_publisher_rules("Example Games", []) == "Example Games"
+
+
+@pytest.mark.req("FRG-SRC-012")
+async def test_per_source_rules_migrate_into_the_library_wide_list(db, config_dir):
+    """The upgrade path: rules the operator already had per-source are carried
+    into the single list and the per-source field is cleared."""
+    settings = load_settings()
+    first = await _source(db, name="Humble A", publisher_rules=[OTHER_PUBLISHER])
+    second = await _source(db, name="Humble B", publisher_rules=["Example Press"])
+    untouched = await _source(db, name="Humble C")
+
+    await publisher_rules_migration_startup_hook(_app(db, settings))
+
+    stored = _stored_value(config_dir)
+    assert stored.startswith(DEFAULT_NON_COMIC_PUBLISHERS)
+    assert stored.endswith(f"{OTHER_PUBLISHER}, Example Press")
+    for source in (first, second, untouched):
+        assert await _rules_of(db, source.id) == []
+
+
+@pytest.mark.req("FRG-SRC-012")
+async def test_the_migration_never_resurrects_an_entry_the_operator_removed(
+    db, config_dir
+):
+    """Clearing the per-source field is what makes the union one-time: a second
+    boot finds nothing to migrate, so an entry deleted in between stays deleted
+    and the config file is not rewritten at all."""
+    settings = load_settings()
+    source = await _source(db, publisher_rules=[OTHER_PUBLISHER])
+    app = _app(db, settings)
+    await publisher_rules_migration_startup_hook(app)
+    assert OTHER_PUBLISHER in _stored_value(config_dir)
+
+    # The operator deletes the migrated entry through Settings...
+    trimmed = make_settings(config_dir, non_comic_publishers="Example Press")
+    app.state.settings = trimmed
+    before = (config_dir / CONFIG_FILENAME).read_text(encoding="utf-8")
+
+    await publisher_rules_migration_startup_hook(app)
+
+    assert app.state.settings is trimmed  # no rewrite, no reload
+    assert (config_dir / CONFIG_FILENAME).read_text(encoding="utf-8") == before
+    assert await _rules_of(db, source.id) == []
+
+
+@pytest.mark.req("FRG-SRC-012")
+async def test_an_undecryptable_source_is_skipped_without_aborting_the_migration(
+    db, config_dir
+):
+    """A stranded envelope contributes nothing and is left untouched — one
+    unreadable credential must not cost every other source its rules."""
+    settings = load_settings()
+    stranded = await _source(db, name="Humble A", publisher_rules=["Example Press"])
+    _install_wrong_key()
+    readable = await _source(db, name="Humble B", publisher_rules=[OTHER_PUBLISHER])
+
+    await publisher_rules_migration_startup_hook(_app(db, settings))
+
+    stored = _stored_value(config_dir)
+    assert OTHER_PUBLISHER in stored
+    assert "Example Press" not in stored
+    assert await _rules_of(db, readable.id) == []
+    with pytest.raises(Exception):
+        await _rules_of(db, stranded.id)
+
+
+@pytest.mark.req("FRG-SRC-012")
+async def test_the_migration_skips_the_union_when_the_env_var_manages_the_list(
+    db, config_dir, monkeypatch
+):
+    """Writing the config file under an env-managed value would look applied and
+    do nothing, so the migration leaves the per-source entries in place for a
+    later boot instead of consuming them."""
+    settings = load_settings()
+    source = await _source(db, publisher_rules=[OTHER_PUBLISHER])
+    monkeypatch.setenv(NON_COMIC_PUBLISHERS_ENV_VAR, "Example Press")
+
+    await publisher_rules_migration_startup_hook(_app(db, settings))
+
+    assert OTHER_PUBLISHER not in _stored_value(config_dir)
+    assert await _rules_of(db, source.id) == [OTHER_PUBLISHER]
+
+
+@pytest.mark.req("FRG-SRC-012")
+async def test_the_startup_hook_is_registered_after_the_keystore_is_available():
+    """It reads encrypted envelopes, so it cannot run before the keystore hook
+    installs the process key."""
+    from foragerr.keystore import keystore_startup_hook
+    from foragerr.sources.publisher_migration import (
+        publisher_rules_migration_startup_hook as hook,
+    )
+
+    cfg_hooks = _startup_hook_names()
+    assert cfg_hooks.index(hook.__name__) > cfg_hooks.index(
+        keystore_startup_hook.__name__
+    )
+
+
+def _startup_hook_names() -> list[str]:
+    import tempfile
+
+    from foragerr.app import create_app
+
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = Path(tmp) / "cfg"
+        cfg.mkdir()
+        app = create_app(make_settings(cfg, admin_username="a", admin_password="b" * 12))
+        return [hook.__name__ for hook in app.state.startup_hooks]
+
+
+# --- the Settings surface -----------------------------------------------------
 
 
 @pytest.fixture
@@ -320,163 +539,85 @@ async def app_client(tmp_path: Path):
 
 
 @pytest.mark.req("FRG-SRC-012")
-async def test_patch_publisher_rules_round_trips_without_echoing_the_cookie(
-    app_client,
-):
-    """The rules ride the existing settings envelope: PATCH replaces the whole
-    list, GET reflects it, and the write-only cookie survives the rewrite
-    without ever being echoed (FRG-SRC-002)."""
-    app = app_client.app
-    source = await _source(app.state.db)
+async def test_the_general_resource_round_trips_the_non_comic_list(app_client):
+    """The list is managed in Settings beside the ComicVine ignore list: echoed
+    with its source on GET, written on PUT, and a removed default STAYS removed."""
+    body = (await app_client.get("/api/v1/config/general")).json()
+    assert body["non_comic_publishers"]["value"] == DEFAULT_NON_COMIC_PUBLISHERS
+    assert body["non_comic_publishers"]["source"] in ("file", "default")
 
-    listed_before = (await app_client.get("/api/v1/sources")).json()[0]
-    assert listed_before["settings"]["publisher_rules"] == []
-
-    resp = await app_client.patch(
-        f"/api/v1/sources/{source.id}",
-        json={"publisher_rules": ["Modiphius", "  Chaosium  ", "MODIPHIUS"]},
+    kept = ", ".join(
+        entry
+        for entry in DEFAULT_NON_COMIC_PUBLISHERS.split(", ")
+        if entry != "Paizo*"
+    )
+    resp = await app_client.put(
+        "/api/v1/config/general", json={"non_comic_publishers": kept}
     )
     assert resp.status_code == 200
-    assert resp.json()["settings"]["publisher_rules"] == ["Modiphius", "Chaosium"]
-    assert "session_cookie" not in resp.json()["settings"]
+    assert resp.json()["non_comic_publishers"]["value"] == kept
+    assert "Paizo*" not in (await app_client.get("/api/v1/config/general")).json()[
+        "non_comic_publishers"
+    ]["value"]
+    # The two lists are independent axes — writing one leaves the other.
+    assert resp.json()["comicvine_ignored_publishers"]["value"]
 
-    listed = (await app_client.get("/api/v1/sources")).json()[0]
-    assert listed["settings"]["publisher_rules"] == ["Modiphius", "Chaosium"]
-    # The credential still loads and still decrypts after the rewrite.
-    row = await repo.get_source(app.state.db, source.id)
-    model = repo.load_source_settings(row.type, row.settings)
-    assert model.session_cookie.get_secret_value() == "SYNTH-COOKIE"
-
-    cleared = await app_client.patch(
-        f"/api/v1/sources/{source.id}", json={"publisher_rules": []}
+    cleared = await app_client.put(
+        "/api/v1/config/general", json={"non_comic_publishers": ""}
     )
-    assert cleared.json()["settings"]["publisher_rules"] == []
+    assert cleared.json()["non_comic_publishers"]["value"] == ""
 
 
 @pytest.mark.req("FRG-SRC-012")
-async def test_patch_can_set_rules_and_auto_sync_in_one_body(app_client):
-    app = app_client.app
-    source = await _source(app.state.db)
-    resp = await app_client.patch(
-        f"/api/v1/sources/{source.id}",
-        json={"auto_sync": True, "publisher_rules": ["Modiphius"]},
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["auto_sync"] is True
-    assert body["settings"]["publisher_rules"] == ["Modiphius"]
+async def test_an_env_managed_non_comic_list_is_read_only(app_client, monkeypatch):
+    monkeypatch.setenv(NON_COMIC_PUBLISHERS_ENV_VAR, "Example Press")
+    assert (await app_client.get("/api/v1/config/general")).json()[
+        "non_comic_publishers"
+    ]["source"] == "env"
 
-
-@pytest.mark.req("FRG-SRC-012")
-async def test_patch_rules_on_a_source_with_no_settings_envelope_is_a_409(
-    app_client,
-):
-    """A disconnected source's credential is deliberately deleted, so there is
-    no envelope to write into — a 409 that names the fix, never a settings row
-    silently minted without a cookie."""
-    app = app_client.app
-    source = await _source(app.state.db)
-    await app_client.post(f"/api/v1/sources/{source.id}/disconnect")
-
-    resp = await app_client.patch(
-        f"/api/v1/sources/{source.id}", json={"publisher_rules": ["Modiphius"]}
+    resp = await app_client.put(
+        "/api/v1/config/general", json={"non_comic_publishers": "Example Games"}
     )
     assert resp.status_code == 409
-    assert resp.json()["errors"][0]["field"] == "publisher_rules"
+    assert resp.json()["errors"][0]["field"] == "non_comic_publishers"
 
 
 @pytest.mark.req("FRG-SRC-012")
-async def test_a_rules_write_never_resurrects_a_deleted_credential(app_client):
-    """The verified credential-resurrection race.
-
-    The write used to be a read-modify-write across THREE transactions
-    (``get_source`` → decrypt in Python → ``update_source_settings``), and it
-    passed ``connection_state`` forward from the stale first read. A
-    ``disconnect`` committing in the middle — blanking the settings JSON and
-    setting ``disconnected`` — was then overwritten by the trailing write, which
-    re-persisted the decrypted-then-re-encrypted cookie the operator had just
-    deleted AND restored the ``connected`` state with it.
-
-    Simulated deterministically by racing the disconnect against the repo call:
-    the write must find a blank envelope and refuse (409), never rebuild one.
-    """
+async def test_the_sources_patch_no_longer_accepts_publisher_rules(app_client):
+    """No per-source rule surface remains: the key is rejected outright, while
+    the toggle that IS per-source still works."""
     app = app_client.app
-    db = app.state.db
-    source = await _source(db)
+    source = await _source(app.state.db)
 
-    # The disconnect commits first (the losing interleaving of the race).
-    await app_client.post(f"/api/v1/sources/{source.id}/disconnect")
-
-    resp = await app_client.patch(
-        f"/api/v1/sources/{source.id}", json={"publisher_rules": ["Modiphius"]}
+    rejected = await app_client.patch(
+        f"/api/v1/sources/{source.id}", json={"publisher_rules": ["Example Games"]}
     )
-    assert resp.status_code == 409
+    assert rejected.status_code == 400  # extra="forbid", the uniform 4xx shape
+    assert rejected.json()["errors"][0]["field"] == "publisher_rules"
 
-    row = await repo.get_source(db, source.id)
-    assert row.connection_state == "disconnected"  # never flipped back
-    assert row.settings == "{}"  # the credential stays deleted
-    with pytest.raises(Exception):
-        repo.load_source_settings(row.type, row.settings)
+    empty = await app_client.patch(f"/api/v1/sources/{source.id}", json={})
+    assert empty.status_code == 400
+
+    ok = await app_client.patch(
+        f"/api/v1/sources/{source.id}", json={"auto_sync": True}
+    )
+    assert ok.status_code == 200
+    assert ok.json()["auto_sync"] is True
 
 
 @pytest.mark.req("FRG-SRC-012")
-async def test_the_rules_write_is_one_transaction_and_never_writes_state(db):
-    """The repo seam the API now delegates to: read → validate → merge →
-    serialize inside ONE ``write_session``, and ``connection_state`` is not a
-    parameter of it at all — a rules edit can no longer reconnect anything.
-
-    Proven on an ``expired`` source: the rules land and the state is preserved
-    rather than rewritten to whatever a stale read held."""
-    source = await repo.create_source(
-        db,
-        source_type=TYPE_HUMBLE,
-        name="Humble Bundle",
-        settings=HumbleSettings(session_cookie="SYNTH-COOKIE"),
-        connection_state="expired",
-    )
-    written = await repo.update_publisher_rules(db, source.id, ["Modiphius"])
-    assert written.connection_state == "expired"
-    model = repo.load_source_settings(written.type, written.settings)
-    assert model.publisher_rules == ["Modiphius"]
-    assert model.session_cookie.get_secret_value() == "SYNTH-COOKIE"
-
-    assert await repo.update_publisher_rules(db, 999999, []) is None
-
-    await repo.set_connection_state(
-        db, source.id, "disconnected", clear_credential=True
-    )
-    with pytest.raises(repo.SourceSettingsUnavailable):
-        await repo.update_publisher_rules(db, source.id, ["Modiphius"])
-
-
-@pytest.mark.req("FRG-SRC-012")
-async def test_connect_accepts_publisher_rules_in_the_settings_body(
-    app_client, tmp_path: Path
-):
-    """The rule list is part of the store type's settings contract, so it is
-    settable at connect time too (and renders from the schema)."""
-    app = app_client.app
-    app.state.http_factory = make_factory(
-        app.state.settings.config_dir,
-        httpx.MockTransport(
-            order_handler(list_body=fixture_bytes("order_list.json"))
-        ),
-    )
-    resp = await app_client.post(
-        "/api/v1/sources",
-        json={
-            "type": "humble",
-            "settings": {
-                "session_cookie": "COOKIE",
-                "publisher_rules": ["Modiphius"],
-            },
-        },
-    )
-    assert resp.status_code == 201
-    assert resp.json()["source"]["settings"]["publisher_rules"] == ["Modiphius"]
-
+async def test_the_source_settings_form_renders_no_publisher_rules_field(app_client):
+    """The field survives on the contract so an envelope written by an earlier
+    release still deserializes, but it is hidden from the rendered form."""
     schema = (await app_client.get("/api/v1/sources/schema")).json()
     humble = next(s for s in schema if s["type"] == "humble")
-    field = next(f for f in humble["fields"] if f["name"] == "publisher_rules")
-    assert field["required"] is False
-    assert field["secret"] is False
+    assert [f["name"] for f in humble["fields"]] == ["session_cookie"]
+    assert humble["fields"][0]["order"] == 0
+    # Still on the contract, and still validated when an old envelope carries it.
+    model = HumbleSettings(session_cookie="c", publisher_rules=["  Example Games  "])
+    assert model.publisher_rules == ["Example Games"]
+    with pytest.raises(ValueError):
+        HumbleSettings(
+            session_cookie="c",
+            publisher_rules=[f"pub-{i}" for i in range(MAX_PUBLISHER_RULES + 1)],
+        )
