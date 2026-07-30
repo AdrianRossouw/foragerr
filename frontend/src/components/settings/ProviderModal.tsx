@@ -11,6 +11,7 @@ import {
   useDeleteProvider,
   useSaveProvider,
   useTestProvider,
+  type TestProviderVars,
 } from './providerHooks';
 import type {
   ProviderKindConfig,
@@ -149,13 +150,14 @@ export function ProviderModal({
 
   const onTest = () => {
     clearFeedback();
-    test.mutate(
-      {
-        implementation: schema.implementation,
-        settings: settingsPayload(schema.fields, settingsValues),
-      },
-      { onSuccess: setTestResult, onError: onFailure },
-    );
+    const vars: TestProviderVars = {
+      implementation: schema.implementation,
+      settings: settingsPayload(schema.fields, settingsValues),
+    };
+    // Editing: the stored secret is write-only, so the payload above cannot
+    // carry it. The row id is what lets the backend supply it for the probe.
+    if (provider) vars[kind.testIdField] = provider.id;
+    test.mutate(vars, { onSuccess: setTestResult, onError: onFailure });
   };
 
   const onSave = () => {

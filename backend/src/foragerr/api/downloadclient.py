@@ -9,6 +9,9 @@ reused generically rather than forked:
 - ``POST /api/v1/downloadclient/test`` — validates a settings payload, then runs
   the implementation's live ``test()`` action, returning success or a
   field-precise failure in the uniform error shape without persisting anything.
+  A body naming an existing ``client_id`` is merged over that row's stored
+  settings first, so testing a saved client does not require retyping its
+  write-only secret.
 
 The outbound factory is read from ``app.state.http_factory`` when present (the
 test-injection seam) and otherwise built from settings — no other module
@@ -49,7 +52,7 @@ from foragerr.downloads.repo import (
     update_download_client,
 )
 from foragerr.indexers.schema import schema_for
-from foragerr.providers.backoff import ProviderBackoff
+from foragerr.providers.backoff import ProviderBackoff, TransientBackoff
 
 router = APIRouter(prefix="/downloadclient", tags=["downloadclient"])
 
@@ -64,10 +67,15 @@ class DownloadClientImplementationSchema(BaseModel):
 
 
 class DownloadClientTestRequest(BaseModel):
-    """Body for ``POST /downloadclient/test``."""
+    """Body for ``POST /downloadclient/test``.
+
+    ``client_id`` identifies an already-saved client whose stored settings the
+    submitted ``settings`` are merged over; it is absent when testing a client
+    that does not exist yet (the add form), where the payload must be complete."""
 
     implementation: str
     settings: dict[str, Any]
+    client_id: int | None = None
 
 
 class DownloadClientTestResponse(BaseModel):
@@ -264,17 +272,47 @@ async def downloadclient_test(
 ) -> DownloadClientTestResponse:
     """Validate settings, then run the client's live ``test()`` (FRG-DL-002).
 
-    Returns success, or a field-precise failure in the uniform error shape.
-    Nothing is persisted (this is a pre-save test)."""
+    With a ``client_id`` the submitted settings are MERGED over that row's
+    stored settings and loaded (decrypting the at-rest secret), so testing a
+    saved client works without retyping its write-only API key (FRG-API-009);
+    without one the payload must stand alone (nothing is stored to fall back
+    on). Returns success, or a field-precise failure in the uniform error
+    shape. Nothing is persisted either way."""
     try:
         impl = get_implementation(body.implementation)
     except UnknownImplementationError as exc:
         raise ApiError(400, str(exc), field="implementation") from exc
 
-    try:
-        settings_model = validate_settings(body.implementation, body.settings)
-    except ValidationError as exc:
-        raise _validation_error(exc) from exc
+    db = request.app.state.db
+    if body.client_id is None:
+        try:
+            settings_model = validate_settings(body.implementation, body.settings)
+        except ValidationError as exc:
+            raise _validation_error(exc) from exc
+    else:
+        existing = await get_download_client(db, body.client_id)
+        if existing is None:
+            raise ApiError(404, f"download client {body.client_id} not found")
+        if existing.implementation != body.implementation:
+            raise ApiError(
+                400,
+                f"download client {body.client_id} is a "
+                f"{existing.implementation!r} client, not {body.implementation!r}",
+                field="implementation",
+            )
+        _reject_reserved_secret_prefix(body.implementation, body.settings)
+        merged = _merge_over_stored(
+            body.implementation, existing.settings, body.settings
+        )
+        try:
+            # load_settings, not validate_settings: the live test must receive
+            # the DECRYPTED secret (the same path a runtime client build takes),
+            # or the probe would authenticate with `enc:v1:` ciphertext.
+            settings_model = load_settings(body.implementation, json.dumps(merged))
+        except ValidationError as exc:
+            raise _validation_error(exc) from exc
+        except KeystoreDecryptError as exc:
+            raise ApiError(400, str(exc)) from exc
 
     if impl.client_factory is None:
         raise ApiError(
@@ -283,13 +321,12 @@ async def downloadclient_test(
             field="implementation",
         )
 
-    db = request.app.state.db
     ctx = ClientBuildContext(
         row=_TransientRow(implementation=impl.name, protocol=impl.protocol),
         settings=settings_model,
         db=db,
         http_factory=_factory(request),
-        backoff=ProviderBackoff(db),
+        backoff=TransientBackoff(db),
         mappings=[],
         app_settings=request.app.state.settings,
     )
@@ -308,12 +345,15 @@ async def downloadclient_test(
 
 
 class _TransientRow:
-    """A minimal stand-in for a ``DownloadClientRow`` in the pre-save test path.
+    """A minimal stand-in for a ``DownloadClientRow`` in the test path.
 
     The test action never persists, so it needs no real row — only the fields a
-    client factory reads: ``id`` (0, mirroring the indexer test's
-    ``indexer_id=0``), ``implementation``, ``protocol`` and the
-    ``remove_completed_downloads`` flag (irrelevant to ``test()``)."""
+    client factory reads: ``id``, ``implementation``, ``protocol`` and the
+    ``remove_completed_downloads`` flag (irrelevant to ``test()``). ``id`` stays
+    0 (mirroring the indexer test's ``indexer_id=0``) even when an existing
+    client is being tested, so the probe never records success or failure
+    against that row's back-off ladder — a test observes, it never alters
+    operational state."""
 
     id = 0
 
@@ -342,6 +382,29 @@ def _reject_reserved_secret_prefix(implementation: str, supplied: dict[str, Any]
                 f"'{ENC_PREFIX}' prefix (it is reserved for at-rest secret framing)",
                 field=f"settings.{name}",
             )
+
+
+def _merge_over_stored(
+    implementation: str, stored_json: str, supplied: dict[str, Any]
+) -> dict[str, Any]:
+    """Layer a submitted settings dict over a row's STORED settings (FRG-API-009).
+
+    The PUT merge idiom, reused by the test path: a secret is write-only, so an
+    edit form never holds the stored value and cannot resend it. An OMITTED
+    secret key therefore means "keep the stored one", and so does an EMPTY
+    STRING — what a client sends for a masked field the operator did not
+    retype. Every other submitted value wins over the stored one, so a retyped
+    secret is what gets tested. Blank-means-keep is safe here because this path
+    never persists; clearing a secret is a save concern, not a test concern."""
+    secret_names = top_level_secret_field_names(
+        get_implementation(implementation).settings_model
+    )
+    incoming = {
+        name: value
+        for name, value in supplied.items()
+        if not (name in secret_names and isinstance(value, str) and not value)
+    }
+    return {**json.loads(stored_json), **incoming}
 
 
 def _settings_for_response(row: DownloadClientRow) -> BaseModel:

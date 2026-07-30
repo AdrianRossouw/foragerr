@@ -8,7 +8,9 @@ Two endpoints, the zero-frontend extensibility seam:
   fields are flagged and carry no value (write-only).
 - ``POST /api/v1/indexer/test`` — validates a settings payload, then runs a
   live ``?t=caps`` probe, returning success or a field-precise failure in the
-  uniform error shape without persisting anything.
+  uniform error shape without persisting anything. A body naming an existing
+  ``indexer_id`` is merged over that row's stored settings first, so testing a
+  saved indexer does not require retyping its write-only secret.
 
 The outbound factory is read from ``app.state.http_factory`` when present (a
 test-injection seam) and otherwise built from settings — no other module
@@ -88,10 +90,15 @@ class IndexerImplementationSchema(BaseModel):
 
 
 class IndexerTestRequest(BaseModel):
-    """Body for ``POST /indexer/test``: which implementation and its settings."""
+    """Body for ``POST /indexer/test``: which implementation and its settings.
+
+    ``indexer_id`` identifies an already-saved indexer whose stored settings the
+    submitted ``settings`` are merged over; it is absent when testing an indexer
+    that does not exist yet (the add form), where the payload must be complete."""
 
     implementation: str
     settings: dict[str, Any]
+    indexer_id: int | None = None
 
 
 class IndexerTestResponse(BaseModel):
@@ -321,18 +328,46 @@ async def delete_indexer_endpoint(indexer_id: int, request: Request) -> None:
 async def indexer_test(body: IndexerTestRequest, request: Request) -> IndexerTestResponse:
     """Validate settings, then run a live caps probe (FRG-IDX-003, FRG-API-009).
 
-    Returns success, or a field-precise failure in the uniform error shape.
-    Nothing is persisted on failure (nothing is persisted at all — this is a
-    pre-save test)."""
+    With an ``indexer_id`` the submitted settings are MERGED over that row's
+    stored settings and loaded (decrypting the at-rest secret), so testing a
+    saved indexer works without retyping its write-only API key (FRG-API-009);
+    without one the payload must stand alone (nothing is stored to fall back
+    on). Returns success, or a field-precise failure in the uniform error
+    shape. Nothing is persisted either way."""
     try:
         get_implementation(body.implementation)
     except UnknownImplementationError as exc:
         raise ApiError(400, str(exc), field="implementation") from exc
 
-    try:
-        settings_model = validate_settings(body.implementation, body.settings)
-    except ValidationError as exc:
-        raise _validation_error(exc) from exc
+    if body.indexer_id is None:
+        try:
+            settings_model = validate_settings(body.implementation, body.settings)
+        except ValidationError as exc:
+            raise _validation_error(exc) from exc
+    else:
+        existing = await get_indexer(request.app.state.db, body.indexer_id)
+        if existing is None:
+            raise ApiError(404, f"indexer {body.indexer_id} not found")
+        if existing.implementation != body.implementation:
+            raise ApiError(
+                400,
+                f"indexer {body.indexer_id} is a {existing.implementation!r} "
+                f"indexer, not {body.implementation!r}",
+                field="implementation",
+            )
+        _reject_reserved_secret_prefix(body.implementation, body.settings)
+        merged = _merge_over_stored(
+            body.implementation, existing.settings, body.settings
+        )
+        try:
+            # load_settings, not validate_settings: the live probe must receive
+            # the DECRYPTED secret (the same path a runtime search takes), or it
+            # would authenticate with `enc:v1:` ciphertext.
+            settings_model = load_settings(body.implementation, json.dumps(merged))
+        except ValidationError as exc:
+            raise _validation_error(exc) from exc
+        except KeystoreDecryptError as exc:
+            raise ApiError(400, str(exc)) from exc
 
     factory = _factory(request)
     async with NewznabClient(
@@ -469,6 +504,29 @@ def _reject_reserved_secret_prefix(implementation: str, supplied: dict[str, Any]
                 f"'{ENC_PREFIX}' prefix (it is reserved for at-rest secret framing)",
                 field=f"settings.{name}",
             )
+
+
+def _merge_over_stored(
+    implementation: str, stored_json: str, supplied: dict[str, Any]
+) -> dict[str, Any]:
+    """Layer a submitted settings dict over a row's STORED settings (FRG-API-009).
+
+    The PUT merge idiom, reused by the test path: a secret is write-only, so an
+    edit form never holds the stored value and cannot resend it. An OMITTED
+    secret key therefore means "keep the stored one", and so does an EMPTY
+    STRING — what a client sends for a masked field the operator did not
+    retype. Every other submitted value wins over the stored one, so a retyped
+    secret is what gets tested. Blank-means-keep is safe here because this path
+    never persists; clearing a secret is a save concern, not a test concern."""
+    secret_names = top_level_secret_field_names(
+        get_implementation(implementation).settings_model
+    )
+    incoming = {
+        name: value
+        for name, value in supplied.items()
+        if not (name in secret_names and isinstance(value, str) and not value)
+    }
+    return {**json.loads(stored_json), **incoming}
 
 
 def _settings_for_response(row: IndexerRow) -> BaseModel:
