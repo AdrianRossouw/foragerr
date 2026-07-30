@@ -121,15 +121,83 @@ def test_a_contained_fold_key_merges_into_one_display_group():
 
 
 @pytest.mark.req("FRG-UI-029")
-def test_the_display_merge_is_order_independent_and_transitively_closed():
-    chain = ["alpha", "alpha beta", "gamma alpha beta"]
+def test_the_display_merge_is_order_independent_along_a_chain():
+    chain = ["alpha beta", "alpha beta gamma", "delta alpha beta gamma"]
     forward = merge_display_groups(chain)
     reverse = merge_display_groups(list(reversed(chain)))
 
     assert forward == reverse
-    # "alpha" is not inside "gamma alpha beta" as a pairwise SHORTEST match only
-    # via the middle link — the component must still close over the chain.
-    assert set(forward.values()) == {"alpha"}
+    # Each key attaches to its LONGEST container, and following those single
+    # edges still reunites a genuine chain of title forms into one group,
+    # labelled by the part all of them share.
+    assert set(forward.values()) == {"alpha beta"}
+
+
+@pytest.mark.req("FRG-UI-029")
+def test_a_single_token_key_is_never_merged_into_a_longer_one():
+    """A one-word fold key is a word, not a title: it sits inside every key that
+    happens to mention it, so treating it as a needle made it a container for
+    unrelated franchises."""
+    merged = merge_display_groups(["example force", "example force academy", "force"])
+
+    assert merged["force"] == "force"  # its own group, alone
+    assert merged["example force"] == "example force"
+    assert merged["example force academy"] == "example force"
+
+
+@pytest.mark.req("FRG-UI-029")
+def test_two_one_word_series_and_the_title_naming_both_stay_apart():
+    """Two single-token series plus a crossover title containing both: three
+    distinct titles, three groups — never one group holding all of them."""
+    merged = merge_display_groups(["alpha", "beta", "alpha versus beta"])
+
+    assert merged == {
+        "alpha": "alpha",
+        "beta": "beta",
+        "alpha versus beta": "alpha versus beta",
+    }
+
+
+@pytest.mark.req("FRG-UI-029")
+def test_one_needle_never_welds_two_unrelated_containers_together():
+    """The runaway shape: a shared two-token run sits inside two longer keys
+    that contain nothing of each other. The needle joins the LONGER of them and
+    the other stays its own group, instead of the three collapsing into one."""
+    merged = merge_display_groups(
+        ["alpha beta", "alpha beta gamma delta", "epsilon alpha beta"]
+    )
+
+    assert merged["alpha beta"] == "alpha beta"
+    assert merged["alpha beta gamma delta"] == "alpha beta"
+    assert merged["epsilon alpha beta"] == "epsilon alpha beta"
+
+
+@pytest.mark.req("FRG-UI-029")
+def test_the_display_merge_holds_its_shape_across_shuffles():
+    """Determinism at listing scale: no ordering of the same key set may produce
+    a different grouping (the review list is built from whatever order the query
+    returns)."""
+    import random
+
+    keys = [
+        "example saga",
+        "example saga academy",
+        "example saga academy annual",
+        "example chronicle",
+        "example chronicle omnibus",
+        "saga",
+        "chronicle",
+        "unrelated example title",
+    ]
+    expected = merge_display_groups(keys)
+    rng = random.Random(20260730)
+    for _ in range(20):
+        shuffled = keys[:]
+        rng.shuffle(shuffled)
+        assert merge_display_groups(shuffled) == expected
+    # Eight keys, and the merge leaves five distinct groups — the two genuine
+    # chains, plus the three keys nothing properly contains.
+    assert len(set(expected.values())) == 5
 
 
 @pytest.mark.req("FRG-UI-029")
@@ -326,3 +394,70 @@ async def test_bulk_restore_covers_a_whole_duplicate_filter_selection(app_client
         row = await repo.get_entitlement(db, eid)
         assert row.review_status == "new"
         assert row.duplicate_of is None
+
+
+@pytest.mark.req("FRG-SRC-015")
+async def test_the_match_and_add_endpoints_refuse_a_parked_copy(app_client):
+    """The direct row actions, not just accept: neither endpoint asks for the
+    ``new`` precondition, so without an unconditional guard a POST straight at a
+    parked copy resolved it — leaving it ``matched`` with ``duplicate_of`` still
+    set and queueing the byte-identical grab the canonical already covers."""
+    app = app_client.app
+    db = app.state.db
+    source_id = await _populate(
+        app,
+        [
+            ("saga_v2", SAGA_SHORT, "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"),
+            ("saga_v2_again", SAGA_SHORT, "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"),
+        ],
+    )
+    rows = {r.machine_name: r for r in await repo.list_entitlements(db, source_id)}
+    copy_id = rows["saga_v2_again"].id
+
+    matched = await app_client.post(
+        f"/api/v1/sources/entitlements/{copy_id}/match", json={"series_id": 1}
+    )
+    added = await app_client.post(
+        f"/api/v1/sources/entitlements/{copy_id}/add", json={"cv_volume_id": 4242}
+    )
+
+    assert matched.status_code == 409
+    assert added.status_code == 409
+    assert "restore it first" in matched.text
+    still_parked = await repo.get_entitlement(db, copy_id)
+    assert still_parked.review_status == "duplicate"
+    assert still_parked.duplicate_of == rows["saga_v2"].id
+
+
+@pytest.mark.req("FRG-SRC-015")
+async def test_an_ignored_canonical_stops_advertising_its_copies(app_client):
+    """A withdrawn row represents nothing: the copies chip would invite the
+    operator into a set whose representative they have already excluded."""
+    app = app_client.app
+    db = app.state.db
+    source_id = await _populate(
+        app,
+        [
+            ("saga_v2", SAGA_SHORT, "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"),
+            ("saga_v2_again", SAGA_SHORT, "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"),
+        ],
+    )
+    rows = {r.machine_name: r for r in await repo.list_entitlements(db, source_id)}
+    canonical_id = rows["saga_v2"].id
+    before = (await app_client.get(f"/api/v1/sources/{source_id}/entitlements")).json()
+    assert {r["machine_name"]: r["duplicate_count"] for r in before}["saga_v2"] == 1
+
+    await app_client.post(f"/api/v1/sources/entitlements/{canonical_id}/ignore")
+
+    listing = (
+        await app_client.get(f"/api/v1/sources/{source_id}/entitlements")
+    ).json()
+    by_name = {row["machine_name"]: row for row in listing}
+    assert by_name["saga_v2"]["review_status"] == "ignored"
+    assert by_name["saga_v2"]["duplicate_count"] == 0
+    assert by_name["saga_v2"]["duplicate_bundles"] == []
+    # The single-row surface answers the same way.
+    detail = (
+        await app_client.get(f"/api/v1/sources/entitlements/{canonical_id}")
+    ).json()
+    assert detail["duplicate_count"] == 0
