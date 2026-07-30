@@ -272,3 +272,44 @@ Decisions taken with that authority:
    be dishonest; sweeping every other screen is a separate change.
 
 Implementation may proceed on these terms.
+
+### Amendment — FRG-UI-018's density figure (recorded by the orchestrator)
+
+The "~1.5 viewport heights at 60 entries" figure this proposal set is
+**unreachable while FRG-UI-047's 24px target floor holds**, so the change as
+first written contradicted itself: a 24px-minimum control plus the row's
+padding and separator is a 29px band before any thumbnail, and 60 × 29 is 1.9
+raw viewport heights at a 900px-tall viewport. The figure was chosen before the
+target floor existed.
+
+FRG-UI-018's density clause and its dense-day scenario are therefore restated
+as an **absolute per-entry bound — no more than 36 CSS px of vertical rhythm
+for an entry whose title fits one line** — with the consequence stated as
+"roughly two viewport heights rather than four". A per-entry bound is
+measurable in the browser tier without depending on viewport height, and the
+one-line qualifier keeps the bound honest against the same requirement's
+never-truncate rule: a wrapped title adds a line and nothing else. Measured
+after the row thumbnail shrank from 20 × 30 to 16 × 24, a single-line row band
+is **29px**, so 60 entries occupy ~1.9 raw viewport heights.
+
+Two smaller spec corrections land with it, both consequences of measuring the
+shipped screen rather than deriving it:
+
+- **The title's measure is a floor, not a residual.** The meta column sized to
+  its own content, which is unbounded (publisher name + state chip + the
+  not-yet-released token), so the flexible title column was the one the grid
+  sacrificed: 23 characters on a typical row at the crossover and 7 on a
+  future-dated one. FRG-UI-018 now requires a *definite* minimum on the title's
+  column with the meta yielding to it, and names the browser tier as where the
+  measure is checked.
+- **The not-yet-released marking may be carried once per day group, and may not
+  be expressed by dimming text.** Per entry it is a ~110px nowrap token in the
+  same track that starves the title, and the store date that makes an entry
+  unreleased belongs to the whole day group anyway. The shipped
+  whole-entry `opacity: 0.72` also pushed the meta text to 3.68:1 and the
+  status chip to 3.43:1 against the page — under the 4.5:1 WCAG 1.4.3 AA floor,
+  on the text FRG-UI-047 had just made the only carrier of state.
+
+Recorded under the same delegated authority as the decisions above; no owner
+re-approval was sought, and nothing in the change's scope, non-goals or
+capability list moves.

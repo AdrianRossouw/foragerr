@@ -38,10 +38,13 @@ SHALL provide:
     thumbnail, meta and actions, the issue number · publisher · state meta
     after it, and the row's actions right-aligned. The title SHALL render at
     the body base type size, SHALL wrap at word boundaries rather than
-    truncate at realistic title lengths, and no action's footprint SHALL
-    reduce its measure below approximately 30 characters per line. Rows SHALL
-    be dense enough that a day of roughly 60 entries occupies on the order of
-    one and a half viewport heights rather than four.
+    truncate at realistic title lengths, and no action's footprint and no
+    other column's content SHALL reduce its measure below approximately 30
+    characters per line — the title's column SHALL therefore carry a definite
+    minimum, and the meta column SHALL yield to it. Rows SHALL be dense
+    enough that an entry whose title fits one line occupies **no more than 36
+    CSS px of vertical rhythm**, so a day of roughly 60 entries reads in
+    roughly two viewport heights rather than the four the card grid produced.
   - **Below the crossover — quiet cards.** A single column of cards in which
     the title spans the card's full width and wraps at word boundaries, every
     action is an **icon-only** control on an action rail beneath the title
@@ -56,7 +59,10 @@ SHALL provide:
   be rendered as a status indicator that is not shaped or announced as a
   control (FRG-UI-047); in particular the monitor-toggle glyph SHALL appear
   only on entries that carry a real toggle. Not-yet-released entries (store
-  date in the future) are visually marked as such.
+  date in the future) SHALL be marked as such. That marking MAY be carried
+  once per day group rather than per entry — the store date that makes an
+  entry unreleased is the day group's own — and SHALL NOT be expressed by
+  dimming the entry's text, which is the only carrier of its state.
 - **Empty state**: a friendly empty message when the filtered week has no
   entries, distinct from the error state.
 
@@ -84,13 +90,16 @@ in-flight behavior by FRG-UI-048.
   cards" wording. The 900px crossover is derived from the screen's own
   geometry, not a device table: fixed chrome to the left of the entry area
   (sidebar, screen padding, day gutter, gap, stream border and padding) plus a
-  row's own cover, meta and action cluster leave the title a measure of
-  roughly *viewport − 681px*, which passes ~30 characters at 900px and falls
-  to ~21 at 840px, while a full-width two-line card at that width carries
-  roughly 55. The crossover also sits above the width at which the shipped
-  `minmax(228px, 1fr)` grid stops fitting two columns (~840px viewport), so
-  compact mode takes over before the wide grid's own fit fails and no width is
-  served badly by both modes.
+  row's own cover and action cluster leave a row about 396px to divide between
+  the title and the meta at 900px — enough for the title's ~30-character floor
+  with the meta yielding, and not enough for both at their natural widths,
+  which is why the floor is a definite track minimum rather than a residual.
+  At 840px the same arithmetic leaves ~336px, while a full-width two-line card
+  at that width carries roughly 55 characters, so the card genuinely wins
+  below the crossover. The crossover also sits above the width at which the
+  shipped `minmax(228px, 1fr)` grid stops fitting two columns (~840px
+  viewport), so compact mode takes over before the wide grid's own fit fails
+  and no width is served badly by both modes.
 
 #### Scenario: Default load shows the current week's ALL releases
 
@@ -139,7 +148,10 @@ in-flight behavior by FRG-UI-048.
   issue · publisher · state meta, right-aligned actions), the title renders at
   the body base type size and wraps at word boundaries with no mid-word break
   and no ellipsis, and its measure is not reduced below approximately 30
-  characters by any action present on the row
+  characters (measured in the browser-driven tier at the crossover width) by
+  any action present on the row, by the length of the publisher name beside
+  it, or by any other column — the meta's own text ellipsises instead, and the
+  frame does not scroll sideways to make the measure fit
 
 #### Scenario: A narrow viewport renders quiet cards with an icon rail
 
@@ -161,9 +173,11 @@ in-flight behavior by FRG-UI-048.
 
 - **WHEN** a single day of roughly 60 entries is rendered at or above the
   crossover
-- **THEN** the day's rendered agenda height stays on the order of one and a
-  half viewport heights (measured in the browser-driven tier), rather than the
-  four the card grid produced
+- **THEN** every entry whose title fits one line occupies no more than 36 CSS
+  px of vertical rhythm — thumbnail, controls, padding and separator included
+  (measured in the browser-driven tier) — so the day reads in roughly two
+  viewport heights rather than the four the card grid produced; a title long
+  enough to wrap adds its own extra line and nothing else
 
 ## ADDED Requirements
 

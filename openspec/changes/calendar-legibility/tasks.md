@@ -19,9 +19,11 @@ Nothing here starts before the FRG-PROC-009 approval is recorded in
       derived state exposes no button and no pressed state; a linked entry's
       toggle is a real `aria-pressed` button; the per-entry button count equals
       the per-entry action count
-- [ ] 1.5 Browser-driven assertion in the e2e a11y tier: every calendar control
-      and the chrome toggle measure ≥ 24 × 24 CSS px on both sides of the
-      crossover (axe-core does not cover WCAG 2.5.8)
+- [x] 1.5 Browser-driven assertion in the e2e tier: every calendar control and
+      the chrome toggle measure ≥ 24 × 24 CSS px on both sides of the crossover
+      (axe-core does not cover WCAG 2.5.8) — derived from what is RENDERED, so a
+      control inherited from a shared component cannot slip past it, and the axe
+      pass itself now runs at both viewports
 
 ## 2. Responsive entry presentation (FRG-UI-018)
 
@@ -41,8 +43,11 @@ Nothing here starts before the FRG-PROC-009 approval is recorded in
 - [x] 2.5 Tagged vitest (IDs in names): wide mode renders rows with an
       unclamped, unbroken long title; narrow mode renders cards with an
       icon-only rail; the action set is identical across the crossover
-- [ ] 2.6 Browser-driven check: a seeded ~60-entry day's rendered agenda height
-      stays on the order of 1.5 viewport heights at a wide viewport
+- [x] 2.6 Browser-driven check: a seeded 60-entry day holds every single-line
+      entry inside the 36 CSS px per-entry bound (the restated density clause —
+      see the proposal's Approval amendment), and the row title keeps its
+      ~30-character measure at the crossover width. Measured: 29.0px band,
+      1.97 viewport heights for 60 entries; title 200.0px = ~30.9 characters
 
 ## 3. Monitor-toggle in-flight feedback (FRG-UI-048)
 

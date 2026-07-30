@@ -43,9 +43,12 @@ page itself, so the sidebar steps aside: it becomes a drawer that slides in from
 the left when you press the **navigation** button that appears at the left of the
 header, and the content region takes the whole window width. Close the drawer by
 pressing Escape, by clicking outside it, or simply by choosing where you want to
-go; keyboard focus moves into the drawer when it opens and back onto the
-navigation button when it closes. Widen the window past 900 pixels and the
-permanent column comes back, with no navigation button.
+go; keyboard focus moves into the drawer — onto its first navigation item — when
+it opens, and back onto the navigation button when it closes. While it is open
+the drawer is the only thing you can reach: the page behind it takes no clicks
+and no keyboard focus, so Tab cycles inside the drawer rather than wandering
+behind the dimmed backdrop. Widen the window past 900 pixels and the permanent
+column comes back, with no navigation button, and focus follows into it.
 
 The three parts:
 
@@ -213,10 +216,17 @@ means "monitor this". **The bookmark button appears only on entries that actuall
 have one to give**: issues already in your library, which offer want/skip and an
 immediate search, the same operations the Wanted screen uses. When you press the
 bookmark it shows the state you asked for straight away and dims while the change
-is in flight, so a working click never looks dead; pressing it again while it is
-working does nothing, and if the change is refused the bookmark returns to its
-real state and the reason appears above the week rather than the button silently
-snapping back.
+is in flight, so a working click never looks dead — and it holds that state until
+the refreshed week confirms it, rather than flickering back in between. Pressing
+it again while it is working does nothing, several bookmarks can be in flight at
+once without blocking each other, and if a change is refused that bookmark
+returns to its real state and the reason appears above the week rather than the
+button silently snapping back.
+
+A day whose releases are still ahead of the store date is labelled **Not yet
+released** in its day heading, once for the whole day, and its covers are dimmed
+to match; the entries' own text stays at full strength, because that text is what
+tells you the state.
 
 Every other entry — anything not linked to an issue in your library, whose
 series you don't already have — carries a one-click **Add** button instead (a `+`
@@ -234,7 +244,7 @@ series you already have never show the Add affordance, since the ordinary
 refresh links them in on its own.
 
 Next week's solicited releases appear under forward navigation once the pull
-source has published them, marked as not yet released, and the whole view keeps
+source has published them, with their day marked not yet released, and the whole view keeps
 working from your local metadata when the external pull source is unconfigured or
 down. When the weekly pull source is actually down, the Calendar shows an inline
 notice that the external source is unavailable and the view is rendering from
