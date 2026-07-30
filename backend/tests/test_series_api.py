@@ -840,6 +840,54 @@ def test_lookup_clean_empty_is_200_complete_with_no_records(client, monkeypatch)
 # 503/auth mapping reused (not re-implemented) from the lookup route.
 
 
+@pytest.mark.req("FRG-META-021")
+def test_suggest_candidate_serves_the_display_sized_cover(client, monkeypatch):
+    volumes = [
+        {
+            "id": 101,
+            "name": "Saga",
+            "start_year": "2012",
+            "image": {
+                "medium_url": "https://comicvine.gamespot.com/a/uploads/medium/x.jpg",
+                "original_url": "https://comicvine.gamespot.com/a/uploads/original/x.jpg",
+            },
+        }
+    ]
+    factory = build_factory(
+        settings=client.app.state.settings, handler=_search_handler(volumes)
+    )
+    monkeypatch.setattr("foragerr.api.series.comicvine_factory", lambda _settings: factory)
+
+    response = client.get("/api/v1/series/lookup/suggest", params={"term": "Saga"})
+    assert response.status_code == 200
+    candidate = response.json()["records"][0]
+    assert candidate["image_url"].endswith("/medium/x.jpg")
+
+
+@pytest.mark.req("FRG-META-021")
+def test_suggest_candidate_falls_back_to_the_original_cover(client, monkeypatch):
+    # A CV payload with only an original still yields a cover rather than none.
+    volumes = [
+        {
+            "id": 102,
+            "name": "Saga",
+            "start_year": "2012",
+            "image": {
+                "original_url": "https://comicvine.gamespot.com/a/uploads/original/y.jpg"
+            },
+        }
+    ]
+    factory = build_factory(
+        settings=client.app.state.settings, handler=_search_handler(volumes)
+    )
+    monkeypatch.setattr("foragerr.api.series.comicvine_factory", lambda _settings: factory)
+
+    response = client.get("/api/v1/series/lookup/suggest", params={"term": "Saga"})
+    assert response.status_code == 200
+    candidate = response.json()["records"][0]
+    assert candidate["image_url"].endswith("/original/y.jpg")
+
+
 @pytest.mark.req("FRG-API-017")
 def test_suggest_returns_bounded_candidates_without_walking(client, monkeypatch):
     volumes = [{"id": 101, "name": "Saga", "start_year": "2012"}]

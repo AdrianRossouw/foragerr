@@ -139,6 +139,21 @@ def test_display_image_url_falls_back_through_the_size_chain():
 
 
 @pytest.mark.req("FRG-META-021")
+def test_display_image_url_priority_with_every_variant_present():
+    rec = map_volume(
+        volume_payload(
+            image={
+                "small_url": "https://example.com/small.jpg",
+                "super_url": "https://example.com/super.jpg",
+                "medium_url": "https://example.com/medium.jpg",
+                "original_url": "https://example.com/original.jpg",
+            }
+        )
+    )
+    assert rec.display_image_url == "https://example.com/medium.jpg"
+
+
+@pytest.mark.req("FRG-META-021")
 def test_display_image_url_absent_when_no_image():
     rec = map_volume(volume_payload(image=None))
     assert rec.display_image_url is None
