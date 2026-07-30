@@ -85,6 +85,18 @@ Trade-shaped items ("… Vol. 4", collected editions) prefer the matching
 collected-edition volume in their proposals rather than the single-issue
 line.
 
+Already know the ComicVine volume you want? Paste its page URL — or just the
+numeric id — into the search box and it resolves that exact volume instead of
+running a name search; an id ComicVine doesn't recognize says so plainly
+rather than coming back empty. Search results also carry a soft
+**collected-edition** badge on any candidate whose title reads like a trade,
+graphic novel, or hardcover — the same title cues foragerr uses to type
+collected editions in your library (see "Collected editions (trades)" in
+`library.md`). It's a hint to help you tell "Example Saga" the ongoing series
+from "Example Saga Vol. 2" the collection apart at a glance — never an
+asserted fact (ComicVine doesn't record a book type), and it never changes
+which results appear or their order.
+
 By default nothing downloads and nothing in your library changes until you
 act: **match**, **add**, **search-and-pick**, or **ignore** — each on a
 single item or a bulk selection. An ignored item drops out of the pending
@@ -92,15 +104,45 @@ count and the default view but stays visible under the Ignored filter, and
 **restore** returns it to New with its proposed match recomputed
 (`FRG-SRC-004`).
 
+### Duplicate copies
+
+Buying the same book twice across bundles is common — a "best of" sale
+overlapping a subscription month, a republished bundle. When sync finds a
+second entitlement of the same source that is the exact same file as one
+already sitting in New — identical file contents, not just a matching
+title — it doesn't add a second row to review. The extra copy parks under
+its own **Duplicates** filter instead, and the row you do review notes how
+many copies exist and which bundles they came from, so nothing is hidden
+(`FRG-SRC-015`).
+
+Only that one row can be matched, accepted, or downloaded; parked copies
+sit dimmed under Duplicates and can't be actioned from there. If you ever
+want to review a copy on its own — say you'd rather track one bundle
+separately — **Restore** sends it back to New as an independent
+entitlement with its own proposed match. Deciding the row you kept (match,
+add, or ignore) never reaches into its parked copies; they stay exactly as
+they are unless you restore them yourself.
+
+If you're upgrading from a version that reviewed duplicates as separate
+rows, the first sync after upgrade tidies up any such pair still sitting in
+New — anything you'd already matched or ignored before upgrading is left
+exactly as it was.
+
 ### Working a big collection
 
 Large accounts land thousands of items at once (the review list stays fast
 at that scale — it renders only what's on screen). Three tools keep the work
 proportional (`FRG-SRC-011`):
 
-- **Groups**: three or more rows that are really the same title collapse
-  into one expandable group with a count — a long run of mislabeled
-  `"TITLE Vol. NNN"` singles reads as one line, not hundreds. A group
+- **Groups**: same-title rows collapse into one expandable group with a
+  count — a long run of mislabeled `"TITLE Vol. NNN"` singles reads as one
+  line, not hundreds. Grouping also catches a series the store names two
+  different ways in different bundles — say "Example Saga" bundled
+  alongside "The Legend of Example Saga" — folding both under one group,
+  because one name reads as the other with extra words around it. Inside a
+  group, rows render in volume/issue order rather than sync order (an item
+  with no readable issue or volume number sorts last), so a long franchise
+  reviews top-to-bottom the way you'd expect. A group
   header shows mixed statuses
   when its rows differ (including a failed-download callout), its checkbox
   selects the whole group, a shift-range across a collapsed group includes
@@ -153,11 +195,14 @@ becomes a match to the existing series instead of an error.
 
 That sweep isn't limited to the add path. Picking a series for one row — a
 plain match to an in-library series works just as well as an add — now
-re-proposes its still-`New` same-group siblings within that source to the
+re-proposes its still-`New` same-title siblings within that source to the
 series you picked (`FRG-SRC-014`), so a single search-and-pick on one row
-fills in the rest of its group instead of leaving them stale. It writes
-proposals only: a swept sibling still shows as New and needs its own accept,
-and anything you've already matched or ignored is left exactly as it was.
+fills in the rest of its group instead of leaving them stale. This sweep is
+narrower than the display grouping above: it only reaches rows that fold to
+the exact same title, not a group widened by the "store names it two ways"
+merge. It writes proposals only: a swept sibling still shows as New and
+needs its own accept, and anything you've already matched or ignored is
+left exactly as it was.
 
 ### The Auto-sync toggle
 
