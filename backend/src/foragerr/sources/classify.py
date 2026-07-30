@@ -15,13 +15,14 @@ Open Questions), applied to the parsed download options of one subproduct:
 5. Everything else (prose ebooks, or any non-``ebook`` platform) ⇒ ``other``.
 
 **Publisher rules (FRG-SRC-012).** Format shape alone cannot tell a CBZ comic
-from a CBZ-shipped RPG sourcebook, so the operator owns a per-source list of
+from a CBZ-shipped RPG sourcebook, so the operator owns a LIBRARY-WIDE list of
 publisher names that force ``other`` whatever the formats say. A rule wins over
 every format signal above (rule 0, evaluated first); matching is on the SHARED
 folded key (:func:`foragerr.parser.normalize.matching_key`, FRG-IMP-005) so
-"Modiphius Entertainment" and "modiphius  entertainment." are the same rule.
-The list ships EMPTY — a source with default settings classifies exactly as it
-did before this change.
+"Modiphius Entertainment" and "modiphius  entertainment." are the same rule, plus
+a trailing ``*`` for substring probes (see :class:`PublisherRuleSet`). The list
+ships with a curated non-comic default set
+(:data:`foragerr.config.DEFAULT_NON_COMIC_PUBLISHERS`), every entry removable.
 
 Non-comic items are retained as ``other`` and shown on demand — never dropped —
 so a misclassification is discoverable and reclassifiable (FRG-SRC-003).
@@ -78,54 +79,107 @@ def _ebook_formats(options: list[DownloadOption]) -> set[str]:
     }
 
 
-def folded_publisher_rules(rules: Iterable[str] | None) -> frozenset[str]:
-    """The operator's publisher rules as folded keys (FRG-SRC-012).
+@dataclass(frozen=True, slots=True)
+class PublisherRuleSet:
+    """The library-wide publisher rules, compiled once per sync (FRG-SRC-012).
 
-    Blank/whitespace-only entries fold away and are dropped, so an empty or
-    all-blank list is indistinguishable from no rules at all."""
-    if not rules:
-        return frozenset()
-    folded = {matching_key(rule) for rule in rules if isinstance(rule, str)}
-    return frozenset(key for key in folded if key)
+    Two folded views, both keyed on :func:`~foragerr.parser.normalize.matching_key`
+    (FRG-IMP-005, the ONE folding implementation): ``exact`` names and
+    ``substrings`` probes. An entry ending in ``*`` becomes a substring probe
+    (``Paizo*`` covers "Paizo Inc." and "Paizo Publishing"); every other entry
+    matches the folded publisher exactly — the semantics the ComicVine ignore
+    list (FRG-META-020) presents to the operator, over this fold rather than a
+    bare ``casefold`` so a rule keeps ONE identity across storage and matching.
+
+    The wildcard MUST be read off the raw entry: ``matching_key`` treats ``*`` as
+    punctuation and folds it away, so a probe derived from the folded string
+    alone could never be told from an exact name. A bare ``*`` folds to nothing
+    and is dropped rather than matching every publisher.
+    """
+
+    exact: frozenset[str]
+    substrings: tuple[str, ...]
+
+    @classmethod
+    def parse(cls, entries: Iterable[str] | None) -> "PublisherRuleSet":
+        """Compile an iterable of raw rule entries. Blank/whitespace-only and
+        punctuation-only entries fold away and are dropped, so an all-blank list
+        is indistinguishable from no rules at all."""
+        exact: set[str] = set()
+        substrings: list[str] = []
+        for entry in entries or ():
+            if not isinstance(entry, str):
+                continue
+            rule = entry.strip()
+            key = matching_key(rule)
+            if not key:
+                continue
+            if rule.endswith("*"):
+                substrings.append(key)
+            else:
+                exact.add(key)
+        return cls(exact=frozenset(exact), substrings=tuple(sorted(set(substrings))))
+
+    @classmethod
+    def from_csv(cls, raw: str | None) -> "PublisherRuleSet":
+        """Compile the comma-separated settings string
+        (``Settings.non_comic_publishers``)."""
+        return cls.parse(split_rules(raw))
+
+    def __bool__(self) -> bool:
+        return bool(self.exact or self.substrings)
+
+    def matches(self, publisher: str | None) -> bool:
+        """Whether ``publisher`` is ruled non-comic.
+
+        A row with no publisher, or one whose name folds to nothing, can never be
+        ruled out — there is nothing to match against."""
+        if not publisher:
+            return False
+        key = matching_key(publisher)
+        if not key:
+            return False
+        if key in self.exact:
+            return True
+        return any(probe in key for probe in self.substrings)
 
 
-def publisher_is_ruled_out(
-    publisher: str | None, rules: Iterable[str] | None
-) -> bool:
-    """Whether ``publisher`` matches one of the operator's rules (FRG-SRC-012).
+#: The compiled empty rule set — pure format-shape classification.
+NO_PUBLISHER_RULES = PublisherRuleSet(exact=frozenset(), substrings=())
 
-    Matching is on the shared folded key, so casing, punctuation, and article
-    noise never decide it. A row with no publisher can never be ruled out (there
-    is nothing to match), and an empty rule list always answers ``False``."""
-    if publisher is None:
-        return False
-    folded_rules = (
-        rules
-        if isinstance(rules, frozenset)
-        else folded_publisher_rules(rules)
-    )
-    if not folded_rules:
-        return False
-    key = matching_key(publisher)
-    return bool(key) and key in folded_rules
+
+def split_rules(raw: str | None) -> list[str]:
+    """Split the comma-separated rule string into trimmed, non-empty entries."""
+    if not raw:
+        return []
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def _as_rule_set(
+    rules: "PublisherRuleSet | Sequence[str] | None",
+) -> PublisherRuleSet:
+    if isinstance(rules, PublisherRuleSet):
+        return rules
+    return PublisherRuleSet.parse(rules)
 
 
 def classify(
     options: list[DownloadOption],
     *,
     publisher: str | None = None,
-    publisher_rules: Sequence[str] | frozenset[str] | None = None,
+    publisher_rules: "PublisherRuleSet | Sequence[str] | None" = None,
 ) -> str:
     """Classify a subproduct's download options as ``comic`` or ``other``.
 
     See the module docstring for the exact rule (FRG-SRC-003 design decision 4).
 
-    ``publisher`` + ``publisher_rules`` apply the operator's per-source rule
-    list (FRG-SRC-012): a folded-key match forces ``other`` ahead of every
-    format signal. Both default to "no rules", so the pure format-shape
-    classification is unchanged for a source with default settings.
+    ``publisher`` + ``publisher_rules`` apply the library-wide rule list
+    (FRG-SRC-012): a rule match forces ``other`` ahead of every format signal.
+    A raw sequence of entries is compiled on the spot; a sync passes the
+    :class:`PublisherRuleSet` it compiled once for the whole run. Both default to
+    "no rules", so the pure format-shape classification stands untouched.
     """
-    if publisher_is_ruled_out(publisher, publisher_rules):
+    if _as_rule_set(publisher_rules).matches(publisher):
         return "other"
     formats = _ebook_formats(options)
     if not formats:
