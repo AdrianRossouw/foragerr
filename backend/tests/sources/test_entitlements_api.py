@@ -580,6 +580,63 @@ async def test_bulk_accept_endpoint_applies_each_rows_own_proposal(app_client):
     assert (await repo.get_entitlement(app.state.db, bare.id)).review_status == "new"
 
 
+async def _browse_only_series(app) -> int:
+    """A series on a read-only reference root."""
+    from sqlalchemy import select
+
+    async with app.state.db.read_session() as session:
+        fp_id = (
+            await session.execute(
+                select(FormatProfileRow.id).where(
+                    FormatProfileRow.name == DEFAULT_PROFILE_NAME
+                )
+            )
+        ).scalar_one()
+    reference = Path(app.state.settings.config_dir) / "reference-library"
+    reference.mkdir()
+    async with app.state.db.write_session() as session:
+        rf = await library_repo.create_root_folder(
+            session, str(reference), read_only=True
+        )
+        series = await library_repo.create_series(
+            session,
+            cv_volume_id=9101,
+            title="Example Reference Series",
+            format_profile_id=fp_id,
+            root_folder_id=rf.id,
+            path=str(reference / "Example Reference Series"),
+        )
+        return series.id
+
+
+@pytest.mark.req("FRG-SER-022")
+async def test_match_and_bulk_match_answer_the_read_only_409_shape(app_client):
+    """The refusal has to reach the client as the SAME 409 every other read-only
+    surface returns — the UI classifies on the ``read_only`` field, not on
+    message text — through the single action route and the bulk one."""
+    app = app_client.app
+    source_id = await _populate(app)
+    eid = await _first_comic_id(app, source_id)
+    series_id = await _browse_only_series(app)
+
+    single = await app_client.post(
+        f"/api/v1/sources/entitlements/{eid}/match", json={"series_id": series_id}
+    )
+    bulk = await app_client.post(
+        "/api/v1/sources/entitlements/bulk",
+        json={"action": "match", "entitlement_ids": [eid], "series_id": series_id},
+    )
+
+    for resp in (single, bulk):
+        assert resp.status_code == 409
+        body = resp.json()
+        assert set(body) == {"message", "errors"}
+        assert [e["field"] for e in body["errors"]] == ["read_only"]
+    after = await repo.get_entitlement(app.state.db, eid)
+    assert after.review_status == "new"
+    assert after.matched_series_id is None
+
+
 @pytest.mark.req("FRG-SRC-011")
 async def test_bulk_rejects_an_unknown_action_by_name(app_client):
     app = app_client.app
