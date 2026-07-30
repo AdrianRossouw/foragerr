@@ -353,9 +353,9 @@ those branches land. No id is renumbered when they do.
 | FRG-UI-042 | Calendar covers and enrichment detail | ui | implemented | M11 |
 | FRG-UI-043 | Group-header search/match affordance | ui | implemented | M11 |
 | FRG-UI-044 | Force-grab affordance for rejected releases | ui | implemented | M11 |
-| FRG-UI-047 | Status indicators are never shaped like controls | ui | proposed | B |
-| FRG-UI-048 | In-flight feedback for the calendar's monitor toggle | ui | proposed | B |
-| FRG-UI-049 | Responsive application chrome below the compact crossover | ui | proposed | B |
+| FRG-UI-047 | Status indicators are never shaped like controls | ui | approved | B |
+| FRG-UI-048 | In-flight feedback for the calendar's monitor toggle | ui | approved | B |
+| FRG-UI-049 | Responsive application chrome below the compact crossover | ui | approved | B |
 | FRG-SRC-001 | store-source model and connection lifecycle | sources | implemented | M6 |
 | FRG-SRC-002 | Humble session-cookie authentication | sources | implemented | M6 |
 | FRG-SRC-003 | entitlement sync | sources | implemented | M6 |

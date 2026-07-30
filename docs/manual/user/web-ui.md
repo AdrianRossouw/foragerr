@@ -35,8 +35,19 @@ lost password is recovered.
 
 ## The shell
 
-Every screen renders inside a fixed three-part frame — the sidebar never moves,
-and only the content region scrolls:
+Every screen renders inside a three-part frame, and only the content region
+scrolls. On a window 900 pixels wide or wider the frame is fixed: the sidebar is
+a permanent column that never moves. Below 900 pixels — a phone held upright, a
+narrow split-screen window — a fixed column would leave under 200 pixels for the
+page itself, so the sidebar steps aside: it becomes a drawer that slides in from
+the left when you press the **navigation** button that appears at the left of the
+header, and the content region takes the whole window width. Close the drawer by
+pressing Escape, by clicking outside it, or simply by choosing where you want to
+go; keyboard focus moves into the drawer when it opens and back onto the
+navigation button when it closes. Widen the window past 900 pixels and the
+permanent column comes back, with no navigation button.
+
+The three parts:
 
 - **Sidebar** (left): the logo lockup, then the navigation list, then a status
   footer. Only active work is badged on the nav: **Queue** shows the number of
@@ -58,7 +69,8 @@ and only the content region scrolls:
   served from foragerr itself — nothing is fetched from an external CDN, so the UI
   works fully offline on your tailnet.
 - **Global header** (top): the library quick-search on the left (see below) and
-  quick-access buttons to the Health and System screens on the right.
+  quick-access buttons to the Health and System screens on the right — plus, on a
+  window narrower than 900 pixels, the navigation button described above.
 - **Page toolbar** (below the header): each screen's own primary actions and view
   controls.
 
@@ -170,18 +182,45 @@ defaults to **All releases** — the whole week's books, so the calendar reads a
 discovery surface first, with an "N followed" marker on days carrying series you
 already track. Switch to **Following** to narrow to just your library, where a
 "+N more titles shipping" note stands in for everything else; either scope is
-publisher-filterable. Each release card carries a cover thumbnail, loading
-lazily and falling back to the familiar tinted spine when no cover is stored for
-that entry or it fails to load — never a broken image. Opening a card's detail
-view shows whatever the pull source supplied for that release: description,
-creators (with their roles), characters, and UPC, each shown only when present.
+publisher-filterable.
 
-Cards for issues already in your library carry their live state (wanted,
-downloading, downloaded, unmonitored), computed from the issue and queue exactly
-like everywhere else — nothing is stored on the calendar itself — and offer
-want/skip and an immediate search, the same operations the Wanted screen uses.
+**How an entry is presented depends on the window width**, because a week at real
+library scale is a long list and the title is the thing you are scanning for. On a
+window 900 pixels wide or wider each entry is a single dense **agenda row**: a
+small fixed cover thumbnail, then the series title taking all the width that is
+left, then the issue number, publisher, and state, with the entry's buttons
+right-aligned. The title is never shortened with an ellipsis and never clamped to
+a fixed number of lines — a long title wraps onto another line at a space rather
+than losing its end. Below 900 pixels each entry becomes a full-width **card**:
+the title spans the whole card and wraps, and the entry's buttons move to a row of
+icons underneath it so nothing competes with the title for horizontal space. The
+day's date, a column of its own on a wide window, folds into the day's heading on
+a narrow one. Both layouts show the same information and offer exactly the same
+actions — only their placement changes.
+
+Every entry carries a cover thumbnail, loading lazily and falling back to the
+familiar tinted spine when no cover is stored for that entry or it fails to load —
+never a broken image. Opening an entry's detail view shows whatever the pull
+source supplied for that release: description, creators (with their roles),
+characters, and UPC, each shown only when present.
+
+Every entry also shows its state as a small **status label** — *Wanted*,
+*Downloading*, *Downloaded*, *Not tracked*, *Pending refresh*, or *Not in library*
+— computed from the issue and queue exactly like everywhere else; nothing is
+stored on the calendar itself. A status label is a label, not a button: you cannot
+click it, it takes no keyboard focus, and it never borrows the bookmark icon that
+means "monitor this". **The bookmark button appears only on entries that actually
+have one to give**: issues already in your library, which offer want/skip and an
+immediate search, the same operations the Wanted screen uses. When you press the
+bookmark it shows the state you asked for straight away and dims while the change
+is in flight, so a working click never looks dead; pressing it again while it is
+working does nothing, and if the change is refused the bookmark returns to its
+real state and the reason appears above the week rather than the button silently
+snapping back.
+
 Every other entry — anything not linked to an issue in your library, whose
-series you don't already have — carries a one-click **Add** instead. Activating
+series you don't already have — carries a one-click **Add** button instead (a `+`
+icon; hover it for its label). Activating
 it opens the standard Add flow: when the pull source supplied a ComicVine id for
 that release, Add opens with the exact matching volume already resolved and
 preselected — cover, title, year, publisher — ready for your confirmation and
