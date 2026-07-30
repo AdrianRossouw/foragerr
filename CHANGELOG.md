@@ -9,6 +9,20 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.19.1] — 2026-07-30
+
+Testing a saved download client or indexer works without retyping its
+key.
+
+### Fixed
+- The connection Test on a saved download client or indexer no longer
+  fails with "api_key: Field required": the test now merges the stored
+  settings under whatever the form submits, so the persisted secret —
+  which is never sent to the browser — is used for the live probe.
+  A retyped key still wins, nothing is persisted by a test, and the
+  new-provider form's validation is unchanged. (FRG-DL-002,
+  FRG-IDX-003, FRG-API-009)
+
 ## [v0.19.0] — 2026-07-30
 
 Duplicate-aware review, groups that reunite a renamed series in reading
