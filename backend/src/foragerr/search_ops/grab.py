@@ -176,10 +176,21 @@ async def _handle_grab_release(
     grab is never silently dropped. Bad release content raises the typed
     :class:`GrabValidationError`. The download id is the join key the tracking
     loop matches on.
+
+    The read-only acquisition boundary is re-checked HERE (FRG-SER-022), not
+    only at the routes that enqueue a grab: this command carries an explicit
+    release identity, so the generic command transport could otherwise hand a
+    browse-only series' release straight to a download client. Refused before
+    the NZB fetch, before ``client.download()``, and before any history row.
     """
     # Lazily imported so this pinned module keeps its lean import graph and the
     # downloads.resolver -> search_ops.grab dependency never becomes a cycle.
     from sqlalchemy import select
+
+    from foragerr.library.read_only import (
+        refuse_read_only_issues,
+        refuse_read_only_series_in,
+    )
 
     from foragerr.db import utcnow
     from foragerr.downloads import make_download_factory
@@ -188,6 +199,18 @@ async def _handle_grab_release(
     from foragerr.downloads.resolver import protocol_for_grab, resolve_client_for
     from foragerr.importer import history as import_history
     from foragerr.providers.backoff import ProviderBackoff
+
+    # Either identity is enough to refuse: a hand-off built by the engine carries
+    # both, a hand-crafted payload may carry only the issue.
+    if command.series_id is not None:
+        await refuse_read_only_series_in(
+            ctx.db, command.series_id, action="grabbing a release"
+        )
+    elif command.issue_id is not None:
+        async with ctx.db.read_session() as session:
+            await refuse_read_only_issues(
+                session, [command.issue_id], action="grabbing a release"
+            )
 
     factory = make_download_factory(ctx.settings)
     backoff = ProviderBackoff(ctx.db)
