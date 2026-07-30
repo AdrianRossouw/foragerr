@@ -26,7 +26,7 @@ import type {
   PullEntryState,
 } from '../../api/types';
 import { candidateCoverUrl } from '../../api/urls';
-import { publisherAccent, publisherTint } from '../../theme/palettes';
+import { publisherAccent, publisherKey, publisherTint } from '../../theme/palettes';
 import { useCompactViewport } from '../../theme/useCompactViewport';
 import {
   addWeeks,
@@ -55,10 +55,12 @@ import styles from './CalendarScreen.module.css';
  * the pull row itself, spending no ComicVine budget (FRG-UI-042).
  *
  * Entries present in one of two modes selected by the single compact crossover
- * (theme/layout.ts): dense agenda rows at or above it, quiet single-column
- * cards with an icon-only action rail below it. Both modes render the same data
- * and expose the same action SET — nothing is reachable in one and not the
- * other — so the mode is a presentation choice, never a capability boundary.
+ * (theme/layout.ts): shelf rows at or above it — a shelf-scale cover beside a
+ * title, a publisher chip at a fixed x, the principal creators and a clamped
+ * description teaser — and quiet single-column cards with an icon-only action
+ * rail below it. Both modes expose the same action SET, and every field either
+ * surfaces is reachable in both (the row's teaser is the expando's opening
+ * lines), so the mode is a presentation choice, never a capability boundary.
  */
 
 type Scope = 'following' | 'all';
@@ -101,10 +103,49 @@ function rowName(r: PullEntryRecord): string {
   return r.series?.title ?? r.seriesName;
 }
 
-/** A row's issue · publisher subtitle. */
+/** An entry's issue number, or a dash when the feed carried none. */
+function issueLabel(r: PullEntryRecord): string {
+  return r.issueNumber != null ? `#${r.issueNumber}` : '—';
+}
+
+/** A card's issue · publisher subtitle (the quiet-card presentation). */
 function rowSub(r: PullEntryRecord): string {
-  const issue = r.issueNumber != null ? `#${r.issueNumber}` : '—';
-  return `${issue} · ${r.publisher ?? 'Unknown'}`;
+  return `${issueLabel(r)} · ${r.publisher ?? 'Unknown'}`;
+}
+
+/** Creator roles the shelf row surfaces, in the order it prints them. */
+const PRINCIPAL_ROLES: readonly ((role: string) => boolean)[] = [
+  (role) => role.includes('writer'),
+  (role) => role.includes('artist') || role.includes('pencil'),
+];
+
+/** How many names one role contributes before the line is cut. */
+const NAMES_PER_ROLE = 2;
+
+/**
+ * The row's creator line: writers first, then artists/pencillers, at most two
+ * names apiece (FRG-UI-042). The stored roles are ComicVine's free text, so the
+ * match is by substring rather than an enumeration — "Penciller (cover)" is the
+ * same credit as "penciler" for a browse line. Null when the entry stores no
+ * principal credit at all, so the line collapses rather than render empty.
+ */
+function principalCreators(r: PullEntryRecord): string | null {
+  const stored = r.creators ?? [];
+  const names: string[] = [];
+  const seen = new Set<string>();
+  for (const matches of PRINCIPAL_ROLES) {
+    let taken = 0;
+    for (const credit of stored) {
+      if (taken === NAMES_PER_ROLE) break;
+      if (!matches((credit.role ?? '').toLowerCase())) continue;
+      taken += 1;
+      // One person credited as both writer and artist is one name on the line.
+      if (seen.has(credit.name)) continue;
+      seen.add(credit.name);
+      names.push(credit.name);
+    }
+  }
+  return names.length > 0 ? names.join(' · ') : null;
 }
 
 /**
@@ -130,10 +171,12 @@ const UNLINKED_PRESENTATION: { label: string; tone: ChipTone } = {
 };
 
 /**
- * The class each shared entry part takes in each mode. Held as one bundle per
- * mode so a part cannot be styled as a row in one place and a card in another:
- * every mode-dependent class an entry uses is named here, and the modes must
- * carry the same keys.
+ * The class each part an entry renders in BOTH modes takes in each of them.
+ * Held as one bundle per mode so such a part cannot be styled as a row in one
+ * place and a card in another: the modes must carry the same keys. Parts one
+ * mode renders and the other does not (the shelf row's meta cluster, the
+ * card's meta line) are named where they are built instead — putting them here
+ * would claim a correspondence that does not exist.
  */
 const ENTRY_CLASSES: Record<
   EntryMode,
@@ -142,16 +185,14 @@ const ENTRY_CLASSES: Record<
     actions: string;
     titleWrap: string;
     titleText: string;
-    meta: string;
     thumb: string;
   }
 > = {
   row: {
     root: styles.row,
-    actions: styles.rowActions,
+    actions: styles.rowRail,
     titleWrap: styles.rowTitle,
     titleText: styles.rowTitleText,
-    meta: styles.rowMeta,
     thumb: styles.thumbRow,
   },
   card: {
@@ -159,7 +200,6 @@ const ENTRY_CLASSES: Record<
     actions: styles.cardRail,
     titleWrap: styles.cardTitle,
     titleText: styles.cardTitleText,
-    meta: styles.cardMeta,
     thumb: styles.thumbCard,
   },
 };
@@ -207,6 +247,32 @@ function StatusChip({
   );
 }
 
+/**
+ * The publisher, as a swatch + normalized name (FRG-UI-042). It leads the row's
+ * meta cluster, so it sits at the same x on every row regardless of how long
+ * the title above it runs — the whole point of moving it off the title line.
+ * The swatch is a styled `<span>`, never an `<svg>`: on this surface a glyph
+ * inside an entry belongs to a control (FRG-UI-047).
+ */
+function PublisherChip({
+  publisher,
+  testId,
+}: {
+  publisher: string | null;
+  testId: string;
+}) {
+  return (
+    <Chip tone="neutral" className={styles.pubChip} testId={testId}>
+      <span
+        className={styles.pubSwatch}
+        style={{ backgroundColor: publisherAccent(publisher) }}
+        aria-hidden
+      />
+      {publisherKey(publisher) ?? 'Unknown publisher'}
+    </Chip>
+  );
+}
+
 /** The card's cover spine style — publisher tint + accent edge (palettes.ts). */
 function spineStyle(r: PullEntryRecord): CSSProperties {
   return {
@@ -230,7 +296,7 @@ const CardCover = memo(function CardCover({
 }: {
   r: PullEntryRecord;
   name: string;
-  /** Agenda rows carry a smaller fixed thumbnail than cards, for row density. */
+  /** Shelf rows carry the browsing-scale cover; quiet cards a small thumbnail. */
   mode: EntryMode;
 }) {
   const [failed, setFailed] = useState(false);
@@ -629,8 +695,16 @@ export function CalendarScreen() {
       .filter(Boolean)
       .join(' ');
 
+    const statusChip = (
+      <StatusChip state={r.state} testId={`calendar-state-${cardKey}`} />
+    );
+
     const actions = (
       <div className={modeClass.actions}>
+        {/* On a shelf row the state travels with the actions on the right rail
+            (FRG-UI-018); the quiet card keeps it in the meta block, where the
+            rail is icon-only by its own requirement. */}
+        {mode === 'row' && statusChip}
         {canAdd && (
           <button
             type="button"
@@ -703,29 +777,68 @@ export function CalendarScreen() {
       </div>
     );
 
+    const debutBadge = isDebut && (
+      <span
+        className={styles.badgeNew}
+        data-testid={`calendar-new-badge-${cardKey}`}
+      >
+        New
+      </span>
+    );
+
     const title = (
       <div className={modeClass.titleWrap}>
         <span className={modeClass.titleText}>{name}</span>
-        {isDebut && (
-          <span
-            className={styles.badgeNew}
-            data-testid={`calendar-new-badge-${cardKey}`}
-          >
-            New
-          </span>
+        {mode === 'row' && (
+          <span className={styles.rowIssue}>{issueLabel(r)}</span>
         )}
+        {debutBadge}
       </div>
     );
 
     // The not-yet-released marking is a property of the DAY, not the entry (a
     // store date is in the future for every entry in that group), so it is
     // stated once in the day header. Repeating it per entry would put a ~110px
-    // nowrap token in the row's meta track, and the title's measure is what
+    // nowrap token in the row's meta cluster, and the title's measure is what
     // pays for it (FRG-UI-018).
-    const meta = (
-      <div className={modeClass.meta}>
+    const cardMeta = (
+      <div className={styles.cardMeta}>
         <span className={styles.metaText}>{rowSub(r)}</span>
-        <StatusChip state={r.state} testId={`calendar-state-${cardKey}`} />
+        {statusChip}
+      </div>
+    );
+
+    const creatorLine = principalCreators(r);
+    const deck = r.description ? stripHtml(r.description) : '';
+
+    /**
+     * The shelf row's content block (FRG-UI-018): title line, then the meta
+     * cluster the publisher chip leads, then the description teaser. Absent
+     * enrichment collapses — a pre-enrichment week stores nulls, and an empty
+     * placeholder would cost the same vertical rhythm as the real thing.
+     */
+    const shelfBody = (
+      <div className={styles.rowBody}>
+        {title}
+        <div className={styles.rowMeta}>
+          <PublisherChip
+            publisher={r.publisher}
+            testId={`calendar-publisher-${cardKey}`}
+          />
+          {creatorLine !== null && (
+            <span
+              className={styles.rowCreators}
+              data-testid={`calendar-creators-${cardKey}`}
+            >
+              {creatorLine}
+            </span>
+          )}
+        </div>
+        {deck && (
+          <p className={styles.rowDeck} data-testid={`calendar-deck-${cardKey}`}>
+            {deck}
+          </p>
+        )}
       </div>
     );
 
@@ -750,8 +863,7 @@ export function CalendarScreen() {
         {mode === 'row' ? (
           <div className={styles.rowFace}>
             {cover}
-            {title}
-            {meta}
+            {shelfBody}
             {actions}
           </div>
         ) : (
@@ -760,7 +872,7 @@ export function CalendarScreen() {
               {cover}
               <div className={styles.cardBody}>
                 {title}
-                {meta}
+                {cardMeta}
               </div>
             </div>
             {actions}

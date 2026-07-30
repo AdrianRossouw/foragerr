@@ -365,13 +365,12 @@
   white-space: nowrap;
 }
 
-/* --- Agenda rows: the wide presentation (FRG-UI-018) --- */
+/* --- Shelf rows: the wide presentation (FRG-UI-018) --- */
 /*
- * Density is the requirement, not a preference: a single-issue drop day runs to
- * dozens of entries, so a row is a ~29px band separated by a hairline rather
- * than a gapped card — FRG-UI-018 caps a single-line entry at 36 CSS px of
- * vertical rhythm. Every dimension below is load-bearing for that: the
- * thumbnail is the row's tallest element, so it caps how dense the band can be.
+ * The calendar is a discovery surface, so the browsing material — cover art and
+ * on-row metadata — outranks row count: a shelf row is sized by its cover and
+ * capped at ~110 CSS px of vertical rhythm for a single-line title. The cover is
+ * the row's tallest element, so it is what sets that rhythm.
  */
 .rows {
   display: flex;
@@ -395,34 +394,43 @@
 }
 
 /*
- * The title is the ONLY flexible column: the thumbnail and the action cluster
- * are fixed, so every pixel the row does not spend elsewhere goes to the title's
+ * The content block is the ONLY flexible column: the cover and the rail are
+ * fixed, so every pixel the row does not spend elsewhere goes to the title's
  * measure. An action must never be given `1fr` here — that is how the shipped
  * card grid starved the title.
  *
- * The title's track carries a DEFINITE minimum, because a meta track that sizes
- * to its own content is not bounded by anything: a long publisher name plus a
- * state chip is wider than the title at the crossover, and the flexible track is
- * the one grid sacrifices. 25ch of digit width measures ~31 characters of
- * mixed-case text at the body size, clearing FRG-UI-018's ~30-character floor;
- * the meta track
- * shrinks below its content instead, and its issue · publisher text ellipsises.
- * `min()` keeps the minimum from ever exceeding the row, so a narrower container
- * cannot overflow.
+ * That track carries a DEFINITE minimum rather than taking what is left over.
+ * 25ch of digit width measures ~31 characters of mixed-case text at the body
+ * size, clearing FRG-UI-018's ~30-character floor; the meta and description
+ * lines inside the block are the parts that yield to it (they clamp and
+ * ellipsise, the title never does). `min()` keeps the minimum from ever
+ * exceeding the row, so a narrower container cannot overflow.
+ *
+ * Vertical: the cover is 99px and the padding 5px a side, so a row is ~109px —
+ * FRG-UI-018's ~110px ceiling. `align-items: start` keeps a wrapped two-line
+ * title from re-centering the cover.
  */
 .rowFace {
   display: grid;
-  grid-template-columns: auto minmax(min(25ch, 100%), 1fr) minmax(0, auto) auto;
-  align-items: center;
+  grid-template-columns: auto minmax(min(25ch, 100%), 1fr) auto;
+  align-items: start;
   gap: var(--spacing-sm);
-  min-height: 28px;
-  padding: 2px var(--spacing-xs) 2px 2px;
+  padding: 5px var(--spacing-xs) 5px 2px;
+}
+
+/* The three stacked lines: title, meta cluster, description teaser. */
+.rowBody {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
 }
 
 .rowTitle {
   display: flex;
   align-items: baseline;
   gap: var(--spacing-xs);
+  flex-wrap: wrap;
   min-width: 0;
   font-size: var(--font-size-base);
   font-weight: var(--font-weight-medium);
@@ -440,28 +448,78 @@
   overflow-wrap: break-word;
 }
 
-/* Shrinkable: `min-width: 0` is what lets the meta go below its own content
- * width so the title's minimum is reachable at the crossover. The state chip
- * keeps its size — it is the entry's state — and the issue · publisher text is
- * the part that yields. */
+.rowIssue {
+  flex: none;
+  font-size: var(--font-size-sm);
+  font-weight: normal;
+  color: var(--text-secondary);
+}
+
+/*
+ * The meta cluster, led by the publisher chip. The chip is `flex: none` and
+ * FIRST, so it starts at the content block's left edge on every row: the
+ * publisher sits at one x-position down the whole day, which is the point of
+ * moving it off the variable-length title line (FRG-UI-018). The creator line
+ * is what yields when the row is narrow.
+ */
 .rowMeta {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: var(--spacing-xs);
+  gap: var(--spacing-sm);
   min-width: 0;
-  overflow: hidden;
   font-size: var(--font-size-sm);
   color: var(--text-secondary);
 }
 
-.rowMeta .metaText {
-  flex: 1 1 auto;
+/* Swatch + name, sized down from the default chip so the meta line stays one
+ * line at the crossover. */
+.pubChip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+/* A `<span>`, never a glyph: on this surface an icon inside an entry denotes a
+ * control (FRG-UI-047). The publisher's accent is applied inline from the
+ * palette data map, like the cover spine's. */
+.pubSwatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex: none;
+}
+
+.rowCreators {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
 }
 
-.rowActions {
+/* The browse teaser, not the reading surface: the full description stays on the
+ * detail expando, so two lines is a deliberate cut rather than a size guess —
+ * and the clamp is what holds the row inside its ~110px rhythm when the backend
+ * serves a maximal (4000-char) description. Same idiom as `.detailDeck`. */
+.rowDeck {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
+  color: var(--text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* State + actions, right-aligned. The row face aligns its tracks to the start,
+ * so the rail sits level with the title line however far the content block
+ * runs — the actions do not drift down a taller row. */
+.rowRail {
   display: inline-flex;
   align-items: center;
   gap: var(--spacing-xs);
@@ -548,8 +606,11 @@
 }
 
 /* --- Shared entry chrome --- */
-/* Unmatched entries read one step quieter than followed ones. */
-.entryUnlinked .metaText {
+/* Unmatched entries read one step quieter than followed ones — on the row's
+ * issue number and the card's subtitle, the element each mode uses to carry it.
+ * The title stays at full strength in both: it is what the week is browsed by. */
+.entryUnlinked .metaText,
+.entryUnlinked .rowIssue {
   color: var(--text-muted);
 }
 
@@ -591,13 +652,13 @@
   object-fit: cover;
 }
 
-/* A row's thumbnail is the band's tallest element, so it sets the density
- * ceiling: at 24px tall it is the same height as the row's controls, which is
- * the floor a 24px minimum target imposes anyway. The card has the vertical room
- * for the larger cover. */
+/* The shelf cover: the row's tallest element, so it is what sets the ~110px
+ * rhythm FRG-UI-018 caps an entry at (99px + 5px padding a side). 2:3 is the
+ * standing comic cover ratio, so a stored cover fills the box without cropping
+ * either dimension. */
 .thumbRow {
-  width: 16px;
-  height: 24px;
+  width: 66px;
+  height: 99px;
 }
 
 .thumbCard {

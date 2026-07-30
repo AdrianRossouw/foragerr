@@ -92,26 +92,49 @@ describe('FRG-UI-018: entry titles keep their measure', () => {
     });
   }
 
-  it('FRG-UI-018 — the agenda row gives its remaining width to the title and floors its measure', () => {
+  it('FRG-UI-018 — the shelf row gives its remaining width to the content block and floors the title measure', () => {
     const body = ruleBody(calendarCss, '.rowFace');
     expect(body).not.toBeNull();
-    // Thumbnail, title, meta, actions: only the title's column is flexible, and
-    // its minimum is DEFINITE — a meta track that sizes to its own content is
-    // otherwise unbounded, and the flexible track is the one grid sacrifices.
+    // Cover, content block, rail: only the content column is flexible, and its
+    // minimum is DEFINITE — a track that sizes to its own content is otherwise
+    // unbounded, and the flexible track is the one grid sacrifices.
     expect(body).toMatch(
-      /grid-template-columns:\s*auto minmax\(min\(25ch, 100%\), 1fr\) minmax\(0, auto\) auto/,
+      /grid-template-columns:\s*auto minmax\(min\(25ch, 100%\), 1fr\) auto/,
     );
+    // No fourth track: the meta moved INSIDE the content block, so nothing
+    // competes with the title for the row's horizontal space any more.
+    expect(body).not.toMatch(/1fr\)\s*minmax/);
   });
 
-  it('FRG-UI-018 — the row meta can shrink below its own content so the title floor is reachable', () => {
-    // Without `min-width: 0` the meta track never goes under its min-content
-    // width, and a long publisher plus a state chip is wider than the title.
-    const meta = ruleBody(calendarCss, '.rowMeta');
-    expect(meta).not.toBeNull();
-    expect(meta).toMatch(/min-width:\s*0/);
-    expect(calendarCss).toMatch(
-      /\.rowMeta \.metaText\s*\{[^}]*text-overflow:\s*ellipsis/,
+  it('FRG-UI-018 — the row meta and description yield to the title floor rather than the reverse', () => {
+    // Without `min-width: 0` neither the content block nor its meta line goes
+    // under its own min-content width, and the title's definite minimum then
+    // overflows the row instead of being honoured.
+    for (const selector of ['.rowBody', '.rowMeta']) {
+      const body = ruleBody(calendarCss, selector);
+      expect(body).not.toBeNull();
+      expect(body).toMatch(/min-width:\s*0/);
+    }
+    // The creator line ellipsises and the description clamps; the title above
+    // them does neither (asserted per-selector above).
+    expect(ruleBody(calendarCss, '.rowCreators')).toMatch(
+      /text-overflow:\s*ellipsis/,
     );
+    expect(ruleBody(calendarCss, '.rowDeck')).toMatch(/line-clamp:\s*2/);
+  });
+
+  it('FRG-UI-018 — the shelf cover sets the row rhythm at approximately 110px', () => {
+    // The cover is the row's tallest element, so its height plus the row face's
+    // vertical padding IS the entry's vertical rhythm — the ~110px ceiling a
+    // single-line title must stay under.
+    const cover = ruleBody(calendarCss, '.thumbRow');
+    expect(cover).not.toBeNull();
+    expect(cover).toMatch(/width:\s*66px/);
+    expect(cover).toMatch(/height:\s*99px/);
+    const face = ruleBody(calendarCss, '.rowFace') as string;
+    const padding = /padding:\s*(\d+)px/.exec(face);
+    expect(padding).not.toBeNull();
+    expect(99 + 2 * Number(padding![1])).toBeLessThanOrEqual(110);
   });
 
   it('FRG-UI-047 — the future-dated treatment dims artwork only, never the text that carries state', () => {
