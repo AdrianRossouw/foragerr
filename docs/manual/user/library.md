@@ -169,6 +169,9 @@ A read-only root is for reading and serving, not managing:
   reconcile — the files are already indexed at their real paths). The
   delete-files option (removing a series or issue and its files from disk) is
   refused with a clear reason instead of silently doing nothing.
+- The recycle bin and duplicate-dump folder may not sit inside a read-only
+  root either: files are *moved into* them and retention pruning *deletes*
+  from them. See `import.md` §Upgrades, deletions, and the recycle bin.
 - Removing a read-only series or issue **without** deleting files — the
   ordinary "remove from foragerr, leave the files alone" action — still
   works, because it never touches the root; only the file-deleting variant is

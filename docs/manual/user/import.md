@@ -76,6 +76,19 @@ preserved — files already in quarantine are swept into the bin, and nothing is
 deleted by the upgrade. Fresh installs start with no bin (permanent delete)
 until you set one in Settings → Media Management.
 
+**Neither the recycle bin nor the duplicate-dump folder may sit inside a
+read-only reference library** (see `library.md` §Read-only / reference
+libraries). Files are *moved into* those directories and retention pruning
+*deletes* from them, so a bin pointed inside a read-only root would write to
+the very collection the read-only flag protects. Settings → Media Management
+rejects such a path when you save it, and any delete or upgrade that would use
+it is refused with a message naming the setting to fix — including when the
+directory was configured before the root was registered read-only, or supplied
+through `FORAGERR_RECYCLE_BIN_PATH` / the config file rather than the UI. A
+misconfigured disposal directory also shows up as a health warning, so you see
+it before a delete is refused. Point the setting outside every read-only root
+and deletes resume; nothing is lost in the meantime.
+
 ### Renaming existing files
 
 Changing the naming template does not touch files by itself. Use the **rename

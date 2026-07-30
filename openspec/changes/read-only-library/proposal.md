@@ -86,7 +86,10 @@ None — extensions of the existing library/import/OPDS areas.
   unsupported — a gate review caught this as a direct contradiction the
   original manual-impact declaration missed); `docs/manual/user/web-ui.md`
   (Media Management's read-only checkbox/badge, Add Series inline
-  registration wording).
+  registration wording); `docs/manual/user/import.md` §Upgrades,
+  deletions, and the recycle bin plus the two disposal rows in
+  `configuration.md` (a recycle bin / duplicate dump inside a read-only
+  root is rejected on save and refused at use, and reported in health).
 
 ## Non-goals
 

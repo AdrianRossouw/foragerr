@@ -66,8 +66,15 @@ per-endpoint.
       `run_grab()` for source-entitlement acquisition before fetch/handoff
 - [ ] 5.6 Refuse manual-import and `rescan-series` `path_override`
       candidates whose *resolved source path* lies under a read-only
-      root in move mode, independent of the destination series' root;
-      confine `path_override` under the series' own root
+      root in move mode, independent of the destination series' root.
+      The read-only direction ONLY: `path_override` is deliberately not
+      confined to the series' own root, because general FRG-SEC-004
+      confinement would renegotiate FRG-SER-010 (whose scenario passes an
+      override wholly outside every registered root, asserted in
+      `backend/tests/library/test_rescan.py`). `path_override` therefore
+      remains an authenticated arbitrary-directory walk-and-move
+      primitive for any directory outside a read-only root; that residual
+      is recorded on RISK-019, not closed here
 - [ ] 5.7 Registry-level test: every command in `IMPORT_FILE_MUTATION_GROUP`
       consults the read-only guard, so a future mutating command added
       without it fails the test rather than shipping a silent gap
@@ -79,8 +86,12 @@ per-endpoint.
 - [ ] 5.9 Unify `ReadOnlyRootError` into `ReadOnlySeriesError` and register
       the merged type with the 409 handler
 - [ ] 5.10 Reject `recycle_bin_path` / `duplicate_dump_path` resolving
-      under a read-only root; case-fold the root-overlap comparison so a
-      case-insensitive filesystem cannot register the same physical
-      directory both read-only and writable
+      under a read-only root — at submission (field-precise 400) AND at
+      every point of consumption, since the submission check is bypassed
+      by configuring the directory before the root is flagged read-only
+      and by the env / `config.json` route; report a misconfigured
+      disposal directory on the health surface. Case-fold the
+      root-overlap comparison so a case-insensitive filesystem cannot
+      register the same physical directory both read-only and writable
 - [ ] 5.11 Tests for every item above; re-run the full gate (8 angles +
       Codex) before merge
