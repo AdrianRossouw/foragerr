@@ -299,6 +299,13 @@ export function CalendarScreen() {
     }
   });
 
+  // Want/skip and search both write through the canonical issue operations, so
+  // either can be refused (a read-only series' issue answers 409). Report the
+  // refusal in one alert region: a silently-rejected toggle is indistinguishable
+  // from a bookmark that simply did not stick.
+  const actionError =
+    toggle.error?.message ?? runCommand.error?.message ?? null;
+
   const todayKey = useMemo(() => {
     // "Today" is the viewer's LOCAL calendar day (read local y/m/d), so the
     // Today badge lands on the right row for users far from UTC near a day
@@ -645,6 +652,16 @@ export function CalendarScreen() {
               showing your library&rsquo;s own data only.
             </span>
           </div>
+        )}
+
+        {actionError && (
+          <p
+            className={styles.actionError}
+            role="alert"
+            data-testid="calendar-action-error"
+          >
+            {actionError}
+          </p>
         )}
 
         {isLoading && <p className={styles.stateMsg}>Loading this week&rsquo;s releases…</p>}

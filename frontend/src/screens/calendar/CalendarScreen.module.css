@@ -113,6 +113,13 @@
   flex: none;
 }
 
+/* --- Refused want/skip or search (FRG-UI-045) --- */
+.actionError {
+  margin: 0 0 var(--spacing-md);
+  color: var(--color-danger-text);
+  font-size: var(--font-size-sm);
+}
+
 /* --- Reality banner --- */
 .banner {
   display: flex;
