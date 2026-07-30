@@ -11,6 +11,71 @@
   overflow: hidden;
 }
 
+/*
+ * Compact frame (FRG-UI-049). There is no width media query anywhere in the
+ * stylesheet: the crossover is a single value in theme/layout.ts, and the shell
+ * stamps `data-compact` from it so this file and the Calendar's cannot drift
+ * apart. Below the crossover the sidebar holds no column — a fixed 212px leaves
+ * a phone-width viewport under 200px of content region — so the grid collapses
+ * to one column and the nav moves into an off-canvas drawer.
+ */
+.shell[data-compact='true'] {
+  grid-template-columns: 1fr;
+}
+
+.navBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: rgba(0, 0, 0, 0.5);
+  animation: navFade 120ms ease-out;
+}
+
+.navDrawer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  z-index: 100;
+  width: var(--layout-sidebar-width);
+  max-width: 86vw;
+  display: flex;
+  box-shadow: var(--shadow-overlay);
+  animation: navSlideIn 160ms ease-out;
+}
+
+.navDrawer > * {
+  flex: 1;
+  min-width: 0;
+}
+
+@keyframes navSlideIn {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes navFade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* An operator who has asked for less motion gets the drawer's end state
+ * immediately rather than a slide. */
+@media (prefers-reduced-motion: reduce) {
+  .navDrawer,
+  .navBackdrop {
+    animation: none;
+  }
+}
+
 /* Skip link: visually hidden until it receives keyboard focus, at which point it
  * appears top-left as the first focusable element and jumps to the outlet region
  * (standard a11y bypass-blocks pattern). */
@@ -251,12 +316,16 @@
   gap: var(--spacing-xs);
 }
 
+/* 34px already clears the WCAG 2.5.8 24x24 floor; the minimum is stated anyway
+ * so a later size change cannot silently drop under it (FRG-UI-047). */
 .iconButton {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 34px;
   height: 34px;
+  min-width: var(--layout-touch-target-min);
+  min-height: var(--layout-touch-target-min);
   border: none;
   border-radius: var(--radius-md);
   background: transparent;
@@ -268,6 +337,11 @@
 .iconButton:hover {
   background: var(--surface-hover);
   color: var(--text-primary);
+}
+
+.iconButton:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
 }
 
 /* A store-session expiry tints + slow-pulses the header health icon amber. */
@@ -309,6 +383,33 @@
   padding: 0 var(--spacing-md);
   background: var(--surface-chrome);
   border-bottom: 1px solid var(--surface-border);
+  flex: none;
+}
+
+/* A screen's toolbar controls cannot all fit one narrow line, and a fixed height
+ * would clip them rather than let them wrap. */
+.shell[data-compact='true'] .toolbar {
+  height: auto;
+  min-height: var(--layout-toolbar-height);
+  padding: var(--spacing-sm) var(--spacing-md);
+  flex-wrap: wrap;
+}
+
+.shell[data-compact='true'] .header {
+  padding: 0 var(--spacing-md);
+}
+
+/* The quick-search cannot claim a fixed 320px of a phone-width header beside the
+ * nav toggle and the three action buttons. */
+.shell[data-compact='true'] .headerSearch {
+  width: auto;
+  flex: 1;
+  min-width: 0;
+  max-width: none;
+}
+
+/* The search already absorbs the slack, so the spacer must not compete for it. */
+.shell[data-compact='true'] .headerSpacer {
   flex: none;
 }
 
