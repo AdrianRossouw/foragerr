@@ -161,6 +161,15 @@ def _derive_issue_state(
     has_file: bool,
     tracked_state: str | None,
 ) -> str:
+    """The projected state for a matched issue.
+
+    ``STATE_UNMONITORED`` has exactly ONE cause here — a monitored flag that is
+    off — and the Calendar reads that cause back out of the value: an issue it
+    just switched ON that settles unmonitored can only be answering to its
+    series' flag, which is how it tells the operator why the toggle did not
+    take (FRG-UI-048). A second route to this state must therefore carry its own
+    distinguishable signal rather than reuse this one.
+    """
     if not (series_monitored and issue_monitored):
         return STATE_UNMONITORED
     if has_file:

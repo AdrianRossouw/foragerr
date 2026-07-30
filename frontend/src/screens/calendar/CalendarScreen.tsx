@@ -165,6 +165,28 @@ const ENTRY_CLASSES: Record<
 };
 
 /**
+ * Why a monitor-on that the backend accepted left the entry untracked, or null
+ * when it did take (FRG-UI-048). A 200 does not mean the entry changed: the
+ * projected state answers to the SERIES' monitored flag as well as the issue's.
+ *
+ * This reads a CAUSE out of an effect, which holds only while the projection has
+ * exactly one route to `unmonitored` — the backend's `_derive_issue_state`
+ * (backend/src/foragerr/pull/projection.py) returns it for a monitored flag that
+ * is off and for nothing else. A second route would have to carry its own
+ * signal; inferring from this state would then misattribute it.
+ */
+function monitorRefusalReason(
+  requested: boolean,
+  settledState: PullEntryState | null | undefined,
+): string | null {
+  if (!requested || settledState !== 'unmonitored') return null;
+  return (
+    'The change was saved, but this issue stays untracked because its series ' +
+    'is not monitored. Monitor the series to start tracking its issues.'
+  );
+}
+
+/**
  * The entry's state as a status indicator (FRG-UI-047): a plain chip `<span>` —
  * no button role, no `aria-pressed`, not focusable, no pointer cursor and no
  * control hover treatment — whose meaning is the text inside it, so assistive
@@ -416,21 +438,14 @@ export function CalendarScreen() {
       // that supersedes it has landed (FRG-UI-048): clearing it any earlier
       // shows the pre-toggle state again for the length of a refetch.
       await queryClient.invalidateQueries({ queryKey: queryKeys.pull.all() });
-      // A 200 does not mean the entry changed: the projected state answers to the
-      // SERIES' monitored flag as well as the issue's, so storing the issue flag
-      // on an issue whose series is unmonitored leaves the entry exactly as it
-      // was. Without this the bookmark simply snaps back — indistinguishable
-      // from a click that did nothing, which FRG-UI-048 forbids.
+      // Read from the re-projection, not from the response: without this the
+      // bookmark simply snaps back — indistinguishable from a click that did
+      // nothing, which FRG-UI-048 forbids.
       const settledState = (
         queryClient.getQueryData<PullEntryRecord[]>(queryKeys.pull.week(week)) ?? []
       ).find((r) => r.matchedIssueId === issueId)?.state;
-      if (monitored && settledState === 'unmonitored') {
-        setMonitorError(
-          'The change was saved, but this issue stays untracked because its ' +
-            'series is not monitored. Monitor the series to start tracking its ' +
-            'issues.',
-        );
-      }
+      const refusal = monitorRefusalReason(monitored, settledState);
+      if (refusal !== null) setMonitorError(refusal);
     } catch (error) {
       setMonitorError(error instanceof Error ? error.message : String(error));
     } finally {
