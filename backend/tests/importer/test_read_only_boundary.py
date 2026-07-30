@@ -212,3 +212,82 @@ async def test_an_in_place_registration_never_rewrites_the_archive(
     assert _stat(original) == before  # not one byte rewritten
     with zipfile.ZipFile(original) as zf:
         assert "ComicInfo.xml" not in zf.namelist()
+
+
+@pytest.mark.req("FRG-SER-021")
+@pytest.mark.req("FRG-PP-014")
+async def test_a_disposal_into_a_reference_library_is_refused_before_placement(
+    db, seed, import_ctx, tmp_path
+):
+    """The DESTINATION-of-disposal direction: the target series is on the
+    ordinary writable root and the candidate is a fresh download, so both
+    directions the placement boundary checks answer "writable" — but the
+    configured dump/bin sits inside a reference library, and the replaced file
+    would be moved in there. Refused before ``place_file`` moves a byte, because
+    one of the three disposal sites runs after placement.
+
+    Both settings are aimed inside the reference library so the duplicate branch
+    and the recycle branch are covered by one run each."""
+    from importer.conftest import _add_issue  # noqa: PLC2701 - shared seeding
+
+    s = await seed()
+    reference = tmp_path / "reference-library"
+    reference.mkdir()
+    await _add_read_only_root(db, reference)
+
+    for setting, issue_number, cv_issue_id in (
+        ("duplicate_dump_path", "404", None),
+        ("recycle_bin_path", "405", 9101),
+    ):
+        issue_id = s.issue_id
+        if cv_issue_id is not None:
+            issue_id = await _add_issue(
+                db, s.series_id, cv_issue_id=cv_issue_id, issue_number=issue_number
+            )
+        existing = s.series_path / f"Example Series {issue_number} old.cbz"
+        make_cbz(existing, images=1)
+        async with db.write_session() as session:
+            from foragerr.library import repo
+
+            await repo.add_issue_file(
+                session,
+                issue_id=issue_id,
+                path=str(existing),
+                size=existing.stat().st_size,
+            )
+        dl_dir = tmp_path / f"download-{setting}"
+        staged = dl_dir / f"Example Series {issue_number} (1987).cbz"
+        make_cbz(staged, images=5)
+        async with db.write_session() as session:
+            session.add(
+                GrabHistoryRow(
+                    download_id=f"dl-{setting}",
+                    series_id=s.series_id,
+                    issue_id=issue_id,
+                    title=f"Example Series {issue_number} (1987)",
+                    protocol="usenet",
+                    source="indexer",
+                    created_at=dt.datetime(2026, 7, 5),
+                )
+            )
+        ctx = import_ctx(**{setting: str(reference / "disposal")})
+        before = _stat(existing)
+        reference_before = sorted(p.name for p in reference.rglob("*"))
+
+        async with db.write_session() as session:
+            outcomes = [
+                await import_candidate(session, candidate, ctx)
+                for candidate in await gather(
+                    CompletedDownloadSource(
+                        download_id=f"dl-{setting}", output_path=str(dl_dir)
+                    ),
+                    session,
+                    ctx,
+                )
+            ]
+
+        assert [o.status for o in outcomes] == [ImportStatus.BLOCKED], setting
+        assert any(setting in reason for reason in outcomes[0].reasons), setting
+        assert _stat(existing) == before  # the replaced file was never moved
+        assert staged.exists()  # ...and the incoming file was never placed
+        assert sorted(p.name for p in reference.rglob("*")) == reference_before

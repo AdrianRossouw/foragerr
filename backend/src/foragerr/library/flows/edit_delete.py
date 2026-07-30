@@ -37,6 +37,7 @@ from foragerr.library.models import (
 from foragerr.library.paths import PathNotUnderRootError, validate_under_root
 from foragerr.library.read_only import (
     ReadOnlySeriesError,
+    refuse_read_only_disposal,
     refuse_read_only_series,
     series_is_read_only,
 )
@@ -465,6 +466,13 @@ async def _delete_series_and_files(
         await refuse_read_only_series(
             session, series_id, action="deleting library files"
         )
+        # ...and the other direction: a MANAGED series' files must not be
+        # recycled INTO a reference library either, which the series-keyed guard
+        # above cannot see (the series is writable; the destination is not).
+        if settings is not None:
+            await refuse_read_only_disposal(
+                session, settings.recycle_bin_path, setting="recycle_bin_path"
+            )
         result = await session.execute(
             select(IssueFileRow)
             .join(IssueRow, IssueRow.id == IssueFileRow.issue_id)
@@ -671,6 +679,12 @@ async def delete_issue_file(
             # under a read-only reference root is never recycled or unlinked.
             await refuse_read_only_series(
                 session, series_id, action="deleting a library file"
+            )
+        if settings is not None:
+            # The destination direction: a managed file is never recycled into a
+            # reference library (see ``_delete_series_and_files``).
+            await refuse_read_only_disposal(
+                session, settings.recycle_bin_path, setting="recycle_bin_path"
             )
 
     file_present = os.path.exists(path)

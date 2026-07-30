@@ -2,8 +2,9 @@
 
 One exception type and one guard, shared by every entry point that would write
 under a read-only root or acquire into a series that lives on one — the API
-routes, the library flows, the command handlers behind them, and the import
-pipeline's placement step. Keeping the policy here (rather than restating it per
+routes, the library flows, the command handlers behind them, the import
+pipeline's placement step, and the disposal directories every replaced or
+deleted file is moved into. Keeping the policy here (rather than restating it per
 endpoint) means a new write or acquire surface fails closed by calling one
 function, and the API translates the refusal in exactly one place.
 
@@ -45,6 +46,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 __all__ = [
     "ReadOnlySeriesError",
     "path_is_read_only",
+    "refuse_read_only_disposal",
     "refuse_read_only_issues",
     "refuse_read_only_path",
     "refuse_read_only_series",
@@ -144,6 +146,39 @@ async def refuse_read_only_path(
         raise ReadOnlySeriesError(
             f"{os.fspath(path)} is inside a read-only reference library "
             f"(browse and serve only); {action} is not available for it"
+        )
+
+
+async def refuse_read_only_disposal(
+    session: AsyncSession, path: str | os.PathLike[str], *, setting: str
+) -> None:
+    """Refuse disposal into ``path`` when it lies under a read-only root.
+
+    The disposal directories (``recycle_bin_path``, ``duplicate_dump_path``) are
+    written to and DELETED from, so one aimed inside a reference library turns
+    every recycle/dump into a write there and hands the retention prune an
+    ``rmtree`` inside it — for a series that is not itself read-only, which is
+    why the series-keyed and path-keyed guards above cannot see it.
+
+    Checked at the point of CONSUMPTION rather than only when the value is
+    submitted, because two routes reach a disposal without passing the config
+    resource's validation: registering a read-only root AFTER the directory was
+    configured, and supplying it through the environment / ``config.json``
+    instead of the API. The refusal names the SETTING, not the operation, since
+    the operation is innocent and the configuration is what must change.
+
+    Refuses rather than degrading (silently hard-deleting, or skipping the
+    disposal): degrading would turn a reversible move into an irreversible
+    delete, which is the exact loss FRG-PP-013's ordering discipline exists to
+    prevent, and would leave the caller's row/file bookkeeping inconsistent. An
+    empty setting is not configured and disposes nowhere."""
+    if not os.fspath(path):
+        return
+    if await path_is_read_only(session, path):
+        raise ReadOnlySeriesError(
+            f"the configured {setting} ({os.fspath(path)}) is inside a read-only "
+            f"reference library, so disposing of files there would write to the "
+            f"operator's originals; point {setting} outside the read-only root"
         )
 
 

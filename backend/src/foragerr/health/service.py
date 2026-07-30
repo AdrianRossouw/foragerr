@@ -25,6 +25,9 @@ Components:
   age of the newest scheduled backup (a filesystem read — no tracking table).
 - **root folders** — existence, writability, and free space per configured root.
 - **disk space** — free space on the config volume under a documented floor.
+- **disposal directories** — a recycle bin / duplicate dump configured inside a
+  read-only reference root (FRG-SER-021), which the runtime guard refuses to
+  write into; reported only when one actually is.
 
 Reads offload blocking filesystem stats to threads so a wedged mount never
 freezes the event loop.
@@ -51,6 +54,7 @@ from foragerr.health.state import current_integrity
 from foragerr.indexers.models import IndexerRow
 from foragerr.keystore import current_keystore, secret_state
 from foragerr.library.models import RootFolderRow
+from foragerr.library.read_only import path_is_read_only
 from foragerr.metadata.ratelimit import comicvine_health
 from foragerr.providers.backoff import (
     PROVIDER_DDL,
@@ -211,6 +215,12 @@ class HealthService:
             component="disk-space",
             kind="disk",
             label="Config volume free space",
+        )
+        components += await self._safe(
+            lambda: self._disposal_path_components(),
+            component="disposal-paths",
+            kind="root_folder",
+            label="Disposal directories",
         )
         return components
 
@@ -912,6 +922,49 @@ class HealthService:
         return ComponentHealth(
             component=component, kind="root_folder", label=label, state=_STATE_OK
         )
+
+    async def _disposal_path_components(self) -> list[ComponentHealth]:
+        """Flag a disposal directory configured inside a read-only root
+        (FRG-SER-021).
+
+        The config resource rejects such a value on submission, but two routes
+        reach the setting without it: registering a read-only root AFTER the
+        directory was configured, and supplying it through the environment or
+        ``config.json``. The runtime guard refuses the disposal itself, so this
+        component exists to surface the misconfiguration BEFORE the operator
+        meets a refused delete — a read of already-loaded settings plus one
+        containment check, never a write. Empty when there is nothing to say, so
+        an installation with no read-only root gains no component."""
+        settings = self._settings
+        configured = [
+            (field, getattr(settings, field, ""))
+            for field in ("recycle_bin_path", "duplicate_dump_path")
+        ]
+        if not any(value for _field, value in configured):
+            return []
+        async with self._db.read_session() as session:
+            offending = [
+                (field, value)
+                for field, value in configured
+                if value and await path_is_read_only(session, value)
+            ]
+        return [
+            ComponentHealth(
+                component=f"disposal-path:{field}",
+                kind="root_folder",
+                label=f"Disposal directory: {field}",
+                state=_STATE_ERROR,
+                message=(
+                    f"'{value}' is inside a read-only reference library, so "
+                    f"replaced and deleted files cannot be disposed of there"
+                ),
+                remediation=(
+                    f"Point {field} at a directory outside every read-only root; "
+                    f"until then deletes and replacements are refused."
+                ),
+            )
+            for field, value in offending
+        ]
 
     async def _disk_component(self) -> ComponentHealth:
         config_dir = str(self._settings.config_dir)

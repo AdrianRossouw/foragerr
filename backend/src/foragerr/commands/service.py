@@ -558,7 +558,7 @@ async def _handle_housekeeping(command: BaseCommand, ctx: HandlerContext) -> str
             recycle_bin_path=settings.recycle_bin_path,
         )
         removed = await recycle.prune_recycle_bin(
-            settings.recycle_bin_path, settings.recycle_bin_retention_days
+            ctx.db, settings.recycle_bin_path, settings.recycle_bin_retention_days
         )
         summary += f", swept {swept} quarantine file(s), pruned {removed} recycle entry(ies)"
     return summary

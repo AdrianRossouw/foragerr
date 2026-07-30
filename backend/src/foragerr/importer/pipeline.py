@@ -84,6 +84,7 @@ from foragerr.library.models import IssueFileRow, IssueRow, SeriesRow
 from foragerr.library.read_only import (
     ReadOnlySeriesError,
     path_is_read_only,
+    refuse_read_only_disposal,
     series_is_read_only,
 )
 from foragerr.metadata.comicinfo import (
@@ -1115,11 +1116,31 @@ async def execute(
     quarantine_path: str | None = None
     upgraded = False
 
+    async def _disposal_target() -> tuple[str, str]:
+        """The directory ``_dispose_existing`` would move the loser into, with
+        the setting that named it — empty when neither is configured, which means
+        a permanent delete and disposes into no directory at all.
+
+        Resolving the target is where the read-only disposal boundary is checked
+        (FRG-SER-021), so no disposal can pick a directory without it: the series
+        being imported into may be perfectly writable while the configured
+        disposal directory sits inside a reference library."""
+        if duplicate_resolution and ctx.duplicate_dump_path:
+            target = (ctx.duplicate_dump_path, "duplicate_dump_path")
+        else:
+            target = (ctx.recycle_bin_path, "recycle_bin_path")
+        await refuse_read_only_disposal(session, target[0], setting=target[1])
+        return target
+
     async def _dispose_existing() -> str | None:
         """Dump / recycle / permanently delete the replaced file (FRG-PP-013/014).
 
         Returns the quarantine destination, or ``None`` for a permanent delete
-        (recorded on the history event with no recycle path)."""
+        (recorded on the history event with no recycle path). The destination
+        directory is boundary-checked (FRG-SER-021) before either move: the
+        series being imported into can be perfectly writable while the
+        configured disposal directory sits inside a reference library."""
+        await _disposal_target()
         if duplicate_resolution and ctx.duplicate_dump_path:
             return str(
                 await _run_fs(
@@ -1175,6 +1196,16 @@ async def execute(
                     f"library (browse and serve only); moving it out of that "
                     f"library is not available for it"
                 )
+
+    # The DESTINATION side of the disposal boundary, resolved above both branches
+    # so it refuses before ``place_file`` moves a byte — one of the three disposal
+    # sites below runs AFTER placement, and a refusal there would already have
+    # written the incoming file. ``disposes_a_file`` is exactly the union of the
+    # three sites' conditions; ``_disposal_target`` is where the check lives, so
+    # a disposal site added without this hoist still cannot pick a directory
+    # inside a reference library — only the before-any-byte property is lost.
+    if disposes_a_file:
+        await _disposal_target()
 
     if in_place:
         # In-place library import (FRG-IMP-023): the candidate is registered at

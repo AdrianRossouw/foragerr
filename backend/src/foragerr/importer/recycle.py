@@ -12,6 +12,11 @@ Two idempotent housekeeping steps (design decision 7), driven from the periodic
 - :func:`prune_recycle_bin` — thin async wrapper over
   :func:`foragerr.importer.fileops.prune_recycle_bin`, permanently removing bin
   entries older than the retention window (``0`` = keep forever).
+
+Both take a :class:`~foragerr.db.Database` so neither can be called without the
+read-only disposal boundary (FRG-SER-021) being consulted: the prune is an
+``rmtree`` at a configured path, which is the single most destructive thing a
+misconfigured ``recycle_bin_path`` can aim into a reference library.
 """
 
 from __future__ import annotations
@@ -22,6 +27,7 @@ from pathlib import Path
 
 from foragerr.db import Database, utcnow
 from foragerr.importer import fileops, history
+from foragerr.library.read_only import refuse_read_only_disposal
 
 logger = logging.getLogger("foragerr.importer.recycle")
 
@@ -43,6 +49,10 @@ async def sweep_quarantine_to_recycle(
     """
     if not recycle_bin_path:
         return 0
+    async with db.read_session() as session:
+        await refuse_read_only_disposal(
+            session, recycle_bin_path, setting="recycle_bin_path"
+        )
     quarantine_root = Path(config_dir) / _QUARANTINE_DIRNAME
     if not quarantine_root.is_dir():
         return 0
@@ -78,14 +88,23 @@ async def sweep_quarantine_to_recycle(
 
 
 async def prune_recycle_bin(
+    db: Database,
     recycle_bin_path: str,
     retention_days: int,
     *,
     now: dt.datetime | None = None,
 ) -> int:
-    """Permanently remove recycle-bin entries older than the retention window."""
+    """Permanently remove recycle-bin entries older than the retention window.
+
+    Refuses outright when the bin resolves inside a read-only reference root
+    (FRG-SER-021) — this is the ``rmtree`` the boundary must never let run there,
+    and ``db`` is a required argument so no caller can reach it unchecked."""
     if not recycle_bin_path:
         return 0
+    async with db.read_session() as session:
+        await refuse_read_only_disposal(
+            session, recycle_bin_path, setting="recycle_bin_path"
+        )
     removed = fileops.prune_recycle_bin(recycle_bin_path, retention_days, now=now)
     if removed:
         logger.info("recycle: pruned %d aged recycle-bin entr(y/ies)", removed)
