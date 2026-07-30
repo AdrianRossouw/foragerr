@@ -1136,10 +1136,9 @@ async def execute(
         """Dump / recycle / permanently delete the replaced file (FRG-PP-013/014).
 
         Returns the quarantine destination, or ``None`` for a permanent delete
-        (recorded on the history event with no recycle path). The destination
-        directory is boundary-checked (FRG-SER-021) before either move: the
-        series being imported into can be perfectly writable while the
-        configured disposal directory sits inside a reference library."""
+        (recorded on the history event with no recycle path). Resolving the
+        target is what checks the read-only disposal boundary, so every branch
+        below inherits it."""
         await _disposal_target()
         if duplicate_resolution and ctx.duplicate_dump_path:
             return str(
