@@ -620,9 +620,9 @@ export function CalendarScreen() {
       inFlight && issueId != null
         ? (requestedMonitor.get(issueId) as boolean)
         : r.state !== 'unmonitored';
-    const v = ENTRY_CLASSES[mode];
+    const modeClass = ENTRY_CLASSES[mode];
     const cls = [
-      v.root,
+      modeClass.root,
       linked ? '' : styles.entryUnlinked,
       isFuture ? styles.entryFuture : '',
     ]
@@ -630,7 +630,7 @@ export function CalendarScreen() {
       .join(' ');
 
     const actions = (
-      <div className={v.actions}>
+      <div className={modeClass.actions}>
         {canAdd && (
           <button
             type="button"
@@ -704,8 +704,8 @@ export function CalendarScreen() {
     );
 
     const title = (
-      <div className={v.titleWrap}>
-        <span className={v.titleText}>{name}</span>
+      <div className={modeClass.titleWrap}>
+        <span className={modeClass.titleText}>{name}</span>
         {isDebut && (
           <span
             className={styles.badgeNew}
@@ -723,7 +723,7 @@ export function CalendarScreen() {
     // nowrap token in the row's meta track, and the title's measure is what
     // pays for it (FRG-UI-018).
     const meta = (
-      <div className={v.meta}>
+      <div className={modeClass.meta}>
         <span className={styles.metaText}>{rowSub(r)}</span>
         <StatusChip state={r.state} testId={`calendar-state-${cardKey}`} />
       </div>
