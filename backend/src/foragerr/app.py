@@ -184,6 +184,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.state.startup_hooks.append(keystore_startup_hook)
 
+    # The one-time carry of per-source publisher rules into the library-wide list
+    # (FRG-SRC-012). It needs the db area (source rows) and the keystore area
+    # (the rules live inside encrypted envelopes) and nothing else, so it is
+    # placed here — AHEAD of the scheduler area below, which starts the worker
+    # pools and can dispatch a due source-sync immediately. A sync that ran first
+    # would classify against the pre-migration list, and on an auto-sync source
+    # could auto-accept rows the operator's own rules ruled out.
+    from foragerr.sources.publisher_migration import (
+        publisher_rules_migration_startup_hook,
+    )
+
+    app.state.startup_hooks.append(publisher_rules_migration_startup_hook)
+
     # Startup integrity quick_check (FRG-DB-012) runs AFTER the db area above
     # has prepared/opened the database, so it checks the live file.
     app.state.startup_hooks.append(quick_check_startup_hook)
@@ -458,9 +471,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     import foragerr.sources.grab  # noqa: F401 — source-grab command registration
     from foragerr.api.sources import router as sources_router
     from foragerr.sources.commands import register_source_sync_task
-    from foragerr.sources.publisher_migration import (
-        publisher_rules_migration_startup_hook,
-    )
 
     app.include_router(sources_router, prefix="/api/v1")
 
@@ -468,12 +478,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         await register_source_sync_task(app.state.scheduler, app.state.settings)
 
     app.state.startup_hooks.append(_register_source_sync_task)
-    # The one-time carry of per-source publisher rules into the library-wide list
-    # (FRG-SRC-012). Runs here because it needs BOTH the db area (source rows)
-    # and the keystore area (the rules live inside encrypted envelopes), and
-    # BEFORE any sync can be dispatched, so the first sync after an upgrade
-    # already classifies against the migrated list.
-    app.state.startup_hooks.append(publisher_rules_migration_startup_hook)
 
     # --- first-run seeding (m2-first-run-defaults, area B): seed the default
     #     keyless GetComics indexer + built-in DDL client once per database,

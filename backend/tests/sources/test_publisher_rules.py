@@ -11,6 +11,7 @@ still in the automatic classifier's hands.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,12 +19,15 @@ import httpx
 import pytest
 import yaml
 from cryptography.fernet import Fernet, MultiFernet
+from pydantic import ValidationError
 
 from conftest import running_app
 from foragerr import keystore as keystore_mod
 from foragerr.config import (
     CONFIG_FILENAME,
     DEFAULT_NON_COMIC_PUBLISHERS,
+    MAX_NON_COMIC_PUBLISHER_LENGTH,
+    MAX_NON_COMIC_PUBLISHERS,
     NON_COMIC_PUBLISHERS_ENV_VAR,
     load_settings,
 )
@@ -250,7 +254,9 @@ def test_a_stored_non_comic_list_survives_upgrade(config_dir):
 @pytest.mark.req("FRG-SRC-012")
 def test_the_defaults_match_realistic_publisher_spellings():
     """Curation is only worth anything if the entries fire against the names the
-    store actually reports — the ``*`` probes have to survive the fold."""
+    store actually reports — the ``*`` probes have to survive the fold, and the
+    corporate suffixes a store attaches to a trading name ("Monte Cook Games,
+    LLC") must not slip past a rule written for the house."""
     rules = PublisherRuleSet.from_csv(DEFAULT_NON_COMIC_PUBLISHERS)
     for publisher in (
         "Paizo Inc.",
@@ -267,9 +273,29 @@ def test_the_defaults_match_realistic_publisher_spellings():
         "The Pragmatic Bookshelf",
         "Mercury Learning and Information",
         "Steve Jackson Games",
+        "Monte Cook Games, LLC",
+        "Steve Jackson Games Incorporated",
+        "Pelgrane Press Ltd",
+        "Kobold Press LLC",
+        "Apress L.P.",
+        "Goodman Games LLC",
+        "Pragmatic Bookshelf, LLC",
+        "CRC Press LLC",
+        "Renegade Game Studios, Inc.",
     ):
         assert rules.matches(publisher), publisher
-    for comic_house in ("Image Comics", "Dark Horse Comics", COMIC_PUBLISHER):
+    # Widening to substrings must not start catching comics houses. "Renegade
+    # Game Studios*" is deliberately spelled in full: a bare "Renegade*" would
+    # take Renegade Arts Entertainment, which publishes comics, with it.
+    for comic_house in (
+        "Image Comics",
+        "Dark Horse Comics",
+        "Renegade Arts Entertainment",
+        "Oni Press",
+        "Avery Hill Publishing",
+        "Mad Cave Studios",
+        COMIC_PUBLISHER,
+    ):
         assert not rules.matches(comic_house), comic_house
 
 
@@ -418,6 +444,43 @@ def test_the_union_dedupes_on_the_folded_key_and_keeps_stored_spellings():
 
 
 @pytest.mark.req("FRG-SRC-012")
+def test_the_union_keeps_the_wildcard_spelling_of_a_colliding_rule():
+    """The collision is resolved in favour of REACH: a stored "Kobold Press*"
+    that meets an exact "Kobold Press" replaces it in place rather than being
+    dropped as a duplicate, which would silently narrow the operator's rule to
+    houses spelled with no corporate suffix."""
+    merged = union_publisher_rules("Kobold Press, Example Press", ["Kobold Press*"])
+    assert merged == "Kobold Press*, Example Press"
+    assert PublisherRuleSet.from_csv(merged).matches("Kobold Press LLC")
+    # The reverse collision leaves the wider entry exactly as it was.
+    assert (
+        union_publisher_rules("Kobold Press*, Example Press", ["Kobold Press"])
+        == "Kobold Press*, Example Press"
+    )
+
+
+@pytest.mark.req("FRG-SRC-012")
+async def test_a_comma_bearing_per_source_rule_migrates_as_one_entry(db, config_dir):
+    """Per-source rules were JSON list items, where a comma inside one entry is
+    ordinary text. The library-wide list separates entries BY comma, so an entry
+    carried across verbatim would be re-split into fragments — and a fragment
+    like "Inc*" is a substring probe that matches half the store."""
+    settings = load_settings()
+    stored_rule = "Example Games, Inc*"
+    source = await _source(db, publisher_rules=[stored_rule])
+
+    await publisher_rules_migration_startup_hook(_app(db, settings))
+
+    stored = _stored_value(config_dir)
+    assert stored.endswith("Example Games Inc*")
+    compiled = PublisherRuleSet.from_csv(stored)
+    assert compiled.matches("Example Games, Inc.")
+    assert "inc" not in compiled.substrings
+    assert "inc" not in compiled.exact
+    assert await _rules_of(db, source.id) == []
+
+
+@pytest.mark.req("FRG-SRC-012")
 async def test_per_source_rules_migrate_into_the_library_wide_list(db, config_dir):
     """The upgrade path: rules the operator already had per-source are carried
     into the single list and the per-source field is cleared."""
@@ -483,34 +546,145 @@ async def test_an_undecryptable_source_is_skipped_without_aborting_the_migration
 
 @pytest.mark.req("FRG-SRC-012")
 async def test_the_migration_skips_the_union_when_the_env_var_manages_the_list(
-    db, config_dir, monkeypatch
+    db, config_dir, monkeypatch, caplog
 ):
     """Writing the config file under an env-managed value would look applied and
     do nothing, so the migration leaves the per-source entries in place for a
-    later boot instead of consuming them."""
+    later boot instead of consuming them.
+
+    The warning has to say what that costs: the kept entries are no longer
+    applied by anything (the classifier reads the library-wide list only), so an
+    operator who reads "still stored" as "still filtering" would be wrong."""
     settings = load_settings()
     source = await _source(db, publisher_rules=[OTHER_PUBLISHER])
     monkeypatch.setenv(NON_COMIC_PUBLISHERS_ENV_VAR, "Example Press")
 
-    await publisher_rules_migration_startup_hook(_app(db, settings))
+    with caplog.at_level(
+        logging.WARNING, logger="foragerr.sources.publisher_migration"
+    ):
+        await publisher_rules_migration_startup_hook(_app(db, settings))
 
     assert OTHER_PUBLISHER not in _stored_value(config_dir)
+    assert await _rules_of(db, source.id) == [OTHER_PUBLISHER]
+    logged = " ".join(record.getMessage() for record in caplog.records)
+    assert "NO LONGER APPLIES" in logged
+    assert NON_COMIC_PUBLISHERS_ENV_VAR in logged
+    assert "unset" in logged
+
+
+@pytest.mark.req("FRG-SRC-012")
+async def test_the_union_bases_on_the_stored_config_not_the_loaded_settings(
+    db, config_dir
+):
+    """A restore-marker boot replaces config.yaml underneath the Settings object
+    already loaded from it, so the union has to read the FILE — merging into the
+    stale in-memory value would write the restored list back out of existence."""
+    stale = make_settings(config_dir, non_comic_publishers="Example Press")
+    load_settings()  # renders config.yaml with the curated defaults
+    source = await _source(db, publisher_rules=[OTHER_PUBLISHER])
+
+    await publisher_rules_migration_startup_hook(_app(db, stale))
+
+    stored = _stored_value(config_dir)
+    assert stored.startswith(DEFAULT_NON_COMIC_PUBLISHERS)
+    assert stored.endswith(OTHER_PUBLISHER)
+    assert "Example Press" not in stored
+    assert await _rules_of(db, source.id) == []
+
+
+@pytest.mark.req("FRG-SRC-012")
+async def test_an_already_listed_rule_clears_without_rewriting_the_config(
+    db, config_dir
+):
+    """A per-source entry the library-wide list already carries adds nothing, so
+    the file is left byte-for-byte alone — but the per-source field still has to
+    be cleared, or every boot re-reads it."""
+    settings = load_settings()
+    source = await _source(db, publisher_rules=["Paizo"])
+    before = (config_dir / CONFIG_FILENAME).read_text(encoding="utf-8")
+
+    await publisher_rules_migration_startup_hook(_app(db, settings))
+
+    assert (config_dir / CONFIG_FILENAME).read_text(encoding="utf-8") == before
+    assert await _rules_of(db, source.id) == []
+
+
+@pytest.mark.req("FRG-SRC-012")
+async def test_a_failing_migration_is_logged_and_never_aborts_startup(
+    db, config_dir, monkeypatch, caplog
+):
+    """Startup must survive a migration that cannot finish: the per-source rules
+    stay put and the next boot retries, since replaying the union is idempotent."""
+    settings = load_settings()
+    source = await _source(db, publisher_rules=[OTHER_PUBLISHER])
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("config write failed")
+
+    monkeypatch.setattr(
+        "foragerr.sources.publisher_migration.apply_config_file_updates", _boom
+    )
+    with caplog.at_level(
+        logging.ERROR, logger="foragerr.sources.publisher_migration"
+    ):
+        await publisher_rules_migration_startup_hook(_app(db, settings))
+
+    assert any(record.exc_info for record in caplog.records)
     assert await _rules_of(db, source.id) == [OTHER_PUBLISHER]
 
 
 @pytest.mark.req("FRG-SRC-012")
-async def test_the_startup_hook_is_registered_after_the_keystore_is_available():
+async def test_a_source_that_cannot_be_cleared_is_reported_as_unfinished(
+    db, config_dir, monkeypatch, caplog
+):
+    """A source whose field survives the clear is re-read at the next start, so
+    the completion log must not claim the migration is done."""
+    settings = load_settings()
+    await _source(db, publisher_rules=[OTHER_PUBLISHER])
+
+    async def _no_write(db, source_id):
+        return False
+
+    monkeypatch.setattr(repo, "clear_publisher_rules", _no_write)
+    with caplog.at_level(
+        logging.WARNING, logger="foragerr.sources.publisher_migration"
+    ):
+        await publisher_rules_migration_startup_hook(_app(db, settings))
+
+    logged = " ".join(record.getMessage() for record in caplog.records)
+    assert "could not be cleared" in logged
+
+
+@pytest.mark.req("FRG-SRC-012")
+async def test_the_startup_hook_runs_after_the_keystore_and_before_any_sync():
     """It reads encrypted envelopes, so it cannot run before the keystore hook
-    installs the process key."""
+    installs the process key — and it must finish before the scheduler area
+    starts the worker pools, which can dispatch a due source-sync at once. A
+    sync that ran first would classify against the pre-migration list and, on an
+    auto-sync source, auto-accept rows the operator's own rules ruled out."""
     from foragerr.keystore import keystore_startup_hook
     from foragerr.sources.publisher_migration import (
         publisher_rules_migration_startup_hook as hook,
     )
 
     cfg_hooks = _startup_hook_names()
-    assert cfg_hooks.index(hook.__name__) > cfg_hooks.index(
-        keystore_startup_hook.__name__
+    migration = cfg_hooks.index(_hook_name(hook))
+    assert migration > cfg_hooks.index(_hook_name(keystore_startup_hook))
+    # The scheduler area's own startup hook: it creates the command service,
+    # starts the worker pools and starts the scheduler loop in one go, so a due
+    # task can be dispatched the moment it returns.
+    assert migration < cfg_hooks.index(
+        "foragerr.commands:register_scheduler.<locals>._startup"
     )
+    assert migration < cfg_hooks.index(
+        "foragerr.app:create_app.<locals>._register_source_sync_task"
+    )
+
+
+def _hook_name(hook) -> str:
+    """Module-qualified, because several areas register a startup hook that is
+    locally named ``_startup``."""
+    return f"{hook.__module__}:{hook.__qualname__}"
 
 
 def _startup_hook_names() -> list[str]:
@@ -522,10 +696,39 @@ def _startup_hook_names() -> list[str]:
         cfg = Path(tmp) / "cfg"
         cfg.mkdir()
         app = create_app(make_settings(cfg, admin_username="a", admin_password="b" * 12))
-        return [hook.__name__ for hook in app.state.startup_hooks]
+        return [_hook_name(hook) for hook in app.state.startup_hooks]
 
 
 # --- the Settings surface -----------------------------------------------------
+
+
+@pytest.mark.req("FRG-SRC-012")
+def test_the_stored_list_is_cleaned_and_bounded(config_dir):
+    """Whatever route a value arrives by — the UI, a hand-edited config.yaml, a
+    migration union — the stored list is trimmed, emptied of blanks, and freed of
+    entries that duplicate a rule already in it. The wildcard is part of a rule's
+    identity, so "Example Games" and "Example Games*" are two rules and both
+    survive; two spellings of the SAME reach do not."""
+    settings = make_settings(
+        config_dir,
+        non_comic_publishers=" Example Games ,, example  games. , Example Games*, ",
+    )
+    assert settings.non_comic_publishers == "Example Games, Example Games*"
+
+    # Bounds exist so a pasted or corrupted value cannot make every sync compile
+    # a pathological rule set; they sit far above any real list.
+    with pytest.raises(ValidationError):
+        make_settings(
+            config_dir,
+            non_comic_publishers="x" * (MAX_NON_COMIC_PUBLISHER_LENGTH + 1),
+        )
+    with pytest.raises(ValidationError):
+        make_settings(
+            config_dir,
+            non_comic_publishers=", ".join(
+                f"Example House {i}" for i in range(MAX_NON_COMIC_PUBLISHERS + 1)
+            ),
+        )
 
 
 @pytest.fixture
