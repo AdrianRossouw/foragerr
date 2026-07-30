@@ -107,3 +107,44 @@ index + serve, no acquisition — and pulling it forward to run foragerr on
 the real library now, accepting a small 1.0-timeline cost for the
 at-scale dogfood signal). Sequenced AFTER the approved import-atomicity
 fix (whose write-path audit this feature builds on).
+
+## Gate evidence
+
+Tier: full (write boundary + acquisition boundary = security-touching). Angles:
+adversarial write-boundary, threat-model/STRIDE, backend correctness, test
+non-vacuity, frontend contract, process audit, simplify, migration/DB, plus
+Codex full-diff and an independent verification of the security docs' coverage
+claim against the shipped code.
+
+Verdict fix-first. Eleven reachable bypasses found and closed across three fix
+rounds: in-place disposal reaching the operator's originals (default recycle
+path empty, so os.remove — format-twin groups made the destructive ordering the
+natural one), post-placement ComicInfo/CBR-CBZ rewrites, unguarded on-demand
+convert commands, boundary keyed on the root FK while paths validated against
+any root, manual import moving files out of a read-only library, rescan
+path_override walking it, acquisition via generic command enqueue, source
+entitlement match/grab, and disposal directories resolving inside a read-only
+root (config-time check bypassable by ordering or by env/config.json).
+
+Structural outcomes rather than per-endpoint patches: the boundary derives from
+the root flag OR the resolved path's containment; one hoisted chokepoint in
+pipeline.execute covering both branches plus move-mode source confinement;
+add/edit confine a supplied path to the assigned root; two registry-level
+invariant tests (file-mutating commands, acquiring commands) that fail until a
+new command is triaged, plus an enumeration test over the disposal primitives.
+Non-vacuity proven by neutering each guard: 20/20 then 8/8 failed their tests.
+Two guards found genuinely redundant were deleted rather than kept unprovable.
+
+Suites at merge: backend 2788, frontend 568, tsc clean, e2e GREEN 42/0/1
+(includes an in-container zero-write proof: the read-only root is mounted
+writable and renaming is enabled, so an unchanged listing is a refusal rather
+than an inability to write). comment_check / soup_check / risk_register_check /
+trace all exit 0.
+
+Documented residuals: rescan path_override general confinement deferred (would
+renegotiate FRG-SER-010, whose scenario passes a path outside every registered
+root) — recorded on RISK-019; a disposal directory supplied outside the API is
+caught at use rather than at load, with the health surface as the only pre-use
+signal — recorded on RISK-054; grab refusal, rescan moves, archive rewrites and
+disposal refusals are backend-tested only, stated as e2e coverage limits rather
+than implied by a green verdict.
