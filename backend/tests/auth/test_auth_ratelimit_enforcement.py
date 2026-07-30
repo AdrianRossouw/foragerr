@@ -328,7 +328,7 @@ def test_lifecycle_events_are_audited(tmp_path, caplog):
     ):
         assert expected in events, f"missing audit event {expected}"
     # Lifecycle events carry a surface derived from the acting request's
-    # auth_via (gate finding Codex-F2): the api-key-authed password change
+    # auth_via: the api-key-authed password change
     # records surface=api_key, not a bare event with only ip=.
     pw_changed = next(
         r.getMessage() for r in _auth_records(caplog)
@@ -410,7 +410,7 @@ def test_login_username_cannot_forge_an_extra_field(tmp_path, caplog):
     """A username crafted to look like extra key=value fields cannot inject a
     real field: the value is logfmt-quoted, so the genuine surface=/ip= appear
     exactly once and the injected tokens stay inside the quoted username value
-    (gate finding S2 — intra-line forgery, not just newline forgery)."""
+    (intra-line forgery, not just newline forgery)."""
     caplog.set_level(logging.DEBUG, logger="foragerr.auth")
     app = make_app(tmp_path)
     with TestClient(app) as client:
@@ -487,7 +487,7 @@ def test_audit_event_never_raises_into_the_caller(caplog):
 def test_ws_apikey_success_audits_source_seen(tmp_path, caplog):
     """The WebSocket handshake's api-key success emits ``auth.apikey_source_seen``
     like the HTTP api-key path, so the leaked-key-visibility guarantee holds on
-    the socket too (gate finding S3)."""
+    the socket too."""
     caplog.set_level(logging.DEBUG, logger="foragerr.auth")
     app = make_app(tmp_path)
     with TestClient(app) as client:
@@ -503,7 +503,7 @@ def test_ws_apikey_success_audits_source_seen(tmp_path, caplog):
 @pytest.mark.req("FRG-AUTH-009")
 def test_ws_apikey_failure_is_audited(tmp_path, caplog):
     """A WS handshake with a wrong api key emits ``auth.apikey_failure`` — WS auth
-    failures are no longer invisible to the audit trail (gate finding S3)."""
+    failures are never invisible to the audit trail."""
     from starlette.websockets import WebSocketDisconnect
 
     caplog.set_level(logging.DEBUG, logger="foragerr.auth")

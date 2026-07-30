@@ -706,8 +706,7 @@ async def test_interrupted_first_run_rolls_back_whole_store(
 ):
     """A failure while storing ANY week rolls back the entire run — an
     interrupted first backfill leaves the store EMPTY, so the next run's
-    empty-store gate re-backfills instead of silently going standard-window
-    (Codex gate finding, 2026-07-23)."""
+    empty-store gate re-backfills instead of silently going standard-window."""
     day_a = dt.date(2026, 7, 1)  # ISO 2026-W27
     day_b = dt.date(2026, 7, 8)  # ISO 2026-W28
     marker = _install_client(

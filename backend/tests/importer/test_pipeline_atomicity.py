@@ -1,6 +1,6 @@
 """FS↔DB atomicity + isolation + deterministic reconciliation regressions.
 
-Covers the merge-gate findings on the shared pipeline:
+Covers the shared pipeline's atomicity invariants:
 
 - FRG-PP-010 — an upgrade places the new file BEFORE quarantining/​swapping, so a
   ``place_file`` failure never strands the superseded file at a vanished path.

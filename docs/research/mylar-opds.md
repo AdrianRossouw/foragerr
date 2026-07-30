@@ -1,7 +1,7 @@
 # Mylar3 OPDS Server — Research Findings
 
 Scope: `mylar/opds.py`, its CherryPy wiring, the Mako feed template, and image
-helpers in the vendored reference at `/Users/adrian/Projects/foragerr/.reference/mylar3`.
+helpers in the vendored reference at `.reference/mylar3`.
 All citations are `file:line` against that tree. This is read-only research for
 foragerr's own (future) OPDS server; no repo files were modified.
 

@@ -163,6 +163,15 @@ def test_allowlist_narrows_to_named_rules(tree: Path):
 
 
 @pytest.mark.req("FRG-PROC-023")
+def test_repository_is_clean():
+    """The committed tree passes — the retroactive sweep's regression guard."""
+    findings, counts, _has_denylist = comment_check.check(REPO_ROOT)
+
+    assert findings == [], "\n".join(str(f) for f in findings)
+    assert counts["files"] > 100
+
+
+@pytest.mark.req("FRG-PROC-023")
 def test_code_is_not_scanned_only_its_non_product_text(tree: Path):
     """Scope is comments/docstrings/test names, never executable code: a
     scanner that rewrote string values used by logic would be unsafe to run

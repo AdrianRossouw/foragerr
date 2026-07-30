@@ -58,19 +58,19 @@
 
 ## 6. Retroactive sweep (FRG-PROC-023)
 
-- [ ] 6.1 Run `tools/comment_check.py` (once 5.x lands) against the full
+- [x] 6.1 Run `tools/comment_check.py` (once 5.x lands) against the full
       committed tree; fix every flagged comment/docstring/test
       name/fixture literal/sample config to comply with the four rules
       (text-only changes, no behavior change).
-- [ ] 6.2 Confirm `tools/comment_check.py` exits 0 against the swept tree
+- [x] 6.2 Confirm `tools/comment_check.py` exits 0 against the swept tree
       and stays green alongside the rest of the merge-gate checklist
       (`tools/trace.py`, `tools/soup_check.py`,
       `tools/risk_register_check.py`).
 
 ## 7. Verification
 
-- [ ] 7.1 Full test suite green; `tools/trace.py` picks up `FRG-PROC-023`
+- [x] 7.1 Full test suite green; `tools/trace.py` picks up `FRG-PROC-023`
       via its tagged test(s).
-- [ ] 7.2 Manual impact confirmed as "none" (contributor-facing docs only,
+- [x] 7.2 Manual impact confirmed as "none" (contributor-facing docs only,
       per the proposal's declaration) — no `docs/manual/` or `README.md`
       change required.

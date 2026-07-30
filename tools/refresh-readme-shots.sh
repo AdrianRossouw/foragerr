@@ -16,15 +16,15 @@
 # FORAGERR_COMICVINE_API_KEY WITHOUT ever being printed.
 #
 # Usage:  tools/refresh-readme-shots.sh          (from the repo root)
-# Env overrides: FORAGERR_PORT (8791), COMICS_DIR (/comics/_pd-demo — a PD-only
-#   library kept separate from any working/testing root), SHOT_BUDGET (300000)
+# Env overrides: FORAGERR_PORT (default below), COMICS_DIR (/comics/_pd-demo — a
+#   PD-only library kept separate from any working/testing root), SHOT_BUDGET
 #
-# The default port is deliberately NOT 8790: that is the operator's long-lived
-# demo instance, which accumulates real browsing state and non-public-domain
-# content — screenshots for public labelling must only ever come from the
-# fresh, PD-seeded instance this tool starts itself (owner instruction
-# 2026-07-11). The stale-port guard below protects against accidents either
-# way; FORAGERR_REFRESH_REUSE=1 remains for hermetic environments only.
+# The default port deliberately differs from any long-lived demo instance's:
+# such an instance accumulates real browsing state and non-public-domain
+# content, and screenshots for public labelling must only ever come from the
+# fresh, PD-seeded instance this tool starts itself. The stale-port guard below
+# protects against accidents either way; FORAGERR_REFRESH_REUSE=1 remains for
+# hermetic environments only.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

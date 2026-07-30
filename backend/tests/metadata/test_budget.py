@@ -70,7 +70,7 @@ async def test_exhausted_path_refuses_locally_without_touching_other_paths():
 async def test_refusal_is_immediate_even_while_the_gate_lock_is_held():
     """An exhausted-path caller is refused without queueing behind the gate
     lock — even while another caller holds the lock sleeping out a spacing
-    interval (gate finding, cv-budget-caching review: the refusal check runs
+    interval: the refusal check runs
     lock-free first, then re-runs under the lock as the authoritative
     admission decision)."""
     gate = ratelimit.gate()
