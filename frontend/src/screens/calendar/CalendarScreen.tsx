@@ -130,6 +130,41 @@ const UNLINKED_PRESENTATION: { label: string; tone: ChipTone } = {
 };
 
 /**
+ * The class each shared entry part takes in each mode. Held as one bundle per
+ * mode so a part cannot be styled as a row in one place and a card in another:
+ * every mode-dependent class an entry uses is named here, and the modes must
+ * carry the same keys.
+ */
+const ENTRY_CLASSES: Record<
+  EntryMode,
+  {
+    root: string;
+    actions: string;
+    titleWrap: string;
+    titleText: string;
+    meta: string;
+    thumb: string;
+  }
+> = {
+  row: {
+    root: styles.row,
+    actions: styles.rowActions,
+    titleWrap: styles.rowTitle,
+    titleText: styles.rowTitleText,
+    meta: styles.rowMeta,
+    thumb: styles.thumbRow,
+  },
+  card: {
+    root: styles.card,
+    actions: styles.cardRail,
+    titleWrap: styles.cardTitle,
+    titleText: styles.cardTitleText,
+    meta: styles.cardMeta,
+    thumb: styles.thumbCard,
+  },
+};
+
+/**
  * The entry's state as a status indicator (FRG-UI-047): a plain chip `<span>` —
  * no button role, no `aria-pressed`, not focusable, no pointer cursor and no
  * control hover treatment — whose meaning is the text inside it, so assistive
@@ -177,7 +212,7 @@ const CardCover = memo(function CardCover({
   mode: EntryMode;
 }) {
   const [failed, setFailed] = useState(false);
-  const sizeClass = mode === 'row' ? styles.thumbRow : styles.thumbCard;
+  const sizeClass = ENTRY_CLASSES[mode].thumb;
   const src = failed ? null : candidateCoverUrl(r.coverUrl);
   if (src === null) {
     return (
@@ -570,8 +605,9 @@ export function CalendarScreen() {
       inFlight && issueId != null
         ? (requestedMonitor.get(issueId) as boolean)
         : r.state !== 'unmonitored';
+    const v = ENTRY_CLASSES[mode];
     const cls = [
-      mode === 'row' ? styles.row : styles.card,
+      v.root,
       linked ? '' : styles.entryUnlinked,
       isFuture ? styles.entryFuture : '',
     ]
@@ -579,7 +615,7 @@ export function CalendarScreen() {
       .join(' ');
 
     const actions = (
-      <div className={mode === 'row' ? styles.rowActions : styles.cardRail}>
+      <div className={v.actions}>
         {canAdd && (
           <button
             type="button"
@@ -653,10 +689,8 @@ export function CalendarScreen() {
     );
 
     const title = (
-      <div className={mode === 'row' ? styles.rowTitle : styles.cardTitle}>
-        <span className={mode === 'row' ? styles.rowTitleText : styles.cardTitleText}>
-          {name}
-        </span>
+      <div className={v.titleWrap}>
+        <span className={v.titleText}>{name}</span>
         {isDebut && (
           <span
             className={styles.badgeNew}
@@ -674,7 +708,7 @@ export function CalendarScreen() {
     // nowrap token in the row's meta track, and the title's measure is what
     // pays for it (FRG-UI-018).
     const meta = (
-      <div className={mode === 'row' ? styles.rowMeta : styles.cardMeta}>
+      <div className={v.meta}>
         <span className={styles.metaText}>{rowSub(r)}</span>
         <StatusChip state={r.state} testId={`calendar-state-${cardKey}`} />
       </div>
