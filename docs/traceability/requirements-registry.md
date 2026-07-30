@@ -92,7 +92,7 @@ renumbered when `m10-release-pipeline` lands.
 | FRG-PROC-017 | Regenerable README screenshots | dev-process | implemented | M4 |
 | FRG-PROC-018 | Roadmap single source of truth | dev-process | implemented | M4 |
 | FRG-PROC-019 | Accessibility scan in the e2e gate | dev-process | implemented | M9 |
-| FRG-PROC-023 | Comment hygiene: deployment-neutral, provenance-free committed text | dev-process | proposed | — |
+| FRG-PROC-023 | Comment hygiene: deployment-neutral, provenance-free committed text | dev-process | implemented | — |
 | FRG-SER-001 | Series entity from ComicVine volume | ser | implemented | M1 |
 | FRG-SER-002 | Issue entity | ser | implemented | M1 |
 | FRG-SER-003 | Two-level monitored flags | ser | implemented | M1 |
