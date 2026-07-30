@@ -113,20 +113,26 @@ already sitting in New — identical file contents, not just a matching
 title — it doesn't add a second row to review. The extra copy parks under
 its own **Duplicates** filter instead, and the row you do review notes how
 many copies exist and which bundles they came from, so nothing is hidden
-(`FRG-SRC-015`).
+(`FRG-SRC-015`). However many copies of that file turn up over time, they
+all park behind the same one row.
 
 Only that one row can be matched, accepted, or downloaded; parked copies
 sit dimmed under Duplicates and can't be actioned from there. If you ever
 want to review a copy on its own — say you'd rather track one bundle
 separately — **Restore** sends it back to New as an independent
-entitlement with its own proposed match. Deciding the row you kept (match,
-add, or ignore) never reaches into its parked copies; they stay exactly as
-they are unless you restore them yourself.
+entitlement with its own proposed match, and it stays that way: later syncs
+never park it again. Deciding the row you kept (match, add, or ignore) never
+reaches into its parked copies; they stay exactly as they are unless you
+restore them yourself.
+
+If the store ever replaces the file behind a parked copy, it stops being the
+same file as the one you're reviewing, so it returns to New by itself rather
+than staying hidden.
 
 If you're upgrading from a version that reviewed duplicates as separate
-rows, the first sync after upgrade tidies up any such pair still sitting in
-New — anything you'd already matched or ignored before upgrading is left
-exactly as it was.
+rows, the upgrade itself tidies up any such pair still sitting in New at
+startup — you don't have to wait for the next sync. Anything you'd already
+matched or ignored before upgrading is left exactly as it was.
 
 ### Working a big collection
 
@@ -134,15 +140,19 @@ Large accounts land thousands of items at once (the review list stays fast
 at that scale — it renders only what's on screen). Three tools keep the work
 proportional (`FRG-SRC-011`):
 
-- **Groups**: same-title rows collapse into one expandable group with a
-  count — a long run of mislabeled `"TITLE Vol. NNN"` singles reads as one
-  line, not hundreds. Grouping also catches a series the store names two
+- **Groups**: three or more same-title rows collapse into one expandable
+  group with a count — a long run of mislabeled `"TITLE Vol. NNN"` singles
+  reads as one line, not hundreds. A pair stays as two plain rows; it isn't
+  worth a header. Grouping also catches a series the store names two
   different ways in different bundles — say "Example Saga" bundled
   alongside "The Legend of Example Saga" — folding both under one group,
-  because one name reads as the other with extra words around it. Inside a
-  group, rows render in volume/issue order rather than sync order (an item
-  with no readable issue or volume number sorts last), so a long franchise
-  reviews top-to-bottom the way you'd expect. A group
+  because one name reads as the other with extra words around it. That only
+  applies to names of two words or more: a one-word title stays its own
+  group, since a single shared word is not evidence of the same series.
+  Rows render in volume/issue order rather than sync order (an item with no
+  readable issue or volume number sorts last), so a long franchise reviews
+  top-to-bottom the way you'd expect — and a same-title pair below the
+  grouping threshold reads in that same order. A group
   header shows mixed statuses
   when its rows differ (including a failed-download callout), its checkbox
   selects the whole group, a shift-range across a collapsed group includes
