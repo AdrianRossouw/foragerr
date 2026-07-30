@@ -244,3 +244,31 @@ None — extensions of the existing `ui` capability.
   framework.
 
 ## Approval
+
+Approved 2026-07-30 under authority the owner delegated in-session ("you can
+approve the spec"), recorded by the orchestrator rather than by the owner's
+own reading of this text. The owner set the layout direction themselves —
+agenda rows on desktop with the quiet card as the narrow fallback, chosen from
+three illustrated variants — and delegated the remaining decisions.
+
+Decisions taken with that authority:
+
+1. **The open bookmark question resolves to option (a).** A status indicator
+   stops being control-shaped, and the bookmark renders only where a real
+   monitor toggle exists; an unmatched entry keeps Add as its single primary
+   action. Option (b), one-tap follow, is not in scope: it hides a two-effect
+   mutation that creates a library record behind a small icon, needs its own
+   undo path, and would amend FRG-PULL-007, which currently states that
+   entries without a linked issue expose no issue actions. (a) is also the
+   only option that resolves the defect rather than redecorating it. If the
+   two-step path proves annoying in daily use, (b) becomes its own change with
+   its own undo story.
+2. **The sidebar crossover stays in this change** (FRG-UI-049 as the
+   narrow-viewport qualifier of FRG-UI-023, not a restatement of it). A
+   narrow-viewport presentation cannot be verified while fixed chrome occupies
+   half the viewport it must fit.
+3. **The 24 x 24 CSS-px target floor applies to the surfaces this change
+   touches**, not app-wide. Shipping a thumb-driven rail below the floor would
+   be dishonest; sweeping every other screen is a separate change.
+
+Implementation may proceed on these terms.
