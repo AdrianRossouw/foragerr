@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { memo, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Toolbar } from '../../components/Toolbar';
@@ -349,8 +349,14 @@ export function CalendarScreen() {
   const [requestedMonitor, setRequestedMonitor] = useState<
     ReadonlyMap<number, boolean>
   >(new Map());
+  // Admission control for the same map, mutated synchronously: the state value a
+  // handler closes over is the one its render was bound with, so two activations
+  // inside a single frame would both pass a check made against it. A ref is
+  // updated the moment the first one is admitted.
+  const inFlightMonitor = useRef<Set<number>>(new Set());
 
   const settleMonitor = (issueId: number) => {
+    inFlightMonitor.current.delete(issueId);
     setRequestedMonitor((prev) => {
       if (!prev.has(issueId)) return prev;
       const next = new Map(prev);
@@ -360,7 +366,8 @@ export function CalendarScreen() {
   };
 
   const toggleMonitor = async (issueId: number, monitored: boolean) => {
-    if (requestedMonitor.has(issueId)) return;
+    if (inFlightMonitor.current.has(issueId)) return;
+    inFlightMonitor.current.add(issueId);
     setRequestedMonitor((prev) => new Map(prev).set(issueId, monitored));
     setMonitorError(null);
     try {
@@ -374,6 +381,21 @@ export function CalendarScreen() {
       // that supersedes it has landed (FRG-UI-048): clearing it any earlier
       // shows the pre-toggle state again for the length of a refetch.
       await queryClient.invalidateQueries({ queryKey: queryKeys.pull.all() });
+      // A 200 does not mean the entry changed: the projected state answers to the
+      // SERIES' monitored flag as well as the issue's, so storing the issue flag
+      // on an issue whose series is unmonitored leaves the entry exactly as it
+      // was. Without this the bookmark simply snaps back — indistinguishable
+      // from a click that did nothing, which FRG-UI-048 forbids.
+      const settledState = (
+        queryClient.getQueryData<PullEntryRecord[]>(queryKeys.pull.week(week)) ?? []
+      ).find((r) => r.matchedIssueId === issueId)?.state;
+      if (monitored && settledState === 'unmonitored') {
+        setMonitorError(
+          'The change was saved, but this issue stays untracked because its ' +
+            'series is not monitored. Monitor the series to start tracking its ' +
+            'issues.',
+        );
+      }
     } catch (error) {
       setMonitorError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -526,9 +548,12 @@ export function CalendarScreen() {
     const linked = r.matchedIssueId != null;
     const issueId = r.matchedIssueId;
     const name = rowName(r);
+    // Whitespace is collapsed out: the fallback key is built from a series name,
+    // and this value becomes a DOM id that `aria-controls` points at — where a
+    // space would be read as a separator between two ids, neither of which exists.
     const cardKey = String(
       r.id ?? `${r.seriesName}-${r.issueNumber}-${r.matchedIssueId}`,
-    );
+    ).replace(/\s+/g, '_');
     const isDebut = r.matchType === 'new_series';
     // Guard-failed rows for a series already in the library self-heal on the
     // next refresh — offering "Add" there would invite duplicates.
@@ -590,13 +615,16 @@ export function CalendarScreen() {
                 truth. The action wording stays on `title`, for sighted hover.
                 In flight the control is `aria-disabled`, not `disabled`, so it
                 keeps its place in keyboard order mid-interaction; the duplicate
-                mutation is suppressed in the handler. */}
+                mutation is suppressed in the handler. `aria-busy` is what makes
+                that unavailability read as work in progress rather than as a
+                control that has been switched off. */}
             <button
               type="button"
               className={`${styles.iconBtn}${inFlight ? ` ${styles.iconBtnBusy}` : ''}`}
               aria-label={`Monitor ${name}`}
               aria-pressed={monitored}
               aria-disabled={inFlight}
+              aria-busy={inFlight}
               title={monitored ? 'Stop monitoring' : 'Monitor / want'}
               onClick={() => void toggleMonitor(issueId, !monitored)}
             >
@@ -838,9 +866,13 @@ export function CalendarScreen() {
                   >
                     {/* The 72px gutter costs a narrow viewport 114px of chrome it
                         cannot spare, so below the crossover the date folds into
-                        the day header instead of holding a fixed column. */}
+                        the day header instead of holding a fixed column.
+                        Hidden from the accessibility tree: it draws the same date
+                        the day heading carries, as three separate boxes, so left
+                        exposed it makes assistive technology read every date in
+                        the week twice. */}
                     {!compact && (
-                      <div className={styles.gutter}>
+                      <div className={styles.gutter} aria-hidden="true">
                         <div
                           className={`${styles.dow} ${
                             d.isNewComicDay ? styles.dowBig : d.isToday ? styles.dowToday : ''
@@ -871,9 +903,9 @@ export function CalendarScreen() {
                     >
                       {/* A heading, so the day groups are structure a screen
                           reader can jump between rather than styled text: a
-                          drop day runs to dozens of entries. Wide mode draws
-                          the date in the gutter, so the heading carries it for
-                          assistive technology only. */}
+                          drop day runs to dozens of entries. Wide mode draws the
+                          date in the hidden gutter, so the heading is the only
+                          place it is announced. */}
                       <h2 className={styles.dayHeader}>
                         {compact ? (
                           <span

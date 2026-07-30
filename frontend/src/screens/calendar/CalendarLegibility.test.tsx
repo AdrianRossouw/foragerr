@@ -106,6 +106,19 @@ function bookmarkGlyphCount(root: HTMLElement): number {
   return root.querySelectorAll(`svg path[d="${BOOKMARK_PATH}"]`).length;
 }
 
+/**
+ * The subtree's text as assistive technology receives it: everything hidden from
+ * the accessibility tree removed. `textContent` alone cannot tell a date drawn
+ * twice from a date drawn once and mirrored decoratively.
+ */
+function accessibleText(root: HTMLElement): string {
+  const clone = root.cloneNode(true) as HTMLElement;
+  for (const hidden of Array.from(clone.querySelectorAll('[aria-hidden="true"]'))) {
+    hidden.remove();
+  }
+  return clone.textContent ?? '';
+}
+
 describe('FRG-UI-018: responsive entry presentation', () => {
   it('FRG-UI-018 — at or above the crossover an entry is an agenda row whose long title is neither clamped nor truncated', async () => {
     setViewportWidth(WIDE);
@@ -255,6 +268,10 @@ describe('FRG-UI-018: responsive entry presentation', () => {
       // The date is in the accessible name at both widths, though only the
       // narrow mode draws it inside the heading.
       expect(heading).toHaveAccessibleName(expect.stringContaining('Jul'));
+      // And exactly once in the whole group: the wide gutter draws the same date
+      // beside the heading, so an unhidden gutter has assistive technology read
+      // every date in the week twice.
+      expect(accessibleText(day).match(/Jul/g) ?? []).toHaveLength(1);
       const list = within(day).getByRole('list');
       expect(within(list).getAllByRole('listitem')).toHaveLength(2);
       expect(list).toContainElement(screen.getByTestId('calendar-card-1'));
@@ -362,6 +379,24 @@ describe('FRG-UI-047: status indicators are never shaped like controls', () => {
     expect(toggle).toHaveAttribute('aria-pressed', 'true');
     expect(toggle).not.toBeDisabled();
     // Exactly one bookmark on the entry, and it is inside the toggle.
+    expect(bookmarkGlyphCount(card)).toBe(1);
+    expect(bookmarkGlyphCount(toggle)).toBe(1);
+  });
+
+  it('FRG-UI-047 — a linked entry in a non-wanted derived state still carries the real toggle beside its status', async () => {
+    // Whether the entry is monitored is not the same question as whether it is
+    // wanted: a downloading issue is monitored and stays operable, so the derived
+    // state must decide the CHIP's words and never whether a control exists.
+    setViewportWidth(WIDE);
+    renderWeek([linkedRow('Meridian Signal', { id: 1, state: 'downloading' })]);
+
+    const card = await screen.findByTestId('calendar-card-1');
+    expect(within(card).getByTestId('calendar-state-1')).toHaveTextContent(
+      'Downloading',
+    );
+    const toggle = within(card).getByRole('button', { name: 'Monitor Meridian Signal' });
+    expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    expect(toggle).toHaveAttribute('aria-busy', 'false');
     expect(bookmarkGlyphCount(card)).toBe(1);
     expect(bookmarkGlyphCount(toggle)).toBe(1);
   });
@@ -558,6 +593,10 @@ describe('FRG-UI-048: in-flight feedback for the monitor toggle', () => {
     const busy = toggleOf('Meridian Signal');
     expect(busy).toHaveAttribute('aria-pressed', 'false');
     expect(busy).toHaveAttribute('aria-disabled', 'true');
+    // Unavailable AND working: without aria-busy the two are indistinguishable
+    // to assistive technology, and a control that is merely unavailable reads as
+    // one the operator cannot use rather than one that is mid-request.
+    expect(busy).toHaveAttribute('aria-busy', 'true');
 
     expect(spy.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1);
     await user.click(busy);
@@ -567,6 +606,7 @@ describe('FRG-UI-048: in-flight feedback for the monitor toggle', () => {
     await waitFor(() =>
       expect(toggleOf('Meridian Signal')).toHaveAttribute('aria-disabled', 'false'),
     );
+    expect(toggleOf('Meridian Signal')).toHaveAttribute('aria-busy', 'false');
   });
 
   it('FRG-UI-048 — the requested state holds across the whole refetch window rather than flashing back', async () => {
@@ -630,6 +670,40 @@ describe('FRG-UI-048: in-flight feedback for the monitor toggle', () => {
       expect(toggleOf('Meridian Signal')).toHaveAttribute('aria-pressed', 'true'),
     );
     expect(screen.queryByTestId('calendar-action-error')).not.toBeInTheDocument();
+  });
+
+  it('FRG-UI-048 — a toggle the projection does not honour is explained rather than silently reverted', async () => {
+    // The derived state answers to the SERIES' monitored flag as well as the
+    // issue's, so storing the issue flag on an issue whose series is unmonitored
+    // answers 200 and leaves the entry exactly as it was. The bookmark reverting
+    // with no message is indistinguishable from a click that did nothing.
+    const records = [linkedRow('Meridian Signal', { id: 1, state: 'unmonitored' })];
+    setViewportWidth(WIDE);
+    const { spy } = renderWeek(records, (path, init) => {
+      if (init?.method === 'PUT' && path === '/api/v1/issues/500') {
+        return makeIssue({ id: 500, series_id: 7, monitored: true });
+      }
+      if (path.startsWith('/api/v1/series')) return pageOf([]);
+      return pageOf(records, { pageSize: 200 });
+    });
+    const user = userEvent.setup();
+
+    await screen.findByTestId('calendar-card-1');
+    expect(toggleOf('Meridian Signal')).toHaveAttribute('aria-pressed', 'false');
+    await user.click(toggleOf('Meridian Signal'));
+
+    await waitFor(() =>
+      expect(spy.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1),
+    );
+    const alert = await screen.findByTestId('calendar-action-error');
+    expect(alert).toHaveAttribute('role', 'alert');
+    expect(alert).toHaveTextContent(/series is not monitored/i);
+    // Settled on the projection and operable again, never left busy.
+    await waitFor(() =>
+      expect(toggleOf('Meridian Signal')).toHaveAttribute('aria-disabled', 'false'),
+    );
+    expect(toggleOf('Meridian Signal')).toHaveAttribute('aria-pressed', 'false');
+    expect(toggleOf('Meridian Signal')).toHaveAttribute('aria-busy', 'false');
   });
 
   it('FRG-UI-048 — two toggles in flight at once both settle, and neither is left permanently busy', async () => {
