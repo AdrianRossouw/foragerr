@@ -22,9 +22,13 @@ import styles from './sources.module.css';
  */
 const VOLUME_ID_PATTERN = /^4050-\d+$/;
 
-/** "4050-1234" -> 40501234 — the numeric id `useLookupVolume` keys its query on. */
+/**
+ * "4050-1234" -> 1234. The "4050-" is ComicVine's volume TYPE prefix, not part
+ * of the id: the volume-id endpoint takes the bare number (the Calendar's
+ * hand-off passes it bare), and the backend re-adds the prefix upstream.
+ */
 function parseVolumeId(normalized: string): number {
-  return Number(normalized.replace('-', ''));
+  return Number(normalized.slice('4050-'.length));
 }
 
 /**

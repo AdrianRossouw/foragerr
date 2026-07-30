@@ -1220,7 +1220,7 @@ describe('FRG-UI-039: pasted volume id resolves through the id lookup', () => {
       calls: [],
       reads: [],
       volume: (id) =>
-        id === 40501234 ? candidate({ cv_volume_id: 40501234, name: 'Widget Chronicles' }) : undefined,
+        id === 1234 ? candidate({ cv_volume_id: 1234, name: 'Widget Chronicles' }) : undefined,
     };
     renderScreen(state);
 
@@ -1231,7 +1231,7 @@ describe('FRG-UI-039: pasted volume id resolves through the id lookup', () => {
     await user.type(input, '4050-1234');
     await user.click(within(panel).getByRole('button', { name: 'Search' }));
 
-    const resolved = await screen.findByTestId('cand-55-40501234');
+    const resolved = await screen.findByTestId('cand-55-1234');
     expect(resolved).toHaveTextContent('Widget Chronicles');
     // The dead path the picker used to advertise-and-not-honor: never a
     // /series/lookup?term= request for an id.
@@ -1239,7 +1239,7 @@ describe('FRG-UI-039: pasted volume id resolves through the id lookup', () => {
       state.reads!.some((p) => p.startsWith('/api/v1/series/lookup?term=')),
     ).toBe(false);
     expect(
-      state.reads!.some((p) => p.startsWith('/api/v1/series/lookup/volume/40501234')),
+      state.reads!.some((p) => p.startsWith('/api/v1/series/lookup/volume/1234')),
     ).toBe(true);
 
     await user.click(resolved);
@@ -1250,7 +1250,7 @@ describe('FRG-UI-039: pasted volume id resolves through the id lookup', () => {
       (state.calls.find((c) => c.path.endsWith('/55/add'))!.init!.body as {
         cv_volume_id: number;
       }).cv_volume_id,
-    ).toBe(40501234);
+    ).toBe(1234);
   });
 
   it('FRG-UI-039 — a full ComicVine volume URL normalizes to the same id path', async () => {
@@ -1261,8 +1261,8 @@ describe('FRG-UI-039: pasted volume id resolves through the id lookup', () => {
       calls: [],
       reads: [],
       volume: (id) =>
-        id === 40509999
-          ? candidate({ cv_volume_id: 40509999, name: 'Driftwood', have_it: true })
+        id === 9999
+          ? candidate({ cv_volume_id: 9999, name: 'Driftwood', have_it: true })
           : undefined,
     };
     renderScreen(state);
@@ -1277,8 +1277,8 @@ describe('FRG-UI-039: pasted volume id resolves through the id lookup', () => {
     );
     await user.click(within(panel).getByRole('button', { name: 'Search' }));
 
-    const resolved = await screen.findByTestId('cand-55-40509999');
-    expect(within(resolved).getByTestId('cand-55-40509999-have')).toHaveTextContent(
+    const resolved = await screen.findByTestId('cand-55-9999');
+    expect(within(resolved).getByTestId('cand-55-9999-have')).toHaveTextContent(
       'In library',
     );
   });
