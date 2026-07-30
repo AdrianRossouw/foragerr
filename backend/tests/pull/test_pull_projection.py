@@ -43,13 +43,21 @@ async def _format_profile_id(db) -> int:
 
 
 async def _seed_series(
-    db, tmp_path, *, title: str, cv_volume_id: int, monitored: bool = True
+    db,
+    tmp_path,
+    *,
+    title: str,
+    cv_volume_id: int,
+    monitored: bool = True,
+    read_only: bool = False,
 ) -> int:
     profile_id = await _format_profile_id(db)
     root = tmp_path / "lib-root"
     root.mkdir(exist_ok=True)
     async with db.write_session() as session:
-        rf = await library_repo.create_root_folder(session, str(root / title))
+        rf = await library_repo.create_root_folder(
+            session, str(root / title), read_only=read_only
+        )
         series = await library_repo.create_series(
             session,
             cv_volume_id=cv_volume_id,
@@ -331,3 +339,81 @@ async def test_matched_but_not_yet_created_entry_is_pending_refresh(db):
     assert len(entries) == 1
     assert entries[0].matched_issue_id is None
     assert entries[0].state == "pending_refresh"
+
+
+# --- FRG-SER-022: read-only series never reach the calendar --------------------
+
+
+@pytest.mark.req("FRG-SER-022")
+async def test_read_only_series_issue_is_excluded_from_the_week(db, tmp_path):
+    """A browse-only series' issue is not a projected entry at all, so the
+    calendar has no linked row on which to offer want / skip / search — the
+    controls the backend would refuse. Its managed sibling still appears."""
+    browse_only_id = await _seed_series(
+        db,
+        tmp_path,
+        title="Example Reference Series",
+        cv_volume_id=11,
+        read_only=True,
+    )
+    await _seed_issue(
+        db, series_id=browse_only_id, cv_issue_id=1101, number="1", store_date=IN_WEEK
+    )
+    managed_id = await _seed_series(
+        db, tmp_path, title="Example Managed Series", cv_volume_id=12
+    )
+    managed_issue_id = await _seed_issue(
+        db, series_id=managed_id, cv_issue_id=1201, number="1", store_date=IN_WEEK
+    )
+
+    async with db.read_session() as session:
+        entries = await weekly_pull(session, WEEK)
+
+    assert {e.matched_issue_id for e in entries} == {managed_issue_id}
+
+
+@pytest.mark.req("FRG-SER-022")
+async def test_stored_entry_matched_to_a_read_only_issue_is_not_linked(db, tmp_path):
+    """The bypass that made the exclusion necessary: a stored pull entry links an
+    issue directly, so the week-range query never saw it. Such an entry cannot
+    resolve to a live row now, whether or not its issue is dated in the week."""
+    browse_only_id = await _seed_series(
+        db,
+        tmp_path,
+        title="Example Reference Series",
+        cv_volume_id=13,
+        read_only=True,
+    )
+    issue_id = await _seed_issue(
+        db,
+        series_id=browse_only_id,
+        cv_issue_id=1301,
+        number="1",
+        store_date=IN_WEEK + dt.timedelta(days=40),
+    )
+    async with db.write_session() as session:
+        rows = await pull_repo.replace_week(
+            session,
+            WEEK,
+            [
+                ParsedPullEntry(
+                    series_name="Example Reference Series",
+                    issue_number="1",
+                    release_date=IN_WEEK,
+                    publisher="Example Press",
+                    cv_series_id=13,
+                    cv_issue_id=1301,
+                )
+            ],
+        )
+        entry_id = rows[0].id
+    async with db.write_session() as session:
+        await pull_repo.update_match(
+            session, entry_id, matched_issue_id=issue_id, match_type="id"
+        )
+
+    async with db.read_session() as session:
+        entries = await weekly_pull(session, WEEK)
+
+    assert [e for e in entries if e.matched_issue_id == issue_id] == []
+    assert [e for e in entries if e.series_id == browse_only_id] == []

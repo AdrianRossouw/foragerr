@@ -92,7 +92,14 @@ async def _queue_grab(db, entitlement_id: int, commands) -> None:
     match / add / auto-accept callers all commit ``matched`` before reaching this
     session, so a non-matched read here is always a real withdrawal.
 
+    This is the single seam every accept path (match / add / degrade / retry /
+    auto-accept) reaches, so the read-only acquisition boundary is enforced here
+    too (FRG-SER-022): a download into a browse-only series is refused before the
+    download axis moves, so no queued row and no ``source-grab`` can exist for
+    one even if a future caller skips the up-front refusals.
+
     Kept import-local to avoid a module import cycle with the grab command."""
+    from foragerr.library.read_only import refuse_read_only_series
     from foragerr.sources.grab import SOURCE_GRAB_TASK
 
     queued = False
@@ -102,6 +109,12 @@ async def _queue_grab(db, entitlement_id: int, commands) -> None:
             return
         if row.review_status != "matched":
             return  # ignored / restored since the caller read it — never grab
+        if row.matched_series_id is not None:
+            await refuse_read_only_series(
+                session,
+                row.matched_series_id,
+                action="downloading a store purchase into it",
+            )
         if row.download_state not in _QUEUEABLE_STATES:
             return  # already queued / in flight / imported — no duplicate grab
         row.download_state = "queued"
@@ -194,6 +207,7 @@ async def match_entitlement(
     the operator took.
     """
     from foragerr.library.models import SeriesRow
+    from foragerr.library.read_only import refuse_read_only_series
     from foragerr.sources.reconcile import revert_owned_via_edition_for_series
 
     async with db.write_session() as session:
@@ -211,6 +225,13 @@ async def match_entitlement(
             raise EntitlementActionError(
                 f"series {series_id} does not exist", status=404
             )
+        # Matching IS accepting (it queues the grab), so a browse-only target is
+        # refused here, inside the transaction that would stamp ``matched``
+        # (FRG-SER-022): the rollback leaves the row exactly as the operator
+        # found it rather than matched-but-never-grabbable.
+        await refuse_read_only_series(
+            session, series_id, action="downloading a store purchase into it"
+        )
         prior_series_id = row.matched_series_id
         if (
             prior_series_id is not None
@@ -344,6 +365,11 @@ async def add_entitlement(
                 status=409,
             )
         root_id = roots[0].id
+    # Adding FOR a store entitlement means downloading into the new series, so a
+    # read-only destination is refused before ``add_series`` runs (FRG-SER-022) —
+    # the alternative is a created-but-never-grabbable series and a refusal the
+    # operator only sees after the refresh + scan chain has been paid for.
+    await _refuse_read_only_root(db, root_id)
 
     try:
         result = await add_series(
@@ -494,6 +520,8 @@ async def retry_download(
     acceptance inside its own write transaction, so such a retry queues nothing
     and leaves the ignored row clean.
     """
+    from foragerr.library.read_only import refuse_read_only_series
+
     async with db.read_session() as session:
         row = await session.get(SourceEntitlementRow, entitlement_id)
         if row is None:
@@ -511,6 +539,14 @@ async def retry_download(
             raise EntitlementActionError(
                 f"entitlement {entitlement_id} has no downloadable copy to retry",
                 status=409,
+            )
+        # Refused BEFORE the stale tracked row is dropped (FRG-SER-022): a retry
+        # that cannot legally grab must leave the row's records untouched.
+        if row.matched_series_id is not None:
+            await refuse_read_only_series(
+                session,
+                row.matched_series_id,
+                action="downloading a store purchase into it",
             )
     await _drop_stale_tracked_row(db, entitlement_id)
     await _queue_grab(db, entitlement_id, commands)
@@ -762,6 +798,9 @@ async def bulk_match(
     commands=None,
     matched_via: str,
 ) -> BulkResult:
+    # Every member targets the SAME series, so a browse-only target is refused by
+    # the first member's own in-transaction check (FRG-SER-022) and the whole
+    # request aborts with nothing applied — no separate up-front check needed.
     # A bulk selection can span many groups; sweeping per member would re-scan
     # the source's open queue once per row (O(members x queue) in the writer
     # lock). The group sweep is the single-pick / group-header convenience, not
@@ -884,7 +923,14 @@ async def bulk_accept(
     runs (the shared :func:`_bulk` idiom). The group sweep is suppressed per
     member (it would re-scan the source queue once per row); the FRG-SRC-008
     volume sweep on the add path is ungated and still runs.
+
+    The read-only refusal is the ONE all-or-none precondition here (FRG-SER-022):
+    the rows are heterogeneous, so letting the refusal land mid-batch would
+    commit the earlier rows and abort the rest. The match-kind proposals are
+    therefore read once up front, and a browse-only target refuses the request
+    with nothing applied.
     """
+    await _refuse_read_only_proposals(db, entitlement_ids)
     return await _bulk(
         db,
         entitlement_ids,
@@ -1012,6 +1058,59 @@ async def _bulk(db, entitlement_ids: list[int], action) -> BulkResult:
 
 
 # --- helpers ----------------------------------------------------------------
+
+
+async def _refuse_read_only_root(db, root_folder_id: int) -> None:
+    """Refuse adding a series FOR a store entitlement onto a read-only root
+    (FRG-SER-022) — registering a reference library is legitimate, downloading
+    into one is not, and this action does both."""
+    from foragerr.library import repo as library_repo
+    from foragerr.library.read_only import ReadOnlySeriesError
+
+    async with db.read_session() as session:
+        if await library_repo.root_is_read_only(session, root_folder_id):
+            raise ReadOnlySeriesError(
+                f"root folder {root_folder_id} is a read-only reference library "
+                "(browse and serve only); adding a store purchase to it is not "
+                "available"
+            )
+
+
+async def _refuse_read_only_proposals(db, entitlement_ids: list[int]) -> None:
+    """Refuse a bulk accept whose selection proposes a browse-only series.
+
+    Covers the MATCH-kind proposals, which is what a selection resolves against
+    an existing series; a ComicVine-kind proposal is an add, refused by
+    :func:`_refuse_read_only_root` at its own turn (its destination root is only
+    known there). Checked over the DISTINCT proposed series — a review group
+    proposes very few — so the cost is bounded by targets, not selection size."""
+    if not entitlement_ids:
+        return
+    from sqlalchemy import select
+
+    from foragerr.library.read_only import refuse_read_only_series_in
+
+    async with db.read_session() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(SourceEntitlementRow).where(
+                        SourceEntitlementRow.id.in_(entitlement_ids)
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    targets = {
+        series_id
+        for series_id in (_proposed_series_id(row) for row in rows)
+        if series_id is not None
+    }
+    for series_id in sorted(targets):
+        await refuse_read_only_series_in(
+            db, series_id, action="downloading a store purchase into it"
+        )
 
 
 async def _series_id_for_volume(db, cv_volume_id: int) -> int | None:

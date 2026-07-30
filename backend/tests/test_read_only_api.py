@@ -15,14 +15,16 @@ from __future__ import annotations
 
 import os
 import stat
+import time
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from foragerr.app import create_app
 from foragerr.db import CommandRow
+from foragerr.downloads.models import GrabHistoryRow
 from foragerr.library.models import IssueRow, RootFolderRow
 from opds_support import opds_settings, seed, simple_series
 
@@ -276,6 +278,68 @@ def test_rename_execute_is_refused_and_queues_nothing(client, tmp_path):
 
     assert on_disk.exists()
     assert "rename-series" not in client.portal.call(_command_names, client.app)
+
+
+# --- FRG-SER-022: the generic command transport is not a way in ---------------
+
+
+async def _grab_history_count(app) -> int:
+    async with app.state.db.read_session() as session:
+        return await session.scalar(
+            select(func.count()).select_from(GrabHistoryRow)
+        )
+
+
+def _await_terminal(client, command_id: int) -> dict:
+    """The command row once the worker has finished with it."""
+    deadline = time.monotonic() + 10.0
+    while time.monotonic() < deadline:
+        body = client.get(f"/api/v1/command/{command_id}").json()
+        if body["status"] in ("completed", "failed"):
+            return body
+        time.sleep(0.05)
+    raise AssertionError(f"command {command_id} never reached a terminal status")
+
+
+@pytest.mark.req("FRG-SER-022")
+def test_enqueued_acquisition_commands_are_refused_by_their_handlers(
+    client, tmp_path
+):
+    """``POST /api/v1/command`` takes any registered name with an explicit
+    payload, so it reaches a search or a grab without passing the routes that
+    refuse. Both handlers refuse on their own and the grab records nothing."""
+    data = _seed_read_only_library(client, tmp_path, n_issues=1)
+    series_id = data["series"][0]["id"]
+    issue_id = data["series"][0]["issues"][0]["id"]
+
+    search = client.post(
+        "/api/v1/command",
+        json={
+            "name": "issue-search",
+            "payload": {"series_id": series_id, "issue_id": issue_id},
+        },
+    )
+    grab = client.post(
+        "/api/v1/command",
+        json={
+            "name": "grab-release",
+            "payload": {
+                "indexer_id": 1,
+                "guid": "synthetic-guid-1",
+                "link": "https://indexer.example.com/nzb/1",
+                "title": "Example Series 001 (2024)",
+                "series_id": series_id,
+                "issue_id": issue_id,
+            },
+        },
+    )
+
+    for created in (search, grab):
+        assert created.status_code == 201
+        record = _await_terminal(client, created.json()["id"])
+        assert record["status"] == "failed"
+        assert "read-only reference library" in record["error"]
+    assert client.portal.call(_grab_history_count, client.app) == 0
 
 
 @pytest.mark.req("FRG-SER-022")

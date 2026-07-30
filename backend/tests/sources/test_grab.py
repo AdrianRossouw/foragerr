@@ -358,3 +358,86 @@ async def test_egress_off_allowlist_is_refused(db, config_dir):
     after = await repo.get_entitlement(db, ent.id)
     assert after.download_state == "failed"
     assert "allowlist" in after.download_error or "refused" in after.download_error
+
+
+@pytest.mark.req("FRG-SER-022")
+async def test_re_match_onto_a_read_only_series_aborts_before_the_handoff(
+    db, config_dir, tmp_path, monkeypatch
+):
+    """A grab can be re-matched onto another series while it downloads, so the
+    read-only boundary is re-tested against the FRESH row before the irreversible
+    import hand-off (FRG-SER-022): nothing enters the pipeline and the staged
+    bytes are dropped rather than left behind."""
+    import foragerr.sources.grab as grab_module
+    from foragerr.library import repo as library_repo
+    from foragerr.library.read_only import ReadOnlySeriesError
+    from foragerr.quality.models import DEFAULT_PROFILE_NAME, FormatProfileRow
+
+    reference = tmp_path / "reference-library"
+    reference.mkdir()
+    async with db.write_session() as session:
+        profile_id = (
+            await session.execute(
+                select(FormatProfileRow.id).where(
+                    FormatProfileRow.name == DEFAULT_PROFILE_NAME
+                )
+            )
+        ).scalar_one()
+        root = await library_repo.create_root_folder(
+            session, str(reference), read_only=True
+        )
+        series = await library_repo.create_series(
+            session,
+            cv_volume_id=9901,
+            title="Example Reference Series",
+            format_profile_id=profile_id,
+            root_folder_id=root.id,
+            path=str(reference / "Example Reference Series"),
+        )
+        await session.flush()
+        browse_only_series_id = series.id
+
+    ent = await _matched_entitlement(db, config_dir, md5=FILE_MD5)
+    original = grab_module.repo.get_entitlement
+    reads = {"count": 0}
+
+    async def _rematched_after_the_download(db_, entitlement_id):
+        row = await original(db_, entitlement_id)
+        reads["count"] += 1
+        if reads["count"] > 1 and row is not None:
+            row.matched_series_id = browse_only_series_id
+        return row
+
+    monkeypatch.setattr(
+        grab_module.repo, "get_entitlement", _rematched_after_the_download
+    )
+    handler = _handler(
+        order_body=_order_body(
+            "synth_singleissue_01", "https://dl.humble.com/synth_hero_01.cbz?t=x"
+        )
+    )
+
+    with pytest.raises(ReadOnlySeriesError):
+        await run_grab(
+            db,
+            _grab_factory(config_dir, handler),
+            make_settings(config_dir),
+            ent.id,
+            min_interval=0.0,
+        )
+
+    from foragerr.downloads.models import TrackedDownloadRow
+
+    async with db.read_session() as session:
+        handed_off = (
+            await session.execute(
+                select(TrackedDownloadRow).where(
+                    TrackedDownloadRow.download_id == f"humble:{ent.id}"
+                )
+            )
+        ).all()
+    assert handed_off == []
+    assert list(sources_staging_dir(config_dir).glob("*")) == []
+    after = await original(db, ent.id)
+    assert after.download_state == "failed"
+    assert "read-only reference library" in after.download_error
