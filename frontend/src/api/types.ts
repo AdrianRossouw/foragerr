@@ -711,6 +711,17 @@ export interface ComicVineConfig {
     value: string;
     source: IgnoredPublishersSource;
   };
+  /**
+   * Library-wide publisher classification rules (FRG-SRC-012 / FRG-UI-046):
+   * items from a listed publisher are always classified Other on the next
+   * sync, whatever their file shape. Same comma-separated,
+   * trailing-`*`-substring-match shape as `comicvine_ignored_publishers`, and
+   * ships with a curated non-empty default rather than empty.
+   */
+  non_comic_publishers: {
+    value: string;
+    source: IgnoredPublishersSource;
+  };
 }
 
 /** POST /api/v1/config/comicvine/test result (FRG-API-018) — never the key. */

@@ -141,24 +141,15 @@ export interface UpdateSourceInput {
   sourceId: number;
   /** Flip the auto-sync control (FRG-SRC-004). */
   auto_sync?: boolean;
-  /**
-   * WHOLE-LIST replace of the source's publisher rules (FRG-SRC-012) — the
-   * editor sends the list it wants and `[]` clears them. Takes effect on the
-   * next sync, and only over rows the automatic classifier still owns.
-   */
-  publisher_rules?: string[];
 }
 
 /**
  * PATCH /api/v1/sources/{id} — change a source's mutable controls post-connect
- * (FRG-SRC-004 / FRG-SRC-012). `auto_sync`: flipping it ON persists the flag
- * only and NEVER retroactively accepts existing entitlements (the backend
- * auto-accepts confident matches on a subsequent sync). `publisher_rules`: a
- * whole-list replace inside the source's existing encrypted settings envelope —
- * a source with no loadable settings (disconnected) answers 409 rather than
- * minting an envelope. Only the fields supplied are sent, so a caller never
- * silently rewrites the control it did not touch. On success we sweep the whole
- * sources family so the toggle, the rules editor and any dependent view
+ * (FRG-SRC-004). `auto_sync`: flipping it ON persists the flag only and NEVER
+ * retroactively accepts existing entitlements (the backend auto-accepts
+ * confident matches on a subsequent sync). Only the fields supplied are sent,
+ * so a caller never silently rewrites a control it did not touch. On success
+ * we sweep the whole sources family so the toggle and any dependent view
  * re-derive together.
  */
 export function useUpdateSource(): UseMutationResult<
@@ -169,12 +160,11 @@ export function useUpdateSource(): UseMutationResult<
   const fetcher = useFetcher();
   const invalidate = useInvalidateSources();
   return useMutation({
-    mutationFn: ({ sourceId, auto_sync, publisher_rules }) =>
+    mutationFn: ({ sourceId, auto_sync }) =>
       fetcher<StoreSourceResource>(`/api/v1/sources/${sourceId}`, {
         method: 'PATCH',
         body: {
           ...(auto_sync !== undefined ? { auto_sync } : {}),
-          ...(publisher_rules !== undefined ? { publisher_rules } : {}),
         },
       }),
     onSuccess: invalidate,
