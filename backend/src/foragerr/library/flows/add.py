@@ -86,7 +86,14 @@ async def add_series(
     * the ComicVine volume does not exist or cannot be fetched cleanly;
     * ``root_folder_id`` / ``format_profile_id`` reference no real row;
     * ``cv_volume_id`` already has a series row;
-    * ``path_override`` does not resolve under a registered root folder.
+    * ``path_override`` does not resolve under the ASSIGNED root folder (not
+      merely under some registered root — the row's root key and its path must
+      agree, or every per-root policy reads the wrong root).
+
+    When ``root_folder_id`` is a **read-only** reference root (FRG-SER-021), the
+    series is created browse/serve-only (FRG-SER-022): unmonitored, with the
+    monitoring strategy and new-item policy forced to ``none`` and search-on-add
+    off, whatever the caller asked for.
 
     ``booktype`` / ``booktype_locked`` carry the optional add-time
     collected-edition override (FRG-SER-018): with ``booktype_locked=True`` the
@@ -149,6 +156,20 @@ async def add_series(
                 f"root folder {root_folder_id} is not registered"
             )
 
+        if root.read_only:
+            # A series on a read-only reference root is browse/serve-only
+            # (FRG-SER-022): there is nowhere to download into, so the whole
+            # acquisition surface is off by CONSTRUCTION rather than by a later
+            # refusal — the series is unmonitored, no issue is monitored by the
+            # add-time strategy, refresh-discovered issues arrive unmonitored,
+            # and no search-on-add sweep is requested. Overridden rather than
+            # rejected: the caller's monitoring intent is meaningless for a root
+            # that cannot receive files, and refusing the add would refuse the
+            # only thing a reference library is for.
+            monitor_strategy = "none"
+            monitor_new_items = "none"
+            search_on_add = False
+
         resolved_profile_id = await _resolve_format_profile_id(
             session, format_profile_id
         )
@@ -162,11 +183,19 @@ async def add_series(
             )
 
         if path_override is not None:
-            roots = await repo.list_root_folders(session)
+            # Confined to the ASSIGNED root, not to "any registered root": a
+            # path accepted under some OTHER root would give the series a
+            # ``root_folder_id`` that disagrees with where its files actually
+            # live, and every per-root policy (the read-only boundary above all)
+            # reads the key. Scoping the check here is what keeps the key and
+            # the path in agreement by construction (FRG-SER-021, FRG-SEC-004).
             try:
-                path = str(validate_under_root(path_override, [r.path for r in roots]))
+                path = str(validate_under_root(path_override, [root.path]))
             except PathNotUnderRootError as exc:
-                raise SeriesValidationError(str(exc)) from exc
+                raise SeriesValidationError(
+                    f"path {path_override!r} does not resolve under root folder "
+                    f"{root_folder_id} ({root.path}): {exc}"
+                ) from exc
         else:
             path = str(build_series_path(root.path, title, record.start_year))
 
@@ -184,6 +213,7 @@ async def add_series(
             title=title,
             publisher=record.publisher,
             start_year=record.start_year,
+            monitored=not root.read_only,
             monitor_new_items=monitor_new_items,
             format_profile_id=resolved_profile_id,
             root_folder_id=root_folder_id,

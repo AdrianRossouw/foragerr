@@ -72,6 +72,7 @@ from foragerr.downloads.state import (
 )
 from foragerr.events import Event
 from foragerr.importer import history as import_history
+from foragerr.library import repo as library_repo
 from foragerr.library.models import IssueRow, SeriesRow
 from foragerr.parser import parse
 from foragerr.providers.backoff import ProviderBackoff
@@ -572,7 +573,7 @@ async def process_failures(
             )
             infos.append(_FailureInfo(download_id=row.download_id, issues=issues))
 
-    await _enqueue_research(commands, settings, infos)
+    await _enqueue_research(db, commands, settings, infos)
     return infos
 
 
@@ -640,12 +641,17 @@ def write_blocklist_row(
         queue_event(session, BlocklistChanged())
 
 
-async def _enqueue_research(commands, settings, infos: list[_FailureInfo]) -> None:
+async def _enqueue_research(db, commands, settings, infos: list[_FailureInfo]) -> None:
     """Enqueue an automatic re-search per affected issue (FRG-DL-013).
 
     Runs after the failed transition has committed (a separate write session).
     Deduped both within this call and by the command backbone across cycles, so a
     failure storm cannot spawn a storm of duplicate searches.
+
+    An issue on a read-only reference root is SKIPPED (FRG-SER-022): the
+    re-search is automatic, so without this filter a single failed download
+    against such an issue would keep re-enqueuing a search the handler must then
+    refuse, cycle after cycle.
     """
     if commands is None:
         return
@@ -653,16 +659,28 @@ async def _enqueue_research(commands, settings, infos: list[_FailureInfo]) -> No
     if not auto:
         return
     queued: set[tuple[int, int]] = set()
-    for info in infos:
-        for series_id, issue_id in info.issues:
-            if (series_id, issue_id) in queued:
-                continue
-            queued.add((series_id, issue_id))
-            await commands.enqueue(
-                "issue-search",
-                {"series_id": series_id, "issue_id": issue_id},
-                triggered_by="failure",
+    targets = [
+        (series_id, issue_id)
+        for info in infos
+        for series_id, issue_id in info.issues
+    ]
+    async with db.read_session() as session:
+        browse_only = set(
+            await library_repo.read_only_issue_ids(
+                session, [issue_id for _, issue_id in targets if issue_id is not None]
             )
+        )
+    for series_id, issue_id in targets:
+        if issue_id in browse_only:
+            continue
+        if (series_id, issue_id) in queued:
+            continue
+        queued.add((series_id, issue_id))
+        await commands.enqueue(
+            "issue-search",
+            {"series_id": series_id, "issue_id": issue_id},
+            triggered_by="failure",
+        )
 
 
 # --- client enumeration (the I/O boundary) -----------------------------------

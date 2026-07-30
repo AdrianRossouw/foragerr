@@ -71,7 +71,7 @@ const SERIES = [
 
 /** One registered root (FRG-SER-008); free_space null = unreadable path. */
 const ROOT_FOLDERS: RootFolderResource[] = [
-  { id: 1, path: '/comics', free_space: 250_000_000_000 },
+  { id: 1, path: '/comics', free_space: 250_000_000_000, read_only: false },
 ];
 
 const RENAME_ROWS: RenamePreviewEntry[] = [
@@ -97,6 +97,8 @@ interface Overrides {
   commandList?: () => ReturnType<typeof makeCommand>[];
   /** Root-folder list (FRG-SER-008); defaults to one registered root. */
   rootFolders?: () => RootFolderResource[];
+  /** The library index the rename picker reads; defaults to one series. */
+  series?: () => ReturnType<typeof makeSeriesResource>[];
   onPostRootFolder?: (init?: FetcherInit) => unknown;
   onDeleteRootFolder?: (id: number) => unknown;
 }
@@ -106,8 +108,13 @@ function resolver(o: Overrides = {}) {
     if (path === '/api/v1/rootfolder') {
       if (init?.method === 'POST') {
         if (o.onPostRootFolder) return o.onPostRootFolder(init);
-        const body = init.body as { path: string };
-        return { id: 9, path: body.path, free_space: 1_000_000_000 };
+        const body = init.body as { path: string; read_only?: boolean };
+        return {
+          id: 9,
+          path: body.path,
+          free_space: 1_000_000_000,
+          read_only: body.read_only ?? false,
+        };
       }
       return o.rootFolders ? o.rootFolders() : ROOT_FOLDERS;
     }
@@ -133,7 +140,9 @@ function resolver(o: Overrides = {}) {
       }
       return o.mm ? o.mm() : MM;
     }
-    if (path.startsWith('/api/v1/series?')) return pageOf(SERIES);
+    if (path.startsWith('/api/v1/series?')) {
+      return pageOf(o.series ? o.series() : SERIES);
+    }
     if (path.startsWith('/api/v1/rename?')) {
       return o.renameRows ? o.renameRows() : RENAME_ROWS;
     }
@@ -606,7 +615,9 @@ describe('FRG-UI-012 / FRG-SER-008: root folders are manageable from settings', 
   it('FRG-UI-012 — an unreadable root renders "free space unknown", not a bogus figure', async () => {
     const { fetcher } = fakeFetcher(
       resolver({
-        rootFolders: () => [{ id: 3, path: '/mnt/gone', free_space: null }],
+        rootFolders: () => [
+          { id: 3, path: '/mnt/gone', free_space: null, read_only: false },
+        ],
       }),
     );
     renderWithProviders(<MediaManagement />, { fetcher });
@@ -622,8 +633,13 @@ describe('FRG-UI-012 / FRG-SER-008: root folders are manageable from settings', 
       resolver({
         rootFolders: () => rows,
         onPostRootFolder: (init) => {
-          const body = init?.body as { path: string };
-          const created = { id: 2, path: body.path, free_space: 5_000_000_000 };
+          const body = init?.body as { path: string; read_only?: boolean };
+          const created = {
+            id: 2,
+            path: body.path,
+            free_space: 5_000_000_000,
+            read_only: body.read_only ?? false,
+          };
           rows = [...rows, created];
           return created;
         },
@@ -640,7 +656,10 @@ describe('FRG-UI-012 / FRG-SER-008: root folders are manageable from settings', 
     await waitFor(() =>
       expect(spy).toHaveBeenCalledWith(
         '/api/v1/rootfolder',
-        expect.objectContaining({ method: 'POST', body: { path: '/mnt/comics2' } }),
+        expect.objectContaining({
+          method: 'POST',
+          body: { path: '/mnt/comics2', read_only: false },
+        }),
       ),
     );
     // The invalidated list refetches and the new root renders; the input clears.
@@ -778,5 +797,128 @@ describe('FRG-UI-012 / FRG-SER-008: root folders are manageable from settings', 
     );
     // Typing a root-folder path is not a config edit — the save bar stays inert.
     expect(screen.getByRole('button', { name: 'No Changes' })).toBeDisabled();
+  });
+});
+
+describe('FRG-UI-045: read-only root folders', () => {
+  it('FRG-UI-045 — checking the read-only option and submitting posts read_only:true', async () => {
+    const user = userEvent.setup();
+    const { spy, fetcher } = fakeFetcher(resolver());
+    renderWithProviders(<MediaManagement />, { fetcher });
+
+    await user.type(
+      await screen.findByLabelText('New root folder path'),
+      '/mnt/reference-library',
+    );
+    await user.click(screen.getByLabelText('Register as read-only'));
+    await user.click(screen.getByRole('button', { name: 'Add Root Folder' }));
+
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith(
+        '/api/v1/rootfolder',
+        expect.objectContaining({
+          method: 'POST',
+          body: { path: '/mnt/reference-library', read_only: true },
+        }),
+      ),
+    );
+  });
+
+  it('FRG-UI-045 — leaving the read-only option unchecked posts read_only:false', async () => {
+    const user = userEvent.setup();
+    const { spy, fetcher } = fakeFetcher(resolver());
+    renderWithProviders(<MediaManagement />, { fetcher });
+
+    await user.type(
+      await screen.findByLabelText('New root folder path'),
+      '/mnt/writable-library',
+    );
+    await user.click(screen.getByRole('button', { name: 'Add Root Folder' }));
+
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith(
+        '/api/v1/rootfolder',
+        expect.objectContaining({
+          method: 'POST',
+          body: { path: '/mnt/writable-library', read_only: false },
+        }),
+      ),
+    );
+  });
+
+  it('FRG-UI-045 — a read-only root renders its marker in the list', async () => {
+    const { fetcher } = fakeFetcher(
+      resolver({
+        rootFolders: () => [
+          { id: 4, path: '/mnt/reference', free_space: 10_000, read_only: true },
+        ],
+      }),
+    );
+    renderWithProviders(<MediaManagement />, { fetcher });
+
+    const row = await screen.findByTestId('root-folder-4');
+    expect(within(row).getByTestId('root-folder-read-only-4')).toHaveTextContent(
+      'Read-only',
+    );
+  });
+
+  it('FRG-UI-045 — a normal (writable) root renders no read-only marker', async () => {
+    const { fetcher } = fakeFetcher(resolver());
+    renderWithProviders(<MediaManagement />, { fetcher });
+
+    const row = await screen.findByTestId('root-folder-1');
+    expect(within(row).queryByTestId('root-folder-read-only-1')).not.toBeInTheDocument();
+  });
+
+  it('FRG-UI-045 — the rename picker omits read-only series and states how many', async () => {
+    const { fetcher } = fakeFetcher(
+      resolver({
+        series: () => [
+          makeSeriesResource({ id: 7, title: 'Example Series' }),
+          makeSeriesResource({ id: 8, title: 'Example Reference Run', read_only: true }),
+        ],
+      }),
+    );
+    renderWithProviders(<MediaManagement />, { fetcher });
+
+    const picker = await screen.findByLabelText('Series to preview renames for');
+    await waitFor(() =>
+      expect(
+        within(picker).getByRole('option', { name: 'Example Series' }),
+      ).toBeInTheDocument(),
+    );
+    // A read-only series cannot be submitted to /rename (409), so it is not
+    // selectable at all.
+    expect(
+      within(picker).queryByRole('option', { name: 'Example Reference Run' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId('rename-read-only-excluded')).toHaveTextContent(
+      '1 series in read-only libraries is not listed',
+    );
+  });
+
+  it('FRG-UI-045 — a writable-only library lists every series with no exclusion note', async () => {
+    const { fetcher } = fakeFetcher(
+      resolver({
+        series: () => [
+          makeSeriesResource({ id: 7, title: 'Example Series' }),
+          makeSeriesResource({ id: 8, title: 'Example Second Series' }),
+        ],
+      }),
+    );
+    renderWithProviders(<MediaManagement />, { fetcher });
+
+    const picker = await screen.findByLabelText('Series to preview renames for');
+    await waitFor(() =>
+      expect(
+        within(picker).getByRole('option', { name: 'Example Series' }),
+      ).toBeInTheDocument(),
+    );
+    expect(
+      within(picker).getByRole('option', { name: 'Example Second Series' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId('rename-read-only-excluded'),
+    ).not.toBeInTheDocument();
   });
 });

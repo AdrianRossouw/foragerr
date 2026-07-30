@@ -34,7 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from foragerr.downloads.models import TrackedDownloadRow
 from foragerr.downloads.state import TrackedDownloadState
-from foragerr.library.models import IssueFileRow, IssueRow, SeriesRow
+from foragerr.library.models import IssueFileRow, IssueRow, RootFolderRow, SeriesRow
 from foragerr.pull import repo
 from foragerr.pull.models import PullEntryRow
 
@@ -224,13 +224,23 @@ async def _entries_for_issue_ids(
 ) -> dict[int, ProjectedPullEntry]:
     """Batch-build library-sourced projected entries for exactly these issue
     ids (used both for the week-range query and for a matched pull entry
-    whose linked issue's own store_date happens to sit outside the range)."""
+    whose linked issue's own store_date happens to sit outside the range).
+
+    Series on a read-only reference root are excluded IN THE QUERY (FRG-SER-022):
+    this is the one function that turns an issue id into a projected entry, so
+    excluding here is what keeps every calendar row free of the live want/skip
+    and search controls the backend would refuse. The join to ``root_folders``
+    (rather than a NOT EXISTS) also fails closed — an issue whose series has no
+    resolvable root yields no entry.
+    """
     if not issue_ids:
         return {}
     rows = (
         await session.execute(
             select(IssueRow, SeriesRow)
             .join(SeriesRow, SeriesRow.id == IssueRow.series_id)
+            .join(RootFolderRow, RootFolderRow.id == SeriesRow.root_folder_id)
+            .where(RootFolderRow.read_only.is_(False))
             .where(IssueRow.id.in_(issue_ids))
         )
     ).all()
@@ -311,9 +321,14 @@ async def weekly_pull(session: AsyncSession, week: str) -> list[ProjectedPullEnt
             if row.matched_issue_id is not None:
                 base = by_issue.get(row.matched_issue_id)
                 if base is None:
-                    # The linked issue was deleted after this entry was
-                    # matched (FK ondelete=SET NULL would have cleared the
-                    # link — defensive only, should not happen in practice).
+                    # Either the linked issue was deleted after this entry was
+                    # matched (FK ondelete=SET NULL would have cleared the link
+                    # — defensive only), or its series is on a read-only
+                    # reference root and _entries_for_issue_ids excluded it. A
+                    # browse-only match therefore drops OUT of the week rather
+                    # than surfacing as an unlinked row: the pull source's own
+                    # copy of an issue the operator already owns is not a
+                    # want/search opportunity (FRG-SER-022).
                     continue
                 by_issue[row.matched_issue_id] = ProjectedPullEntry(
                     pull_entry_id=row.id,

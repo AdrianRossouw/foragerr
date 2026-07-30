@@ -143,6 +143,52 @@ registered root folder — an override pointing outside every root folder is rej
 A valid path change renames the on-disk directory; if the rename fails, the path
 change is rolled back so the database and disk never disagree.
 
+## Read-only / reference libraries
+
+If you already have an organized comics collection you don't want foragerr to
+reorganize — maybe it's mounted read-only, maybe it's just yours and you'd
+rather manage it yourself — you can register its folder as a **read-only
+root** instead of an ordinary one.
+
+To register one, use the read-only option on the root-folder form. A
+read-only root only needs to be *readable*; unlike an ordinary root it does
+not need to be writable, so a read-only mount works fine.
+
+A read-only root is for reading and serving, not managing:
+
+- Importing under it (see `import.md`) indexes your existing files where they
+  already are. Nothing is renamed, moved, or copied.
+- Series on a read-only root are **browse-only**: they are never monitored,
+  never searched, and never downloaded into — there's nowhere to download
+  into, since foragerr won't write to the root. Metadata still refreshes
+  normally, and the series still serves over OPDS to your reader apps exactly
+  like any other series.
+- Files on a read-only root are never renamed, moved, or deleted by
+  foragerr. Import and rescan never rename or move them; a manual rescan of a
+  read-only series' folder is skipped rather than attempted (nothing to
+  reconcile — the files are already indexed at their real paths). The
+  delete-files option (removing a series or issue and its files from disk) is
+  refused with a clear reason instead of silently doing nothing.
+- The recycle bin and duplicate-dump folder may not sit inside a read-only
+  root either: files are *moved into* them and retention pruning *deletes*
+  from them. See `import.md` §Upgrades, deletions, and the recycle bin.
+- Removing a read-only series or issue **without** deleting files — the
+  ordinary "remove from foragerr, leave the files alone" action — still
+  works, because it never touches the root; only the file-deleting variant is
+  blocked.
+- The **missing** count on a read-only series' detail page always reads 0,
+  even when it holds fewer issues than ComicVine lists for the volume: a
+  read-only series is never monitored, and "missing" counts monitored,
+  released, file-less issues — an unmonitored series has none by definition.
+  The have/total figures still reflect exactly what's indexed.
+
+The UI marks a read-only root and its series accordingly, and hides the
+monitor toggle and search action on them; the delete-files option is hidden
+or disabled while removing the series/issue itself (without files) stays
+available — so you're never offered a file-mutating action foragerr will
+refuse. Reading a read-only series and pulling it over OPDS work exactly as
+they do for any other series.
+
 ## Series statistics
 
 Series list and detail views report issue count, have/total issue-file counts, size on

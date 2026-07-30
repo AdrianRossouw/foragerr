@@ -39,6 +39,7 @@ from foragerr.importer.rename_ops import (
     preview_renames,
 )
 from foragerr.library import repo
+from foragerr.library.read_only import refuse_read_only_series
 
 logger = logging.getLogger("foragerr.library.flows.rename")
 
@@ -114,13 +115,18 @@ async def rename_series(
     ``EVENT_FILE_RENAMED`` row commit in their OWN transaction (per-file
     isolation, see :func:`execute_renames`), so a mid-batch failure never rolls
     back files that already moved on disk. A missing series yields an empty
-    plan."""
+    plan; a series on a read-only reference root is refused fail-closed
+    (FRG-SER-021) — renaming is exactly the mutation that feature exists to
+    prevent, and this flow also runs as a directly enqueueable command."""
     now = now or utcnow()
     async with db.read_session() as session:
         series = await repo.get_series(session, series_id)
         if series is None:
             logger.info("rename series %d: series gone; skipped", series_id)
             return RenamePlan(series_id=series_id, entries=())
+        await refuse_read_only_series(
+            session, series_id, action="renaming library files"
+        )
         reference_year = series.start_year or now.year
     ctx = _build_ctx(series.path, reference_year, settings, now=now, offload=offload)
     plan = await execute_renames(db, series, ctx)

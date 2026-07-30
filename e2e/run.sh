@@ -19,7 +19,14 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${HERE}/.." && pwd)"
 export FORAGERR_IMAGE="${FORAGERR_IMAGE:-foragerr:e2e}"
 
-COMPOSE=(docker compose -f "${HERE}/compose.yaml" -p foragerr-e2e)
+# The compose project name. Overridable because the docker daemon is SHARED:
+# two runs started from different worktrees under one project name tear down
+# each other's containers mid-suite (the surviving run then sees its app on a
+# dead port and every later scenario fails with ECONNREFUSED). Give a
+# concurrent run its own name. Exported so the specs that drive compose
+# themselves target the same project.
+export FORAGERR_E2E_PROJECT="${FORAGERR_E2E_PROJECT:-foragerr-e2e}"
+COMPOSE=(docker compose -f "${HERE}/compose.yaml" -p "${FORAGERR_E2E_PROJECT}")
 
 # Run-scoped scratch OUTSIDE the repo (keeps the build-context secret scan and
 # git status clean; certs/keys never touch the tree).
@@ -49,7 +56,12 @@ cleanup() {
 trap cleanup EXIT
 
 echo "==> run dir: ${RUN_DIR}"
-mkdir -p "${RUN_DIR}"/{config,library,certs,data}
+# `reference` and `unwritable` back the read-only reference-library tier
+# (FRG-SER-021): `reference` is mounted writable so the zero-write proof belongs
+# to the boundary rather than to the kernel, `unwritable` is mounted :ro so the
+# readability-instead-of-writability registration check is exercised for real.
+# Neither is registered here — registering them IS the tier's first scenario.
+mkdir -p "${RUN_DIR}"/{config,library,certs,data,reference,unwritable}
 chmod -R 777 "${RUN_DIR}"
 
 # --- 1. build the real image under test -------------------------------------

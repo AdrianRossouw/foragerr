@@ -71,13 +71,12 @@ approval as of 2026-07-29) and do not yet appear in this baseline table.
 the next free id after that branch's reservation: `FRG-PROC-023`. No id is
 renumbered when `m10-release-pipeline` lands.
 
-`FRG-UI-045` (read-only library treatment, `change/read-only-library`) and
 `FRG-UI-046` (publisher-filtering settings panel,
-`change/publisher-filtering`) are likewise reserved on unmerged branches and
-do not yet appear in this baseline table. `calendar-legibility` therefore
-allocates the next free ids after those reservations —
-`FRG-UI-047`..`FRG-UI-049` — leaving the 045/046 gap in the table below until
-those branches land. No id is renumbered when they do.
+`change/publisher-filtering`) is likewise reserved on an unmerged branch and
+does not yet appear in this baseline table. `FRG-UI-045` landed with
+`read-only-library`, and `calendar-legibility` allocated the next free ids
+after the 046 reservation — `FRG-UI-047`..`FRG-UI-049` — leaving the 046 gap
+in the table below until that branch lands. No id is renumbered when it does.
 
 | ID | Title | Spec | Status | Milestone |
 |----|-------|------|--------|-----------|
@@ -121,6 +120,8 @@ those branches land. No id is renumbered when they do.
 | FRG-SER-018 | Series collected-edition (trade) typing | ser | implemented | M3 |
 | FRG-SER-019 | Trades never suppress single-issue wanted | ser | implemented | M3 |
 | FRG-SER-020 | Trade containment model (declared, display-only) | ser | implemented | M4 |
+| FRG-SER-021 | Read-only library root | ser | implemented | B |
+| FRG-SER-022 | Read-only series are browse/serve-only | ser | implemented | B |
 | FRG-META-001 | ComicVine client fundamentals | meta | implemented | M1 |
 | FRG-META-002 | API key handling | meta | implemented | M1 |
 | FRG-META-003 | Client-side rate limiting with 429 handling | meta | implemented | M1 |
@@ -261,6 +262,7 @@ those branches land. No id is renumbered when they do.
 | FRG-IMP-025 | Story-arc reading-order prefix | imp | approved | B |
 | FRG-IMP-026 | Issue-word filler stripping | imp | implemented | M11 |
 | FRG-IMP-027 | Per-group import atomicity (no zombie series shell) | imp | implemented | B |
+| FRG-IMP-028 | Index-in-place import for read-only roots | imp | implemented | B |
 | FRG-PP-001 | Single shared import pipeline | pp | implemented | M1 |
 | FRG-PP-002 | Completed-download handling state machine | pp | implemented | M1 |
 | FRG-PP-003 | Grab reconciliation by download ID | pp | implemented | M1 |
@@ -353,9 +355,10 @@ those branches land. No id is renumbered when they do.
 | FRG-UI-042 | Calendar covers and enrichment detail | ui | implemented | M11 |
 | FRG-UI-043 | Group-header search/match affordance | ui | implemented | M11 |
 | FRG-UI-044 | Force-grab affordance for rejected releases | ui | implemented | M11 |
-| FRG-UI-047 | Status indicators are never shaped like controls | ui | approved | B |
-| FRG-UI-048 | In-flight feedback for the calendar's monitor toggle | ui | approved | B |
-| FRG-UI-049 | Responsive application chrome below the compact crossover | ui | approved | B |
+| FRG-UI-045 | Read-only library treatment | ui | implemented | B |
+| FRG-UI-047 | Status indicators are never shaped like controls | ui | implemented | B |
+| FRG-UI-048 | In-flight feedback for the calendar's monitor toggle | ui | implemented | B |
+| FRG-UI-049 | Responsive application chrome below the compact crossover | ui | implemented | B |
 | FRG-SRC-001 | store-source model and connection lifecycle | sources | implemented | M6 |
 | FRG-SRC-002 | Humble session-cookie authentication | sources | implemented | M6 |
 | FRG-SRC-003 | entitlement sync | sources | implemented | M6 |

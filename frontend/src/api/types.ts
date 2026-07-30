@@ -219,6 +219,13 @@ export interface SeriesResource {
    */
   booktype: 'tpb' | 'gn' | 'hc' | 'one_shot' | null;
   statistics: SeriesStatisticsResource;
+  /**
+   * True when this series lives on a read-only root (FRG-SER-021/022): a
+   * browse-only reference library the backend refuses to write to or
+   * acquire into regardless of what the UI offers. The UI's job is honesty
+   * (FRG-UI-045) — hide/disable the affordances the backend refuses anyway.
+   */
+  read_only: boolean;
 }
 
 /**
@@ -560,6 +567,11 @@ export interface RootFolderResource {
   id: number;
   path: string;
   free_space: number | null;
+  /**
+   * A read-only reference library (FRG-SER-021): indexed in place, served,
+   * never written to. The UI marks it and suppresses write/acquire actions.
+   */
+  read_only: boolean;
 }
 
 /** One `GET /api/v1/formatprofile` row (FRG-QUAL-001). */

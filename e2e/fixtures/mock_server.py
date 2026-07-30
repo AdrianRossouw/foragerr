@@ -83,7 +83,7 @@ LI_ISSUES = [
     {"id": 350002, "number": "2", "cover_date": "2002-08-14"},
 ]
 
-# A THIRD volume for the calendar-legibility scenarios
+# A volume for the calendar-legibility scenarios
 # (w-calendar-legibility.spec.ts): a long run of issues all store-dated in the
 # SAME day of the current ISO week. The hermetic stack runs with the external
 # weekly-pull source disabled, so the projection's library-primary half
@@ -109,11 +109,34 @@ def _current_week_wednesday() -> str:
 
 CAL_ISSUES = [
     {
-        "id": 360000 + number,
+        "id": 380000 + number,
         "number": str(number),
         "cover_date": _current_week_wednesday(),
     }
     for number in range(1, CAL_ISSUE_COUNT + 1)
+]
+
+# Two MORE volumes for the read-only reference-library tier
+# (y2-read-only-library.spec.ts). Both must be distinct from every volume above:
+# a series is unique per cv volume id, so each creation path needs its own.
+# RO_ADD_* is added against the read-only root through the add surface;
+# RO_INDEX_* is the pre-existing on-disk collection indexed in place.
+RO_ADD_VOLUME_ID = 62001
+RO_ADD_VOLUME_NAME = "Meridian Drift"
+RO_ADD_START_YEAR = "2015"
+RO_ADD_PUBLISHER = "Example Comics"
+RO_ADD_ISSUES = [
+    {"id": 360001, "number": "1", "cover_date": "2015-05-06"},
+    {"id": 360002, "number": "2", "cover_date": "2015-06-03"},
+]
+
+RO_INDEX_VOLUME_ID = 62002
+RO_INDEX_VOLUME_NAME = "Umbral Signal"
+RO_INDEX_START_YEAR = "1994"
+RO_INDEX_PUBLISHER = "Example Comics"
+RO_INDEX_ISSUES = [
+    {"id": 370001, "number": "1", "cover_date": "1994-02-08"},
+    {"id": 370002, "number": "2", "cover_date": "1994-03-08"},
 ]
 
 #: Every volume the fixture ComicVine knows, keyed by cv volume id. A search
@@ -138,6 +161,18 @@ VOLUMES: dict[int, dict] = {
         "start_year": CAL_START_YEAR,
         "publisher": CAL_PUBLISHER,
         "issues": CAL_ISSUES,
+    },
+    RO_ADD_VOLUME_ID: {
+        "name": RO_ADD_VOLUME_NAME,
+        "start_year": RO_ADD_START_YEAR,
+        "publisher": RO_ADD_PUBLISHER,
+        "issues": RO_ADD_ISSUES,
+    },
+    RO_INDEX_VOLUME_ID: {
+        "name": RO_INDEX_VOLUME_NAME,
+        "start_year": RO_INDEX_START_YEAR,
+        "publisher": RO_INDEX_PUBLISHER,
+        "issues": RO_INDEX_ISSUES,
     },
 }
 

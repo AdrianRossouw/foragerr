@@ -44,6 +44,7 @@ from foragerr.importer import (
 )
 from foragerr.library import repo
 from foragerr.library.flows import reconcile
+from foragerr.library.read_only import refuse_read_only_path, series_is_read_only
 
 logger = logging.getLogger("foragerr.library.flows.rescan")
 
@@ -112,7 +113,23 @@ async def rescan_series(
         if series is None:
             logger.info("rescan series %d: series gone; skipped", series_id)
             return RescanReport(series_id, (), (), 0, 0, 0)
+        if await series_is_read_only(session, series.id):
+            # A read-only reference series (FRG-SER-021) is indexed in place and
+            # never rescan-managed — rescan would try to move untracked files
+            # into it (refused by the pipeline). Skip cleanly; the scan-series
+            # the import chained thus no-ops rather than erroring.
+            logger.info("rescan series %d: read-only root; skipped", series_id)
+            return RescanReport(series_id, (), (), 0, 0, 0)
         walk_path = path_override or series.path
+        # The walk path is what actually gets read and moved out of, and it is
+        # NOT confined to the series' own root: an override pointed at a
+        # reference library would walk it and move every matching untracked file
+        # into this (writable) series. Refused fail-closed on the override's
+        # location, independent of the series' own root (FRG-SER-021).
+        if path_override is not None:
+            await refuse_read_only_path(
+                session, path_override, action="rescanning into another series"
+            )
         reference_year = series.start_year or now.year
         # Existing issue-files for this series, for the vanished-file scan
         # (shared root/series reconciliation helpers, FRG-IMP-022).

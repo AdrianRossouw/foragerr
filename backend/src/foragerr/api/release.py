@@ -27,6 +27,10 @@ from foragerr.api.command import CommandResource
 from foragerr.api.errors import ApiError
 from foragerr.indexers.caps import CapsCache
 from foragerr.library.models import IssueRow
+from foragerr.library.read_only import (
+    refuse_read_only_series,
+    refuse_read_only_series_in,
+)
 from foragerr.providers.backoff import ProviderBackoff
 from foragerr.search import Decision
 from foragerr.search.titles import to_naive_utc
@@ -181,6 +185,12 @@ async def search_releases(
         if issue is None:
             raise ApiError(404, f"issue {issueId} not found")
         series_id = issue.series_id
+        # A browse-only reference series is never searched (FRG-SER-022): there
+        # is nowhere to download into, so refuse here rather than spend
+        # indexer/CV budget producing decisions no grab could ever act on.
+        await refuse_read_only_series(
+            session, series_id, action="searching for releases"
+        )
 
     result = await run_search(
         db=db,
@@ -217,6 +227,10 @@ async def grab_release(body: ReleaseGrabRequest, request: Request) -> CommandRes
       quality-rule constraint, enqueuing nothing;
     - NOT approved + ``force=True`` → enqueue the SAME grab hand-off, recorded
       as an operator-forced override (``triggered_by="interactive-forced"``).
+
+    A release for a series on a read-only reference root is refused with a 409
+    regardless of ``force`` (FRG-SER-022) — that series has nowhere to download
+    into, and ``force`` overrides the quality rules only.
     """
     db = request.app.state.db
     cached = await get_cached(db, body.indexer_id, body.guid)
@@ -225,6 +239,14 @@ async def grab_release(body: ReleaseGrabRequest, request: Request) -> CommandRes
             404,
             "release is no longer cached; run the interactive search again "
             "before grabbing",
+        )
+    if cached.handoff.series_id is not None:
+        # Acquisition gate (FRG-SER-022), checked BEFORE the approval verdict so
+        # ``force: true`` cannot override it: force bypasses the quality rules
+        # only, never the read-only boundary. A cache entry can outlive the
+        # search that produced it, so the boundary is re-checked at grab time.
+        await refuse_read_only_series_in(
+            db, cached.handoff.series_id, action="grabbing a release"
         )
     if cached.approved:
         triggered_by = "interactive"

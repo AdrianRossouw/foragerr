@@ -138,12 +138,20 @@ async def run_grab(
     min_interval: float,
     offload=None,
 ) -> str:
-    """Fetch → verify → import one entitlement; return a one-line summary."""
+    """Fetch → verify → import one entitlement; return a one-line summary.
+
+    Raises :class:`ReadOnlySeriesError` when the matched series lives on a
+    read-only reference root (FRG-SER-022) — checked here, on the worker side,
+    because a queued command outlives the request that enqueued it, and again
+    before the import hand-off."""
     ent = await repo.get_entitlement(db, entitlement_id)
     if ent is None:
         return f"source-grab: entitlement {entitlement_id} gone; nothing to do"
     if ent.review_status != "matched":
         return f"source-grab: entitlement {entitlement_id} not accepted; skipped"
+    # Before the signed-URL fetch: no byte of a browse-only series' purchase is
+    # downloaded, so the boundary costs the operator no bandwidth either.
+    await _refuse_read_only_target(db, entitlement_id, ent.matched_series_id)
     if not (ent.md5 and ent.filename):
         await _fail(db, entitlement_id, "entitlement has no grabbable copy")
         return f"source-grab: entitlement {entitlement_id} not grabbable"
@@ -243,6 +251,16 @@ async def run_grab(
             entitlement_id,
         )
         return f"source-grab: {entitlement_id} no longer matched; import aborted"
+    # A re-match can have moved the entitlement onto a different series while the
+    # download ran, so the boundary is re-tested against the FRESH row before the
+    # irreversible hand-off (FRG-SER-022); the staged file is dropped rather than
+    # entering the pipeline.
+    await _refuse_read_only_target(
+        db,
+        entitlement_id,
+        fresh.matched_series_id,
+        staged=outcome.partial_path,
+    )
 
     final_path = _promote(staging, outcome.partial_path, ent, entitlement_id)
     await _handoff_to_import(db, ent, final_path)
@@ -386,6 +404,36 @@ async def _fail(db, entitlement_id: int, reason: str) -> None:
             row.download_state = "failed"
             row.download_error = reason[:500]
             row.updated_at = utcnow()
+
+
+async def _refuse_read_only_target(
+    db, entitlement_id: int, series_id: int | None, *, staged: Path | None = None
+) -> None:
+    """Refuse a grab whose matched series is a browse-only one (FRG-SER-022).
+
+    The refusal is recorded on the entitlement's own failed axis before it is
+    raised, so the operator sees WHY the grab stopped (the command's error alone
+    is not on the review screen) and the retry action refuses it in turn instead
+    of re-queueing forever. ``staged`` is removed first when the refusal comes
+    after bytes have already landed, so nothing is left in the staging area.
+    An unmatched entitlement has no series to test and is left to the caller's
+    own acceptance checks."""
+    from foragerr.library.read_only import (
+        ReadOnlySeriesError,
+        refuse_read_only_series_in,
+    )
+
+    if series_id is None:
+        return
+    try:
+        await refuse_read_only_series_in(
+            db, series_id, action="downloading a store purchase into it"
+        )
+    except ReadOnlySeriesError as exc:
+        if staged is not None:
+            staged.unlink(missing_ok=True)
+        await _fail(db, entitlement_id, str(exc))
+        raise
 
 
 async def _inline_offload(func, *args, **kwargs) -> Any:

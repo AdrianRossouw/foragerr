@@ -36,7 +36,15 @@ import { ADMIN_USER, ADMIN_PASSWORD, EMPTY_STORAGE_STATE } from './helpers';
  */
 
 const COMPOSE_FILE = fileURLToPath(new URL('../compose.yaml', import.meta.url));
-const COMPOSE = ['compose', '-f', COMPOSE_FILE, '-p', 'foragerr-e2e'];
+// The project name run.sh exports — overridable so two concurrent runs on the
+// shared docker daemon do not reach into each other's stacks.
+const COMPOSE = [
+  'compose',
+  '-f',
+  COMPOSE_FILE,
+  '-p',
+  process.env.FORAGERR_E2E_PROJECT ?? 'foragerr-e2e',
+];
 
 /** Cookie-jar context logged in as the operator; unsafe methods thread Origin
  * (FRG-SEC-005 — a cookie-authed POST without our own Origin is refused). */

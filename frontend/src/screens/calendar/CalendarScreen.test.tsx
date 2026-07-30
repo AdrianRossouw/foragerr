@@ -986,3 +986,82 @@ describe('FRG-UI-035: Calendar degraded pull-source notice', () => {
     expect(screen.queryByTestId('calendar-degraded-notice')).not.toBeInTheDocument();
   });
 });
+
+/**
+ * FRG-UI-045 — a read-only series' issue is excluded from the linked pull
+ * projection upstream, so the Calendar offers it no want/skip or search. This
+ * is the defence-in-depth half: whatever reaches the screen, a refused write
+ * must state its reason rather than read as a toggle that did not stick.
+ */
+describe('FRG-UI-045: Calendar refusals are visible', () => {
+  it('FRG-UI-045 — a refused want/skip toggle surfaces the reason', async () => {
+    const records = [
+      linkedRow('Example Series', '2026-07-01', {
+        state: 'unmonitored',
+        matchedIssueId: 500,
+      }),
+    ];
+    const { fetcher } = fakeFetcher((path, init) => {
+      if (init?.method === 'PUT' && path === '/api/v1/issues/500') {
+        throw new Error('series is in a read-only library');
+      }
+      return pageOf(records, { pageSize: 200 });
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
+
+    await screen.findByText('Example Series');
+    await user.click(screen.getByRole('button', { name: 'Want Example Series' }));
+
+    expect(await screen.findByTestId('calendar-action-error')).toHaveTextContent(
+      'series is in a read-only library',
+    );
+  });
+
+  it('FRG-UI-045 — a refused search dispatch surfaces the reason', async () => {
+    const records = [linkedRow('Example Series', '2026-07-01')];
+    const { fetcher } = fakeFetcher((path, init) => {
+      if (init?.method === 'POST' && path === '/api/v1/command') {
+        throw new Error('series is in a read-only library');
+      }
+      return pageOf(records, { pageSize: 200 });
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
+
+    await screen.findByText('Example Series');
+    await user.click(screen.getByRole('button', { name: 'Search for Example Series' }));
+
+    expect(await screen.findByTestId('calendar-action-error')).toHaveTextContent(
+      'series is in a read-only library',
+    );
+  });
+
+  it('FRG-UI-045 — an accepted want/skip leaves no error region behind', async () => {
+    const records = [
+      linkedRow('Example Series', '2026-07-01', {
+        state: 'unmonitored',
+        matchedIssueId: 500,
+      }),
+    ];
+    const { spy, fetcher } = fakeFetcher((path, init) => {
+      if (init?.method === 'PUT' && path === '/api/v1/issues/500') {
+        return makeIssue({ id: 500, series_id: 7, monitored: true });
+      }
+      return pageOf(records, { pageSize: 200 });
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<CalendarScreen />, { fetcher, route: '/calendar?week=2026-W27' });
+
+    await screen.findByText('Example Series');
+    await user.click(screen.getByRole('button', { name: 'Want Example Series' }));
+
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith('/api/v1/issues/500', {
+        method: 'PUT',
+        body: { monitored: true },
+      }),
+    );
+    expect(screen.queryByTestId('calendar-action-error')).not.toBeInTheDocument();
+  });
+});

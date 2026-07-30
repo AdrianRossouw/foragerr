@@ -19,8 +19,11 @@ import { fileURLToPath } from 'node:url';
  */
 
 const COMPOSE_FILE = fileURLToPath(new URL('../compose.yaml', import.meta.url));
-// Mirror run.sh's invocation: docker compose -f e2e/compose.yaml -p foragerr-e2e
-const COMPOSE = ['compose', '-f', COMPOSE_FILE, '-p', 'foragerr-e2e'];
+// Mirror run.sh's invocation, including the project name it exports — which is
+// overridable so two concurrent runs on the shared docker daemon do not recreate
+// each other's containers.
+const PROJECT = process.env.FORAGERR_E2E_PROJECT ?? 'foragerr-e2e';
+const COMPOSE = ['compose', '-f', COMPOSE_FILE, '-p', PROJECT];
 
 async function healthy(base: string): Promise<boolean> {
   const ctx = await pwRequest.newContext({ baseURL: base, ignoreHTTPSErrors: true });
