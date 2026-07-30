@@ -43,19 +43,43 @@ The system SHALL allow a library root to be registered **read-only**. A
 read-only root's registration SHALL validate the path as an absolute,
 existing, **readable** directory (the writable-directory requirement of
 FRG-SER-008 is waived for it, replaced by readability), while the
-duplicate/nesting guards still apply. For every series whose root is
-read-only, all disk-write paths — library-import rename/move, per-series
-rescan file moves, download-into-root, and delete/recycle-bin — SHALL be
-refused **fail-closed**, so foragerr never writes to a read-only root
-even if a caller reaches a write path by another route. The read-only
-flag SHALL be a persisted property of the root, additive to the schema.
+duplicate/nesting guards still apply. The read-only flag SHALL be a
+persisted property of the root, additive to the schema.
+
+For every series whose root is read-only, and for every path that resolves
+at or under a read-only root, the system SHALL refuse **fail-closed** every
+disk-write path in a **checkable, enumerated set**:
+
+1. library-import rename/move and any other import placement into the root;
+2. per-series rescan file moves;
+3. download-into-root (and the acquisition surface FRG-SER-022 governs);
+4. delete and recycle of the root's own files;
+5. post-placement archive rewrites — ComicInfo tagging and CBR→CBZ
+   conversion — including the on-demand convert commands;
+6. **disposal into a configured recycle-bin or duplicate-dump directory that
+   resolves inside a read-only root**, whether or not the series being
+   disposed of is itself read-only;
+
+plus the source direction of (1): a move-mode import whose candidate file
+resolves inside a read-only root, which would take the operator's original
+out of it.
+
+Each refusal SHALL be enforced in the flow body rather than only at the API
+route, so an operation reached by enqueuing its command directly is refused
+identically, and the enumeration SHALL itself be asserted by test so a new
+disk-write path cannot ship outside the set. No coverage is claimed for a
+disk-write path outside the enumerated set.
 
 - **Milestone**: B (read-only-library).
 - **Source**: rig finding #4 (a real, read-only-mounted collection was
   refused because roots must be writable); relates to FRG-SER-008.
 - **Notes**: The feature exists to protect the operator's real files, so
   read-only is a write *boundary*, not a hint — the tests assert no write
-  occurs under a read-only root across every path (FRG-PROC-006).
+  occurs under a read-only root across every path in the enumerated set,
+  and assert the set's completeness against the command registry
+  (FRG-PROC-006). The claim is deliberately bounded rather than universal:
+  the boundary is only as wide as the paths it is checked at, and item 6
+  was found by review AFTER the first cut shipped with items 1-5.
 
 #### Scenario: Registering a read-only root validates readability, not writability
 
@@ -65,13 +89,26 @@ flag SHALL be a persisted property of the root, additive to the schema.
   missing/unreadable path, a duplicate, or a nested path is still refused
   with a structured 400
 
-#### Scenario: Every write path is refused for a read-only root
+#### Scenario: Every enumerated write path is refused for a read-only root
 
-- **WHEN** any operation that would write under a read-only root is
-  attempted — an import rename/move, a rescan move, a download into it, or
-  a delete/recycle — by any route
-- **THEN** it is refused fail-closed with a clear reason and no bytes are
-  written to the read-only root
+- **WHEN** any operation in the enumerated write set is attempted against a
+  read-only root — an import rename/move, a rescan move, a download into
+  it, a delete/recycle, a post-placement archive rewrite, or a move-mode
+  import out of it — by any route, including enqueuing its command directly
+- **THEN** it is refused fail-closed with a clear reason and no bytes under
+  the read-only root are created, moved, rewritten, or removed
+
+#### Scenario: A disposal directory inside a read-only root is refused
+
+- **WHEN** the configured recycle bin or duplicate-dump directory resolves
+  inside a read-only root — whether it was submitted through the config
+  API, configured before the root was registered read-only, or supplied
+  through the environment or the config file
+- **THEN** submitting it through the config API is rejected against its own
+  field, every disposal that would move a file into it is refused at the
+  point of use with a reason naming the setting, the retention prune never
+  removes anything inside the read-only root, and the misconfiguration is
+  reported on the health surface
 
 ### Requirement: FRG-SER-022 — Read-only series are browse/serve-only
 

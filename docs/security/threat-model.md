@@ -1924,8 +1924,11 @@ attacker, but tampering all the same if a write path is missed.
   consulted in the **flow body** (not only at the API route) of every
   path in the checkable set:
   - the eight commands sharing `IMPORT_FILE_MUTATION_GROUP` exclusivity
-    (library-import, rename, delete/recycle, rescan, `convert-series`,
-    `convert-issue`, manual-import, download-import);
+    (`library-import`, `rename-series`, `delete-series-files`,
+    `rescan-series`, `convert-series`, `convert-issue`, `manual-import`,
+    `process-imports`) — with one deliberate exception: `library-import`
+    does not refuse, because importing a read-only root is the FEATURE
+    (FRG-IMP-028 registers the files in place and writes nothing);
   - the single `pipeline.execute()` placement step, gated ABOVE the
     in-place/move branch split so disposal of an already-tracked file is
     covered in both branches, not only the move branch;
@@ -1937,25 +1940,72 @@ attacker, but tampering all the same if a write path is missed.
     `path_override`: any candidate whose *resolved source path* lies
     under a read-only root is refused in move mode regardless of the
     destination series' root, closing the direction where files move OUT
-    of a reference library;
+    of a reference library. Only that direction is closed — `path_override`
+    is deliberately NOT confined to the series' own root, so it remains an
+    authenticated arbitrary-directory walk-and-move primitive for any
+    directory that is not inside a read-only root. General confinement
+    would renegotiate FRG-SER-010 (whose scenario passes an override wholly
+    outside every registered root) and is deferred; see RISK-019;
   - path-derived, not FK-derived, read-only status for add/edit: a path
     under a read-only root is refused independent of which root's id the
     request names, so a mismatched `root_folder_id` cannot present a
-    read-only path as writable.
+    read-only path as writable;
+  - the two **disposal directories** (`recycle_bin_path`,
+    `duplicate_dump_path`): every replaced or deleted file is MOVED into
+    them, the bin root and its marker file are CREATED in them, and the
+    retention prune later `rmtree`s dated folders in them — so one aimed
+    inside a reference library turns the whole boundary into a write path
+    for a series that is not itself read-only, which neither the
+    series-keyed nor the candidate-keyed guard can see. Rejecting the
+    submitted value at `PUT /config/mediamanagement` (a field-precise 400)
+    does not close it: the check returns early while no read-only root
+    exists, so configuring the directory FIRST and registering the root
+    read-only afterwards gets past it (`POST /rootfolder` never inspects
+    the disposal settings), and `FORAGERR_RECYCLE_BIN_PATH` /
+    `config.json` never reach the API at all — a flag-only read-only root
+    is writable on disk, so the `W_OK` validator accepts the path. The
+    boundary is therefore enforced at every point of CONSUMPTION (the
+    pipeline's disposal-target resolution, both delete flows, the
+    quarantine sweep, the retention prune, whose `Database` argument is
+    required so the `rmtree` cannot be reached unchecked), naming the
+    SETTING rather than the operation. It **refuses** rather than
+    degrading: silently hard-deleting instead would convert a reversible
+    move into permanent loss — the exact outcome FRG-PP-013's ordering
+    discipline exists to prevent — and skipping the disposal would leave
+    the caller's row/file bookkeeping inconsistent. The cost is that a
+    misconfigured disposal directory blocks unrelated deletes, so the
+    health surface reports it as an error component with the field to fix,
+    which is also the only pre-use signal for the environment route.
+
+  Fail-closed and fail-open are deliberately split by what an absent row
+  means: an unknown root id reads as read-only (`repo.root_is_read_only`)
+  because a write boundary must not be opened by a row that cannot be
+  found, while an unknown series id reads as NOT read-only
+  (`repo.series_is_read_only` / `read_only.series_is_read_only`) because
+  there are no files to protect and every guarding flow raises its own
+  not-found first — so a verified 404 can never surface as a 409.
 
   This placement matters because `POST /api/v1/command` can enqueue any
   registered command by name (FRG-SCHED, COMP 12): a per-endpoint check
   on the ordinary rescan/delete routes would not stop the same operation
   reaching a read-only series through the generic command surface. One
   guard, checked where the write actually happens, covers both paths by
-  construction rather than by remembering to add the check twice. A
-  registry-level test asserts every `IMPORT_FILE_MUTATION_GROUP` command
-  consults the guard, so a future mutating command added without it
-  fails the test rather than shipping a silent gap. **This is the full
+  construction rather than by remembering to add the check twice. Two
+  enumeration tests, not per-flow tests, are what make this checkable:
+  one asserts that the set of `IMPORT_FILE_MUTATION_GROUP` command names
+  equals a table of payloads aimed at a read-only reference library and
+  that driving each through the generic enqueue route leaves that library
+  **byte-identical** (a before/after snapshot of every entry's path, kind,
+  inode, size and mtime — a stronger property than "the guard was
+  called", since it fails on any write however the command reached it);
+  the other enumerates the modules that call the `fileops` disposal
+  primitives and requires each to be behind the disposal guard. A new
+  mutating command or a sixth disposal call site fails the enumeration
+  until it is added, rather than shipping a silent gap. **This is the full
   extent of the claim**: every write path in the enumerated set above is
   refused fail-closed with no bytes written to the read-only root; no
   claim is made about write paths outside this set, and any new
-  disk-write path must be added to the registry-level test before merge.
+  disk-write path must join an enumeration test before merge.
 - **The force-grab override cannot cross the boundary (FRG-SER-022)**:
   `POST /release`'s acquisition guard (`refuse_read_only_series_in`) runs
   before the approved/force branch, so `force: true` — the sole bypass of
@@ -2027,7 +2077,13 @@ attacker, but tampering all the same if a write path is missed.
   (a missing or unreachable root is still an error state). The probe
   never attempts a write either way — it inspects `os.access(path,
   os.W_OK)`, it does not write a byte — so this is a narrowing of what
-  counts as unhealthy, not a new write attempt.
+  counts as unhealthy, not a new write attempt. A second, additive
+  component reports a disposal directory that resolves inside a read-only
+  root; it reads already-loaded settings plus the same containment check
+  and is present only when one actually is misconfigured, so an
+  installation without a read-only root gains no component and no new
+  disclosure beyond a path the authenticated config resource already
+  returns.
 
 No new STRIDE category: this entry **tightens** an existing one (COMP 9
 Tampering — move/delete safety) by adding a write-refusal boundary over a
