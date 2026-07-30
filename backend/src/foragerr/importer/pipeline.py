@@ -1561,7 +1561,14 @@ async def import_candidate(
             candidate.file_name,
             exc,
         )
-        reason = f"import failed placing the file on disk: {exc}"
+        # A boundary refusal is not an IO failure: it placed nothing and the
+        # reason IS the operator-facing explanation, so it is reported verbatim
+        # rather than wrapped in placement-failure wording (FRG-SER-021).
+        reason = (
+            str(exc)
+            if isinstance(exc, ReadOnlySeriesError)
+            else f"import failed placing the file on disk: {exc}"
+        )
         # Deduped like the rejection path above (RISK-040): a persistent IO
         # failure re-blocks identically on every retry cycle.
         await history.record_event_deduped(

@@ -20,8 +20,12 @@ from sqlalchemy import func, select
 
 from flows_support import FakeCV, build_factory, flows_settings, issue
 from foragerr.commands import CommandService
+from foragerr.db import utcnow
 from foragerr.library import repo
 from foragerr.library.flows import (
+    add_series,
+    convert_issue,
+    convert_series,
     delete_issue_file,
     delete_series,
     edit_series,
@@ -30,13 +34,19 @@ from foragerr.library.flows import (
     rescan_series,
     scan_library_root,
 )
+from foragerr.library.flows._common import SeriesValidationError
+from foragerr.library.flows.library_import import encode_group_files
 from foragerr.library.models import (
     IssueFileRow,
     IssueRow,
     LibraryImportGroupRow,
     SeriesRow,
 )
-from foragerr.library.read_only import ReadOnlySeriesError
+from foragerr.library.read_only import (
+    ReadOnlySeriesError,
+    path_is_read_only,
+)
+from foragerr.library.read_only import series_is_read_only as read_only_series
 
 _PNG_1x1 = bytes.fromhex(
     "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
@@ -83,6 +93,11 @@ def read_only_root_path(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+async def commands(db, settings, command_registry):
+    return CommandService(db, settings)
+
+
+@pytest.fixture
 async def read_only_root_id(db, read_only_root_path: Path) -> int:
     async with db.write_session() as session:
         row = await repo.create_root_folder(
@@ -95,14 +110,39 @@ async def read_only_root_id(db, read_only_root_path: Path) -> int:
 def settings(tmp_path: Path):
     cfg = tmp_path / "cfg"
     cfg.mkdir()
-    # Deliberately hostile settings: move mode + renaming ON, plus a recycle
-    # bin. Every one of them would mutate the root if the read-only boundary
-    # did not override them.
+    # Deliberately hostile settings: every media-management seam that can mutate
+    # a file is switched ON. Move mode + renaming relocate and rename;
+    # ComicInfo tagging and CBR→CBZ conversion REWRITE the file after it is
+    # placed (so they bypass the placement boundary entirely and must be
+    # forced off in their own right); a recycle bin makes replacement disposal
+    # a move. Every one of them would mutate the root if the read-only
+    # boundary did not override it.
     return flows_settings(
         cfg,
         library_import_mode="move",
         rename_enabled=True,
+        comicinfo_tag_on_import=True,
+        convert_cbr_to_cbz=True,
         recycle_bin_path=str(tmp_path / "bin"),
+    )
+
+
+@pytest.fixture
+def no_bin_settings(tmp_path: Path):
+    """The hostile settings with the DEFAULT (empty) recycle-bin path.
+
+    ``recycle_bin_path`` defaults to ``""``, which makes replacement disposal a
+    permanent ``os.remove`` rather than a reversible move — so this is the
+    configuration in which a disposal bug destroys the operator's file outright,
+    and the one the duplicate/upgrade tests below must use."""
+    cfg = tmp_path / "cfg-no-bin"
+    cfg.mkdir()
+    return flows_settings(
+        cfg,
+        library_import_mode="move",
+        rename_enabled=True,
+        comicinfo_tag_on_import=True,
+        convert_cbr_to_cbz=True,
     )
 
 
@@ -145,6 +185,35 @@ async def _seed_series(
             )
             file_id = file_row.id
         return series.id, issue_row.id, file_id
+
+
+async def _stage_group(
+    db,
+    *,
+    root_folder_id: int,
+    folder: Path,
+    files: list[Path],
+    cv_volume_id: int,
+) -> int:
+    """A CONFIRMED staging group over ``files``, built directly.
+
+    Bypasses the scan so the group's exact file list is the test's choice — the
+    disposal cases below need a specific pair of files in a specific folder,
+    which a scan's own grouping would not guarantee."""
+    async with db.write_session() as session:
+        group = LibraryImportGroupRow(
+            matching_key="example series",
+            root_folder_id=root_folder_id,
+            folder=str(folder),
+            files=encode_group_files([(str(p), p.stat().st_size) for p in files]),
+            confidence=1.0,
+            state="confirmed",
+            confirmed_cv_volume_id=cv_volume_id,
+            scanned_at=utcnow(),
+        )
+        session.add(group)
+        await session.flush()
+        return group.id
 
 
 # --- FRG-IMP-028: index in place, mutate nothing -----------------------------
@@ -213,6 +282,78 @@ async def test_read_only_import_indexes_in_place_and_writes_nothing(
     assert series.path == str(original.parent)  # the folder as it already is
     assert series.monitored is False  # browse-only (FRG-SER-022)
     assert series.monitor_new_items == "none"
+
+
+@pytest.mark.req("FRG-IMP-028")
+@pytest.mark.req("FRG-SER-021")
+async def test_a_second_copy_of_an_indexed_issue_never_disposes_the_original(
+    db, no_bin_settings, read_only_root_id, read_only_root_path
+):
+    """A reference folder holding TWO copies of one issue must lose neither.
+
+    This is the whole feature's primary flow, not an edge case: a real
+    collection routinely carries a second scan (or a format twin) of the same
+    issue. The first copy indexes; the second maps to the same issue, so the
+    pipeline sees ``existing_present`` and — as an upgrade or a same-rung
+    duplicate win — DISPOSES of the loser. With the default empty recycle-bin
+    path that disposal is a permanent ``os.remove`` of the operator's file, and
+    it happens on the in-place branch where nothing is ever placed. The
+    boundary therefore has to refuse any candidate that displaces an indexed
+    file, not just any candidate that would be moved.
+    """
+    settings = no_bin_settings
+    group_folder = read_only_root_path / "example series v1"
+    indexed = make_large_cbz(
+        group_folder / "Example Series 001 (2012).cbz", filler=200 * 1024
+    )
+    # Larger, so it WINS the duplicate/upgrade contest and the already-indexed
+    # copy becomes the loser to be disposed of.
+    second_copy = make_large_cbz(
+        group_folder / "Example Series 001 (2012) rescan.cbz", filler=400 * 1024
+    )
+    series_id, _issue_id, _file_id = await _seed_series(
+        db, root_folder_id=read_only_root_id, series_path=group_folder,
+        file_path=indexed,
+    )
+    group_id = await _stage_group(
+        db,
+        root_folder_id=read_only_root_id,
+        folder=group_folder,
+        files=[indexed, second_copy],
+        cv_volume_id=4242,
+    )
+    before = snapshot(read_only_root_path)
+
+    cv = (
+        FakeCV()
+        .volume(4242, name="Example Series", start_year=2012)
+        .issues(4242, [issue(91001, "1", cover_date="2012-03-01")])
+    )
+    factory = build_factory(settings, cv.handler())
+    summary = await execute_library_import(
+        db, settings, [group_id], commands=CommandService(db, settings),
+        factory=factory,
+    )
+
+    assert summary == "blocked=1"
+    assert snapshot(read_only_root_path) == before  # BOTH copies still there
+    async with db.read_session() as session:
+        paths = (
+            (
+                await session.execute(
+                    select(IssueFileRow.path)
+                    .join(IssueRow, IssueFileRow.issue_id == IssueRow.id)
+                    .where(IssueRow.series_id == series_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        group = await session.get(LibraryImportGroupRow, group_id)
+        message = group.message or ""
+    # The original keeps its row; the refusal is visible, not silent.
+    assert list(paths) == [str(indexed)]
+    assert "read-only reference library" in message
 
 
 @pytest.mark.req("FRG-SER-021")
@@ -356,6 +497,169 @@ async def test_a_series_cannot_be_moved_onto_a_read_only_root(
         assert row.root_folder_id == root_folder_id
 
 
+@pytest.mark.req("FRG-SER-021")
+@pytest.mark.req("FRG-PP-018")
+async def test_read_only_series_refuses_on_demand_conversion(
+    db, settings, read_only_root_id, read_only_root_path
+):
+    """On-demand CBR→CBZ conversion writes a new archive beside the source and
+    then DELETES the source, and it never routes through the import pipeline —
+    so the placement boundary never sees it. Both the per-series and per-issue
+    flows refuse, which also closes the command-enqueue route: the flow IS what
+    the ``convert-series`` / ``convert-issue`` handlers call."""
+    series_path = read_only_root_path / "Example Series (2012)"
+    indexed = make_large_cbz(series_path / "Example Series 001 (2012).cbz")
+    series_id, issue_id, _file_id = await _seed_series(
+        db, root_folder_id=read_only_root_id, series_path=series_path,
+        file_path=indexed,
+    )
+    before = snapshot(read_only_root_path)
+
+    with pytest.raises(ReadOnlySeriesError):
+        await convert_series(db, settings, series_id)
+    with pytest.raises(ReadOnlySeriesError):
+        await convert_issue(db, settings, issue_id)
+
+    assert snapshot(read_only_root_path) == before
+
+
+@pytest.mark.req("FRG-SER-021")
+async def test_a_series_cannot_be_added_with_a_read_only_path_under_a_writable_root(
+    db, settings, commands, read_only_root_id, read_only_root_path, root_folder_id,
+    root_folder_path,
+):
+    """The path and the root key must agree. A path override was validated
+    against ANY registered root, so an add naming a WRITABLE root while
+    pointing INSIDE the reference library produced a series whose files live on
+    the read-only mount and whose ``root_folder_id`` says otherwise — every
+    guard that reads the key then answers "writable" for the operator's
+    originals. The override is confined to the ASSIGNED root instead."""
+    root_folder_path.mkdir(exist_ok=True)
+    inside_reference = read_only_root_path / "Example Series (2012)"
+    inside_reference.mkdir(parents=True)
+    factory = build_factory(
+        settings, FakeCV().volume(777, name="Example Series").handler()
+    )
+
+    with pytest.raises(SeriesValidationError) as excinfo:
+        await add_series(
+            db,
+            settings,
+            cv_volume_id=777,
+            root_folder_id=root_folder_id,
+            commands=commands,
+            path_override=str(inside_reference),
+            factory=factory,
+        )
+
+    assert "does not resolve under root folder" in str(excinfo.value)
+    async with db.read_session() as session:
+        assert (
+            await session.scalar(select(SeriesRow.id).where(SeriesRow.cv_volume_id == 777))
+        ) is None
+
+
+@pytest.mark.req("FRG-SER-021")
+async def test_a_writable_series_cannot_be_path_edited_into_a_read_only_root(
+    db, settings, read_only_root_id, read_only_root_path, root_folder_id,
+    root_folder_path,
+):
+    """The other direction of the same asymmetry: a path edit was validated
+    against ANY root, so a managed series could be given a path inside the
+    reference library — and the directory MOVE that follows would drop it
+    there. The refusal comes from confining the new path to the series' own
+    root, so no directory is renamed."""
+    root_folder_path.mkdir(exist_ok=True)
+    series_path = root_folder_path / "Example Series (2012)"
+    series_path.mkdir(parents=True)
+    (series_path / "marker.txt").write_text("here", encoding="utf-8")
+    series_id, _issue_id, _file_id = await _seed_series(
+        db, root_folder_id=root_folder_id, series_path=series_path
+    )
+    before = snapshot(read_only_root_path)
+
+    with pytest.raises(SeriesValidationError):
+        await edit_series(
+            db, series_id, path=str(read_only_root_path / "Stolen Series")
+        )
+
+    assert snapshot(read_only_root_path) == before
+    assert (series_path / "marker.txt").exists()
+    async with db.read_session() as session:
+        row = await repo.get_series(session, series_id)
+        assert row.path == str(series_path)
+
+
+@pytest.mark.req("FRG-SER-021")
+async def test_rescan_path_override_cannot_walk_a_read_only_root(
+    db, settings, read_only_root_id, read_only_root_path, root_folder_id,
+    root_folder_path,
+):
+    """``rescan-series`` takes an unconfined walk override, and the read-only
+    check reads the SERIES' root — so a MANAGED series could be rescanned with
+    the reference library as its walk path, move-placing every matching
+    untracked file out of it. Refused on the override's own location."""
+    root_folder_path.mkdir(exist_ok=True)
+    series_path = root_folder_path / "Managed Series (2012)"
+    series_path.mkdir(parents=True)
+    series_id, _issue_id, _file_id = await _seed_series(
+        db, root_folder_id=root_folder_id, series_path=series_path
+    )
+    make_large_cbz(
+        read_only_root_path / "example series v1" / "Example Series 001 (2012).cbz"
+    )
+    before = snapshot(read_only_root_path)
+
+    with pytest.raises(ReadOnlySeriesError):
+        await rescan_series(
+            db, settings, series_id, path_override=str(read_only_root_path)
+        )
+
+    assert snapshot(read_only_root_path) == before
+    assert list(series_path.iterdir()) == []
+
+
+# --- FRG-SER-021: the predicates' own direction -------------------------------
+
+
+@pytest.mark.req("FRG-SER-021")
+async def test_the_root_predicate_fails_closed_on_an_unresolvable_root(
+    db, read_only_root_id
+):
+    """A write boundary must not be opened by a row that cannot be found, so an
+    unknown root id reads as READ-ONLY. The series-level predicate keeps the
+    opposite direction on purpose: a missing SERIES has no files to protect and
+    is the caller's own not-found, so reporting it read-only would turn every
+    404 into a 409."""
+    async with db.read_session() as session:
+        assert await repo.root_is_read_only(session, read_only_root_id) is True
+        assert await repo.root_is_read_only(session, 999_999) is True
+        assert await repo.series_is_read_only(session, 999_999) is False
+        assert await read_only_series(session, 999_999) is False
+
+
+@pytest.mark.req("FRG-SER-021")
+async def test_the_boundary_reads_a_path_inside_a_reference_library(
+    db, read_only_root_id, read_only_root_path, root_folder_id, root_folder_path
+):
+    """The containment half, asserted on its own: a path answers for WHERE it
+    is, so the boundary holds for a series row whose stored path and root key
+    disagree — and for a location no row describes at all."""
+    root_folder_path.mkdir(exist_ok=True)
+    inside = read_only_root_path / "example series v1" / "Example Series 001.cbz"
+    series_id, _issue_id, _file_id = await _seed_series(
+        db, root_folder_id=root_folder_id, series_path=inside.parent
+    )
+
+    async with db.read_session() as session:
+        assert await path_is_read_only(session, inside) is True
+        assert await path_is_read_only(session, root_folder_path / "x.cbz") is False
+        # The root KEY says writable; the path says otherwise, and the boundary
+        # answers read-only on the strength of the path alone.
+        assert await repo.series_is_read_only(session, series_id) is False
+        assert await read_only_series(session, series_id) is True
+
+
 # --- FRG-SER-022: browse/serve-only ------------------------------------------
 
 
@@ -377,6 +681,41 @@ async def test_read_only_series_refuses_monitoring_edits(
         row = await repo.get_series(session, series_id)
         assert row.monitored is True  # seeded default, left exactly as it was
         assert row.monitor_new_items == "all"
+
+
+@pytest.mark.req("FRG-SER-022")
+async def test_read_only_series_accepts_an_edit_that_restates_browse_only(
+    db, settings, read_only_root_id, read_only_root_path
+):
+    """The refusal is about the STATE asked for, not the field's presence: a
+    whole-resource edit echoing a browse-only series' own unmonitored state and
+    folder back asks for nothing and must not 409. Refusing on presence would
+    make a browse-only series impossible to edit at all through the
+    read-modify-write shape a form submits — including the display metadata
+    that IS meant to stay editable."""
+    series_path = read_only_root_path / "Example Series (2012)"
+    series_path.mkdir(parents=True)
+    series_id, _issue_id, _file_id = await _seed_series(
+        db, root_folder_id=read_only_root_id, series_path=series_path
+    )
+    async with db.write_session() as session:
+        row = await repo.get_series(session, series_id)
+        row.monitored = False
+        row.monitor_new_items = "none"
+    before = snapshot(read_only_root_path)
+
+    edited = await edit_series(
+        db,
+        series_id,
+        monitored=False,
+        monitor_new_items="none",
+        path=str(series_path),
+        root_folder_id=read_only_root_id,
+        aliases=["Alternate Name"],
+    )
+
+    assert edited.monitored is False
+    assert snapshot(read_only_root_path) == before
 
 
 @pytest.mark.req("FRG-SER-022")
