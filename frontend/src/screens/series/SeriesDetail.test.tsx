@@ -45,6 +45,9 @@ interface DetailOptions {
   series?: SeriesResource;
   issues?: IssueResource[];
   collections?: CollectionRecord[];
+  /** Refuse a specific write so a test can drive its error surface: a
+   *  non-null return is thrown as the backend's message. */
+  refuse?: (method: string, path: string) => string | null;
 }
 
 /** A stateful fake backend for series 7 covering all detail-screen routes. */
@@ -55,9 +58,12 @@ function detailFetcher({
   series = mockSeriesResource,
   issues = mockIssues,
   collections = [],
+  refuse,
 }: DetailOptions = {}) {
   return fakeFetcher((path, options) => {
     const method = options?.method ?? 'GET';
+    const refusal = refuse?.(method, path) ?? null;
+    if (refusal !== null) throw new Error(refusal);
     if (method === 'GET' && path === '/api/v1/config/mediamanagement') {
       return mmConfig;
     }
@@ -1596,7 +1602,20 @@ describe('FRG-UI-045: read-only series offers no acquisition or file actions', (
     ).toBeInTheDocument();
   });
 
-  it('FRG-UI-045 — a normal (non read-only) series is unaffected: monitor toggle, search, and rename all render', async () => {
+  it('FRG-UI-045 — a read-only series offers no Edit affordance', async () => {
+    renderDetail({ series: { ...mockSeriesResource, read_only: true } });
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Invincible' })).toBeInTheDocument(),
+    );
+    // The dialog's only field is monitor-new-issues, refused under a read-only
+    // root — so the affordance is suppressed, not offered-then-refused.
+    expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
+    // Delete (rows-only for a read-only series) is deliberately still offered.
+    expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
+  });
+
+  it('FRG-UI-045 — a normal (non read-only) series is unaffected: monitor toggle, search, edit, and rename all render', async () => {
     renderDetail();
     const user = userEvent.setup();
 
@@ -1607,8 +1626,104 @@ describe('FRG-UI-045: read-only series offers no acquisition or file actions', (
     expect(screen.getByRole('button', { name: 'Unmonitor series' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Search Monitored' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Search All' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
+    expect(screen.queryByTestId('series-action-error')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'More' }));
     expect(screen.getByRole('menuitem', { name: 'Rename Files' })).toBeInTheDocument();
+  });
+});
+
+describe('FRG-UI-045: refused mutations state their reason', () => {
+  it('FRG-UI-045 — a refused monitor-policy save keeps the dialog open with the reason', async () => {
+    renderDetail({
+      refuse: (method, path) =>
+        method === 'PUT' && path === '/api/v1/series/7'
+          ? 'This series is in a read-only library.'
+          : null,
+    });
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Invincible' })).toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Edit Invincible' });
+    await user.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+    expect(await screen.findByTestId('edit-error')).toHaveTextContent(
+      'This series is in a read-only library.',
+    );
+    // The dialog must NOT close on a refusal — closing reads as a saved no-op.
+    expect(
+      screen.getByRole('dialog', { name: 'Edit Invincible' }),
+    ).toBeInTheDocument();
+  });
+
+  it('FRG-UI-045 — a refused series monitor toggle surfaces its reason', async () => {
+    renderDetail({
+      refuse: (method, path) =>
+        method === 'PUT' && path === '/api/v1/series/7' ? 'Refused: read-only.' : null,
+    });
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Invincible' })).toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole('button', { name: 'Unmonitor series' }));
+
+    expect(await screen.findByTestId('series-action-error')).toHaveTextContent(
+      'Refused: read-only.',
+    );
+  });
+
+  it('FRG-UI-045 — a refused per-issue monitor toggle surfaces its reason', async () => {
+    renderDetail({
+      refuse: (method, path) =>
+        method === 'PUT' && path === '/api/v1/issues/71' ? 'Refused: read-only.' : null,
+    });
+    const user = userEvent.setup();
+
+    const row = await screen.findByTestId('issue-row-71');
+    await user.click(within(row).getByRole('button', { name: 'Unmonitor issue 1' }));
+
+    expect(await screen.findByTestId('series-action-error')).toHaveTextContent(
+      'Refused: read-only.',
+    );
+  });
+
+  it('FRG-UI-045 — a refused bulk monitor surfaces its reason', async () => {
+    renderDetail({
+      refuse: (method, path) =>
+        method === 'PUT' && path === '/api/v1/issues/monitor'
+          ? 'Refused: read-only.'
+          : null,
+    });
+    const user = userEvent.setup();
+
+    const row = await screen.findByTestId('issue-row-71');
+    await user.click(within(row).getByRole('checkbox', { name: 'Select issue 1' }));
+    await user.click(screen.getByRole('button', { name: 'Unmonitor selected' }));
+
+    expect(await screen.findByTestId('series-action-error')).toHaveTextContent(
+      'Refused: read-only.',
+    );
+  });
+
+  it('FRG-UI-045 — a refused command dispatch surfaces its reason', async () => {
+    renderDetail({
+      refuse: (method, path) =>
+        method === 'POST' && path === '/api/v1/command' ? 'Refused: read-only.' : null,
+    });
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Invincible' })).toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    expect(await screen.findByTestId('series-action-error')).toHaveTextContent(
+      'Refused: read-only.',
+    );
   });
 });
