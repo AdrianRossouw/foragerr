@@ -73,6 +73,34 @@ DEFAULT_IGNORED_PUBLISHERS = (
     "Editorial Televisa, Ediciones Zinco"
 )
 
+#: Fresh-install default for ``non_comic_publishers`` (FRG-SRC-012).
+#: Curation rule: only houses whose store output is UNAMBIGUOUSLY non-comic —
+#: role-playing/game publishers and tech/textbook publishers whose bundles ship
+#: rulebooks and manuals, frequently in the same CBZ/PDF shapes a comic uses, so
+#: file shape alone cannot tell them apart. Publishers of genuine comics stay OFF
+#: this list on the same conservative rule as :data:`DEFAULT_IGNORED_PUBLISHERS`,
+#: and EVERY entry here is operator-removable — someone does collect these books,
+#: and a removed entry re-classifies on the next sync. Matching uses the shared
+#: fold: an entry ending in ``*`` matches as a substring of the folded publisher
+#: (``Paizo*`` covers "Paizo Inc." / "Paizo Publishing"), every other entry
+#: matches the folded publisher exactly. Seeds fresh installs ONLY — a config.yaml
+#: that already carries a value (including the empty string) keeps it.
+DEFAULT_NON_COMIC_PUBLISHERS = (
+    "Paizo*, Pelgrane Press, Green Ronin*, Kobold Press, Free League*, "
+    "Modiphius*, Chaosium*, Cubicle 7*, Evil Hat*, Monte Cook Games, "
+    "Goodman Games, Onyx Path*, Steve Jackson Games, R. Talsorian*, "
+    "Renegade Game Studios, O'Reilly*, No Starch*, Manning Publications*, "
+    "Packt*, Pragmatic Bookshelf, Apress, Wiley*, Addison-Wesley*, Pearson*, "
+    "CRC Press, Mercury Learning*"
+)
+
+#: The environment variable that supplies ``non_comic_publishers`` and, by
+#: pydantic's env-over-file source ordering, shadows the config-file value. Named
+#: beside the setting it shadows so both the config resource (which renders the
+#: field read-only when the environment wins) and the startup migration (which
+#: must not write a value the environment would shadow) read ONE spelling.
+NON_COMIC_PUBLISHERS_ENV_VAR = "FORAGERR_NON_COMIC_PUBLISHERS"
+
 #: The mandatory at-rest encryption passphrase env var (FRG-AUTH-011).
 #: Environment-only: never read from, or written to, a file under ``/config``.
 #: Startup fails when it is absent or empty (enforced in :func:`load_settings`).
@@ -792,6 +820,23 @@ class Settings(BaseSettings):
             "(FRG-NFR-005). Default 2 s; floored at 0.1 s."
         ),
     )
+    non_comic_publishers: str = Field(
+        default=DEFAULT_NON_COMIC_PUBLISHERS,
+        description=(
+            "Comma-separated publisher names whose store items are always filed "
+            "as Other rather than comics (FRG-SRC-012) — bundle content that "
+            "isn't a comic: role-playing rulebooks, tech-book PDFs, art books. "
+            "The list is library-wide (it applies to every connected source) and "
+            "editable in Settings -> General. Matched case-insensitively; an "
+            "entry ending in '*' matches as a substring (e.g. 'Paizo*' covers "
+            "Paizo Inc. and Paizo Publishing), any other entry matches exactly. "
+            "The curated default seeds FRESH INSTALLS only — an existing config "
+            "keeps its stored value, and an empty string filters nothing. "
+            "Changing the list reclassifies only items you have not reviewed "
+            "yet, on the next sync; items you have already matched or ignored "
+            "never move, and nothing is ever deleted."
+        ),
+    )
     humble_base_url: str = Field(
         default="https://www.humblebundle.com",
         description=(
@@ -1451,6 +1496,53 @@ def generate_default_config(path: Path) -> None:
     """Write a first-run ``config.yaml`` (FRG-DEP-003): the documented defaults,
     written atomically."""
     atomic_write_text(path, render_documented_config())
+
+
+def env_var_is_set(name: str) -> bool:
+    """Whether ``name`` is present as a NON-EMPTY environment variable, matched
+    case-insensitively — mirroring pydantic-settings' env resolution (a lowercase
+    spelling shadows the file too) and ``env_ignore_empty`` (an empty value does
+    not shadow). The effective :class:`Settings` object cannot say which source
+    won, so anything that must tell an env-supplied value from a file-supplied
+    one asks the raw environment here."""
+    return any(key.upper() == name and value for key, value in os.environ.items())
+
+
+def read_config_file(config_file: Path) -> dict[str, Any]:
+    """The stored ``config.yaml`` mapping, or ``{}`` for an absent/non-mapping
+    file. Reports what the FILE carries, not the effective settings — the caller
+    that has to tell a stored value from an env-supplied or defaulted one needs
+    key PRESENCE, which the collapsed :class:`Settings` object cannot answer."""
+    if not config_file.exists():
+        return {}
+    loaded = yaml.safe_load(config_file.read_text(encoding="utf-8")) or {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def apply_config_file_updates(
+    config_dir: Path, updates: dict[str, Any]
+) -> tuple[Settings, dict[str, Any]]:
+    """Merge ``updates`` into ``config.yaml``, validate, persist, return the new
+    :class:`Settings` and the merged mapping.
+
+    The single read-modify-write used by every non-first-run config write (the
+    config resources' ``PUT`` and the startup data migrations), so no caller
+    hand-rolls a rewrite that strips the documentation the first-run file
+    promised: the file is re-rendered through :func:`render_documented_config`
+    and written atomically. Validation runs BEFORE the write, so a rejected
+    update leaves the file byte-for-byte untouched and raises
+    :class:`pydantic.ValidationError` for the caller to shape.
+
+    ``config_dir`` is environment-resolved, never file-stored, so it is dropped
+    from the merged mapping before both validation and rendering. Serializing
+    concurrent writers is the CALLER's job — this function holds no lock.
+    """
+    config_file = config_dir / CONFIG_FILENAME
+    merged = {**read_config_file(config_file), **updates}
+    merged.pop("config_dir", None)
+    settings = Settings(config_dir=config_dir, **merged)
+    atomic_write_text(config_file, render_documented_config(merged))
+    return settings, merged
 
 
 def _format_validation_error(exc: ValidationError) -> str:

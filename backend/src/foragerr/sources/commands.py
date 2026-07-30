@@ -34,6 +34,7 @@ from foragerr.sources.humble import (
     HumbleMalformedError,
     HumbleUnavailable,
 )
+from foragerr.sources.classify import NO_PUBLISHER_RULES, PublisherRuleSet
 from foragerr.sources.models import SourceRow
 from foragerr.sources.service import SyncResult, run_sync
 
@@ -121,6 +122,10 @@ async def _handle_source_sync(command: SourceSyncCommand, ctx: HandlerContext) -
     factory = make_humble_factory(settings)
     min_interval = float(settings.source_min_request_interval_seconds)
     base_url = settings.humble_base_url
+    # The library-wide non-comic publisher rules (FRG-SRC-012), compiled ONCE for
+    # the whole batch: one list governs every source, so it is read from the
+    # effective settings here rather than from any source's settings envelope.
+    publisher_rules = PublisherRuleSet.from_csv(settings.non_comic_publishers)
 
     if command.source_id is not None:
         source = await repo.get_source(ctx.db, command.source_id)
@@ -152,7 +157,12 @@ async def _handle_source_sync(command: SourceSyncCommand, ctx: HandlerContext) -
             skipped += 1
             continue
         outcome = await _sync_one(
-            ctx.db, factory, source, min_interval, base_url=base_url
+            ctx.db,
+            factory,
+            source,
+            min_interval,
+            base_url=base_url,
+            publisher_rules=publisher_rules,
         )
         synced += 1
         if outcome.expired:
@@ -193,12 +203,18 @@ async def _sync_one(
     min_interval: float,
     *,
     base_url: str = HUMBLE_API_BASE,
+    publisher_rules: PublisherRuleSet = NO_PUBLISHER_RULES,
 ) -> SyncResult:
     """Sync one source, converting a mid-sync 401 into the ``expired`` state
     (FRG-SRC-005) — partial results kept, no retry storm."""
     try:
         result = await run_sync(
-            db, factory, source, min_interval=min_interval, base_url=base_url
+            db,
+            factory,
+            source,
+            min_interval=min_interval,
+            base_url=base_url,
+            publisher_rules=publisher_rules,
         )
     except KeystoreDecryptError:
         # Defensive: the pre-loop secret_state check normally skips this source,
