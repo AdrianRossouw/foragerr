@@ -46,9 +46,17 @@ valve. Seeds fresh installs only; an existing config value is kept.
 **D3 — Migrate existing per-source rules into the library-wide list.**
 On upgrade, union any per-source `publisher_rules` from every source's
 settings envelope into the new library-wide value (then the per-source
-field is unused). One-time, in the config/settings migration path.
-Rationale: the owner already has per-source rules on the rig; silently
-losing them would be a regression.
+field is unused). One-time and idempotent, as a startup hook rather than
+the config-file migration path: the union needs the database and the
+keystore (to read source envelopes), which the config layer predates, and
+it must complete before the scheduler can dispatch any sync so the first
+post-upgrade classification already sees the carried rules. Union
+fidelity rules: comma-bearing stored entries flatten to spaces
+(fold-neutral), a wildcard spelling survives a folded-key collision with
+an exact one, the union bases on the on-disk config (a restored backup is
+never clobbered), and a hook failure logs and defers to the next boot
+instead of blocking startup. Rationale: silently losing or narrowing an
+operator's stored rules would be a regression.
 
 **D4 — Plain UI copy, Settings home.** The panel moves from `StoreManage`
 to Settings beside the ignore-list control; the "RPG-sourcebook escape
@@ -82,3 +90,26 @@ absent. No schema table change beyond the config value; rollback = revert
   same over-catch risk FRG-META-020 guards against.
 - Whether to visually distinguish shipped defaults from operator-added
   entries in the panel (nice-to-have, not required).
+
+## Deferred follow-ups (recorded at the merge gate)
+
+- **publisher-list-unification** (one future change): a shared
+  publisher-match-list module parameterized by fold and wildcard policy,
+  adopted by both the ComicVine ignore list and the classification rules
+  (today they are deliberately different folds with near-identical
+  shapes); one shared rule-identity/normalize helper with a collision
+  policy (the config validator keeps `Paizo` + `Paizo*` distinct while
+  the migration union prefers the wildcard — both defensible, currently
+  re-derived); server-side enforcement that only a trailing `*` widens a
+  rule (today interior-`*` entries are inert and only the panel refuses
+  them); a shared frontend publisher-list editor for both Settings
+  fields; bounds on `comicvine_ignored_publishers` matching the new
+  list's validator.
+- The `hidden` schema flag hides a field from the rendered connect form
+  only; the general form (public_settings omission + write-path
+  rejection as one contract) is part of the unification follow-up. The
+  write path itself is already closed (connect/reconnect strip the
+  field).
+- Startup migration reads every source envelope each boot until rules
+  are cleared; a completion marker would short-circuit it (bounded by
+  source count, low priority).
