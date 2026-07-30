@@ -7,8 +7,11 @@
 The system SHALL support an operator-managed, **library-wide** publisher
 rule list that classifies matching items as non-comic at sync time,
 matched on the folded publisher string (an entry ending in `*` matches as
-a case-insensitive substring; every other entry matches exactly — the same
-semantics as the ComicVine ignore list, FRG-META-020). The list SHALL
+a case-insensitive substring; every other entry matches exactly — the
+trailing-`*` convention shared with the ComicVine ignore list,
+FRG-META-020, though the two folds differ: classification folds with the
+matching key, the ignore list casefolds, and only a **trailing** `*`
+widens a classification rule). The list SHALL
 apply across all sources and SHALL be managed in Settings, beside the
 ComicVine ignore list — not per-source on the Sources screen. It SHALL
 **ship with a curated default set** of unambiguous non-comic publisher
