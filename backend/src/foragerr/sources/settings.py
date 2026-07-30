@@ -46,14 +46,15 @@ class HumbleSettings(BaseModel):
         json_schema_extra={
             "label": "Non-comic publishers",
             "help": (
-                "Publishers whose items are always classified as Other, "
-                "whatever their file formats — the RPG-sourcebook escape "
-                "hatch. Ships empty; a suggested starter list is offered in "
-                "the review screen and only applied when you accept it. "
-                "Changing this reclassifies unreviewed items on the next "
-                "sync; items you have already matched or ignored never move."
+                "Retained so a settings envelope written by an earlier release "
+                "still deserializes. SUPERSEDED by the library-wide "
+                "non_comic_publishers setting (FRG-SRC-012), which is what the "
+                "classifier reads; a startup migration unions any stored entries "
+                "into that list and clears this one. Hidden from the rendered "
+                "settings form: there is no per-source rule surface."
             ),
             "advanced": True,
+            "hidden": True,
         },
     )
 

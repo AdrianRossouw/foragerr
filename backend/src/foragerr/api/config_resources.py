@@ -16,19 +16,24 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-import yaml
 from fastapi import APIRouter, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
 
 from foragerr.api.errors import ApiError, error_body
-from foragerr.config import CONFIG_FILENAME, Settings, render_documented_config
-from foragerr.config_migrations import atomic_write_text
+from foragerr.config import (
+    CONFIG_FILENAME,
+    NON_COMIC_PUBLISHERS_ENV_VAR,
+    Settings,
+    apply_config_file_updates,
+    env_var_is_set,
+    read_config_file,
+)
 from foragerr.library import repo
 from foragerr.library.flows import comicvine_factory
 from foragerr.logging import register_secret
@@ -231,47 +236,41 @@ def _comicvine_source(settings: Settings) -> str:
     env var ⇒ ``"environment"`` (it also outranks the file); else a non-empty
     file/effective value ⇒ ``"file"``; else ``"unset"``.
 
-    The scan is CASE-INSENSITIVE and skips empty values to match pydantic's
-    effective behavior: pydantic-settings matches env names case-insensitively,
-    so a lowercase ``foragerr_comicvine_api_key`` shadows the file just as the
-    exact-uppercase spelling does — an exact ``os.environ.get`` would miss it and
-    report ``"file"``/``"unset"`` while the env value actually wins, producing a
-    silently-ineffective editor (GET/PUT share this helper). Empty env values are
-    ignored here to mirror ``env_ignore_empty=True`` on ``Settings`` (an empty
-    ``FORAGERR_COMICVINE_API_KEY=""`` does NOT shadow the file key).
+    Reporting ``"file"``/``"unset"`` while an env value actually wins would give
+    the operator a silently-ineffective editor (GET/PUT share this helper), so
+    the env probe must match pydantic's resolution exactly —
+    :func:`~foragerr.config.env_var_is_set` is that probe.
     """
-    if any(
-        k.upper() == COMICVINE_KEY_ENV_VAR and v
-        for k, v in os.environ.items()
-    ):
+    if env_var_is_set(COMICVINE_KEY_ENV_VAR):
         return "environment"
     if settings.comicvine_api_key.get_secret_value():
         return "file"
     return "unset"
 
 
-def _env_var_is_set(name: str) -> bool:
-    """Whether ``name`` is present as a NON-EMPTY environment variable, matched
-    case-insensitively — mirroring pydantic-settings' env resolution (a
-    lowercase spelling shadows the file too) and ``env_ignore_empty`` (an empty
-    value does not shadow). Shared by the key and ignored-publishers source
-    helpers."""
-    return any(k.upper() == name and v for k, v in os.environ.items())
+def _stored_config(settings: Settings) -> dict[str, Any]:
+    """The ``config.yaml`` mapping behind these settings. Read ONCE per request
+    and passed down: every source attribution in one response must describe the
+    same file state, and a concurrent PUT can rewrite the file between reads."""
+    return read_config_file(Path(settings.config_dir) / CONFIG_FILENAME)
 
 
-def _ignored_publishers_source(settings: Settings) -> str:
-    """Report where the effective ignored-publishers list comes from (FRG-UI-031):
-    ``"env"`` (the env var wins), ``"file"`` (a value is stored in ``config.yaml``,
-    including the empty string older releases rendered), else ``"default"``.
-    Presence in the file — not its emptiness — distinguishes ``file`` from
-    ``default``, so an upgrader who stored an empty value keeps it. Note that
-    ``"default"`` is rare in practice: first-run rendering writes non-secret
-    defaults as real values, so even fresh installs report ``file`` — the
-    branch covers a hand-edited config whose line was removed."""
-    if _env_var_is_set(COMICVINE_IGNORED_PUBLISHERS_ENV_VAR):
+def _publisher_list_source(stored: Mapping[str, Any], key: str, env_var: str) -> str:
+    """Report where an effective publisher-list setting comes from (FRG-UI-031,
+    FRG-SRC-012): ``"env"`` (the env var wins), ``"file"`` (a value is stored in
+    ``config.yaml``, including the empty string older releases rendered), else
+    ``"default"``. Presence of the key in the file — not its emptiness —
+    distinguishes ``file`` from ``default``, so an upgrader who stored an empty
+    value keeps it. Note that ``"default"`` is rare in practice: first-run
+    rendering writes non-secret defaults as real values, so even fresh installs
+    report ``file`` — the branch covers a config predating the key, or a
+    hand-edited one whose line was removed.
+
+    ``stored`` is the config-file mapping (:func:`_stored_config`), never the
+    effective :class:`Settings`, which cannot say which source won."""
+    if env_var_is_set(env_var):
         return "env"
-    stored = _read_config(Path(settings.config_dir) / CONFIG_FILENAME)
-    if "comicvine_ignored_publishers" in stored:
+    if key in stored:
         return "file"
     return "default"
 
@@ -285,8 +284,8 @@ class ComicVineKeyStatus(BaseModel):
     source: str
 
 
-class IgnoredPublishersStatus(BaseModel):
-    """The ignored-publishers list VALUE + its source (FRG-UI-031).
+class PublisherListStatus(BaseModel):
+    """A publisher-list setting's VALUE + its source (FRG-UI-031, FRG-SRC-012).
 
     Unlike the key this is not a secret: the value is echoed so the Settings
     field can render it for editing. ``source`` is ``"env"``/``"file"``/``"default"``
@@ -298,28 +297,49 @@ class IgnoredPublishersStatus(BaseModel):
 
 class GeneralConfig(BaseModel):
     """The Settings → General resource: the ComicVine credential STATUS plus the
-    editable ignored-publishers list.
+    two editable publisher lists.
 
     The key is a write-only credential surface — the read reports whether it is
     configured and its source but never the value or any substring of it
-    (FRG-API-018 / FRG-META-002). The ignored-publishers list IS echoed (not a
-    secret) with its source so the field can render editable or read-only
-    (FRG-UI-031).
+    (FRG-API-018 / FRG-META-002). Both publisher lists ARE echoed (neither is a
+    secret) with their source so each field can render editable or read-only
+    (FRG-UI-031). They are separate axes and never merged: the ignore list hides
+    ComicVine SEARCH results, the non-comic list files store items as Other at
+    sync (FRG-SRC-012).
     """
 
     comicvine_api_key: ComicVineKeyStatus
-    comicvine_ignored_publishers: IgnoredPublishersStatus
+    comicvine_ignored_publishers: PublisherListStatus
+    non_comic_publishers: PublisherListStatus
 
     @classmethod
-    def from_settings(cls, settings: Settings) -> "GeneralConfig":
+    def from_settings(
+        cls, settings: Settings, stored: Mapping[str, Any] | None = None
+    ) -> "GeneralConfig":
+        """Build the resource, reading the config file once for both list
+        sources. A caller that already read the file for the SAME state — the
+        PUT path, whose env-managed pre-checks read it — passes that mapping as
+        ``stored`` so one request never reads it twice."""
+        if stored is None:
+            stored = _stored_config(settings)
         key_source = _comicvine_source(settings)
         return cls(
             comicvine_api_key=ComicVineKeyStatus(
                 configured=key_source != "unset", source=key_source
             ),
-            comicvine_ignored_publishers=IgnoredPublishersStatus(
+            comicvine_ignored_publishers=PublisherListStatus(
                 value=settings.comicvine_ignored_publishers,
-                source=_ignored_publishers_source(settings),
+                source=_publisher_list_source(
+                    stored,
+                    "comicvine_ignored_publishers",
+                    COMICVINE_IGNORED_PUBLISHERS_ENV_VAR,
+                ),
+            ),
+            non_comic_publishers=PublisherListStatus(
+                value=settings.non_comic_publishers,
+                source=_publisher_list_source(
+                    stored, "non_comic_publishers", NON_COMIC_PUBLISHERS_ENV_VAR
+                ),
             ),
         )
 
@@ -330,14 +350,16 @@ class GeneralConfigUpdate(BaseModel):
     ``comicvine_api_key``: a blank value means "leave the stored key unchanged"
     (the write-only "leave blank to keep" convention), NOT "clear it".
 
-    ``comicvine_ignored_publishers``: ``None`` (the default, or an omitted field)
-    means "leave the stored list unchanged"; a STRING — including the empty
-    string — sets it, so an operator CAN clear the list to hide nothing. The two
-    fields are independent, so a save that only touches one leaves the other.
+    ``comicvine_ignored_publishers`` / ``non_comic_publishers``: ``None`` (the
+    default, or an omitted field) means "leave the stored list unchanged"; a
+    STRING — including the empty string — sets it, so an operator CAN clear a
+    list to filter nothing. Every field is independent, so a save that touches
+    one leaves the others.
     """
 
     comicvine_api_key: str = ""
     comicvine_ignored_publishers: str | None = None
+    non_comic_publishers: str | None = None
 
 
 class ComicVineTestResponse(BaseModel):
@@ -366,15 +388,17 @@ async def put_general(body: GeneralConfigUpdate, request: Request):
       env-supplied (``source == "environment"``) is REJECTED as
       environment-managed (a 409 naming the env var) rather than persisting a
       value the environment would shadow on reload (design decision 4).
-    - **Ignored publishers**: ``None`` (omitted) leaves the stored list; a string
-      (including empty, to hide nothing) is written — unless the list is
-      env-managed, which is rejected the same way as the key.
+    - **Publisher lists** (the ComicVine ignore list and the non-comic list):
+      ``None`` (omitted) leaves the stored list; a string (including empty, to
+      filter nothing) is written — unless that list is env-managed, which is
+      rejected the same way as the key.
     - Applied fields are merged into ``config.yaml`` through the documented
       writer via the shared ``_apply`` read-modify-write-reload, which swaps
       ``app.state.settings`` (live-apply, no restart) and re-registers secrets
       with the log-redaction filter.
     """
     current: Settings = request.app.state.settings
+    stored = _stored_config(current)
     updates: dict[str, Any] = {}
 
     key = body.comicvine_api_key.strip()
@@ -389,23 +413,57 @@ async def put_general(body: GeneralConfigUpdate, request: Request):
             )
         updates["comicvine_api_key"] = key
 
-    if body.comicvine_ignored_publishers is not None:
-        if _ignored_publishers_source(current) == "env":
-            raise ApiError(
-                409,
-                "the ignored-publishers list is managed by the "
-                f"{COMICVINE_IGNORED_PUBLISHERS_ENV_VAR} environment variable, "
-                "which takes precedence over the config file; unset it to edit "
-                "the list here",
-                field="comicvine_ignored_publishers",
-            )
-        updates["comicvine_ignored_publishers"] = body.comicvine_ignored_publishers
+    _stage_publisher_list(
+        updates,
+        stored,
+        field="comicvine_ignored_publishers",
+        env_var=COMICVINE_IGNORED_PUBLISHERS_ENV_VAR,
+        label="the ignored-publishers list",
+        value=body.comicvine_ignored_publishers,
+    )
+    _stage_publisher_list(
+        updates,
+        stored,
+        field="non_comic_publishers",
+        env_var=NON_COMIC_PUBLISHERS_ENV_VAR,
+        label="the non-comic publisher list",
+        value=body.non_comic_publishers,
+    )
 
     if not updates:
         # Nothing to change (blank key, list untouched); report current status.
-        return GeneralConfig.from_settings(current)
+        return GeneralConfig.from_settings(current, stored)
 
     return await _apply(request, updates, GeneralConfig)
+
+
+def _stage_publisher_list(
+    updates: dict[str, Any],
+    stored: Mapping[str, Any],
+    *,
+    field: str,
+    env_var: str,
+    label: str,
+    value: str | None,
+) -> None:
+    """Stage one publisher-list write into ``updates`` (FRG-UI-031, FRG-SRC-012).
+
+    ``None`` leaves the stored list alone; a string — including the empty one,
+    which clears the list — is staged. A list the environment supplies is
+    REFUSED with a 409 naming the variable rather than written: the env value
+    shadows the file on reload, so the write would look applied and filter
+    nothing."""
+    if value is None:
+        return
+    if _publisher_list_source(stored, field, env_var) == "env":
+        raise ApiError(
+            409,
+            f"{label} is managed by the {env_var} environment variable, which "
+            "takes precedence over the config file; unset it to edit the list "
+            "here",
+            field=field,
+        )
+    updates[field] = value
 
 
 @router.post("/comicvine/test", response_model=ComicVineTestResponse)
@@ -476,14 +534,9 @@ async def _apply(request: Request, updates: dict[str, Any], resource: type[BaseM
     async with _config_write_lock:
         current: Settings = request.app.state.settings
         config_dir = Path(current.config_dir)
-        config_file = config_dir / CONFIG_FILENAME
-
-        stored = _read_config(config_file)
-        merged = {**stored, **updates}
-        merged.pop("config_dir", None)  # environment-only
 
         try:
-            new_settings = Settings(config_dir=config_dir, **merged)
+            new_settings, _merged = apply_config_file_updates(config_dir, updates)
         except ValidationError as exc:
             return JSONResponse(
                 status_code=400,
@@ -499,8 +552,7 @@ async def _apply(request: Request, updates: dict[str, Any], resource: type[BaseM
                 ),
             )
 
-        # Validation passed: persist (documented + atomic) and swap in the reload.
-        atomic_write_text(config_file, render_documented_config(merged))
+        # Persisted (documented + atomic) by the writer above; swap in the reload.
         for secret in new_settings.secret_fields().values():
             register_secret(secret.get_secret_value())
         request.app.state.settings = new_settings
@@ -511,11 +563,8 @@ async def _apply(request: Request, updates: dict[str, Any], resource: type[BaseM
         commands = getattr(request.app.state, "commands", None)
         if commands is not None:
             commands.context.settings = new_settings
+        # A resource that reports where its values come from re-reads the file
+        # it just rewrote, NOT ``_merged``: the documented renderer emits every
+        # model key, so the written file can carry a key the merge did not, and
+        # only the file answers "is this value stored?" (``_stored_config``).
         return resource.from_settings(new_settings)
-
-
-def _read_config(config_file: Path) -> dict[str, Any]:
-    if not config_file.exists():
-        return {}
-    loaded = yaml.safe_load(config_file.read_text(encoding="utf-8")) or {}
-    return loaded if isinstance(loaded, dict) else {}

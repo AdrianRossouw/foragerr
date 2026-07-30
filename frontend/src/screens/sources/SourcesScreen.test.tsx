@@ -13,7 +13,6 @@ import type {
   StoreSourceResource,
 } from '../../api/types';
 import { SourcesScreen } from './SourcesScreen';
-import { STARTER_PUBLISHERS } from './PublisherRules';
 
 /*
  * FRG-UI-029 — the Sources screen: connect flow (masked input, live-validated
@@ -84,8 +83,6 @@ interface FetcherState {
   reconnectError?: ApiRequestError;
   /** Error the retry-download endpoint rejects with (e.g. a 409 conflict). */
   retryError?: ApiRequestError;
-  /** Error PATCH /sources/{id} rejects with (e.g. the 409 unloadable envelope). */
-  patchError?: ApiRequestError;
   /** Error the bulk recompute rejects with (e.g. the 409 no-ComicVine-key). */
   recomputeError?: ApiRequestError;
   /**
@@ -189,33 +186,18 @@ function makeFetcher(state: FetcherState): Fetcher {
         if (state.recomputeGate) await state.recomputeGate;
         return { command_id: 7, status: 'queued' };
       }
-      // PATCH /sources/{id} — flip a mutable control (auto_sync) or replace the
-      // publisher rules (FRG-SRC-012). Mutate the in-memory source so the
-      // invalidation-driven refetch reflects it.
+      // PATCH /sources/{id} — flip a mutable control (auto_sync). Mutate the
+      // in-memory source so the invalidation-driven refetch reflects it.
       const patchMatch = path.match(/^\/api\/v1\/sources\/(\d+)$/);
       if (patchMatch && init?.method === 'PATCH') {
-        if (state.patchError) throw state.patchError;
         const id = Number(patchMatch[1]);
-        const body = init.body as {
-          auto_sync?: boolean;
-          publisher_rules?: string[];
-        };
-        // Replace the array with a fresh one (a new reference) so the
-        // invalidation-driven refetch is not short-circuited by identity.
+        const body = init.body as { auto_sync?: boolean };
         state.sources = state.sources.map((s) =>
           s.id === id
             ? {
                 ...s,
                 ...(body.auto_sync !== undefined
                   ? { auto_sync: body.auto_sync }
-                  : {}),
-                ...(body.publisher_rules !== undefined
-                  ? {
-                      settings: {
-                        ...s.settings,
-                        publisher_rules: body.publisher_rules,
-                      },
-                    }
                   : {}),
               }
             : s,
@@ -1776,130 +1758,19 @@ describe('FRG-SRC-010: proposal verdict vs not-yet-computed', () => {
 });
 
 /*
- * FRG-SRC-012 — operator-owned publisher rules: a per-source list of publishers
- * whose items are always filed as Other. Ships EMPTY; the starter list is
- * OFFERED (it fills the editor) and only written when the operator saves.
+ * FRG-UI-046 — publisher classification rules moved to a library-wide
+ * Settings panel (see General.test.tsx); no per-source control renders here.
  */
-describe('FRG-SRC-012: publisher rules editor', () => {
-  const source = makeSource({ id: 5, connection_state: 'connected' });
-
-  async function openRules(user: ReturnType<typeof userEvent.setup>) {
-    await user.click(await screen.findByTestId('publisher-rules-toggle'));
-  }
-
-  it('FRG-SRC-012 — the editor ships empty', async () => {
-    const user = userEvent.setup();
+describe('FRG-UI-046: no per-source publisher-rules control', () => {
+  it('FRG-UI-046 — the manage view renders no publisher-rules control', async () => {
+    const source = makeSource({ id: 5, connection_state: 'connected' });
     renderScreen({ sources: [source], entitlements: [], calls: [] });
-    await openRules(user);
 
-    expect(screen.getByTestId('rules-empty')).toHaveTextContent(
-      'No publisher rules',
-    );
-    expect(screen.queryByTestId('rules-list')).toBeNull();
-  });
-
-  it('FRG-SRC-012 — the suggested starter list MERGES into the editor and saves nothing', async () => {
-    const user = userEvent.setup();
-    const state: FetcherState = {
-      sources: [source],
-      entitlements: [],
-      calls: [],
-    };
-    renderScreen(state);
-    await openRules(user);
-
-    // Something the operator typed FIRST — the starter list is an offer, so it
-    // must never discard work already in the draft.
-    await user.type(screen.getByTestId('rule-input'), 'Onyx Path');
-    await user.click(screen.getByTestId('rule-add'));
-    // …including one the starter list also carries, which must not double up.
-    await user.type(screen.getByTestId('rule-input'), 'paizo');
-    await user.click(screen.getByTestId('rule-add'));
-
-    await user.click(screen.getByTestId('rules-starter'));
-
-    // The RPG publishers are in the editor, ready to be pruned…
-    expect(screen.getByTestId('rule-Chaosium')).toBeInTheDocument();
-    // …the operator's own entries survived, in their own order first…
-    const items = within(screen.getByTestId('rules-list')).getAllByRole(
-      'listitem',
-    );
-    expect(items[0]).toHaveTextContent('Onyx Path');
-    expect(items[1]).toHaveTextContent('paizo');
-    // …the case-insensitive duplicate was NOT added a second time…
-    expect(screen.queryByTestId('rule-Paizo')).toBeNull();
-    expect(items).toHaveLength(STARTER_PUBLISHERS.length + 1);
-    // …and nothing was written: no PATCH left the screen.
+    await screen.findByTestId('count-line');
+    expect(screen.queryByTestId('publisher-rules')).not.toBeInTheDocument();
     expect(
-      state.calls.filter((c) => c.init?.method === 'PATCH'),
-    ).toHaveLength(0);
-  });
-
-  it('FRG-SRC-012 — Save PATCHes the WHOLE list (add + remove, then save)', async () => {
-    const user = userEvent.setup();
-    const state: FetcherState = {
-      sources: [source],
-      entitlements: [],
-      calls: [],
-    };
-    renderScreen(state);
-    await openRules(user);
-
-    await user.click(screen.getByTestId('rules-starter'));
-    await user.click(screen.getByTestId('rule-remove-Chaosium'));
-    await user.type(screen.getByTestId('rule-input'), 'Onyx Path');
-    await user.click(screen.getByTestId('rule-add'));
-    await user.click(screen.getByTestId('rules-save'));
-
-    await waitFor(() =>
-      expect(
-        state.calls.find(
-          (c) => c.path === '/api/v1/sources/5' && c.init?.method === 'PATCH',
-        ),
-      ).toBeTruthy(),
-    );
-    const body = state.calls.find((c) => c.path === '/api/v1/sources/5')!.init!
-      .body as { publisher_rules: string[]; auto_sync?: boolean };
-    expect(body.publisher_rules).toContain('Paizo');
-    expect(body.publisher_rules).toContain('Onyx Path');
-    expect(body.publisher_rules).not.toContain('Chaosium');
-    // The rules PATCH never rewrites the control it did not touch.
-    expect(body.auto_sync).toBeUndefined();
-    expect(await screen.findByTestId('rules-saved')).toBeInTheDocument();
-    // The saved list re-seeds from the server intact — a multi-word publisher
-    // is ONE rule, not two.
-    expect(screen.getByTestId('rule-Pelgrane Press')).toBeInTheDocument();
-    expect(
-      within(screen.getByTestId('rules-list')).getAllByRole('listitem'),
-    ).toHaveLength(body.publisher_rules.length);
-  });
-
-  it('FRG-SRC-012 — a 409 (no settings envelope to write into) surfaces the reconnect guidance', async () => {
-    const user = userEvent.setup();
-    renderScreen({
-      sources: [source],
-      entitlements: [],
-      calls: [],
-      patchError: new ApiRequestError(
-        409,
-        {
-          message:
-            'source 5 has no stored settings to update — reconnect it before editing its publisher rules',
-          errors: [{ field: 'publisher_rules', message: 'no settings' }],
-        },
-        '/api/v1/sources/5',
-      ),
-    });
-    await openRules(user);
-
-    await user.type(screen.getByTestId('rule-input'), 'Chaosium');
-    await user.click(screen.getByTestId('rule-add'));
-    await user.click(screen.getByTestId('rules-save'));
-
-    const note = await screen.findByTestId('rules-error');
-    expect(note).toHaveTextContent('reconnect it before editing its publisher rules');
-    // The draft survives the failure — nothing the operator typed is lost.
-    expect(screen.getByTestId('rule-Chaosium')).toBeInTheDocument();
+      screen.queryByTestId('publisher-rules-toggle'),
+    ).not.toBeInTheDocument();
   });
 });
 

@@ -34,7 +34,7 @@ logger = logging.getLogger("foragerr.sources.repo")
 
 __all__ = [
     "ProposalAttempt",
-    "SourceSettingsUnavailable",
+    "clear_publisher_rules",
     "create_source",
     "delete_source",
     "get_entitlement",
@@ -47,19 +47,8 @@ __all__ = [
     "serialize_settings",
     "set_auto_sync",
     "set_connection_state",
-    "update_publisher_rules",
     "update_source_settings",
 ]
-
-
-class SourceSettingsUnavailable(Exception):
-    """A source row carries no loadable settings envelope to update.
-
-    Raised by :func:`update_publisher_rules` when the row's settings JSON is
-    blank (disconnected — the credential was deliberately deleted) or fails to
-    decrypt. The API maps it to a 409: there is nothing to write into, and
-    minting a fresh settings envelope would silently resurrect a source without
-    a cookie."""
 
 
 async def get_entitlement(db, entitlement_id: int) -> SourceEntitlementRow | None:
@@ -259,50 +248,33 @@ async def update_source_settings(
         return row
 
 
-async def update_publisher_rules(
-    db, source_id: int, rules: list[str]
-) -> SourceRow | None:
-    """Replace a source's publisher rule list in place (FRG-SRC-012).
+async def clear_publisher_rules(db, source_id: int) -> bool:
+    """Empty a source's superseded ``publisher_rules`` field in place, returning
+    whether anything was written (FRG-SRC-012 migration).
 
-    Whole-list replace of ``publisher_rules`` inside the existing settings
-    envelope: read → validate → merge → re-serialize, all in ONE write
-    transaction, and it NEVER writes ``connection_state``.
-
-    Both properties are the fix for a verified credential-resurrection race. The
-    API layer used to do this as a read-modify-write across three separate
-    transactions (``get_source``, then ``load_source_settings`` in Python, then
-    ``update_source_settings``) and pass ``connection_state=row.connection_state``
-    from the stale read. A ``disconnect`` committing in the middle — blanking the
-    settings JSON and setting ``disconnected`` — was then overwritten by the
-    trailing write, which re-persisted the DECRYPTED-then-RE-ENCRYPTED cookie the
-    operator had just deleted and restored the ``connected`` state with it. Doing
-    the whole cycle under the writer lock makes the disconnect either wholly
-    before (this call finds a blank envelope and refuses, below) or wholly after
-    (it blanks the row this call just wrote), and never touching
-    ``connection_state`` means a rules edit can no longer reconnect anything.
-
-    Returns the detached row, ``None`` for an unknown id; raises
-    :class:`SourceSettingsUnavailable` for a row with no envelope and
-    :class:`pydantic.ValidationError` for a rule list the contract rejects.
-    """
+    Read → merge → re-serialize inside ONE write transaction, and
+    ``connection_state`` is not a parameter of it at all: the credential the
+    envelope carries is re-encrypted on the way back, so a concurrent disconnect
+    must not be able to interleave into a resurrected cookie or a restored
+    connection state. A row whose envelope is blank or undecryptable carries no
+    rules to clear and is left exactly as it is."""
     async with db.write_session() as session:
         row = await session.get(SourceRow, source_id)
         if row is None:
-            return None
+            return False
         try:
             model = load_source_settings(row.type, row.settings)
-        except Exception as exc:  # noqa: BLE001 — blank/undecryptable envelope
-            raise SourceSettingsUnavailable(
-                f"source {source_id} has no stored settings to update"
-            ) from exc
+        except Exception:  # noqa: BLE001 — blank or undecryptable envelope
+            return False
+        if not getattr(model, "publisher_rules", None):
+            return False
         updated = validate_settings(
-            row.type, {**model.model_dump(), "publisher_rules": rules}
+            row.type, {**model.model_dump(), "publisher_rules": []}
         )
         register_row_secrets(updated)
         row.settings = serialize_settings(updated)
         await session.flush()
-        session.expunge(row)
-        return row
+        return True
 
 
 async def set_auto_sync(db, source_id: int, auto_sync: bool) -> SourceRow | None:

@@ -81,10 +81,20 @@ def _field_type(annotation: Any, *, secret: bool) -> str:
 
 
 def schema_for(model: Type[BaseModel]) -> list[FieldSpec]:
-    """Derive the ordered ``fields[]`` metadata for one settings model."""
+    """Derive the ordered ``fields[]`` metadata for one settings model.
+
+    A field carrying ``"hidden": True`` in its ``json_schema_extra`` is OMITTED:
+    it still exists on the contract (so an envelope written by an earlier release
+    deserializes) but has no operator-facing surface, and rendering it would put
+    a superseded control back on the form. Hiding is opt-in per field, so the
+    default remains "every declared field is rendered".
+    """
     specs: list[FieldSpec] = []
-    for order, (name, info) in enumerate(model.model_fields.items()):
+    order = 0
+    for name, info in model.model_fields.items():
         extra = info.json_schema_extra if isinstance(info.json_schema_extra, dict) else {}
+        if extra.get("hidden"):
+            continue
         secret = _is_secret(info.annotation)
         specs.append(
             FieldSpec(
@@ -99,4 +109,5 @@ def schema_for(model: Type[BaseModel]) -> list[FieldSpec]:
                 selectOptions=list(extra.get("selectOptions", [])),
             )
         )
+        order += 1
     return specs

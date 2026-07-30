@@ -132,18 +132,16 @@ budget is running hot, a compact meter appears above the review list;
 the full per-path meter lives in Settings → General (`FRG-SRC-013`,
 `FRG-UI-040`).
 
-### Publisher rules
+### Publisher filtering
 
-Humble bundles mix RPG rulebooks in with comics, and format detection alone
-can't always tell them apart. Each source has an operator-managed
-**publisher rules** list (`FRG-SRC-012`): items from a listed publisher are
-classified as Other at sync time. The list ships **empty** — a suggested
-starter list of common RPG publishers is one click away, but it only fills
-the editor; nothing applies until you save, and saved rules take effect on
-the **next sync**. Rule changes reclassify only items still awaiting
-review; anything you've already matched or ignored never moves, and Other
-items remain visible on demand as always. Editing rules needs a connected
-source (a disconnected source asks you to reconnect first).
+Some bundle items aren't comics no matter their file format — RPG
+rulebooks, tech-book PDFs, art books — and format detection alone can't
+always tell them apart. Listing a publisher classifies its items as Other
+at sync time, and that list lives in one place, library-wide, applying to
+every connected source: **Settings → General**, beside the ComicVine
+publisher ignore list (`FRG-SRC-012`) — not here on the Sources screen. See
+`../admin/configuration.md` for the setting, its shipped defaults, and how
+it behaves.
 
 Proposals stay honest as your library changes underneath them (`FRG-SRC-008`).
 Humble bundles routinely contain many items from the same series, all
