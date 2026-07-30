@@ -133,3 +133,29 @@ policy.
 
 None blocking. Bundle-name surfacing on the copies chip uses whatever
 bundle identity FRG-SRC-011 already exposes on the row resource.
+
+## Deferred follow-ups (recorded at the merge gate)
+
+- **Collected-cues badge is near-inert on real CV titles** (owner note):
+  the shared vocabulary is seven phrases (tpb/trade paperback/digital
+  tpb/gn/graphic novel/hc/hardcover) and CV volume names rarely carry
+  them — "Omnibus"/"The Complete Collection" do not badge. Widening the
+  vocabulary moves FRG-SER-018 series typing too, so it is a deliberate
+  single-vocabulary decision, not an oversight.
+- Duplicates-filter rows carry no route back to their canonical
+  (`duplicate_of` is served but unrendered); spec mandates only the
+  canonical→copies direction.
+- LibraryImport's pasted-id dead end remains (its picker still submits
+  a 4050-form id as a name search); AddSeries and the row picker are
+  fixed.
+- Word-numbered volumes ("Book Two") get no parser ordinal, so they
+  sort by name within a group; teaching the parser word-numbers touches
+  the shared FRG-IMP-005 fold.
+- `merge_display_groups` runs over the response's key set — stable only
+  while the client fetches unfiltered; a server-side filter/pagination
+  must merge over the source's full key set (comment at the call site).
+- Frontend id/lookup string utilities have outgrown AddSeries as their
+  home (fifth/sixth symbol imported from a screen component) — extract
+  a pure `lookupTerm` module.
+- `dedupe.py` phase extraction (`_unpark_stale`/`_resolve_set`) is
+  cosmetic polish; the tests carry the contract.
