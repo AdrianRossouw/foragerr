@@ -11,13 +11,12 @@ import { COMPACT_MEDIA_QUERY } from './layout';
  * accessibility tree and in keyboard order — so the crossover is evaluated in
  * JS and the presentations differ by DOM, not by visibility.
  *
- * `matchMedia` is guarded because environments without it (a non-browser test
- * host) must still render the wide frame rather than throw.
+ * `matchMedia` is guarded because a test host may not implement it: without the
+ * guard those cases throw instead of rendering the wide frame. The app ships as
+ * a browser-only bundle, so `window` itself is always present.
  */
 function matchesCompact(): boolean {
-  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
-    return false;
-  }
+  if (typeof window.matchMedia !== 'function') return false;
   return window.matchMedia(COMPACT_MEDIA_QUERY).matches;
 }
 
