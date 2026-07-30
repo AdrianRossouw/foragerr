@@ -1119,9 +1119,14 @@ export function useSetIssueMonitored(
  * PUT /api/v1/issues/{id} — single-issue monitored toggle used by the Calendar
  * (FRG-PULL-007). Unlike `useSetIssueMonitored`, it is not scoped to a series'
  * issues table: it delegates to the canonical issue endpoint and invalidates the
- * DERIVED views (pull + wanted + any open issues table) so the pull card's
- * projected state and the Wanted list re-derive. It writes no pull-side status
- * (D4) — the card changes only because the issue projection changed.
+ * DERIVED views (wanted + any open issues table) so the Wanted list re-derives.
+ * It writes no pull-side status (D4) — a card changes only because the issue
+ * projection changed.
+ *
+ * The pull view is NOT invalidated here. Its caller awaits its own pull
+ * invalidation so the optimistic value is released only once the re-projection
+ * has landed (FRG-UI-048); a second invalidation from this callback cancels that
+ * awaited refetch, which on a dense week abandons one request per entry.
  */
 export function useToggleIssueMonitored(): UseMutationResult<
   IssueResource,
@@ -1137,7 +1142,6 @@ export function useToggleIssueMonitored(): UseMutationResult<
         body: { monitored },
       }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.pull.all() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.wanted.all() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.issues.all() });
     },

@@ -9,7 +9,44 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
-## [v0.16.0] — 2026-07-30
+## [v0.17.0] — 2026-07-30
+
+Calendar legibility: the week reads as an agenda on desktop and as quiet
+cards on narrow screens, status stops dressing up as controls, and the
+whole shell becomes usable at phone width. Delivers FRG-UI-047, FRG-UI-048,
+FRG-UI-049 and modifies FRG-UI-018.
+
+### Added
+- Responsive Calendar presentation (FRG-UI-018, FRG-UI-049): agenda rows at
+  or above the 900px crossover, single-column quiet cards below it, with an
+  identical action set in both modes and a per-entry density bound that
+  keeps a dense day scannable.
+- Off-canvas navigation drawer below the crossover (FRG-UI-049): the
+  sidebar collapses behind a toggle; the drawer is keyboard-operable —
+  focus moves in on open, Escape/backdrop/nav-item dismiss it and return
+  focus to the toggle — and the page behind it is genuinely inert.
+- Honest status indicators (FRG-UI-047): non-interactive state renders as a
+  labelled chip, never as a control-shaped glyph; the bookmark toggle
+  appears only where a real monitor toggle exists, and every interactive
+  target meets a 24px minimum enforced from one token.
+- In-flight monitor feedback (FRG-UI-048): the toggle renders the requested
+  state immediately, announces busy state to assistive technology,
+  suppresses duplicate activations, settles to the re-projected state, and
+  explains — rather than silently reverting — a write the projection does
+  not honour (for example an issue whose series is unmonitored).
+
+### Changed
+- Mutations now fail fast when the browser is offline instead of pausing
+  indefinitely, so in-flight controls cannot latch busy forever.
+- Screen-reader output of the Calendar's day groups no longer announces
+  each date twice.
+
+### Fixed
+- A monitor toggle refused by the backend (including read-only series) now
+  reports its reason in the Calendar's alert region in every case; a
+  successful toggle no longer triggers two overlapping refetches.
+
+No migrations. No upgrade steps.
 
 Read-only library roots: point foragerr at a collection you own and want
 indexed, browsed and served, but never written to.

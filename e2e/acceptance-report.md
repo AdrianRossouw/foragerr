@@ -3,9 +3,9 @@
 _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.mjs` — do not edit by hand (FRG-PROC-010)._
 
 - **Verdict:** GREEN
-- **Scenarios:** 43 (42 pass, 0 fail, 1 skipped, 0 flaky, 0 not run)
-- **Run started:** 2026-07-30T03:22:52.594Z
-- **Duration:** 151.4s
+- **Scenarios:** 47 (46 pass, 0 fail, 1 skipped, 0 flaky, 0 not run)
+- **Run started:** 2026-07-30T11:21:58.005Z
+- **Duration:** 159.6s
 
 ## Scenario → requirement coverage
 
@@ -23,7 +23,11 @@ _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.m
 | PASS | FRG-PROC-010 FRG-UI-018: the calendar renders an unconfigured-source week without error | FRG-PROC-010, FRG-UI-018 |
 | PASS | FRG-PROC-010 FRG-OPDS-001 FRG-OPDS-002 FRG-OPDS-003 FRG-OPDS-005 FRG-OPDS-019: OPDS navigates to a byte-identical comic download and a reachable cover | FRG-OPDS-001, FRG-OPDS-002, FRG-OPDS-003, FRG-OPDS-005, FRG-OPDS-019, FRG-PROC-010 |
 | SKIPPED | FRG-PROC-010: live SABnzbd tier (skipped — no credentials) | FRG-PROC-010 |
-| PASS | FRG-PROC-019 FRG-UI-038: core screens carry zero serious/critical axe WCAG 2.1 A/AA violations | FRG-PROC-019, FRG-UI-038 |
+| PASS | FRG-UI-047: every calendar and chrome control meets the 24px target floor at both sides of the crossover | FRG-UI-047 |
+| PASS | FRG-UI-018: an agenda row keeps ~30 characters of title measure at the crossover width | FRG-UI-018 |
+| PASS | FRG-UI-018: a dense day holds every entry inside the per-entry vertical bound | FRG-UI-018 |
+| PASS | FRG-UI-049: the open nav drawer contains Tab and Shift+Tab | FRG-UI-049 |
+| PASS | FRG-PROC-019 FRG-UI-038 FRG-UI-049: core screens carry zero serious/critical axe WCAG 2.1 A/AA violations at both viewports | FRG-PROC-019, FRG-UI-038, FRG-UI-049 |
 | PASS | FRG-PROC-010 FRG-UI-015 FRG-IMP-022 FRG-IMP-023: library import scans a root, reviews matches and imports existing files in place without a download | FRG-IMP-022, FRG-IMP-023, FRG-PROC-010, FRG-UI-015 |
 | PASS | FRG-PROC-010 FRG-SER-021 FRG-UI-045: a readable-but-unwritable root registers read-only while an ordinary registration of it is refused | FRG-PROC-010, FRG-SER-021, FRG-UI-045 |
 | PASS | FRG-PROC-010 FRG-SER-022 FRG-UI-045: a series added on a read-only root is unmonitored with no search dispatched | FRG-PROC-010, FRG-SER-022, FRG-UI-045 |
@@ -104,6 +108,8 @@ _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.m
 | FRG-UI-029 | PASS |
 | FRG-UI-038 | PASS |
 | FRG-UI-045 | PASS |
+| FRG-UI-047 | PASS |
+| FRG-UI-049 | PASS |
 
 ---
 

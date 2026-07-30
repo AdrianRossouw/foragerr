@@ -21,6 +21,10 @@ import styles from './AppShell.module.css';
  * m5-creators-screens (FRG-UI-027), the change that ships its screen (mirrors
  * the README shipped-claims rule). The queue count reads the existing React
  * Query cache kept live by the WebSocketBridge (no new endpoints, no polling).
+ *
+ * `onNavigate` fires after a nav item is chosen; the shell passes it only when
+ * this sidebar is the compact off-canvas drawer, which must close on selection
+ * (FRG-UI-049). The nav itself is identical either way.
  */
 
 type BadgeKind = 'queue';
@@ -149,7 +153,7 @@ function SourcesNavBadge() {
   );
 }
 
-export function Sidebar() {
+export function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
   const connection = useConnectionStore((s) => s.status);
   const health = useHealthWarnings();
   const status = useSystemStatus();
@@ -190,7 +194,12 @@ export function Sidebar() {
   return (
     <aside className={styles.sidebar}>
       {/* The lockup doubles as the way home (owner request 2026-07-10). */}
-      <Link to="/" className={styles.brand} aria-label="Foragerr — home">
+      <Link
+        to="/"
+        className={styles.brand}
+        aria-label="Foragerr — home"
+        onClick={onNavigate}
+      >
         <span className={styles.brandTile} aria-hidden>
           <LogoMarkIcon size={26} />
         </span>
@@ -214,6 +223,7 @@ export function Sidebar() {
                     ? `${styles.navLink} ${styles.navLinkActive}`
                     : styles.navLink
                 }
+                onClick={onNavigate}
               >
                 <span className={styles.navIcon} aria-hidden>
                   <i className={`fa-solid ${item.icon}`} />

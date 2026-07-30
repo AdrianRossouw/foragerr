@@ -9,9 +9,11 @@ import { readFileSync } from 'node:fs';
  * m9-a11y-fixes findings land in the same change so the clean state is the
  * starting invariant.
  *
- * File name `x-a11y` sorts AFTER `spine.spec.ts` (single worker, file order), so
- * the library already has the seeded series/issue the spine grabs and imports —
- * the scanned screens render real content, not just empty states.
+ * File name `x-a11y` sorts AFTER `spine.spec.ts` and
+ * `w-calendar-legibility.spec.ts` (single worker, file order), so the library
+ * already holds the series/issue the spine grabs and imports and the Calendar's
+ * seeded dense week — the scanned screens render real content in both
+ * presentations, not just empty states.
  *
  * axe-core is e2e dev tooling injected at runtime from the resolved package
  * source (SOUP-register-exempt per the harness's existing note, like
@@ -68,22 +70,19 @@ interface Finding {
   target: string;
 }
 
-async function scanRoute(page: Page, route: string): Promise<Finding[]> {
-  await page.goto(route);
-  // The app shell only mounts inside the authenticated tree; its footer status
-  // row is the reliable "shell is really up" signal (same one auth.setup uses).
-  // We deliberately do NOT waitForLoadState('networkidle') — the app holds a
-  // live WebSocket open, so the network never goes idle.
-  await expect(page.getByTestId('sidebar-status')).toBeVisible();
-  // Let per-screen content paint so contrast/structure is scanned as the user
-  // sees it, not a transient loading frame.
-  // Settle: fixed waits alone can scan a loading frame (false pass). Give
-  // the screen a beat, then require any visible loading placeholder to clear.
-  await page.waitForTimeout(750);
-  await expect
-    .poll(async () => page.getByText(/^Loading\b/i).count(), { timeout: 10_000 })
-    .toBe(0);
+/**
+ * Both sides of the compact crossover (FRG-UI-049). Below it the shell unmounts
+ * the sidebar for an off-canvas drawer and screens switch presentation, so a
+ * wide-only scan leaves the compact chrome, the Calendar's cards and its action
+ * rail unchecked by any automated ruleset.
+ */
+const VIEWPORTS = [
+  { label: 'wide', width: 1280, height: 900 },
+  { label: 'compact', width: 600, height: 900 },
+] as const;
 
+/** Inject axe, scan the page as it stands, and keep the serious/critical rows. */
+async function runAxe(page: Page, label: string): Promise<Finding[]> {
   // Inject axe as a page-context expression (CDP eval; CSP-exempt), then run it.
   await page.evaluate(AXE_SOURCE);
   const results = (await page.evaluate(
@@ -97,7 +96,7 @@ async function scanRoute(page: Page, route: string): Promise<Finding[]> {
     .filter((v) => v.impact === 'serious' || v.impact === 'critical')
     .flatMap((v) =>
       v.nodes.map((n) => ({
-        route,
+        route: label,
         rule: v.id,
         impact: v.impact ?? 'unknown',
         help: v.help,
@@ -106,12 +105,69 @@ async function scanRoute(page: Page, route: string): Promise<Finding[]> {
     );
 }
 
-test('FRG-PROC-019 FRG-UI-038: core screens carry zero serious/critical axe WCAG 2.1 A/AA violations', async ({
+/**
+ * The open nav drawer (FRG-UI-049): a dialog that exists only once the toggle is
+ * pressed, so no route scan reaches it — and it is the one state in which the
+ * rest of the frame is inert, which is exactly what the modality rules check.
+ */
+async function scanOpenDrawer(page: Page): Promise<Finding[]> {
+  await page.goto('/calendar');
+  await expect(page.getByTestId('nav-toggle')).toBeVisible();
+  await page.getByTestId('nav-toggle').click();
+  await expect(page.getByTestId('nav-drawer')).toBeVisible();
+  return runAxe(page, '/calendar + nav drawer');
+}
+
+async function scanRoute(
+  page: Page,
+  route: string,
+  compact: boolean,
+): Promise<Finding[]> {
+  await page.goto(route);
+  // The app shell only mounts inside the authenticated tree; the "shell is
+  // really up" signal differs by width, because the sidebar footer status row is
+  // one of the things compact mode does not render — gating on it is what kept
+  // this scan from being pointed at compact mode at all.
+  // We deliberately do NOT waitForLoadState('networkidle') — the app holds a
+  // live WebSocket open, so the network never goes idle.
+  await expect(
+    page.getByTestId(compact ? 'nav-toggle' : 'sidebar-status'),
+  ).toBeVisible();
+  // Let per-screen content paint so contrast/structure is scanned as the user
+  // sees it, not a transient loading frame.
+  // Settle: fixed waits alone can scan a loading frame (false pass). Give
+  // the screen a beat, then require any visible loading placeholder to clear.
+  await page.waitForTimeout(750);
+  await expect
+    .poll(async () => page.getByText(/^Loading\b/i).count(), { timeout: 10_000 })
+    .toBe(0);
+
+  return runAxe(page, route);
+}
+
+test('FRG-PROC-019 FRG-UI-038 FRG-UI-049: core screens carry zero serious/critical axe WCAG 2.1 A/AA violations at both viewports', async ({
   page,
 }) => {
   const findings: Finding[] = [];
-  for (const route of CORE_ROUTES) {
-    findings.push(...(await scanRoute(page, route)));
+  for (const viewport of VIEWPORTS) {
+    const compact = viewport.label === 'compact';
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    for (const route of CORE_ROUTES) {
+      findings.push(
+        ...(await scanRoute(page, route, compact)).map((f) => ({
+          ...f,
+          route: `${f.route} @${viewport.label}`,
+        })),
+      );
+    }
+    if (compact) {
+      findings.push(
+        ...(await scanOpenDrawer(page)).map((f) => ({
+          ...f,
+          route: `${f.route} @${viewport.label}`,
+        })),
+      );
+    }
   }
 
   // On failure the message names every offending screen, rule id, and the first
