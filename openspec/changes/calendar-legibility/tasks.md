@@ -79,7 +79,7 @@ Nothing here starts before the FRG-PROC-009 approval is recorded in
       presentation prose for both widths and for what the monitor affordance is
       and where it exists; correct the **The shell** section's claim that the
       sidebar never moves
-- [ ] 5.2 Registry rows for FRG-UI-047/048/049 flipped `proposed` →
+- [x] 5.2 Registry rows for FRG-UI-047/048/049 flipped `proposed` →
       `implemented`; traceability regenerated and clean — rows are `approved`
       and the matrix is regenerated; the `implemented` flip lands with the
       baseline spec sync (`tools/trace.py` treats an implemented row with no
@@ -87,7 +87,7 @@ Nothing here starts before the FRG-PROC-009 approval is recorded in
 - [x] 5.3 Refresh the README tour shots if the Calendar's appearance changed in
       any embedded screenshot (FRG-PROC-017) — none needed: no README shot shows
       the Calendar, and every shot is a wide-viewport frame, which is unchanged
-- [ ] 5.4 Merge gate: full frontend + backend suites green, `tools/trace.py`,
+- [x] 5.4 Merge gate: full frontend + backend suites green, `tools/trace.py`,
       `tools/soup_check.py`, `tools/risk_register_check.py` and
       `tools/comment_check.py` all exit 0, e2e green including the a11y tier,
       medium review fleet + independent-model full-diff review with an

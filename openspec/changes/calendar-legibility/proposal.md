@@ -313,3 +313,56 @@ shipped screen rather than deriving it:
 Recorded under the same delegated authority as the decisions above; no owner
 re-approval was sought, and nothing in the change's scope, non-goals or
 capability list moves.
+
+## Gate evidence
+
+Tier: medium (UI-only change, no new attack surface). Angles: state
+correctness/races, accessibility and keyboard operability, spec/test
+traceability, comment hygiene + process conformance, plus an
+independent-model full-diff review and a four-angle simplify pass (reuse,
+simplification, efficiency, altitude).
+
+Verdict fix-first. Two majors found and closed: the drawer's focus restore
+targeted an element still inside the inert subtree — a no-op in every real
+browser, invisible to jsdom, and unasserted by the browser tier — fixed by
+deferring the restore past the commit that lifts inert; and a monitor
+toggle on an entry whose series is unmonitored succeeded at the API then
+settled silently back to unmonitored, the exact silent revert FRG-UI-048
+forbids — now explained through the alert region, with the single-cause
+inference named on both sides of the projection boundary. The e2e tier was
+hardened until it could catch both: focus asserted after Escape, the
+containment walk fails on focus stranded at the body, the target-floor
+sweep opens the drawer before measuring, the scroll guard measures the
+real scroller, and the title probe cannot pass vacuously.
+
+Folded minors: aria-busy on the in-flight toggle, the day gutter hidden
+from assistive technology (its date now announced exactly once), a focus
+ring for the drawer's initial target, undimmed focus indicators on
+aria-disabled controls, an axe scan of the open drawer, atomic activation
+admission, one refetch per toggle instead of two cancelled ones, offline
+mutations failing fast into the revert-and-report path (promoted to
+client-wide policy), and comments corrected where claims had drifted from
+behavior.
+
+Simplify applied ten cleanups, among them one source for the 24px floor
+across all three test tiers, one sr-only utility in the theme layer, one
+per-mode class bundle, shared pull-entry fixtures, and a batched e2e
+measurement. Follow-ups recorded, deliberately not taken here: a per-entry
+component owning its own mutation observer (removes the screen-level
+optimistic map and restores per-row re-render isolation); a shared
+dismissable-surface hook adopted by Modal — whose Tab-trap containment and
+unmount-time focus restore are both weaker than the drawer's — plus a
+z-index scale resolving the acknowledged modal-under-drawer stacking; a
+focus-ring token with an app-wide sweep; seriesMonitored exposed on the
+pull projection so the toggle could be suppressed rather than explained
+after the fact; a crossover-resize remount that drops focus and cover
+fallback state; a top-level heading for screen titles; and a route-change
+announcement for the drawer's primary-navigation path.
+
+Suites at merge: backend 2704 passed / 13 skipped, frontend 586 across 62
+files, tsc clean, e2e GREEN 40 pass / 0 fail / 1 skipped including the
+a11y tier. comment_check, soup_check, risk_register_check and trace all
+exit 0; openspec validate --strict valid. Registry rows stay approved on
+the branch by design — the implemented flip lands with the baseline sync,
+since an implemented row with no baseline requirement reads as a trace
+gap.
