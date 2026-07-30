@@ -356,6 +356,7 @@ in the table below until that branch lands. No id is renumbered when it does.
 | FRG-UI-043 | Group-header search/match affordance | ui | implemented | M11 |
 | FRG-UI-044 | Force-grab affordance for rejected releases | ui | implemented | M11 |
 | FRG-UI-045 | Read-only library treatment | ui | implemented | B |
+| FRG-UI-046 | Publisher-filtering settings panel | ui | implemented | B |
 | FRG-UI-047 | Status indicators are never shaped like controls | ui | implemented | B |
 | FRG-UI-048 | In-flight feedback for the calendar's monitor toggle | ui | implemented | B |
 | FRG-UI-049 | Responsive application chrome below the compact crossover | ui | implemented | B |

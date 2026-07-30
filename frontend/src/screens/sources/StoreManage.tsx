@@ -8,7 +8,6 @@ import { ComicVineBudgetChip } from '../../components/ComicVineBudget';
 import { EntitlementRow } from './EntitlementRow';
 import { EntitlementGroupHeader } from './EntitlementGroupHeader';
 import type { PickedCandidate } from './EntitlementSearch';
-import { PublisherRules } from './PublisherRules';
 import {
   bundlesInView,
   buildReviewItems,
@@ -545,9 +544,6 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
           </span>
         </div>
       )}
-
-      {/* Operator-owned classification rules (FRG-SRC-012) */}
-      <PublisherRules source={source} />
 
       {/* Count line + filters */}
       <div className={styles.countRow}>

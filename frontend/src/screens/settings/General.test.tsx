@@ -25,19 +25,30 @@ const IGNORED_DEFAULT = {
   source: 'default' as const,
 };
 
+/** Default non-comic-publishers status shared by the fixtures below (the
+ * curated default set, editable) so key- and ignore-list-focused tests
+ * exercise their own field alone (see NonComicPublishers.test.tsx). */
+const NON_COMIC_DEFAULT = {
+  value: 'Example Games, Example Tech Press',
+  source: 'default' as const,
+};
+
 const UNSET: ComicVineConfig = {
   comicvine_api_key: { configured: false, source: 'unset' },
   comicvine_ignored_publishers: IGNORED_DEFAULT,
+  non_comic_publishers: NON_COMIC_DEFAULT,
 };
 
 const FILE_SET: ComicVineConfig = {
   comicvine_api_key: { configured: true, source: 'file' },
   comicvine_ignored_publishers: IGNORED_DEFAULT,
+  non_comic_publishers: NON_COMIC_DEFAULT,
 };
 
 const ENV_SET: ComicVineConfig = {
   comicvine_api_key: { configured: true, source: 'environment' },
   comicvine_ignored_publishers: IGNORED_DEFAULT,
+  non_comic_publishers: NON_COMIC_DEFAULT,
 };
 
 interface Overrides {
@@ -306,6 +317,7 @@ describe('FRG-UI-031: Settings -> General ignored publishers', () => {
   const FILE_LIST: ComicVineConfig = {
     comicvine_api_key: { configured: true, source: 'file' },
     comicvine_ignored_publishers: { value: 'Panini*', source: 'file' },
+    non_comic_publishers: NON_COMIC_DEFAULT,
   };
 
   it('FRG-UI-031 — the field is seeded from the stored value, editable, and a save persists it', async () => {
@@ -327,6 +339,7 @@ describe('FRG-UI-031: Settings -> General ignored publishers', () => {
               value: 'Panini*, Reprint House',
               source: 'file',
             },
+            non_comic_publishers: NON_COMIC_DEFAULT,
           } satisfies ComicVineConfig;
         },
       }),
@@ -353,6 +366,7 @@ describe('FRG-UI-031: Settings -> General ignored publishers', () => {
     const ENV_LIST: ComicVineConfig = {
       comicvine_api_key: { configured: true, source: 'file' },
       comicvine_ignored_publishers: { value: 'Env House', source: 'env' },
+      non_comic_publishers: NON_COMIC_DEFAULT,
     };
     const { fetcher } = fakeFetcher(resolver({ config: () => ENV_LIST }));
     renderWithProviders(<General />, { fetcher });

@@ -13,6 +13,7 @@ import {
   usePutComicVineConfig,
   useTestComicVine,
 } from './general/generalHooks';
+import { NonComicPublishers } from './general/NonComicPublishers';
 import styles from './general/General.module.css';
 
 /*
@@ -300,6 +301,12 @@ export function General() {
             )}
           </section>
         )}
+
+        {/* Library-wide publisher classification rules (FRG-UI-046 /
+            FRG-SRC-012) — beside the ComicVine ignore list, not per-source
+            on the Sources screen. Owns its own GET/PUT against the same
+            /config/general resource. */}
+        <NonComicPublishers />
       </div>
     </>
   );

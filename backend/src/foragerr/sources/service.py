@@ -30,7 +30,11 @@ from dataclasses import dataclass, field
 from pydantic import BaseModel
 
 from foragerr.db.base import utcnow
-from foragerr.sources.classify import classify, folded_publisher_rules
+from foragerr.sources.classify import (
+    NO_PUBLISHER_RULES,
+    PublisherRuleSet,
+    classify,
+)
 from foragerr.sources.humble import (
     HUMBLE_API_BASE,
     HumbleAuthError,
@@ -179,16 +183,21 @@ async def run_sync(
     *,
     min_interval: float,
     base_url: str = HUMBLE_API_BASE,
+    publisher_rules: PublisherRuleSet = NO_PUBLISHER_RULES,
 ) -> SyncResult:
     """Diff the Humble order API against known entitlements (FRG-SRC-003).
 
     Persists per order (partial results survive a mid-sync failure). A 401 at any
     point stops the run and RAISES :class:`HumbleAuthError` so the caller flips
     the source to ``expired`` (FRG-SRC-005); a transient/malformed order is
-    skipped-and-logged and the run continues."""
+    skipped-and-logged and the run continues.
+
+    ``publisher_rules`` is the library-wide non-comic rule set (FRG-SRC-012),
+    compiled ONCE by the caller from ``Settings.non_comic_publishers`` and applied
+    to every entitlement of the run — it is not source-scoped state, so it is not
+    read from the source's settings envelope. Omitted, it is empty: pure
+    format-shape classification."""
     settings = load_source_settings(source.type, source.settings)
-    # The operator's publisher rules, folded once for the whole run (FRG-SRC-012).
-    rules = folded_publisher_rules(getattr(settings, "publisher_rules", None))
     result = SyncResult()
     async with HumbleClient(
         factory,
@@ -214,7 +223,7 @@ async def run_sync(
                 result.skipped_orders += 1
                 continue
             await _persist_order(
-                db, source.id, entitlements, result, publisher_rules=rules
+                db, source.id, entitlements, result, publisher_rules=publisher_rules
             )
             result.orders += 1
             result.partial = True
@@ -227,7 +236,7 @@ async def _persist_order(
     entitlements: list[ParsedEntitlement],
     result: SyncResult,
     *,
-    publisher_rules: frozenset[str] = frozenset(),
+    publisher_rules: PublisherRuleSet = NO_PUBLISHER_RULES,
 ) -> None:
     """Upsert one order's entitlements by the store-native key (idempotent).
 
@@ -237,7 +246,7 @@ async def _persist_order(
     are PRESERVED — a re-sync never resets a decision or creates a duplicate.
 
     **Classification is re-derived every sync** from the item's CURRENT formats
-    and the source's CURRENT publisher rules (FRG-SRC-012) — but written back
+    and the CURRENT library-wide publisher rules (FRG-SRC-012) — but written back
     ONLY while the row is still ``review_status = "new"``. That is what makes a
     rule change take effect in both directions on the next sync (added rule:
     comic → other; removed rule: other → comic) while leaving every decided row

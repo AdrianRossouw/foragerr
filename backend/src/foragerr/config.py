@@ -73,6 +73,48 @@ DEFAULT_IGNORED_PUBLISHERS = (
     "Editorial Televisa, Ediciones Zinco"
 )
 
+#: Fresh-install default for ``non_comic_publishers`` (FRG-SRC-012).
+#: Curation rule: only houses whose store output is UNAMBIGUOUSLY non-comic —
+#: role-playing/game publishers and tech/textbook publishers whose bundles ship
+#: rulebooks and manuals, frequently in the same CBZ/PDF shapes a comic uses, so
+#: file shape alone cannot tell them apart. Publishers of genuine comics stay OFF
+#: this list on the same conservative rule as :data:`DEFAULT_IGNORED_PUBLISHERS`,
+#: and EVERY entry here is operator-removable — someone does collect these books,
+#: and a removed entry re-classifies on the next sync. Matching uses the shared
+#: fold: an entry ending in ``*`` matches as a substring of the folded publisher
+#: (``Paizo*`` covers "Paizo Inc." / "Paizo Publishing"), every other entry
+#: matches the folded publisher exactly. Seeds fresh installs ONLY — a config.yaml
+#: that already carries a value (including the empty string) keeps it.
+#:
+#: Every entry is a wildcard because stores report corporate suffixes the house's
+#: trading name does not carry ("Monte Cook Games, LLC", "Pelgrane Press Ltd"),
+#: which an exact rule cannot reach. The FULL trading name is kept in each
+#: wildcard rather than a shorter stem: a bare ``Renegade*`` would also catch the
+#: comics house Renegade Arts Entertainment.
+DEFAULT_NON_COMIC_PUBLISHERS = (
+    "Paizo*, Pelgrane Press*, Green Ronin*, Kobold Press*, Free League*, "
+    "Modiphius*, Chaosium*, Cubicle 7*, Evil Hat*, Monte Cook Games*, "
+    "Goodman Games*, Onyx Path*, Steve Jackson Games*, R. Talsorian*, "
+    "Renegade Game Studios*, O'Reilly*, No Starch*, Manning Publications*, "
+    "Packt*, Pragmatic Bookshelf*, Apress*, Wiley*, Addison-Wesley*, Pearson*, "
+    "CRC Press*, Mercury Learning*"
+)
+
+#: Bounds on the stored ``non_comic_publishers`` list. Deliberately far above any
+#: hand-curated list AND above what a migration union of every per-source rule
+#: could produce, so the cap only ever fires on a corrupted or pasted-in value —
+#: never on a legitimate upgrade, which would otherwise fail config validation at
+#: startup.
+MAX_NON_COMIC_PUBLISHERS = 1000
+MAX_NON_COMIC_PUBLISHER_LENGTH = 200
+
+#: The environment variable that supplies ``non_comic_publishers`` and, by
+#: pydantic's env-over-file source ordering, shadows the config-file value. Named
+#: beside the setting it shadows so both the config resource (which renders the
+#: field read-only when the environment wins) and the startup migration (which
+#: must not write a value the environment would shadow) read ONE spelling.
+NON_COMIC_PUBLISHERS_ENV_VAR = "FORAGERR_NON_COMIC_PUBLISHERS"
+
 #: The mandatory at-rest encryption passphrase env var (FRG-AUTH-011).
 #: Environment-only: never read from, or written to, a file under ``/config``.
 #: Startup fails when it is absent or empty (enforced in :func:`load_settings`).
@@ -792,6 +834,23 @@ class Settings(BaseSettings):
             "(FRG-NFR-005). Default 2 s; floored at 0.1 s."
         ),
     )
+    non_comic_publishers: str = Field(
+        default=DEFAULT_NON_COMIC_PUBLISHERS,
+        description=(
+            "Comma-separated publisher names whose store items are always filed "
+            "as Other rather than comics (FRG-SRC-012) — bundle content that "
+            "isn't a comic: role-playing rulebooks, tech-book PDFs, art books. "
+            "The list is library-wide (it applies to every connected source) and "
+            "editable in Settings -> General. Matched case-insensitively; an "
+            "entry ending in '*' matches as a substring (e.g. 'Paizo*' covers "
+            "Paizo Inc. and Paizo Publishing), any other entry matches exactly. "
+            "The curated default seeds FRESH INSTALLS only — an existing config "
+            "keeps its stored value, and an empty string filters nothing. "
+            "Changing the list reclassifies only items you have not reviewed "
+            "yet, on the next sync; items you have already matched or ignored "
+            "never move, and nothing is ever deleted."
+        ),
+    )
     humble_base_url: str = Field(
         default="https://www.humblebundle.com",
         description=(
@@ -1231,6 +1290,47 @@ class Settings(BaseSettings):
             )
         return clamped
 
+    @field_validator("non_comic_publishers")
+    @classmethod
+    def _clean_non_comic_publishers(cls, value: str) -> str:
+        """Normalize the stored rule list: trim, drop empties, drop entries that
+        duplicate one already kept, and bound the whole thing.
+
+        Two entries are the same rule when they agree on BOTH the shared fold
+        (FRG-IMP-005, what the classifier matches on) and on carrying a trailing
+        ``*`` — "Paizo" and "Paizo*" are different rules with different reach, so
+        only the fold is not enough of a key. The first spelling of a rule wins,
+        so an operator edit never reorders or rewrites the list it was applied to.
+
+        The bounds exist so a pasted or corrupted value cannot make every sync
+        compile a pathological rule set; they are set far above any real list, so
+        an upgrade that unions genuine per-source rules never trips them.
+        """
+        from foragerr.parser.normalize import matching_key
+
+        seen: set[tuple[str, bool]] = set()
+        kept: list[str] = []
+        for raw in value.split(","):
+            entry = raw.strip()
+            if not entry:
+                continue
+            if len(entry) > MAX_NON_COMIC_PUBLISHER_LENGTH:
+                raise ValueError(
+                    f"publisher entry exceeds {MAX_NON_COMIC_PUBLISHER_LENGTH} "
+                    f"characters: {entry[:60]!r}…"
+                )
+            key = (matching_key(entry) or entry.casefold(), entry.endswith("*"))
+            if key in seen:
+                continue
+            seen.add(key)
+            kept.append(entry)
+        if len(kept) > MAX_NON_COMIC_PUBLISHERS:
+            raise ValueError(
+                f"at most {MAX_NON_COMIC_PUBLISHERS} publisher entries are "
+                f"allowed (got {len(kept)})"
+            )
+        return ", ".join(kept)
+
     @field_validator("log_level")
     @classmethod
     def _valid_log_level(cls, value: str) -> str:
@@ -1451,6 +1551,59 @@ def generate_default_config(path: Path) -> None:
     """Write a first-run ``config.yaml`` (FRG-DEP-003): the documented defaults,
     written atomically."""
     atomic_write_text(path, render_documented_config())
+
+
+def env_var_is_set(name: str) -> bool:
+    """Whether ``name`` is present as a NON-EMPTY environment variable, matched
+    case-insensitively — mirroring pydantic-settings' env resolution (a lowercase
+    spelling shadows the file too) and ``env_ignore_empty`` (an empty value does
+    not shadow). The effective :class:`Settings` object cannot say which source
+    won, so anything that must tell an env-supplied value from a file-supplied
+    one asks the raw environment here."""
+    return any(key.upper() == name and value for key, value in os.environ.items())
+
+
+def read_config_file(config_file: Path) -> dict[str, Any]:
+    """The stored ``config.yaml`` mapping, or ``{}`` for an absent/non-mapping
+    file. Reports what the FILE carries, not the effective settings — the caller
+    that has to tell a stored value from an env-supplied or defaulted one needs
+    key PRESENCE, which the collapsed :class:`Settings` object cannot answer.
+
+    Deliberately LENIENT about a non-mapping top level, where
+    :func:`load_settings` keeps its own strict read and raises
+    :class:`ConfigError` for it: startup must refuse a config it cannot trust,
+    while a caller asking only "is this key stored?" gets the same answer from a
+    junk file as from an absent one. Invalid YAML still propagates from both."""
+    if not config_file.exists():
+        return {}
+    loaded = yaml.safe_load(config_file.read_text(encoding="utf-8")) or {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def apply_config_file_updates(
+    config_dir: Path, updates: dict[str, Any]
+) -> tuple[Settings, dict[str, Any]]:
+    """Merge ``updates`` into ``config.yaml``, validate, persist, return the new
+    :class:`Settings` and the merged mapping.
+
+    The single read-modify-write used by every non-first-run config write (the
+    config resources' ``PUT`` and the startup data migrations), so no caller
+    hand-rolls a rewrite that strips the documentation the first-run file
+    promised: the file is re-rendered through :func:`render_documented_config`
+    and written atomically. Validation runs BEFORE the write, so a rejected
+    update leaves the file byte-for-byte untouched and raises
+    :class:`pydantic.ValidationError` for the caller to shape.
+
+    ``config_dir`` is environment-resolved, never file-stored, so it is dropped
+    from the merged mapping before both validation and rendering. Serializing
+    concurrent writers is the CALLER's job — this function holds no lock.
+    """
+    config_file = config_dir / CONFIG_FILENAME
+    merged = {**read_config_file(config_file), **updates}
+    merged.pop("config_dir", None)
+    settings = Settings(config_dir=config_dir, **merged)
+    atomic_write_text(config_file, render_documented_config(merged))
+    return settings, merged
 
 
 def _format_validation_error(exc: ValidationError) -> str:

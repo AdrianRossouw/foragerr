@@ -695,12 +695,12 @@ export interface NamingTokens {
 export type ComicVineKeySource = 'unset' | 'file' | 'environment';
 
 /**
- * Source of the ignored-publishers list (FRG-UI-031): `env` (the
- * FORAGERR_COMICVINE_IGNORED_PUBLISHERS var wins — the field renders
- * read-only), `file` (stored in config.yaml), or `default` (the curated
+ * Where an editable publisher list comes from (FRG-UI-031, FRG-SRC-012 — both
+ * lists share this): `env` (the list's environment variable wins, so the field
+ * renders read-only), `file` (stored in config.yaml), or `default` (the curated
  * fresh-install default). Unlike the key, the list value IS echoed.
  */
-export type IgnoredPublishersSource = 'env' | 'file' | 'default';
+export type PublisherListSource = 'env' | 'file' | 'default';
 
 export interface ComicVineConfig {
   comicvine_api_key: {
@@ -709,7 +709,18 @@ export interface ComicVineConfig {
   };
   comicvine_ignored_publishers: {
     value: string;
-    source: IgnoredPublishersSource;
+    source: PublisherListSource;
+  };
+  /**
+   * Library-wide publisher classification rules (FRG-SRC-012 / FRG-UI-046):
+   * items from a listed publisher are always classified Other on the next
+   * sync, whatever their file shape. Same comma-separated,
+   * trailing-`*`-substring-match shape as `comicvine_ignored_publishers`, and
+   * ships with a curated non-empty default rather than empty.
+   */
+  non_comic_publishers: {
+    value: string;
+    source: PublisherListSource;
   };
 }
 
