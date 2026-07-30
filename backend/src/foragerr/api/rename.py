@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from foragerr.api.command import CommandResource
 from foragerr.library.flows.rename import preview_series_renames
+from foragerr.library.read_only import refuse_read_only_series_in
 
 router = APIRouter(tags=["rename"])
 
@@ -57,7 +58,15 @@ async def preview_renames_endpoint(
 async def execute_renames_endpoint(
     body: RenameExecuteRequest, request: Request
 ) -> CommandResource:
-    """Enqueue the rename-series command that applies the previewed renames."""
+    """Enqueue the rename-series command that applies the previewed renames.
+
+    A series on a read-only reference root is refused with a 409 here
+    (FRG-SER-021), so the operator gets an immediate reason instead of a command
+    that fails in a worker; the flow itself refuses too, closing the direct
+    command-enqueue route."""
+    await refuse_read_only_series_in(
+        request.app.state.db, body.seriesId, action="renaming library files"
+    )
     service = request.app.state.commands
     record = await service.enqueue("rename-series", {"series_id": body.seriesId})
     return CommandResource.from_record(record)

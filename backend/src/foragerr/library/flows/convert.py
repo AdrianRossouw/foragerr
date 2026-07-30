@@ -36,6 +36,10 @@ from foragerr.importer import (
     media_management_fields,
 )
 from foragerr.library.models import IssueFileRow, IssueRow, SeriesRow
+from foragerr.library.read_only import (
+    refuse_read_only_issues,
+    refuse_read_only_series,
+)
 
 logger = logging.getLogger("foragerr.library.flows.convert")
 
@@ -125,7 +129,18 @@ async def _convert_files(
     offload: OffloadFn | None,
     now: dt.datetime,
 ) -> ConvertReport:
-    """Convert each file in its own write_session (per-file isolation)."""
+    """Convert each file in its own write_session (per-file isolation).
+
+    The fail-closed read-only chokepoint for on-demand conversion (FRG-SER-021):
+    conversion writes a new .cbz beside each source and then DELETES the source,
+    so every series represented in ``files`` is checked BEFORE the first file is
+    touched. All-or-none, like the bulk acquisition guards — a mid-batch refusal
+    would leave some of a reference library converted and the rest not."""
+    async with db.read_session() as session:
+        for series_id in sorted({row.series_id for row in files if row.series_id}):
+            await refuse_read_only_series(
+                session, series_id, action="converting files"
+            )
     ctx = ImportContext(
         library_root=".",
         config_dir=str(settings.config_dir) if settings is not None else ".",
@@ -182,12 +197,18 @@ async def convert_series(
     """Convert every CBR file of one series to CBZ (FRG-PP-018).
 
     A missing series yields an empty report rather than an error. Each CBR
-    converts under verify-before-discard; non-CBR files are skipped as no-ops."""
+    converts under verify-before-discard; non-CBR files are skipped as no-ops.
+
+    A read-only reference series is refused fail-closed (FRG-SER-021) — before
+    the file list is even loaded, so the refusal is reported even for a series
+    with nothing convertible. The refusal lives here as well as in the endpoint
+    because a ``convert-series`` command can be enqueued directly."""
     now = now or utcnow()
     async with db.read_session() as session:
         if await session.get(SeriesRow, series_id) is None:
             logger.info("convert series %d: series gone; skipped", series_id)
             return ConvertReport((), 0, 0)
+        await refuse_read_only_series(session, series_id, action="converting files")
     files = await _load_series_files(db, series_id)
     report = await _convert_files(db, settings, files, offload=offload, now=now)
     logger.info("convert series %d: %s", series_id, report.summary())
@@ -202,8 +223,15 @@ async def convert_issue(
     offload: OffloadFn | None = None,
     now: dt.datetime | None = None,
 ) -> ConvertReport:
-    """Convert every CBR file of one issue to CBZ (FRG-PP-018)."""
+    """Convert every CBR file of one issue to CBZ (FRG-PP-018).
+
+    Refused fail-closed for an issue of a read-only reference series
+    (FRG-SER-021), for the same reasons as :func:`convert_series`."""
     now = now or utcnow()
+    async with db.read_session() as session:
+        await refuse_read_only_issues(
+            session, [issue_id], action="converting files"
+        )
     files = await _load_issue_files(db, issue_id)
     report = await _convert_files(db, settings, files, offload=offload, now=now)
     logger.info("convert issue %d: %s", issue_id, report.summary())

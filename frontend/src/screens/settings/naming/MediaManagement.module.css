@@ -403,3 +403,19 @@
   font-family: var(--font-mono, monospace);
   font-size: var(--font-size-base);
 }
+
+.rootFolderReadOnlyRow {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  white-space: nowrap;
+}
+
+.rootFolderReadOnlyBadge {
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--spacing-xs);
+  white-space: nowrap;
+}

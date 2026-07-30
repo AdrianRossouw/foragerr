@@ -113,6 +113,8 @@ renumbered when `m10-release-pipeline` lands.
 | FRG-SER-018 | Series collected-edition (trade) typing | ser | implemented | M3 |
 | FRG-SER-019 | Trades never suppress single-issue wanted | ser | implemented | M3 |
 | FRG-SER-020 | Trade containment model (declared, display-only) | ser | implemented | M4 |
+| FRG-SER-021 | Read-only library root | ser | implemented | B |
+| FRG-SER-022 | Read-only series are browse/serve-only | ser | implemented | B |
 | FRG-META-001 | ComicVine client fundamentals | meta | implemented | M1 |
 | FRG-META-002 | API key handling | meta | implemented | M1 |
 | FRG-META-003 | Client-side rate limiting with 429 handling | meta | implemented | M1 |
@@ -253,6 +255,7 @@ renumbered when `m10-release-pipeline` lands.
 | FRG-IMP-025 | Story-arc reading-order prefix | imp | approved | B |
 | FRG-IMP-026 | Issue-word filler stripping | imp | implemented | M11 |
 | FRG-IMP-027 | Per-group import atomicity (no zombie series shell) | imp | implemented | B |
+| FRG-IMP-028 | Index-in-place import for read-only roots | imp | implemented | B |
 | FRG-PP-001 | Single shared import pipeline | pp | implemented | M1 |
 | FRG-PP-002 | Completed-download handling state machine | pp | implemented | M1 |
 | FRG-PP-003 | Grab reconciliation by download ID | pp | implemented | M1 |
@@ -345,6 +348,7 @@ renumbered when `m10-release-pipeline` lands.
 | FRG-UI-042 | Calendar covers and enrichment detail | ui | implemented | M11 |
 | FRG-UI-043 | Group-header search/match affordance | ui | implemented | M11 |
 | FRG-UI-044 | Force-grab affordance for rejected releases | ui | implemented | M11 |
+| FRG-UI-045 | Read-only library treatment | ui | implemented | B |
 | FRG-SRC-001 | store-source model and connection lifecycle | sources | implemented | M6 |
 | FRG-SRC-002 | Humble session-cookie authentication | sources | implemented | M6 |
 | FRG-SRC-003 | entitlement sync | sources | implemented | M6 |

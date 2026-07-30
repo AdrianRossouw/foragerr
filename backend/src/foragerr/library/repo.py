@@ -13,6 +13,7 @@ add/refresh flow in change 3).
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from sqlalchemy import Select, case, exists, func, or_, select
@@ -33,11 +34,88 @@ from foragerr.parser.normalize import matching_key
 # --- root folders -------------------------------------------------------
 
 
-async def create_root_folder(session: AsyncSession, path: str) -> RootFolderRow:
-    row = RootFolderRow(path=path)
+async def create_root_folder(
+    session: AsyncSession, path: str, *, read_only: bool = False
+) -> RootFolderRow:
+    row = RootFolderRow(path=path, read_only=read_only)
     session.add(row)
     await session.flush()
     return row
+
+
+async def root_is_read_only(session: AsyncSession, root_folder_id: int) -> bool:
+    """Whether a root folder is a read-only reference library (FRG-SER-021).
+
+    The flag half of the fail-closed write boundary. An id with NO root row
+    reads as read-only: a write boundary must not be opened by a row that
+    cannot be found, so an id that resolves to nothing refuses rather than
+    permits. Callers that must distinguish "unknown root" from "read-only
+    root" for their own 4xx (the series edit's root reassignment) resolve the
+    row themselves first and never rely on this to report absence."""
+    read_only = await session.scalar(
+        select(RootFolderRow.read_only).where(RootFolderRow.id == root_folder_id)
+    )
+    if read_only is None:
+        return True
+    return bool(read_only)
+
+
+async def series_is_read_only(session: AsyncSession, series_id: int) -> bool:
+    """Whether a series' ROOT KEY names a read-only root (FRG-SER-021/022).
+
+    The flag half only — ``library.read_only.series_is_read_only`` is the guard
+    callers use, because it ORs this with the series path's containment. A
+    series id with no row reads as NOT read-only: there is nothing to protect
+    and the caller resolves the absence as its own not-found."""
+    root_folder_id = await session.scalar(
+        select(SeriesRow.root_folder_id).where(SeriesRow.id == series_id)
+    )
+    if root_folder_id is None:
+        return False
+    return await root_is_read_only(session, root_folder_id)
+
+
+async def read_only_root_paths(session: AsyncSession) -> list[str]:
+    """The on-disk paths of every read-only reference root (FRG-SER-021).
+
+    Backs the containment half of the boundary (``library.read_only``), which
+    asks whether a PATH lands inside a reference library rather than which root
+    a row names. Empty for an installation with no read-only root, which is the
+    signal to skip path resolution entirely."""
+    result = await session.execute(
+        select(RootFolderRow.path).where(RootFolderRow.read_only.is_(True))
+    )
+    return list(result.scalars().all())
+
+
+async def read_only_root_ids(session: AsyncSession) -> set[int]:
+    """The ids of every read-only reference root (FRG-SER-021).
+
+    One query for a whole page of series resources, so annotating each row's
+    ``read_only`` never becomes a per-row lookup."""
+    result = await session.execute(
+        select(RootFolderRow.id).where(RootFolderRow.read_only.is_(True))
+    )
+    return set(result.scalars().all())
+
+
+async def read_only_issue_ids(
+    session: AsyncSession, issue_ids: Sequence[int]
+) -> list[int]:
+    """Which of ``issue_ids`` belong to a series on a read-only root
+    (FRG-SER-021/022), ascending — the query behind the bulk acquisition
+    guards. Empty in, empty out."""
+    if not issue_ids:
+        return []
+    result = await session.execute(
+        select(IssueRow.id)
+        .join(SeriesRow, SeriesRow.id == IssueRow.series_id)
+        .join(RootFolderRow, RootFolderRow.id == SeriesRow.root_folder_id)
+        .where(IssueRow.id.in_(issue_ids))
+        .where(RootFolderRow.read_only.is_(True))
+        .order_by(IssueRow.id)
+    )
+    return list(result.scalars().all())
 
 
 async def list_root_folders(session: AsyncSession) -> list[RootFolderRow]:
@@ -453,6 +531,31 @@ def wanted_issues(as_of: dt.date | None = None) -> Select:
         .where(IssueRow.monitored.is_(True))
         .where(released)
         .where(~has_file)
+        .where(~_on_read_only_root())
+    )
+
+
+def _on_read_only_root():
+    """A correlated EXISTS true when ``IssueRow``'s series sits on a read-only
+    reference root (FRG-SER-021/022). Both acquisition projections exclude it:
+    a browse-only series is never wanted, missing, searched, or grabbed.
+
+    ``IssueRow`` is the only entity this subquery relies on being correlated
+    from the enclosing SELECT; ``SeriesRow`` and ``RootFolderRow`` are left to
+    SQLAlchemy's auto-correlation, which resolves them to the subquery's own
+    FROM when the enclosing query does not already select from them and to the
+    OUTER occurrence when it does (``wanted_issues`` joins ``SeriesRow``,
+    ``missing_issues`` does not). Both resolutions express the same predicate
+    ONLY because every join condition here is stated explicitly. An enclosing
+    query that starts selecting from ``RootFolderRow`` would silently correlate
+    it outward and turn this EXISTS into a different question, so a caller that
+    needs a root-folder join must pass this predicate an explicit alias instead
+    of relying on the correlation."""
+    return (
+        exists()
+        .where(SeriesRow.id == IssueRow.series_id)
+        .where(RootFolderRow.id == SeriesRow.root_folder_id)
+        .where(RootFolderRow.read_only.is_(True))
     )
 
 
@@ -497,7 +600,12 @@ def missing_issues(as_of: dt.date | None = None) -> Select:
         (IssueRow.store_date.is_(None)) & (IssueRow.cover_date.is_(None)),
     )
     has_file = exists().where(IssueFileRow.issue_id == IssueRow.id)
-    return select(IssueRow).where(released).where(~has_file)
+    return (
+        select(IssueRow)
+        .where(released)
+        .where(~has_file)
+        .where(~_on_read_only_root())
+    )
 
 
 # --- statistics (FRG-SER-009) ------------------------------------------------

@@ -9,6 +9,50 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.16.0] — 2026-07-30
+
+Read-only library roots: point foragerr at a collection you own and want
+indexed, browsed and served, but never written to.
+
+### Added
+
+- A root folder can be registered **read-only** (FRG-SER-021). Registration
+  requires the directory to be readable but not writable, and the health surface
+  stops treating unwritability as an error for such a root.
+- Series under a read-only root are **browse-and-serve only** (FRG-SER-022):
+  created unmonitored, excluded from the wanted/missing and calendar
+  projections, and refused — fail-closed, with a uniform 409 carrying
+  `errors[].field == "read_only"` — for monitor changes, search, grab (including
+  a forced grab), store-entitlement acquisition, rename, delete-files,
+  single-file delete, and path or root edits. Refusals are enforced in the flow
+  bodies, so enqueuing a command directly is refused identically.
+- Importing files already inside a read-only root **indexes them in place**
+  (FRG-IMP-028): no move, no rename, and no post-placement archive rewrite
+  (ComicInfo tagging and CBR-to-CBZ conversion are both forced off).
+- A configured recycle-bin or duplicate-dump directory that resolves inside a
+  read-only root is refused at use as well as at submission, and the health
+  surface reports the offending setting.
+- The web UI marks read-only roots and series and withdraws every affordance the
+  backend refuses (FRG-UI-045). Mutations that previously failed silently now
+  surface their reason.
+
+### Changed
+
+- Read-only series no longer appear on the release calendar at all, rather than
+  appearing as entries whose controls refuse on use.
+
+### Security
+
+- New threat-model section and RISK-054. The read-only guarantee is stated as a
+  bounded, enumerated set of six enforced write paths, asserted by test so a new
+  disk-write path cannot ship outside the set; no coverage is claimed for paths
+  outside it. Residuals recorded on RISK-019 and RISK-054.
+
+### Upgrade notes
+
+- Migration 0031 adds `root_folders.read_only`, defaulting existing roots to
+  writable. No action required; forward-only per FRG-DB-002.
+
 ## [v0.15.2] — 2026-07-29
 
 Calendar title legibility fix.

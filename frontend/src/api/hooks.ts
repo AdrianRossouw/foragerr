@@ -366,20 +366,23 @@ export function useRootFolders(): UseQueryResult<RootFolderResource[]> {
 }
 
 /**
- * POST /api/v1/rootfolder — register a new root folder (FRG-SER-008). A
- * validation failure rejects with an `ApiRequestError` whose body carries the
- * backend's field-precise 400 verbatim; the settings screen renders that
- * message against the path input. On success the rootfolder list is invalidated.
+ * POST /api/v1/rootfolder — register a new root folder (FRG-SER-008).
+ * `read_only` registers it as a browse-only reference library (FRG-SER-021):
+ * the backend indexes in place and never writes to it, defaulting to false
+ * when omitted. A validation failure rejects with an `ApiRequestError` whose
+ * body carries the backend's field-precise 400 verbatim; the settings screen
+ * renders that message against the path input. On success the rootfolder
+ * list is invalidated.
  */
 export function useCreateRootFolder(): UseMutationResult<
   RootFolderResource,
   Error,
-  { path: string }
+  { path: string; read_only?: boolean }
 > {
   const fetcher = useFetcher();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: { path: string }) =>
+    mutationFn: (body: { path: string; read_only?: boolean }) =>
       fetcher<RootFolderResource>('/api/v1/rootfolder', {
         method: 'POST',
         body,

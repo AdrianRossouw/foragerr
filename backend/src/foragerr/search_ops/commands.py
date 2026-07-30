@@ -30,6 +30,7 @@ from foragerr.config import Settings
 from foragerr.indexers.ratelimit import DEFAULT_MIN_INTERVAL
 from foragerr.library.flows._common import SeriesSearchCommand
 from foragerr.library.models import IssueRow
+from foragerr.library.read_only import refuse_read_only_series_in
 from foragerr.library.repo import missing_issues, wanted_issues
 from foragerr.providers.backoff import ProviderBackoff
 from foragerr.search import Decision
@@ -206,6 +207,14 @@ class IssueSearchCommand(BaseCommand):
 async def _handle_issue_search(
     command: IssueSearchCommand, ctx: HandlerContext
 ) -> str:
+    # The acquisition boundary lives in the HANDLER, not only in the routes that
+    # normally enqueue this command (FRG-SER-022): the command carries explicit
+    # ids, so anything that can enqueue it — the generic command transport, the
+    # failure-driven re-search — would otherwise reach an indexer and a download
+    # client for a browse-only series.
+    await refuse_read_only_series_in(
+        ctx.db, command.series_id, action="searching for releases"
+    )
     factory, backoff, caps_cache = _build_infra(ctx)
     handed_off = await _search_one_issue(
         ctx,
@@ -241,7 +250,15 @@ async def run_series_search(
     derived-wanted set when ``True``, every released-and-fileless issue
     regardless of monitored flags when ``False`` (see
     :func:`_wanted_issue_targets`).
+
+    A series on a read-only reference root is REFUSED, not walked to zero
+    targets (FRG-SER-022): both selectables already exclude it, so the refusal
+    changes no scope — it names the boundary instead of reporting an empty
+    search, and it holds for the ``monitored_only=False`` scope too.
     """
+    await refuse_read_only_series_in(
+        ctx.db, command.series_id, action="searching for releases"
+    )
     targets = await _wanted_issue_targets(
         ctx, series_id=command.series_id, include_all=not command.monitored_only
     )

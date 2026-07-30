@@ -96,6 +96,7 @@ function DeleteDialog({
   busy,
   error,
   commandStatus,
+  readOnly,
   onCancel,
   onConfirm,
 }: {
@@ -104,6 +105,9 @@ function DeleteDialog({
   error: string | null;
   /** Live status of the async delete-series-files command (202 path), if any. */
   commandStatus: string | null;
+  /** A read-only series (FRG-UI-045): no delete-files option — only the
+   *  library record can be removed, files on disk are never touched. */
+  readOnly: boolean;
   onCancel: () => void;
   onConfirm: (deleteFiles: boolean) => void;
 }) {
@@ -122,7 +126,7 @@ function DeleteDialog({
             type="button"
             className={`${styles.button} ${styles.danger}`}
             disabled={busy}
-            onClick={() => onConfirm(deleteFiles)}
+            onClick={() => onConfirm(readOnly ? false : deleteFiles)}
           >
             Delete
           </button>
@@ -131,21 +135,32 @@ function DeleteDialog({
     >
       <div className={styles.dialogBody}>
         <p>The series will be removed from the library.</p>
-        <label className={styles.checkboxRow}>
-          <input
-            type="checkbox"
-            checked={deleteFiles}
-            disabled={busy}
-            onChange={(e) => setDeleteFiles(e.target.checked)}
-          />
-          Also delete files from disk
-        </label>
-        {/* Truthful since m2-daily-surfaces: deleteFiles=true is implemented
-            (each file routed through the recycle bin before the rows go). */}
-        <p className={styles.dialogHint}>
-          Files are moved to the recycle bin when one is configured; otherwise
-          they are permanently deleted. Unchecked, files stay on disk.
-        </p>
+        {readOnly ? (
+          <p className={styles.dialogHint}>
+            This is a read-only library — files on disk are never touched.
+            Only the library record is removed.
+          </p>
+        ) : (
+          <>
+            <label className={styles.checkboxRow}>
+              <input
+                type="checkbox"
+                checked={deleteFiles}
+                disabled={busy}
+                onChange={(e) => setDeleteFiles(e.target.checked)}
+              />
+              Also delete files from disk
+            </label>
+            {/* Truthful since m2-daily-surfaces: deleteFiles=true is
+                implemented (each file routed through the recycle bin before
+                the rows go). */}
+            <p className={styles.dialogHint}>
+              Files are moved to the recycle bin when one is configured;
+              otherwise they are permanently deleted. Unchecked, files stay on
+              disk.
+            </p>
+          </>
+        )}
         {/* deleteFiles=true returns 202: the file removal runs as a watched
             delete-series-files command whose status shows here until terminal. */}
         {commandStatus && (
@@ -253,12 +268,16 @@ function EditDialog({
   title,
   monitorNewItems,
   busy,
+  error,
   onCancel,
   onSave,
 }: {
   title: string;
   monitorNewItems: string;
   busy: boolean;
+  /** A refused save must state its reason in the dialog — Save closing on
+   *  success only means a silent dialog reads as a no-op. */
+  error: string | null;
   onCancel: () => void;
   onSave: (monitorNewItems: string) => void;
 }) {
@@ -295,6 +314,11 @@ function EditDialog({
             ))}
           </select>
         </label>
+        {error && (
+          <p className={styles.errorNote} role="alert" data-testid="edit-error">
+            {error}
+          </p>
+        )}
       </div>
     </Modal>
   );
@@ -428,7 +452,13 @@ export function SeriesDetail() {
   const allSelected = issues.length > 0 && issues.every((i) => selected.has(i.id));
   const selectedIssues = issues.filter((i) => selected.has(i.id));
 
+  // A refused enqueue (409 under a read-only root, or any other refusal) is
+  // held per-dispatch rather than read off the shared mutation: the bulk
+  // "Search selected" path drives the SAME mutation and owns its own note, so
+  // one screen-wide read of `runCommand.error` would double-report it.
+  const [dispatchError, setDispatchError] = useState<string | null>(null);
   const dispatch = (label: string, name: string, payload: Record<string, unknown>) => {
+    setDispatchError(null);
     runCommand.mutate(
       { name, payload },
       {
@@ -436,6 +466,7 @@ export function SeriesDetail() {
           setCommandLabel(label);
           start(record.id);
         },
+        onError: (error) => setDispatchError(error.message),
       },
     );
   };
@@ -506,9 +537,12 @@ export function SeriesDetail() {
         start(record.id);
       }
       clearSelection();
-    } catch {
+    } catch (error) {
+      // Name the refusal, not just the count: a read-only series' 409 is the
+      // one cause the operator can act on.
+      const reason = error instanceof Error ? ` ${error.message}` : '';
       setBatchNote(
-        `Search dispatched for ${dispatched} of ${targets.length} selected issue(s); the rest failed.`,
+        `Search dispatched for ${dispatched} of ${targets.length} selected issue(s); the rest failed.${reason}`,
       );
     } finally {
       setBatchSearching(false);
@@ -538,6 +572,13 @@ export function SeriesDetail() {
   const stats = series.statistics;
   const backdrop = coverUrl(series);
   const nowMs = Date.now();
+  // A browse-only reference library (FRG-SER-021/022): the backend refuses
+  // its write/acquire operations regardless, so the UI's job (FRG-UI-045) is
+  // honesty — never OFFER a monitor toggle, search/grab, or file-mutating
+  // (delete-files/rename/move) affordance for it. Reading and OPDS are
+  // unaffected, so everything gated here is additive suppression, never a
+  // change to what data loads.
+  const readOnly = series.read_only;
 
   const firstIssueIso = issues.length
     ? issues[0].store_date ?? issues[0].cover_date
@@ -551,6 +592,18 @@ export function SeriesDetail() {
   )
     .sort()
     .join(' / ');
+
+  // Every screen-level mutation reports through ONE alert region: a rejected
+  // write (a 409 under a read-only root, or any other refusal) must never read
+  // as a no-op, and gating affordances cannot cover a refusal an operator can
+  // still provoke. `updateSeries` is omitted while the edit dialog is open —
+  // the dialog carries the same error in place, on the field that caused it.
+  const mutationError =
+    dispatchError ??
+    (showEdit ? undefined : updateSeries.error?.message) ??
+    setIssueMonitored.error?.message ??
+    bulkMonitor.error?.message ??
+    null;
 
   const commandChip = commandLabel && command.status && (
     <span
@@ -593,17 +646,27 @@ export function SeriesDetail() {
                   <span className={styles.year}>({series.start_year})</span>
                 )}
                 <BookTypeBadge booktype={series.booktype} />
+                {readOnly && (
+                  <Chip tone="neutral" testId="series-read-only-badge">
+                    Read-only library
+                  </Chip>
+                )}
               </div>
 
               <div className={styles.metaRow}>
                 <span className={styles.metaMonitor}>
-                  <MonitorToggle
-                    monitored={series.monitored}
-                    label="series"
-                    size={14}
-                    disabled={updateSeries.isPending}
-                    onToggle={() => updateSeries.mutate({ monitored: !series.monitored })}
-                  />
+                  {/* No monitor toggle for a read-only series (FRG-UI-045) —
+                      the backend never acquires into it, so there is nothing
+                      a toggle could honor. */}
+                  {!readOnly && (
+                    <MonitorToggle
+                      monitored={series.monitored}
+                      label="series"
+                      size={14}
+                      disabled={updateSeries.isPending}
+                      onToggle={() => updateSeries.mutate({ monitored: !series.monitored })}
+                    />
+                  )}
                   {series.monitored ? 'Monitored' : 'Unmonitored'}
                 </span>
                 {series.publisher && (
@@ -631,27 +694,33 @@ export function SeriesDetail() {
               </div>
 
               <div className={styles.actionRow}>
-                <button
-                  type="button"
-                  className={styles.action}
-                  onClick={() => dispatch('Search', 'series-search', { series_id: seriesId })}
-                >
-                  <SearchIcon size={16} />
-                  Search Monitored
-                </button>
-                <button
-                  type="button"
-                  className={styles.action}
-                  onClick={() =>
-                    dispatch('Search All', 'series-search', {
-                      series_id: seriesId,
-                      monitored_only: false,
-                    })
-                  }
-                >
-                  <SearchIcon size={16} />
-                  Search All
-                </button>
+                {/* No search/grab affordance for a read-only series
+                    (FRG-UI-045) — the backend refuses acquisition into it. */}
+                {!readOnly && (
+                  <>
+                    <button
+                      type="button"
+                      className={styles.action}
+                      onClick={() => dispatch('Search', 'series-search', { series_id: seriesId })}
+                    >
+                      <SearchIcon size={16} />
+                      Search Monitored
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.action}
+                      onClick={() =>
+                        dispatch('Search All', 'series-search', {
+                          series_id: seriesId,
+                          monitored_only: false,
+                        })
+                      }
+                    >
+                      <SearchIcon size={16} />
+                      Search All
+                    </button>
+                  </>
+                )}
                 <button
                   type="button"
                   className={styles.action}
@@ -660,14 +729,19 @@ export function SeriesDetail() {
                   <RefreshIcon size={16} />
                   Refresh
                 </button>
-                <button
-                  type="button"
-                  className={styles.action}
-                  onClick={() => setShowEdit(true)}
-                >
-                  <WrenchIcon size={15} />
-                  Edit
-                </button>
+                {/* No Edit affordance for a read-only series (FRG-UI-045) —
+                    the dialog's only field is the monitor-new-issues policy,
+                    which the backend refuses under a read-only root. */}
+                {!readOnly && (
+                  <button
+                    type="button"
+                    className={styles.action}
+                    onClick={() => setShowEdit(true)}
+                  >
+                    <WrenchIcon size={15} />
+                    Edit
+                  </button>
+                )}
                 <button
                   type="button"
                   className={`${styles.action} ${styles.actionDanger}`}
@@ -699,22 +773,37 @@ export function SeriesDetail() {
                     <FolderScanIcon size={16} />
                     Rescan
                   </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    data-menuitem
-                    className={styles.menuItem}
-                    onClick={() => {
-                      setOverflowOpen(false);
-                      setShowRename(true);
-                    }}
-                  >
-                    <TableIcon size={16} />
-                    Rename Files
-                  </button>
+                  {/* No rename affordance for a read-only series (FRG-UI-045)
+                      — renaming moves/renames files on disk, which the
+                      backend refuses under a read-only root. */}
+                  {!readOnly && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      data-menuitem
+                      className={styles.menuItem}
+                      onClick={() => {
+                        setOverflowOpen(false);
+                        setShowRename(true);
+                      }}
+                    >
+                      <TableIcon size={16} />
+                      Rename Files
+                    </button>
+                  )}
                 </Menu>
                 {commandChip}
               </div>
+
+              {mutationError && (
+                <p
+                  className={styles.errorNote}
+                  role="alert"
+                  data-testid="series-action-error"
+                >
+                  {mutationError}
+                </p>
+              )}
 
               {series.description_sanitized && (
                 <Overview text={series.description_sanitized} />
@@ -840,15 +929,22 @@ export function SeriesDetail() {
                   <table className={styles.table}>
                     <thead>
                       <tr>
-                        <th scope="col" className={styles.selectCol}>
-                          <input
-                            type="checkbox"
-                            aria-label="Select all issues"
-                            checked={allSelected}
-                            onChange={toggleSelectAll}
-                          />
-                        </th>
-                        <th scope="col" className={styles.iconCol} />
+                        {/* No bulk selection for a read-only series
+                            (FRG-UI-045) — every bulk action it would drive
+                            is monitor/search, which the backend refuses. */}
+                        {!readOnly && (
+                          <th scope="col" className={styles.selectCol}>
+                            <input
+                              type="checkbox"
+                              aria-label="Select all issues"
+                              checked={allSelected}
+                              onChange={toggleSelectAll}
+                            />
+                          </th>
+                        )}
+                        {/* No per-issue monitor toggle for a read-only
+                            series (FRG-UI-045). */}
+                        {!readOnly && <th scope="col" className={styles.iconCol} />}
                         <th scope="col" className={styles.numberCol}>Issue</th>
                         <th scope="col">Release</th>
                         <th scope="col">Status</th>
@@ -867,29 +963,33 @@ export function SeriesDetail() {
                         const num = issue.issue_number ?? '—';
                         return (
                           <tr key={issue.id} data-testid={`issue-row-${issue.id}`}>
-                            <td className={styles.selectCol}>
-                              <input
-                                type="checkbox"
-                                aria-label={`Select issue ${num}`}
-                                checked={selected.has(issue.id)}
-                                onChange={() => {}}
-                                onClick={(e) => selectRow(index, e.shiftKey)}
-                              />
-                            </td>
-                            <td className={styles.iconCol}>
-                              <MonitorToggle
-                                monitored={issue.monitored}
-                                label={`issue ${num}`}
-                                size={14}
-                                disabled={setIssueMonitored.isPending}
-                                onToggle={() =>
-                                  setIssueMonitored.mutate({
-                                    issueId: issue.id,
-                                    monitored: !issue.monitored,
-                                  })
-                                }
-                              />
-                            </td>
+                            {!readOnly && (
+                              <td className={styles.selectCol}>
+                                <input
+                                  type="checkbox"
+                                  aria-label={`Select issue ${num}`}
+                                  checked={selected.has(issue.id)}
+                                  onChange={() => {}}
+                                  onClick={(e) => selectRow(index, e.shiftKey)}
+                                />
+                              </td>
+                            )}
+                            {!readOnly && (
+                              <td className={styles.iconCol}>
+                                <MonitorToggle
+                                  monitored={issue.monitored}
+                                  label={`issue ${num}`}
+                                  size={14}
+                                  disabled={setIssueMonitored.isPending}
+                                  onToggle={() =>
+                                    setIssueMonitored.mutate({
+                                      issueId: issue.id,
+                                      monitored: !issue.monitored,
+                                    })
+                                  }
+                                />
+                              </td>
+                            )}
                             {/* Verbatim string issue number — never coerced. */}
                             <td className={styles.numberCol}>
                               {issue.issue_number ?? '—'}
@@ -918,39 +1018,46 @@ export function SeriesDetail() {
                               {issue.file ? formatBytes(issue.file.size) : '—'}
                             </td>
                             <td className={styles.actionsCol}>
-                              <button
-                                type="button"
-                                className={styles.iconButton}
-                                aria-label={`Automatic search for issue ${num}`}
-                                title="Automatic search"
-                                onClick={() =>
-                                  dispatch(`Search #${num}`, 'issue-search', {
-                                    series_id: seriesId,
-                                    issue_id: issue.id,
-                                  })
-                                }
-                              >
-                                <SearchIcon size={14} />
-                              </button>
-                              <button
-                                type="button"
-                                className={styles.iconButton}
-                                aria-label={`Interactive search for issue ${num}`}
-                                title="Interactive search"
-                                onClick={() => openInteractiveSearch(issue.id)}
-                              >
-                                <PersonIcon size={14} />
-                              </button>
-                              {issue.file && (
-                                <button
-                                  type="button"
-                                  className={styles.iconDanger}
-                                  aria-label={`Delete file for issue ${num}`}
-                                  title="Delete file"
-                                  onClick={() => setDeleteFileIssue(issue)}
-                                >
-                                  <TrashIcon size={14} />
-                                </button>
+                              {/* No search/grab or delete-file affordance for
+                                  a read-only series (FRG-UI-045) — the
+                                  backend refuses both regardless. */}
+                              {!readOnly && (
+                                <>
+                                  <button
+                                    type="button"
+                                    className={styles.iconButton}
+                                    aria-label={`Automatic search for issue ${num}`}
+                                    title="Automatic search"
+                                    onClick={() =>
+                                      dispatch(`Search #${num}`, 'issue-search', {
+                                        series_id: seriesId,
+                                        issue_id: issue.id,
+                                      })
+                                    }
+                                  >
+                                    <SearchIcon size={14} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={styles.iconButton}
+                                    aria-label={`Interactive search for issue ${num}`}
+                                    title="Interactive search"
+                                    onClick={() => openInteractiveSearch(issue.id)}
+                                  >
+                                    <PersonIcon size={14} />
+                                  </button>
+                                  {issue.file && (
+                                    <button
+                                      type="button"
+                                      className={styles.iconDanger}
+                                      aria-label={`Delete file for issue ${num}`}
+                                      title="Delete file"
+                                      onClick={() => setDeleteFileIssue(issue)}
+                                    >
+                                      <TrashIcon size={14} />
+                                    </button>
+                                  )}
+                                </>
                               )}
                             </td>
                           </tr>
@@ -1009,6 +1116,7 @@ export function SeriesDetail() {
           busy={deleteSeries.isPending || deleteCommand.running}
           error={deleteSeries.error ? deleteSeries.error.message : null}
           commandStatus={deleteCommand.status}
+          readOnly={readOnly}
           onCancel={() => setShowDelete(false)}
           onConfirm={(deleteFiles) =>
             deleteSeries.mutate(
@@ -1047,6 +1155,7 @@ export function SeriesDetail() {
           title={series.title}
           monitorNewItems={series.monitor_new_items}
           busy={updateSeries.isPending}
+          error={updateSeries.error ? updateSeries.error.message : null}
           onCancel={() => setShowEdit(false)}
           onSave={(monitorNewItems) =>
             updateSeries.mutate(

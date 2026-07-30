@@ -27,6 +27,7 @@ from foragerr.library.containment import (
     RangeInput,
 )
 from foragerr.library.models import IssueRow
+from foragerr.library.read_only import refuse_read_only_issues
 
 router = APIRouter(prefix="/issues", tags=["issues"])
 
@@ -242,10 +243,14 @@ async def bulk_update_monitored(
 ) -> IssueBulkMonitorResult:
     """Bulk monitored toggle, atomic (all-or-none) via one write_session
     (FRG-API-004): a missing id rolls back the WHOLE request — nothing
-    changes for any of the named issues."""
+    changes for any of the named issues. One issue on a read-only reference
+    library refuses the whole batch the same way (FRG-SER-022)."""
     db = request.app.state.db
     try:
         async with db.write_session() as session:
+            await refuse_read_only_issues(
+                session, body.issue_ids, action="monitoring"
+            )
             await repo.bulk_set_issue_monitored(
                 session, body.issue_ids, body.monitored
             )
@@ -270,6 +275,9 @@ async def update_monitored(
     db = request.app.state.db
     try:
         async with db.write_session() as session:
+            # A browse-only series never carries monitored state (FRG-SER-022);
+            # refused before the flag is written, not silently no-op'd.
+            await refuse_read_only_issues(session, [issue_id], action="monitoring")
             await repo.set_issue_monitored(session, issue_id, body.monitored)
             row = (
                 await session.execute(

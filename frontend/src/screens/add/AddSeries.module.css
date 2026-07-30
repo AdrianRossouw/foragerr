@@ -262,6 +262,18 @@
   font-size: var(--font-size-sm);
 }
 
+/* Read-only root consequence line (FRG-UI-045) — a muted statement of fact
+   standing where the Monitor control would be, never an error tone. */
+.readOnlyRootNote {
+  margin: 0;
+  padding: var(--spacing-sm);
+  background: var(--surface-card);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
 .panelActions {
   display: flex;
   justify-content: flex-end;

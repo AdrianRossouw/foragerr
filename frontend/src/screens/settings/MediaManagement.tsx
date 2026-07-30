@@ -498,6 +498,7 @@ function RootFoldersSection() {
   const deleteRootFolder = useDeleteRootFolder();
 
   const [newPath, setNewPath] = useState('');
+  const [newReadOnly, setNewReadOnly] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
   const [confirmingId, setConfirmingId] = useState<number | null>(null);
   const [removeError, setRemoveError] = useState<{
@@ -508,8 +509,12 @@ function RootFoldersSection() {
   const add = async () => {
     setAddError(null);
     try {
-      await createRootFolder.mutateAsync({ path: newPath.trim() });
+      await createRootFolder.mutateAsync({
+        path: newPath.trim(),
+        read_only: newReadOnly,
+      });
       setNewPath('');
+      setNewReadOnly(false);
     } catch (error) {
       // The fetcher's ApiRequestError carries the backend's uniform-shape
       // message verbatim (the field-precise 400 names the exact problem).
@@ -565,6 +570,14 @@ function RootFoldersSection() {
               data-testid={`root-folder-${folder.id}`}
             >
               <span className={styles.rootFolderPath}>{folder.path}</span>
+              {folder.read_only && (
+                <span
+                  className={styles.rootFolderReadOnlyBadge}
+                  data-testid={`root-folder-read-only-${folder.id}`}
+                >
+                  Read-only
+                </span>
+              )}
               <span className={styles.rootFolderFree}>
                 {folder.free_space !== null
                   ? `${formatBytes(folder.free_space)} free`
@@ -623,6 +636,15 @@ function RootFoldersSection() {
             setAddError(null);
           }}
         />
+        <label className={styles.rootFolderReadOnlyRow}>
+          <input
+            type="checkbox"
+            aria-label="Register as read-only"
+            checked={newReadOnly}
+            onChange={(e) => setNewReadOnly(e.target.checked)}
+          />
+          Read-only
+        </label>
         <button
           type="button"
           className={`${styles.button} ${styles.buttonPrimary}`}
@@ -632,6 +654,13 @@ function RootFoldersSection() {
           {createRootFolder.isPending ? 'Adding…' : 'Add Root Folder'}
         </button>
       </div>
+      {newReadOnly && (
+        <p className={styles.sectionHelp}>
+          A read-only library is a collection foragerr reads and serves but
+          never changes — files are indexed in place, never moved, renamed,
+          or deleted.
+        </p>
+      )}
       {addError && (
         <p className={styles.fieldError} role="alert" data-testid="root-folder-add-error">
           {addError}
@@ -645,40 +674,53 @@ function SeriesRenamePicker({
   series,
   onPick,
 }: {
-  series: { id: number; title: string }[] | undefined;
+  series: { id: number; title: string; read_only: boolean }[] | undefined;
   onPick: (s: SelectedSeries) => void;
 }) {
   const [selectedId, setSelectedId] = useState<string>('');
-  const rows = series ?? [];
+  const all = series ?? [];
+  // A read-only series is never renamed on disk, so it is not offerable here
+  // (FRG-UI-045) — POST /rename for one is refused with a 409. The count is
+  // stated below so the omission is visible rather than an unexplained gap.
+  const rows = all.filter((s) => !s.read_only);
+  const readOnlyCount = all.length - rows.length;
 
   return (
-    <div className={styles.renamePicker}>
-      <select
-        aria-label="Series to preview renames for"
-        className={styles.picker}
-        value={selectedId}
-        onChange={(e) => setSelectedId(e.target.value)}
-      >
-        <option value="" disabled>
-          Select a series…
-        </option>
-        {rows.map((s) => (
-          <option key={s.id} value={String(s.id)}>
-            {s.title}
+    <>
+      <div className={styles.renamePicker}>
+        <select
+          aria-label="Series to preview renames for"
+          className={styles.picker}
+          value={selectedId}
+          onChange={(e) => setSelectedId(e.target.value)}
+        >
+          <option value="" disabled>
+            Select a series…
           </option>
-        ))}
-      </select>
-      <button
-        type="button"
-        className={styles.button}
-        disabled={selectedId === ''}
-        onClick={() => {
-          const picked = rows.find((s) => String(s.id) === selectedId);
-          if (picked) onPick({ id: picked.id, title: picked.title });
-        }}
-      >
-        Preview Rename
-      </button>
-    </div>
+          {rows.map((s) => (
+            <option key={s.id} value={String(s.id)}>
+              {s.title}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          className={styles.button}
+          disabled={selectedId === ''}
+          onClick={() => {
+            const picked = rows.find((s) => String(s.id) === selectedId);
+            if (picked) onPick({ id: picked.id, title: picked.title });
+          }}
+        >
+          Preview Rename
+        </button>
+      </div>
+      {readOnlyCount > 0 && (
+        <p className={styles.sectionHelp} data-testid="rename-read-only-excluded">
+          {readOnlyCount} series in read-only libraries {readOnlyCount === 1 ? 'is' : 'are'}{' '}
+          not listed — their files are never renamed.
+        </p>
+      )}
+    </>
   );
 }

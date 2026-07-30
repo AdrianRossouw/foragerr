@@ -3,9 +3,9 @@
 _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.mjs` — do not edit by hand (FRG-PROC-010)._
 
 - **Verdict:** GREEN
-- **Scenarios:** 37 (36 pass, 0 fail, 1 skipped, 0 flaky, 0 not run)
-- **Run started:** 2026-07-29T04:40:31.421Z
-- **Duration:** 140.4s
+- **Scenarios:** 43 (42 pass, 0 fail, 1 skipped, 0 flaky, 0 not run)
+- **Run started:** 2026-07-30T03:22:52.594Z
+- **Duration:** 151.4s
 
 ## Scenario → requirement coverage
 
@@ -25,6 +25,12 @@ _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.m
 | SKIPPED | FRG-PROC-010: live SABnzbd tier (skipped — no credentials) | FRG-PROC-010 |
 | PASS | FRG-PROC-019 FRG-UI-038: core screens carry zero serious/critical axe WCAG 2.1 A/AA violations | FRG-PROC-019, FRG-UI-038 |
 | PASS | FRG-PROC-010 FRG-UI-015 FRG-IMP-022 FRG-IMP-023: library import scans a root, reviews matches and imports existing files in place without a download | FRG-IMP-022, FRG-IMP-023, FRG-PROC-010, FRG-UI-015 |
+| PASS | FRG-PROC-010 FRG-SER-021 FRG-UI-045: a readable-but-unwritable root registers read-only while an ordinary registration of it is refused | FRG-PROC-010, FRG-SER-021, FRG-UI-045 |
+| PASS | FRG-PROC-010 FRG-SER-022 FRG-UI-045: a series added on a read-only root is unmonitored with no search dispatched | FRG-PROC-010, FRG-SER-022, FRG-UI-045 |
+| PASS | FRG-PROC-010 FRG-SER-022: search and monitoring for a read-only series are refused with the uniform 409, by route and by direct command | FRG-PROC-010, FRG-SER-022 |
+| PASS | FRG-PROC-010 FRG-IMP-028: library import indexes a read-only root in place, renaming and moving nothing | FRG-IMP-028, FRG-PROC-010 |
+| PASS | FRG-PROC-010 FRG-SER-021: file-mutating operations are refused and the read-only root stays untouched | FRG-PROC-010, FRG-SER-021 |
+| PASS | FRG-PROC-010 FRG-UI-045: the UI marks a read-only series and offers none of the refused actions | FRG-PROC-010, FRG-UI-045 |
 | PASS | FRG-AUTH-010 FRG-PROC-010: a bare API request (no credential) is refused 401 | FRG-AUTH-010, FRG-PROC-010 |
 | PASS | FRG-AUTH-010 FRG-PROC-010: OPDS answers a bare request with a Basic realm challenge, then serves with Basic creds | FRG-AUTH-010, FRG-PROC-010 |
 | PASS | FRG-SEC-005 FRG-PROC-010: a cookie-authed unsafe method with a foreign Origin is refused 403, and the X-Api-Key surface is immune | FRG-PROC-010, FRG-SEC-005 |
@@ -70,6 +76,7 @@ _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.m
 | FRG-DL-007 | PASS |
 | FRG-IMP-022 | PASS |
 | FRG-IMP-023 | PASS |
+| FRG-IMP-028 | PASS |
 | FRG-OPDS-001 | PASS |
 | FRG-OPDS-002 | PASS |
 | FRG-OPDS-003 | PASS |
@@ -84,6 +91,8 @@ _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.m
 | FRG-SEC-005 | PASS |
 | FRG-SER-005 | PASS |
 | FRG-SER-009 | PASS |
+| FRG-SER-021 | PASS |
+| FRG-SER-022 | PASS |
 | FRG-SRCH-001 | PASS |
 | FRG-UI-003 | PASS |
 | FRG-UI-005 | PASS |
@@ -94,6 +103,7 @@ _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.m
 | FRG-UI-027 | PASS |
 | FRG-UI-029 | PASS |
 | FRG-UI-038 | PASS |
+| FRG-UI-045 | PASS |
 
 ---
 
