@@ -48,13 +48,27 @@ export function AppShell({ socketFactory }: { socketFactory?: SocketFactory }) {
   const drawerRef = useRef<HTMLDivElement>(null);
 
   // Returning focus is only correct for a deliberate dismissal; widening the
-  // viewport past the crossover unmounts the drawer without a focus move.
+  // viewport past the crossover unmounts the drawer without a focus move — so
+  // the intent is recorded here and consumed by the effect below rather than
+  // acted on inline. At this point the state change has not been committed and
+  // the toggle is still inside the `inert` subtree, where a `focus()` call is
+  // ignored by the browser.
+  const restoreFocus = useRef(false);
   const closeNav = useCallback(() => {
+    restoreFocus.current = true;
     setNavOpen(false);
-    toggleRef.current?.focus();
   }, []);
 
   const shellRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (navOpen || !restoreFocus.current) return;
+    // Post-commit: the drawer is gone and the frame is no longer inert, so the
+    // toggle can take focus. Only a dismissal sets the flag, which is what keeps
+    // this from fighting the widen effect's move into the persistent nav.
+    restoreFocus.current = false;
+    toggleRef.current?.focus();
+  }, [navOpen]);
 
   useEffect(() => {
     if (compact || !navOpen) return;
@@ -83,8 +97,11 @@ export function AppShell({ socketFactory }: { socketFactory?: SocketFactory }) {
 
   // Everything outside the drawer, while it is open: `inert` is native focus
   // containment plus accessibility-tree exclusion in one attribute, so no
-  // keydown trap is needed and nothing behind the backdrop is reachable.
-  const outsideDrawer = navOpen ? ('' as const) : undefined;
+  // keydown trap is needed and nothing behind the backdrop is reachable. The
+  // condition must be the drawer's OWN render condition: keyed off `navOpen`
+  // alone, widening past the crossover paints a frame in which the whole app is
+  // inert and no drawer exists to hold focus.
+  const outsideDrawer = compact && navOpen ? ('' as const) : undefined;
 
   return (
     <div
@@ -122,16 +139,22 @@ export function AppShell({ socketFactory }: { socketFactory?: SocketFactory }) {
         <GlobalBanner />
         <header className={styles.header}>
           {compact && (
+            // An OPEN control only: while the drawer is open this button sits in
+            // the inert subtree behind the backdrop, so it cannot be reached by
+            // pointer or by keyboard. A "Close navigation" name and a dismissing
+            // branch would both describe something no operator can do — the
+            // drawer is dismissed by Escape or by the backdrop. `aria-expanded`
+            // still carries the state the toggle is returned to.
             <button
               type="button"
               ref={toggleRef}
               className={styles.iconButton}
-              aria-label={navOpen ? 'Close navigation' : 'Open navigation'}
+              aria-label="Open navigation"
               aria-expanded={navOpen}
               aria-controls="nav-drawer"
               title="Navigation"
               data-testid="nav-toggle"
-              onClick={() => (navOpen ? closeNav() : setNavOpen(true))}
+              onClick={() => setNavOpen(true)}
             >
               <i className="fa-solid fa-bars" aria-hidden />
             </button>

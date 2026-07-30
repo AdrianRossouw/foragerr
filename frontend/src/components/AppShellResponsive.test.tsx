@@ -114,6 +114,14 @@ describe('FRG-UI-049: responsive application chrome', () => {
     );
     expect(escapees.map((el) => el.outerHTML.slice(0, 60))).toEqual([]);
 
+    // The toggle is one of those unreachable elements, so it names the only
+    // thing it can do: a "Close navigation" name would advertise an action
+    // nothing can reach, while aria-expanded still reports the drawer's state.
+    const toggle = screen.getByTestId('nav-toggle');
+    expect(toggle).toHaveAccessibleName('Open navigation');
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(toggle.closest('[inert]')).not.toBeNull();
+
     await user.keyboard('{Escape}');
     await waitFor(() =>
       expect(screen.queryByTestId('nav-drawer')).not.toBeInTheDocument(),
@@ -152,6 +160,9 @@ describe('FRG-UI-049: responsive application chrome', () => {
     expect(
       screen.getByRole('navigation', { name: 'Primary' }),
     ).toContainElement(document.activeElement as HTMLElement);
+    // Containment is gated on the drawer's own render condition, so a frame with
+    // no drawer in it can never be a frame with the whole app inert.
+    expect(document.querySelectorAll('[inert]')).toHaveLength(0);
   });
 
   it('FRG-UI-049 — the backdrop dismisses the drawer and restores focus to the toggle', async () => {
