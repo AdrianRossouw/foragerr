@@ -60,6 +60,7 @@ export function EntitlementGroupHeader({
     counts.new > 0 ? `${counts.new} new` : null,
     counts.matched > 0 ? `${counts.matched} matched` : null,
     counts.ignored > 0 ? `${counts.ignored} ignored` : null,
+    counts.duplicate > 0 ? `${counts.duplicate} duplicate` : null,
   ].filter(Boolean) as string[];
 
   return (

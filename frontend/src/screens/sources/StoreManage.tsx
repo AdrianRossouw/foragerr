@@ -27,7 +27,7 @@ import { queryKeys } from '../../api/queryKeys';
 import type { EntitlementResource, StoreSourceResource } from '../../api/types';
 import styles from './sources.module.css';
 
-type Filter = 'all' | 'new' | 'matched' | 'ignored';
+type Filter = 'all' | 'new' | 'matched' | 'ignored' | 'duplicate';
 
 /** One row's failure inside a bulk accept, named for the operator. */
 interface BulkFailure {
@@ -76,8 +76,10 @@ const BULK_VERBS = {
 /**
  * Connected-store manage view (FRG-UI-029): account bar (auto-sync toggle, Sync
  * now, Disconnect), the publisher-rules editor (FRG-SRC-012), the count line +
- * All/New/Matched/Ignored filter segments and a non-comic reveal, and the
- * reviewable entitlement list.
+ * All/New/Matched/Ignored/Duplicates filter segments and a non-comic reveal,
+ * and the reviewable entitlement list. "All" and the pending counts exclude
+ * `duplicate` rows (FRG-SRC-015) — a parked copy was already reviewed once as
+ * its canonical row, so the Duplicates filter is its only home.
  *
  * The list is the at-scale surface (the dogfood first sync is 1,318 rows): it
  * virtualizes, same-title runs fold into expandable groups keyed by the
@@ -154,13 +156,20 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
   const count = (s: EntitlementResource['review_status']) =>
     scoped.filter((e) => e.review_status === s).length;
   const counts = {
-    all: scoped.length,
+    // "All" is the default view (FRG-SRC-015): a duplicate set was already
+    // reviewed once as its canonical row, so its parked copies stay out of
+    // both this count and the default list — the Duplicates filter is their
+    // only home.
+    all: scoped.filter((e) => e.review_status !== 'duplicate').length,
     new: count('new'),
     matched: count('matched'),
     ignored: count('ignored'),
+    duplicate: count('duplicate'),
   };
   const visible =
-    filter === 'all' ? scoped : scoped.filter((e) => e.review_status === filter);
+    filter === 'all'
+      ? scoped.filter((e) => e.review_status !== 'duplicate')
+      : scoped.filter((e) => e.review_status === filter);
 
   // Same-title collapse (FRG-UI-029): rows fold into groups by the SERVER's
   // group_key and the list becomes ONE flat array of headers and rows. Every
@@ -561,6 +570,7 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
               { value: 'new', label: `New ${counts.new}`, testId: 'filter-new' },
               { value: 'matched', label: `Matched ${counts.matched}`, testId: 'filter-matched' },
               { value: 'ignored', label: `Ignored ${counts.ignored}`, testId: 'filter-ignored' },
+              { value: 'duplicate', label: `Duplicates ${counts.duplicate}`, testId: 'filter-duplicate' },
             ]}
           />
           <label className={styles.otherToggle}>
