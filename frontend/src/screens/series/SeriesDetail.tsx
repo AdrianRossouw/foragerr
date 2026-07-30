@@ -268,12 +268,16 @@ function EditDialog({
   title,
   monitorNewItems,
   busy,
+  error,
   onCancel,
   onSave,
 }: {
   title: string;
   monitorNewItems: string;
   busy: boolean;
+  /** A refused save must state its reason in the dialog — Save closing on
+   *  success only means a silent dialog reads as a no-op. */
+  error: string | null;
   onCancel: () => void;
   onSave: (monitorNewItems: string) => void;
 }) {
@@ -310,6 +314,11 @@ function EditDialog({
             ))}
           </select>
         </label>
+        {error && (
+          <p className={styles.errorNote} role="alert" data-testid="edit-error">
+            {error}
+          </p>
+        )}
       </div>
     </Modal>
   );
@@ -443,7 +452,13 @@ export function SeriesDetail() {
   const allSelected = issues.length > 0 && issues.every((i) => selected.has(i.id));
   const selectedIssues = issues.filter((i) => selected.has(i.id));
 
+  // A refused enqueue (409 under a read-only root, or any other refusal) is
+  // held per-dispatch rather than read off the shared mutation: the bulk
+  // "Search selected" path drives the SAME mutation and owns its own note, so
+  // one screen-wide read of `runCommand.error` would double-report it.
+  const [dispatchError, setDispatchError] = useState<string | null>(null);
   const dispatch = (label: string, name: string, payload: Record<string, unknown>) => {
+    setDispatchError(null);
     runCommand.mutate(
       { name, payload },
       {
@@ -451,6 +466,7 @@ export function SeriesDetail() {
           setCommandLabel(label);
           start(record.id);
         },
+        onError: (error) => setDispatchError(error.message),
       },
     );
   };
@@ -521,9 +537,12 @@ export function SeriesDetail() {
         start(record.id);
       }
       clearSelection();
-    } catch {
+    } catch (error) {
+      // Name the refusal, not just the count: a read-only series' 409 is the
+      // one cause the operator can act on.
+      const reason = error instanceof Error ? ` ${error.message}` : '';
       setBatchNote(
-        `Search dispatched for ${dispatched} of ${targets.length} selected issue(s); the rest failed.`,
+        `Search dispatched for ${dispatched} of ${targets.length} selected issue(s); the rest failed.${reason}`,
       );
     } finally {
       setBatchSearching(false);
@@ -573,6 +592,18 @@ export function SeriesDetail() {
   )
     .sort()
     .join(' / ');
+
+  // Every screen-level mutation reports through ONE alert region: a rejected
+  // write (a 409 under a read-only root, or any other refusal) must never read
+  // as a no-op, and gating affordances cannot cover a refusal an operator can
+  // still provoke. `updateSeries` is omitted while the edit dialog is open —
+  // the dialog carries the same error in place, on the field that caused it.
+  const mutationError =
+    dispatchError ??
+    (showEdit ? undefined : updateSeries.error?.message) ??
+    setIssueMonitored.error?.message ??
+    bulkMonitor.error?.message ??
+    null;
 
   const commandChip = commandLabel && command.status && (
     <span
@@ -698,14 +729,19 @@ export function SeriesDetail() {
                   <RefreshIcon size={16} />
                   Refresh
                 </button>
-                <button
-                  type="button"
-                  className={styles.action}
-                  onClick={() => setShowEdit(true)}
-                >
-                  <WrenchIcon size={15} />
-                  Edit
-                </button>
+                {/* No Edit affordance for a read-only series (FRG-UI-045) —
+                    the dialog's only field is the monitor-new-issues policy,
+                    which the backend refuses under a read-only root. */}
+                {!readOnly && (
+                  <button
+                    type="button"
+                    className={styles.action}
+                    onClick={() => setShowEdit(true)}
+                  >
+                    <WrenchIcon size={15} />
+                    Edit
+                  </button>
+                )}
                 <button
                   type="button"
                   className={`${styles.action} ${styles.actionDanger}`}
@@ -758,6 +794,16 @@ export function SeriesDetail() {
                 </Menu>
                 {commandChip}
               </div>
+
+              {mutationError && (
+                <p
+                  className={styles.errorNote}
+                  role="alert"
+                  data-testid="series-action-error"
+                >
+                  {mutationError}
+                </p>
+              )}
 
               {series.description_sanitized && (
                 <Overview text={series.description_sanitized} />
@@ -1109,6 +1155,7 @@ export function SeriesDetail() {
           title={series.title}
           monitorNewItems={series.monitor_new_items}
           busy={updateSeries.isPending}
+          error={updateSeries.error ? updateSeries.error.message : null}
           onCancel={() => setShowEdit(false)}
           onSave={(monitorNewItems) =>
             updateSeries.mutate(

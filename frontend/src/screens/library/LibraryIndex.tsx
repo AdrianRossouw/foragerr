@@ -11,7 +11,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Toolbar } from '../../components/Toolbar';
 import { ToolbarButton } from '../../components/ToolbarButton';
 import { ProgressStrip } from '../../components/ProgressStrip';
-import { Chip } from '../../components/Chip';
+import { Chip, type ChipTone } from '../../components/Chip';
 import { Menu } from '../../components/Menu';
 import { SegmentedControl } from '../../components/SegmentedControl';
 import { Poster } from '../../components/Poster';
@@ -164,6 +164,27 @@ function CoverChrome({
   );
 }
 
+/**
+ * Browse-only reference-library marker (FRG-UI-045). A read-only series is not
+ * merely unmonitored — nothing is ever acquired into it and its files are never
+ * touched — so it must not read identically to a series the operator chose to
+ * unmonitor. Neutral by design: `overlay` rides on cover art, `muted` in rows.
+ */
+function ReadOnlyMarker({
+  series,
+  tone = 'muted',
+}: {
+  series: SeriesResource;
+  tone?: ChipTone;
+}) {
+  if (!series.read_only) return null;
+  return (
+    <Chip tone={tone} testId={`series-read-only-${series.id}`}>
+      Read-only
+    </Chip>
+  );
+}
+
 /* --- flat poster card ------------------------------------------------------ */
 
 const PosterCard = memo(function PosterCard({ series }: { series: SeriesResource }) {
@@ -192,6 +213,7 @@ const PosterCard = memo(function PosterCard({ series }: { series: SeriesResource
             <>
               {series.publisher && <Chip tone="overlay">{series.publisher}</Chip>}
               <BookTypeBadge booktype={series.booktype} />
+              <ReadOnlyMarker series={series} tone="overlay" />
             </>
           }
         />
@@ -244,6 +266,7 @@ const OverviewRow = memo(function OverviewRow({ series }: { series: SeriesResour
           </span>
           <Chip tone={cont ? 'success' : 'muted'}>{statusLabel(series)}</Chip>
           <BookTypeBadge booktype={series.booktype} />
+          <ReadOnlyMarker series={series} />
         </div>
         <div className={styles.overviewMeta}>
           {series.publisher ? `${series.publisher} · ` : ''}
@@ -282,6 +305,7 @@ const SeriesTableRow = memo(function SeriesTableRow({ series }: { series: Series
             {series.title}
           </Link>
           <BookTypeBadge booktype={series.booktype} />
+          <ReadOnlyMarker series={series} />
         </span>
       </td>
       <td>{series.publisher ?? '—'}</td>
@@ -649,6 +673,7 @@ const MemberRow = memo(function MemberRow({ series }: { series: SeriesResource }
         {series.title}
       </span>
       <BookTypeBadge booktype={series.booktype} />
+      <ReadOnlyMarker series={series} />
       <span className={styles.memberPublisher}>{series.publisher ?? '—'}</span>
       <ProgressStrip
         have={stats.file_count}

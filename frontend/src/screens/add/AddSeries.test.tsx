@@ -1541,3 +1541,115 @@ describe('FRG-PULL-008: id-first add hand-off', () => {
     expect(note).not.toHaveTextContent(/searching by name instead/i);
   });
 });
+
+/**
+ * FRG-UI-045 — the add flow is the one place the read-only boundary is an
+ * OVERRIDE rather than a refusal: the backend accepts the add and forces
+ * monitored=false / strategy none / no search-on-add. The panel must state
+ * that before submit, not discard the operator's choices behind their back.
+ */
+describe('FRG-UI-045: add under a read-only root', () => {
+  const ROOTS_WITH_READ_ONLY: RootFolderResource[] = [
+    { id: 1, path: '/comics', free_space: 250_000_000_000, read_only: false },
+    { id: 2, path: '/reference/comics', free_space: null, read_only: true },
+  ];
+
+  async function openPanel(rootFolders?: () => unknown) {
+    const utils = renderAdd(rootFolders ? { rootFolders } : {});
+    const user = await searchFor('saga');
+    await waitFor(() =>
+      expect(screen.getByTestId('candidate-40501234')).toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole('button', { name: 'Select Saga' }));
+    const panel = screen.getByTestId('add-options-panel');
+    const rootFolder = within(panel).getByRole('combobox', { name: 'Root folder' });
+    await waitFor(() =>
+      expect(within(rootFolder).getAllByRole('option')).toHaveLength(2),
+    );
+    return { ...utils, user, panel, rootFolder };
+  }
+
+  it('FRG-UI-045 — the root picker marks a read-only root in its option label', async () => {
+    const { rootFolder } = await openPanel(() => ROOTS_WITH_READ_ONLY);
+
+    expect(
+      within(rootFolder).getByRole('option', { name: '/reference/comics — read-only' }),
+    ).toBeInTheDocument();
+    // The writable root carries no marker.
+    expect(
+      within(rootFolder).getByRole('option', { name: '/comics — 232.8 GB free' }),
+    ).toBeInTheDocument();
+  });
+
+  it('FRG-UI-045 — selecting a read-only root withdraws the monitor and search controls and names the consequence', async () => {
+    const { user, panel, rootFolder } = await openPanel(() => ROOTS_WITH_READ_ONLY);
+
+    await user.selectOptions(rootFolder, '2');
+
+    expect(
+      within(panel).queryByRole('radiogroup', { name: 'Monitor strategy' }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(panel).queryByRole('checkbox', {
+        name: 'Start search for missing issues',
+      }),
+    ).not.toBeInTheDocument();
+    expect(within(panel).getByTestId('add-read-only-note')).toHaveTextContent(
+      /added\s+unmonitored, with no monitor strategy and no search/i,
+    );
+    // Book type is display-only, so its control is untouched.
+    expect(
+      within(panel).getByRole('radiogroup', { name: 'Collect as' }),
+    ).toBeInTheDocument();
+  });
+
+  it('FRG-UI-045 — the add posts monitor_strategy none and search_on_add false for a read-only root', async () => {
+    const { spy, user, panel, rootFolder } = await openPanel(
+      () => ROOTS_WITH_READ_ONLY,
+    );
+
+    // Choose acquiring options against the WRITABLE root first, then switch to
+    // the read-only one: the request must carry what the panel last stated.
+    await user.click(within(panel).getByRole('radio', { name: 'Missing issues' }));
+    await user.click(
+      within(panel).getByRole('checkbox', {
+        name: 'Start search for missing issues',
+      }),
+    );
+    await user.selectOptions(rootFolder, '2');
+    await user.click(within(panel).getByRole('button', { name: 'Add Saga' }));
+
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith('/api/v1/series', {
+        method: 'POST',
+        body: {
+          cv_volume_id: 40501234,
+          root_folder_id: 2,
+          format_profile_id: 1,
+          monitor_strategy: 'none',
+          monitor_new_items: 'all',
+          search_on_add: false,
+        },
+      }),
+    );
+  });
+
+  it('FRG-UI-045 — a writable root is unaffected: monitor, search, and no read-only note', async () => {
+    const { panel, rootFolder } = await openPanel();
+
+    expect(rootFolder).toHaveValue('1');
+    expect(
+      within(panel).getByRole('radiogroup', { name: 'Monitor strategy' }),
+    ).toBeInTheDocument();
+    expect(
+      within(panel).getByRole('checkbox', {
+        name: 'Start search for missing issues',
+      }),
+    ).toBeInTheDocument();
+    expect(within(panel).queryByTestId('add-read-only-note')).not.toBeInTheDocument();
+    // No root in the default fixture is marked.
+    expect(
+      within(rootFolder).queryByRole('option', { name: /read-only/ }),
+    ).not.toBeInTheDocument();
+  });
+});

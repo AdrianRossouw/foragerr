@@ -674,40 +674,53 @@ function SeriesRenamePicker({
   series,
   onPick,
 }: {
-  series: { id: number; title: string }[] | undefined;
+  series: { id: number; title: string; read_only: boolean }[] | undefined;
   onPick: (s: SelectedSeries) => void;
 }) {
   const [selectedId, setSelectedId] = useState<string>('');
-  const rows = series ?? [];
+  const all = series ?? [];
+  // A read-only series is never renamed on disk, so it is not offerable here
+  // (FRG-UI-045) — POST /rename for one is refused with a 409. The count is
+  // stated below so the omission is visible rather than an unexplained gap.
+  const rows = all.filter((s) => !s.read_only);
+  const readOnlyCount = all.length - rows.length;
 
   return (
-    <div className={styles.renamePicker}>
-      <select
-        aria-label="Series to preview renames for"
-        className={styles.picker}
-        value={selectedId}
-        onChange={(e) => setSelectedId(e.target.value)}
-      >
-        <option value="" disabled>
-          Select a series…
-        </option>
-        {rows.map((s) => (
-          <option key={s.id} value={String(s.id)}>
-            {s.title}
+    <>
+      <div className={styles.renamePicker}>
+        <select
+          aria-label="Series to preview renames for"
+          className={styles.picker}
+          value={selectedId}
+          onChange={(e) => setSelectedId(e.target.value)}
+        >
+          <option value="" disabled>
+            Select a series…
           </option>
-        ))}
-      </select>
-      <button
-        type="button"
-        className={styles.button}
-        disabled={selectedId === ''}
-        onClick={() => {
-          const picked = rows.find((s) => String(s.id) === selectedId);
-          if (picked) onPick({ id: picked.id, title: picked.title });
-        }}
-      >
-        Preview Rename
-      </button>
-    </div>
+          {rows.map((s) => (
+            <option key={s.id} value={String(s.id)}>
+              {s.title}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          className={styles.button}
+          disabled={selectedId === ''}
+          onClick={() => {
+            const picked = rows.find((s) => String(s.id) === selectedId);
+            if (picked) onPick({ id: picked.id, title: picked.title });
+          }}
+        >
+          Preview Rename
+        </button>
+      </div>
+      {readOnlyCount > 0 && (
+        <p className={styles.sectionHelp} data-testid="rename-read-only-excluded">
+          {readOnlyCount} series in read-only libraries {readOnlyCount === 1 ? 'is' : 'are'}{' '}
+          not listed — their files are never renamed.
+        </p>
+      )}
+    </>
   );
 }

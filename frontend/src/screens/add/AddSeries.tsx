@@ -347,6 +347,13 @@ function AddOptionsPanel({
   const selectedRootFolderId = rootFolderId ?? rootFolders.data?.[0]?.id ?? null;
   const selectedProfileId =
     formatProfileId ?? formatProfiles.data?.[0]?.id ?? null;
+  // A read-only root is a browse-only reference library (FRG-SER-021): the add
+  // is accepted but the backend forces monitored=false, strategy none and no
+  // search-on-add. State that consequence BEFORE submit (FRG-UI-045) rather
+  // than let the operator pick options that are silently discarded.
+  const readOnlyRoot =
+    rootFolders.data?.some((f) => f.id === selectedRootFolderId && f.read_only) ??
+    false;
   // No-roots state (FRG-UI-012 first-run scenario): a fresh install has no
   // registered root folder, so adding is impossible — point at the settings
   // section where one can actually be created instead of a dead-end select.
@@ -439,6 +446,9 @@ function AddOptionsPanel({
               {rootFolders.data?.map((folder) => (
                 <option key={folder.id} value={folder.id}>
                   {folder.path}
+                  {/* A select option cannot carry the list view's badge
+                      element, so the marker rides in the label text. */}
+                  {folder.read_only && ' — read-only'}
                   {folder.free_space !== null &&
                     ` — ${formatBytes(folder.free_space)} free`}
                 </option>
@@ -462,16 +472,30 @@ function AddOptionsPanel({
         </label>
       </div>
 
-      <div className={styles.formField}>
-        <span className={styles.fieldLabel}>Monitor</span>
-        <SegmentedControl
-          options={monitorOptions}
-          value={monitorStrategy}
-          onChange={setMonitorStrategy}
-          ariaLabel="Monitor strategy"
-        />
-      </div>
+      {readOnlyRoot ? (
+        <p
+          className={styles.readOnlyRootNote}
+          role="status"
+          data-testid="add-read-only-note"
+        >
+          This is a read-only library — foragerr indexes and serves what is
+          already there but never acquires into it. The series is added
+          unmonitored, with no monitor strategy and no search.
+        </p>
+      ) : (
+        <div className={styles.formField}>
+          <span className={styles.fieldLabel}>Monitor</span>
+          <SegmentedControl
+            options={monitorOptions}
+            value={monitorStrategy}
+            onChange={setMonitorStrategy}
+            ariaLabel="Monitor strategy"
+          />
+        </div>
+      )}
 
+      {/* Book type is display-only (FRG-SER-018/FRG-UI-022), so a read-only
+          root neither refuses nor overrides it. */}
       <div className={styles.formField}>
         <span className={styles.fieldLabel}>Collect as</span>
         <SegmentedControl
@@ -482,14 +506,16 @@ function AddOptionsPanel({
         />
       </div>
 
-      <label className={styles.checkboxRow}>
-        <input
-          type="checkbox"
-          checked={searchOnAdd}
-          onChange={(e) => setSearchOnAdd(e.target.checked)}
-        />
-        Start search for missing issues
-      </label>
+      {!readOnlyRoot && (
+        <label className={styles.checkboxRow}>
+          <input
+            type="checkbox"
+            checked={searchOnAdd}
+            onChange={(e) => setSearchOnAdd(e.target.checked)}
+          />
+          Start search for missing issues
+        </label>
+      )}
 
       {error && <p className={styles.errorNote}>{error}</p>}
 
@@ -511,8 +537,10 @@ function AddOptionsPanel({
             onAdd({
               rootFolderId: selectedRootFolderId,
               formatProfileId: selectedProfileId,
-              monitorStrategy,
-              searchOnAdd,
+              // Send what the panel told the operator would happen; the
+              // backend forces the same values for a read-only root.
+              monitorStrategy: readOnlyRoot ? 'none' : monitorStrategy,
+              searchOnAdd: readOnlyRoot ? false : searchOnAdd,
               // Untouched collect-as -> omit booktype (derivation); an explicit
               // choice sends the locked add-time book-type (FRG-SER-018).
               ...(collectAs ? { booktype: COLLECT_AS_BOOKTYPE[collectAs] } : {}),

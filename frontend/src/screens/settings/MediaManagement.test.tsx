@@ -97,6 +97,8 @@ interface Overrides {
   commandList?: () => ReturnType<typeof makeCommand>[];
   /** Root-folder list (FRG-SER-008); defaults to one registered root. */
   rootFolders?: () => RootFolderResource[];
+  /** The library index the rename picker reads; defaults to one series. */
+  series?: () => ReturnType<typeof makeSeriesResource>[];
   onPostRootFolder?: (init?: FetcherInit) => unknown;
   onDeleteRootFolder?: (id: number) => unknown;
 }
@@ -138,7 +140,9 @@ function resolver(o: Overrides = {}) {
       }
       return o.mm ? o.mm() : MM;
     }
-    if (path.startsWith('/api/v1/series?')) return pageOf(SERIES);
+    if (path.startsWith('/api/v1/series?')) {
+      return pageOf(o.series ? o.series() : SERIES);
+    }
     if (path.startsWith('/api/v1/rename?')) {
       return o.renameRows ? o.renameRows() : RENAME_ROWS;
     }
@@ -864,5 +868,57 @@ describe('FRG-UI-045: read-only root folders', () => {
 
     const row = await screen.findByTestId('root-folder-1');
     expect(within(row).queryByTestId('root-folder-read-only-1')).not.toBeInTheDocument();
+  });
+
+  it('FRG-UI-045 — the rename picker omits read-only series and states how many', async () => {
+    const { fetcher } = fakeFetcher(
+      resolver({
+        series: () => [
+          makeSeriesResource({ id: 7, title: 'Example Series' }),
+          makeSeriesResource({ id: 8, title: 'Example Reference Run', read_only: true }),
+        ],
+      }),
+    );
+    renderWithProviders(<MediaManagement />, { fetcher });
+
+    const picker = await screen.findByLabelText('Series to preview renames for');
+    await waitFor(() =>
+      expect(
+        within(picker).getByRole('option', { name: 'Example Series' }),
+      ).toBeInTheDocument(),
+    );
+    // A read-only series cannot be submitted to /rename (409), so it is not
+    // selectable at all.
+    expect(
+      within(picker).queryByRole('option', { name: 'Example Reference Run' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId('rename-read-only-excluded')).toHaveTextContent(
+      '1 series in read-only libraries is not listed',
+    );
+  });
+
+  it('FRG-UI-045 — a writable-only library lists every series with no exclusion note', async () => {
+    const { fetcher } = fakeFetcher(
+      resolver({
+        series: () => [
+          makeSeriesResource({ id: 7, title: 'Example Series' }),
+          makeSeriesResource({ id: 8, title: 'Example Second Series' }),
+        ],
+      }),
+    );
+    renderWithProviders(<MediaManagement />, { fetcher });
+
+    const picker = await screen.findByLabelText('Series to preview renames for');
+    await waitFor(() =>
+      expect(
+        within(picker).getByRole('option', { name: 'Example Series' }),
+      ).toBeInTheDocument(),
+    );
+    expect(
+      within(picker).getByRole('option', { name: 'Example Second Series' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId('rename-read-only-excluded'),
+    ).not.toBeInTheDocument();
   });
 });
