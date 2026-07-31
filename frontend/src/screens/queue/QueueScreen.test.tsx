@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { screen, waitFor, act, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../../test/renderWithProviders';
+import { ApiRequestError } from '../../api/fetcher';
 import { fakeFetcher } from '../../test/fakeFetcher';
 import {
   mockQueueEnvelope,
@@ -272,6 +273,30 @@ describe('FRG-UI-006: failed rows read by status, not by progress noise', () => 
     // The live row keeps its progress.
     expect(screen.getByTestId('queue-progress-900')).toHaveTextContent('10%');
   });
+
+  it('FRG-UI-006 — a failed_pending row drops the same progress noise, and Clear failed still leaves it alone', async () => {
+    // Mid-transition through the failure loop: its bytes are as stale as a
+    // terminal failure's, but de-tracking it would pull it out from under the
+    // loop that is still deciding what it becomes.
+    const envelope = mockQueueEnvelope([
+      mockQueueRecord({
+        id: 940,
+        state: 'failed_pending',
+        status: 'error',
+        size: 100,
+        sizeleft: 100,
+      }),
+    ]);
+    const { fetcher } = fakeFetcher(() => envelope);
+    renderWithProviders(<QueueScreen />, { fetcher });
+
+    const row = await screen.findByTestId('queue-row-940');
+    expect(within(row).queryByRole('progressbar')).toBeNull();
+    expect(within(row).queryByText(/left of/)).toBeNull();
+    expect(within(row).getByText('Failing')).toBeInTheDocument();
+    // Not part of the failure backlog Clear failed sweeps.
+    expect(screen.getByRole('button', { name: 'Clear failed' })).toBeDisabled();
+  });
 });
 
 describe('FRG-UI-006: selection and bulk cleanup', () => {
@@ -329,7 +354,7 @@ describe('FRG-UI-006: selection and bulk cleanup', () => {
     expect(screen.getByTestId('queue-selection-count')).toHaveTextContent('1 selected');
   });
 
-  it('FRG-UI-006 — Clear failed removes every failed row and leaves the others untouched', async () => {
+  it('FRG-UI-006 — Clear failed asks the server for the whole failed SCOPE, not the ids on this page', async () => {
     const { spy, fetcher } = fakeFetcher((path) =>
       path.startsWith('/api/v1/queue?')
         ? mockQueueWithFailures
@@ -342,15 +367,44 @@ describe('FRG-UI-006: selection and bulk cleanup', () => {
     await user.click(screen.getByRole('button', { name: 'Clear failed' }));
 
     // The same dialog, with the same explicit options — no hidden blocklist.
-    const dialog = screen.getByRole('dialog', { name: /Remove 2 queue items/ });
+    const dialog = screen.getByRole('dialog', { name: /Remove 2 failed queue items/ });
     expect(within(dialog).getByRole('checkbox', { name: /Blocklist release/ })).not.toBeChecked();
     await user.click(within(dialog).getByRole('button', { name: 'Remove' }));
 
     await waitFor(() =>
       expect(spy).toHaveBeenCalledWith('/api/v1/queue/remove', {
         method: 'POST',
-        // The downloading row (900) is not in the batch.
-        body: { ids: [930, 931], blocklist: false, deleteData: false },
+        // No ids: the server selects every failed row, so the downloading row
+        // (900) is out of scope without this client having to say so.
+        body: { scope: 'failed', blocklist: false, deleteData: false },
+      }),
+    );
+  });
+
+  it('FRG-UI-006 — Clear failed is offered for failures on pages this screen never loaded', async () => {
+    // The motivating case: page 1 is all live downloads, and the failure
+    // backlog sits on page 3. A page-derived count would grey the button out.
+    const envelope = { ...mockQueuePage1, totalRecords: 45, failedRecords: 7 };
+    const { spy, fetcher } = fakeFetcher((path) =>
+      path.startsWith('/api/v1/queue?') ? envelope : { applied: 7, errors: {} },
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<QueueScreen />, { fetcher });
+
+    await screen.findByTestId('queue-row-900');
+    const clear = screen.getByRole('button', { name: 'Clear failed' });
+    expect(clear).toBeEnabled();
+
+    await user.click(clear);
+    const dialog = screen.getByRole('dialog', { name: /Remove 7 failed queue items/ });
+    // The confirmation counts the backlog and says the rows it cannot name.
+    expect(within(dialog).getByText('…and 7 more on other pages')).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole('button', { name: 'Remove' }));
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith('/api/v1/queue/remove', {
+        method: 'POST',
+        body: { scope: 'failed', blocklist: false, deleteData: false },
       }),
     );
   });
@@ -361,6 +415,162 @@ describe('FRG-UI-006: selection and bulk cleanup', () => {
 
     await screen.findByTestId('queue-row-900');
     expect(screen.getByRole('button', { name: 'Clear failed' })).toBeDisabled();
+  });
+
+  it('FRG-UI-006 — a 409 the single-item DELETE throws is shown in the dialog rather than swallowed', async () => {
+    // The single-row path is a bare DELETE, so a refusal arrives as a thrown
+    // 4xx instead of the bulk endpoint's per-row errors map.
+    const { fetcher } = fakeFetcher((path) => {
+      if (path.startsWith('/api/v1/queue?')) return mockQueuePage1;
+      throw new ApiRequestError(
+        409,
+        {
+          message: 'import in progress for this item; try again once it completes',
+          errors: [],
+        },
+        path,
+      );
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<QueueScreen />, { fetcher });
+
+    await screen.findByTestId('queue-row-900');
+    await user.click(screen.getByRole('button', { name: 'Remove Chapter Forty-One' }));
+    const dialog = screen.getByRole('dialog', { name: /Remove Saga #41/ });
+    await user.click(within(dialog).getByRole('button', { name: 'Remove' }));
+
+    const alert = await within(dialog).findByRole('alert');
+    expect(alert).toHaveTextContent(/import in progress for this item/);
+    // The dialog stays open on failure — the row was not removed.
+    expect(screen.getByRole('dialog', { name: /Remove Saga #41/ })).toBeInTheDocument();
+  });
+});
+
+describe('FRG-UI-006: selection and notices are page-scoped', () => {
+  /** Page 1 holds a refusable row; page 2 holds a different one. */
+  const pagedFetcher = () =>
+    fakeFetcher((path) => {
+      if (path.includes('page=2')) {
+        return {
+          ...mockQueueEnvelope([
+            mockQueueRecord({
+              id: 950,
+              issue: { id: 450, issueNumber: '50', title: 'Chapter Fifty' },
+            }),
+          ]),
+          page: 2,
+          totalRecords: 45,
+        };
+      }
+      if (path.startsWith('/api/v1/queue?')) {
+        return { ...mockQueuePage1, totalRecords: 45 };
+      }
+      return { applied: 0, errors: { 901: 'import in progress for this item' } };
+    });
+
+  it('FRG-UI-006 — turning the page drops the selection, so a bulk remove never carries invisible rows', async () => {
+    const { fetcher } = pagedFetcher();
+    const user = userEvent.setup();
+    renderWithProviders(<QueueScreen />, { fetcher });
+
+    await screen.findByTestId('queue-row-900');
+    await user.click(screen.getByRole('checkbox', { name: 'Select all queue items' }));
+    expect(screen.getByTestId('queue-selection-count')).toHaveTextContent('2 selected');
+
+    await user.click(screen.getByRole('button', { name: 'Next ›' }));
+    await screen.findByTestId('queue-row-950');
+
+    // The bulk bar counts only this page's rows, so it must not survive the move.
+    expect(screen.queryByTestId('queue-selection-count')).toBeNull();
+    expect(screen.getByRole('checkbox', { name: 'Select all queue items' })).not.toBeChecked();
+  });
+
+  it('FRG-UI-006 — a refusal notice clears on the next page and on the next remove attempt', async () => {
+    const { fetcher } = pagedFetcher();
+    const user = userEvent.setup();
+    renderWithProviders(<QueueScreen />, { fetcher });
+
+    await screen.findByTestId('queue-row-900');
+    await user.click(screen.getByRole('checkbox', { name: 'Select all queue items' }));
+    await user.click(screen.getByRole('button', { name: 'Remove selected' }));
+    await user.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove' }),
+    );
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+
+    // Opening the dialog again retires the previous attempt's report.
+    await user.click(screen.getByRole('button', { name: 'Remove Chapter Forty-One' }));
+    expect(screen.queryByRole('alert')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    // And so does leaving the page it described.
+    await user.click(screen.getByRole('checkbox', { name: 'Select all queue items' }));
+    await user.click(screen.getByRole('button', { name: 'Remove selected' }));
+    await user.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove' }),
+    );
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Next ›' }));
+    await screen.findByTestId('queue-row-950');
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('FRG-UI-006 — two rows refused with the identical message are both reported', async () => {
+    // Keyed by message, the second row would collide with the first and vanish.
+    const reason = 'import in progress for this item';
+    const { fetcher } = fakeFetcher((path) =>
+      path.startsWith('/api/v1/queue?')
+        ? mockQueuePage1
+        : { applied: 0, errors: { 900: reason, 901: reason } },
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<QueueScreen />, { fetcher });
+
+    await screen.findByTestId('queue-row-900');
+    await user.click(screen.getByRole('checkbox', { name: 'Select all queue items' }));
+    await user.click(screen.getByRole('button', { name: 'Remove selected' }));
+    await user.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove' }),
+    );
+
+    const notice = await screen.findByRole('alert');
+    expect(within(notice).getAllByRole('listitem')).toHaveLength(2);
+    expect(within(notice).getByText(`Saga #41: ${reason}`)).toBeInTheDocument();
+    expect(within(notice).getByText(`Saga #42: ${reason}`)).toBeInTheDocument();
+  });
+
+  it('FRG-UI-006 — emptying the last page falls back to the page that still has rows', async () => {
+    // Clearing the tail of the queue must not strand the screen on a page past
+    // the end, showing an empty table over live rows.
+    let totalRecords = 21;
+    const { fetcher } = fakeFetcher((path) => {
+      if (!path.startsWith('/api/v1/queue?')) return { applied: 1, errors: {} };
+      const page = path.includes('page=2') ? 2 : 1;
+      if (page === 2 && totalRecords <= 20) {
+        return { ...mockQueueEnvelope([]), page: 2, totalRecords };
+      }
+      return {
+        ...(page === 2
+          ? mockQueueEnvelope([mockQueueRecord({ id: 960 })])
+          : mockQueuePage1),
+        page,
+        totalRecords,
+      };
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<QueueScreen />, { fetcher });
+
+    await screen.findByTestId('queue-row-900');
+    await user.click(screen.getByRole('button', { name: 'Next ›' }));
+    await screen.findByTestId('queue-row-960');
+
+    totalRecords = 20;
+    await user.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('page-controls-label')).toHaveTextContent('Page 1 of 1'),
+    );
+    expect(await screen.findByTestId('queue-row-900')).toBeInTheDocument();
   });
 });
 

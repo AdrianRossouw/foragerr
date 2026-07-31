@@ -17,10 +17,12 @@ action over many ids, reporting per-row rather than failing the batch.
 from __future__ import annotations
 
 import datetime as dt
+import logging
+from typing import Literal
 
 from fastapi import APIRouter, Query, Request
-from pydantic import BaseModel, Field
-from sqlalchemy import select
+from pydantic import BaseModel, model_validator
+from sqlalchemy import func, select
 
 from foragerr.api.errors import ApiError
 from foragerr.api.paging import load_issue_map, load_series_map, paginate
@@ -95,6 +97,11 @@ class QueuePage(BaseModel):
     sortKey: str
     sortDirection: str
     totalRecords: int
+    #: How many queue rows are terminally ``failed``, across ALL pages — the
+    #: reach of ``POST /queue/remove {scope: "failed"}``. A page-derived count
+    #: would understate a backlog longer than one page, so the client cannot
+    #: compute this from ``records``.
+    failedRecords: int
     records: list[QueueResource]
 
 
@@ -172,6 +179,13 @@ async def list_queue(
         rows: list[TrackedDownloadRow] = result["records"]
         series_by_id = await load_series_map(session, {r.series_id for r in rows})
         issue_by_id = await load_issue_map(session, {r.issue_id for r in rows})
+        result["failedRecords"] = (
+            await session.execute(
+                select(func.count())
+                .select_from(TrackedDownloadRow)
+                .where(TrackedDownloadRow.state == TrackedDownloadState.FAILED.value)
+            )
+        ).scalar_one()
     result["records"] = [
         _to_resource(
             row, series_by_id.get(row.series_id), issue_by_id.get(row.issue_id), now
@@ -233,7 +247,7 @@ async def delete_queue_item(
         await session.delete(row)
 
     # Safe now: the item is de-tracked, so deleting client data cannot race a drain.
-    await _instruct_client_remove(db, settings, client_id, download_id, deleteData)
+    await _instruct_clients_remove(db, settings, [(client_id, download_id)], deleteData)
 
     return {"id": queue_id, "removed": True, "blocklisted": blocklist}
 
@@ -245,11 +259,31 @@ _MAX_BULK_REMOVE = 500
 
 
 class QueueRemoveRequest(BaseModel):
-    """Body of ``POST /queue/remove`` (FRG-DL-008)."""
+    """Body of ``POST /queue/remove`` (FRG-DL-008).
 
-    ids: list[int] = Field(min_length=1, max_length=_MAX_BULK_REMOVE)
+    Two mutually exclusive forms name the targets. ``ids`` removes exactly the
+    rows listed. ``scope="failed"`` removes every terminally-failed row the
+    QUEUE holds, whichever page it is on — the operator asking to clear the
+    failure backlog is not asking to clear the twenty rows they can see, and a
+    client that could only send the ids it has loaded would silently under-
+    deliver on a backlog longer than one page.
+    """
+
+    ids: list[int] | None = None
+    scope: Literal["failed"] | None = None
     blocklist: bool = False
     deleteData: bool = False
+
+    @model_validator(mode="after")
+    def _exactly_one_target_form(self) -> QueueRemoveRequest:
+        if (self.ids is None) == (self.scope is None):
+            raise ValueError("name the targets with exactly one of ids or scope")
+        if self.ids is not None:
+            if not self.ids:
+                raise ValueError("ids must name at least one queue item")
+            if len(self.ids) > _MAX_BULK_REMOVE:
+                raise ValueError(f"ids must name at most {_MAX_BULK_REMOVE} queue items")
+        return self
 
 
 @router.post("/remove", status_code=200)
@@ -258,18 +292,21 @@ async def remove_queue_items(
 ) -> dict[str, object]:
     """Remove many queue items in one request (FRG-DL-008, FRG-DL-010).
 
-    Each id gets the single ``DELETE``'s exact semantics — an ``importing`` row
-    is refused, ``blocklist`` writes the shared multi-field key, client removal
-    is best-effort — but a refusal lands in ``errors`` under that id instead of
-    failing the batch: one stuck row must never veto a queue cleanup.
+    Every targeted row gets the single ``DELETE``'s exact semantics — an
+    ``importing`` row is refused, ``blocklist`` writes the shared multi-field
+    key, client removal is best-effort — but a refusal lands in ``errors``
+    under that id instead of failing the batch: one stuck row must never veto a
+    queue cleanup.
 
     De-tracking runs in ONE write transaction, so the ``importing`` guard is
     read inside the transaction that deletes (a drain cannot claim a row in a
-    read-then-write window). Client removals run only AFTER that transaction
-    commits: once a row is de-tracked no drain can pick it up, so deleting its
-    data cannot race an in-flight import. A client removal that fails is logged
-    and left out of ``errors`` — the row IS de-tracked, which is what the
-    caller asked about.
+    read-then-write window). The ``scope="failed"`` selection is made inside
+    that same transaction, so the set removed is the set that was failed at
+    commit time rather than a set some earlier read reported. Client removals
+    run only AFTER the transaction commits: once a row is de-tracked no drain
+    can pick it up, so deleting its data cannot race an in-flight import. A
+    client removal that fails is logged and left out of ``errors`` — the row IS
+    de-tracked, which is what the caller asked about.
     """
     db = request.app.state.db
     settings = request.app.state.settings
@@ -279,9 +316,28 @@ async def remove_queue_items(
     errors: dict[int, str] = {}
     removed: list[tuple[int | None, str]] = []
     async with db.write_session() as session:
-        # dict.fromkeys: a repeated id is one removal, not a second 404.
-        for queue_id in dict.fromkeys(body.ids):
-            row = await session.get(TrackedDownloadRow, queue_id)
+        if body.scope == "failed":
+            targets: list[tuple[int, TrackedDownloadRow | None]] = [
+                (row.id, row)
+                for row in (
+                    await session.execute(
+                        select(TrackedDownloadRow).where(
+                            TrackedDownloadRow.state
+                            == TrackedDownloadState.FAILED.value
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            ]
+        else:
+            # dict.fromkeys: a repeated id is one removal, not a second 404.
+            targets = [
+                (queue_id, await session.get(TrackedDownloadRow, queue_id))
+                for queue_id in dict.fromkeys(body.ids or ())
+            ]
+
+        for queue_id, row in targets:
             if row is None:
                 errors[queue_id] = f"queue item {queue_id} not found"
                 continue
@@ -295,35 +351,61 @@ async def remove_queue_items(
             removed.append((row.client_id, row.download_id))
             await session.delete(row)
 
-    for client_id, download_id in removed:
-        await _instruct_client_remove(
-            db, settings, client_id, download_id, body.deleteData
-        )
+    await _instruct_clients_remove(db, settings, removed, body.deleteData)
 
     return {"applied": len(removed), "errors": errors}
 
 
-async def _instruct_client_remove(
-    db, settings, client_id: int | None, download_id: str, delete_data: bool
+async def _instruct_clients_remove(
+    db,
+    settings,
+    removed: list[tuple[int | None, str]],
+    delete_data: bool,
 ) -> None:
-    """Best-effort: tell the download client to drop this item (and its data)."""
-    if client_id is None:
-        return
+    """Best-effort: tell each download client to drop the items it owns.
+
+    Grouped by client and listed ONCE per client, not once per row: a client's
+    item listing is a full remote round-trip (SABnzbd needs two), so a per-row
+    loop turns a twenty-row clear into forty requests against a service that is
+    already the slowest thing in the path.
+    """
+    by_client: dict[int, list[str]] = {}
+    for client_id, download_id in removed:
+        if client_id is not None:
+            by_client.setdefault(client_id, []).append(download_id)
+
+    for client_id, download_ids in by_client.items():
+        await _instruct_client_remove(db, settings, client_id, download_ids, delete_data)
+
+
+async def _instruct_client_remove(
+    db, settings, client_id: int, download_ids: list[str], delete_data: bool
+) -> None:
+    """Best-effort removal of every named download from one client."""
+    logger = logging.getLogger("foragerr.api.queue")
+    wanted = set(download_ids)
     try:
         client = await build_client_for_id(db, client_id, settings=settings)
         if client is None:
             return
-        for item in await client.get_items():
-            if item.download_id == download_id:
-                await client.remove(item, delete_data)
-                return
+        items = await client.get_items()
     except Exception:  # noqa: BLE001 — client removal must not block de-tracking
-        import logging
-
-        logging.getLogger("foragerr.api.queue").warning(
-            "queue: client removal failed; item still de-tracked",
-            extra={"client_id": client_id, "download_id": download_id},
+        logger.warning(
+            "queue: client unreachable; items still de-tracked",
+            extra={"client_id": client_id, "download_ids": sorted(wanted)},
         )
+        return
+
+    for item in items:
+        if item.download_id not in wanted:
+            continue
+        try:
+            await client.remove(item, delete_data)
+        except Exception:  # noqa: BLE001 — one stuck item must not strand the rest
+            logger.warning(
+                "queue: client removal failed; item still de-tracked",
+                extra={"client_id": client_id, "download_id": item.download_id},
+            )
 
 
 async def _write_manual_blocklist(

@@ -35,7 +35,7 @@ import type {
   LookupCandidate,
   LookupResponse,
   PullEntryRecord,
-  QueueItem,
+  QueuePage,
   QueuePageResponse,
   ReleaseDecision,
   ReleaseSearchResult,
@@ -820,7 +820,7 @@ export function useQueueCount(): UseQueryResult<number> {
  * GET /api/v1/queue?page= (FRG-UI-006).
  *
  * The cached value is the paging envelope carrying NORMALIZED records
- * (`ApiPage<QueueItem>`): the WebSocketBridge queue-progress patch maps over
+ * (`QueuePage`): the WebSocketBridge queue-progress patch maps over
  * `records` in place, and the page controls read `totalRecords`/`pageSize` off
  * the same entry rather than costing a second request. `onClampPage` mirrors
  * `usePagedQuery`: clearing the last rows of the final page would otherwise
@@ -829,7 +829,7 @@ export function useQueueCount(): UseQueryResult<number> {
 export function useQueuePage(
   page: number,
   onClampPage?: (page: number) => void,
-): UseQueryResult<ApiPage<QueueItem>> {
+): UseQueryResult<QueuePage> {
   const fetcher = useFetcher();
   const query = useQuery({
     queryKey: queryKeys.queue.page(page),
@@ -912,7 +912,13 @@ export function useReleases(issueId: number): UseQueryResult<ReleaseSearchResult
 
 export interface RemoveQueueItemsInput {
   /** The queue rows to remove; one id takes the single-item DELETE. */
-  ids: number[];
+  ids?: number[];
+  /**
+   * Remove every row the named scope covers, server-side. `'failed'` reaches
+   * the whole failure backlog — the pages this client never loaded included,
+   * which is exactly what an id list cannot express.
+   */
+  scope?: 'failed';
   /** Also instruct the download client to delete the downloaded data. */
   deleteData: boolean;
   /** Also blocklist the releases so they are never grabbed again. */
@@ -930,10 +936,11 @@ export interface QueueRemoveResult {
  *
  * One id goes to `DELETE /api/v1/queue/{id}` — the canonical single-item
  * action, whose 4xx (409 while importing, 404) throws and surfaces on the
- * dialog. Several ids go to `POST /api/v1/queue/remove`, which applies the
- * same per-row semantics server-side and answers 200 with an `errors` map so
- * one refused row cannot fail the batch. Both shapes are returned as
- * `QueueRemoveResult` so callers never branch on which transport ran.
+ * dialog. Several ids, or a `scope`, go to `POST /api/v1/queue/remove`, which
+ * applies the same per-row semantics server-side and answers 200 with an
+ * `errors` map so one refused row cannot fail the batch. All three shapes are
+ * returned as `QueueRemoveResult` so callers never branch on which transport
+ * ran.
  */
 export function useRemoveQueueItems(): UseMutationResult<
   QueueRemoveResult,
@@ -943,8 +950,8 @@ export function useRemoveQueueItems(): UseMutationResult<
   const fetcher = useFetcher();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ ids, blocklist, deleteData }: RemoveQueueItemsInput) => {
-      if (ids.length === 1) {
+    mutationFn: async ({ ids, scope, blocklist, deleteData }: RemoveQueueItemsInput) => {
+      if (!scope && ids?.length === 1) {
         await fetcher(
           `/api/v1/queue/${ids[0]}?blocklist=${blocklist}&deleteData=${deleteData}`,
           { method: 'DELETE' },
@@ -953,7 +960,8 @@ export function useRemoveQueueItems(): UseMutationResult<
       }
       const body = await fetcher<QueueRemoveResult>('/api/v1/queue/remove', {
         method: 'POST',
-        body: { ids, blocklist, deleteData },
+        // Exactly one target form: the endpoint rejects a body naming both.
+        body: scope ? { scope, blocklist, deleteData } : { ids, blocklist, deleteData },
       });
       return { applied: body.applied ?? 0, errors: body.errors ?? {} };
     },
