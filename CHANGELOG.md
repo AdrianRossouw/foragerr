@@ -9,6 +9,34 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.24.0] — 2026-07-31
+
+Reviewing in bulk stops surprising you.
+
+### Added
+- **Select all** over whatever the current filter shows, with its count.
+  Bundle and group selection are unchanged. (FRG-UI-029)
+- Non-comic is now a filter of its own beside New / Matched / Ignored /
+  Duplicates, with its own count, instead of a toggle that mixed
+  non-comic items into whatever you were looking at. (FRG-UI-029)
+- Bulk buttons say how many of your selection they can actually act on
+  (`Restore (30 of 73)`) and disable when that is none — a selection
+  spanning review states is normal, and you now learn what will happen
+  before you click rather than from a list of refusals. (FRG-UI-029)
+
+### Fixed
+- **Restoring many items at once no longer takes a minute.** It used to
+  make one rate-limited ComicVine call per item while you waited,
+  committing as it went — so a refresh mid-flight showed only part of the
+  work done. Restores now return immediately and their matches are
+  computed by the matching pass, which is prompted straight away and puts
+  those items at the front of its queue; "Recompute proposals" also
+  covers them. Restoring a single item is unchanged. (FRG-SRC-004,
+  FRG-SRC-013)
+- Bulk results are reported against a refreshed list, so the count you
+  read matches what you see.
+- Your selection survives switching filters instead of being discarded.
+
 ## [v0.23.0] — 2026-07-31
 
 You can tell foragerr what is and isn't a comic, and it will not argue.
