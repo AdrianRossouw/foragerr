@@ -211,16 +211,25 @@ a comic to file-shape detection. For those, say so directly (`FRG-SRC-016`):
   misfiled back.
 
 **Your mark sticks.** foragerr won't second-guess you: once you have
-classified an item, no later sync and no later change to the publisher rules
+corrected an item, no later sync and no later change to the publisher rules
 moves it again, in either direction. That is the whole point — the automatic
 classifier re-checks every item awaiting review on every sync, so without this
 your correction would last until the next one.
 
+A mark only takes an item over when it *changes* something. Marking a
+selection non-comic when some of it was already filed that way leaves those
+items exactly where they were — still the automatic classifier's, so a later
+edit to your publisher rules still reaches them. Agreeing with foragerr isn't
+a decision it has to freeze.
+
 Marked items follow the same rules as anything else non-comic: they are kept,
-never deleted, and they simply stop appearing in the comic view. To find them,
-flip the **Non-comic** toggle above the list — it carries a count of how many
-items it is holding back in whatever filter you are looking at, so a marked
-bundle is never just "gone".
+never deleted, and they simply stop appearing in the comic view. They also
+drop out of duplicate sets — collapsing byte-identical copies is there to save
+you reviewing the same comic twice, and a non-comic item isn't review work, so
+marking one frees any copy that was parked behind it. To find your non-comic
+items, flip the **Non-comic** toggle above the list — it carries the count of
+what it is hiding (or, once on, what it is showing) in whatever filter you are
+looking at, so a marked bundle is never just "gone".
 
 Marking is a review-time decision. An item you have already matched or
 ignored refuses the mark and tells you the way back: restore it first, then

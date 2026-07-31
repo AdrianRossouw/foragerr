@@ -649,7 +649,19 @@ async def test_bulk_rejects_an_unknown_action_by_name(app_client):
         json={"action": "obliterate", "entitlement_ids": [comics[0].id]},
     )
     assert resp.status_code == 400
-    assert "accept" in resp.json()["errors"][0]["message"]
+    message = resp.json()["errors"][0]["message"]
+    # The message IS the action vocabulary, so every action the bar can send has
+    # to appear in it — a name missing here reads as unsupported.
+    for action in (
+        "ignore",
+        "restore",
+        "match",
+        "accept",
+        "apply_to_group",
+        "mark_non_comic",
+        "mark_comic",
+    ):
+        assert action in message
 
 
 # --- operator classification (FRG-SRC-016) -----------------------------------
