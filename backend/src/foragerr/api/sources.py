@@ -790,13 +790,10 @@ async def bulk_entitlements_endpoint(
     if body.action == "ignore":
         result = await bulk_ignore(db, body.entitlement_ids)
     elif body.action == "restore":
-        async with _operator_cv_client(request) as (cv_client, cv_configured):
-            result = await bulk_restore(
-                db,
-                body.entitlement_ids,
-                cv_client=cv_client,
-                cv_configured=cv_configured,
-            )
+        # No catalog client: a bulk restore defers its proposals to the
+        # enrichment pass (FRG-SRC-004), so the request never waits on the
+        # rate-limited per-row lookup the single-row endpoint makes.
+        result = await bulk_restore(db, body.entitlement_ids)
     elif body.action == "match":
         if body.series_id is None:
             raise ApiError(422, "match requires series_id", field="series_id")

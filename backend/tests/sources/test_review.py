@@ -241,6 +241,98 @@ async def test_bulk_restore_reports_non_ignored_rows_without_touching_them(
     )
 
 
+@pytest.mark.req("FRG-SRC-004")
+async def test_bulk_restore_defers_proposals_and_single_restore_does_not(
+    db, config_dir, root_folder_id, format_profile_id
+):
+    """A bulk restore must not serialize a rate-limited catalog call per row.
+
+    The calls are spaced by ``comicvine_min_interval_seconds``, so N of them
+    held the operator for N × the spacing while the action committed row by
+    row — a refresh mid-flight showed a partial result. Bulk therefore parks
+    the rows back to ``new`` un-proposed (the deferral shape FRG-META-016
+    sanctions) and the enrichment pass fills them in; the single-row restore,
+    which is one call the operator is watching, still recomputes inline.
+    """
+    from types import SimpleNamespace
+
+    from foragerr.sources.enrich import eligible_for_enrichment
+
+    class _CountingCV:
+        def __init__(self):
+            self.calls = 0
+
+        async def suggest_series(self, term):
+            self.calls += 1
+            return SimpleNamespace(
+                candidates=[
+                    SimpleNamespace(
+                        cv_volume_id=5610, name="Synthetic Hero", start_year=2018
+                    )
+                ]
+            )
+
+    source = await _synced_source(db, config_dir)
+    await _mk_series(
+        db, root_folder_id, format_profile_id, cvid=5610, title="Synthetic Hero"
+    )
+    cv = _CountingCV()
+    comics = await repo.list_entitlements(db, source.id, classification="comic")
+    ids = [e.id for e in comics]
+    assert len(ids) > 1
+    # Give every row a standing proposal, so the deferral is proven to CLEAR
+    # one rather than merely to leave an already-empty column empty.
+    for eid in ids:
+        await review.ignore_entitlement(db, eid)
+        await review.restore_entitlement(db, eid, cv_client=cv, cv_configured=True)
+    assert cv.calls == len(ids)
+    for eid in ids:
+        await review.ignore_entitlement(db, eid)
+
+    result = await review.bulk_restore(db, ids)
+
+    assert result.applied == len(ids)
+    assert cv.calls == len(ids)  # not one more: bulk consults no catalog at all
+    for eid in ids:
+        row = await repo.get_entitlement(db, eid)
+        assert row.review_status == "new"
+        assert row.proposed_match_json is None
+        assert row.proposed_series_id is None
+        # NULL is what puts the row in front of the enrichment pass.
+        assert eligible_for_enrichment(row, cv_configured=True)
+
+    # The single-row form is unchanged: it still pays for its own proposal.
+    await review.ignore_entitlement(db, ids[0])
+    single = await review.restore_entitlement(
+        db, ids[0], cv_client=cv, cv_configured=True
+    )
+    assert cv.calls == len(ids) + 1
+    assert single.proposed_match_json is not None
+
+
+@pytest.mark.req("FRG-SRC-004")
+async def test_bulk_restore_of_a_non_comic_row_leaves_its_proposal_alone(
+    db, config_dir
+):
+    """The non-comic carve-out (FRG-SRC-016) is about which COLUMNS move, and
+    the deferral does not widen it: a row the operator never asked the catalog
+    about keeps whatever it had, rather than being nulled into the enrichment
+    pass's queue."""
+    source = await _synced_source(db, config_dir)
+    others = await repo.list_entitlements(db, source.id, classification="other")
+    assert others
+    row = others[0]
+    before = row.proposed_match_json
+    await review.ignore_entitlement(db, row.id)
+
+    result = await review.bulk_restore(db, [row.id])
+
+    assert result.applied == 1
+    after = await repo.get_entitlement(db, row.id)
+    assert after.review_status == "new"
+    assert after.proposed_match_json == before
+
+
 @pytest.mark.req("FRG-SRC-010")
 async def test_restore_consults_comicvine_and_records_the_catalog_universe(
     db, config_dir, root_folder_id, format_profile_id

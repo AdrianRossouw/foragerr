@@ -102,8 +102,17 @@ act: **match**, **add**, **search-and-pick**, **ignore**, or **mark it
 non-comic** (see "Marking items non-comic yourself" below) — each on a
 single item or a bulk selection. An ignored item drops out of the pending
 count and the default view but stays visible under the Ignored filter, and
-**restore** returns it to New with its proposed match recomputed
-(`FRG-SRC-004`).
+**restore** returns it to New (`FRG-SRC-004`).
+
+Restoring one item recomputes its proposed match while you watch. Restoring
+a **selection** returns immediately instead: the rows come back to New
+straight away and their proposals are filled in shortly afterwards by the
+background matching pass, so restoring thirty items takes about as long as
+restoring one rather than a minute of waiting. Until each proposal lands the
+row simply shows nothing proposed; nothing else about it waits. Rows in the
+selection that were not parked (an already-matched row swept up in a
+select-all, say) are refused individually and named, and the rest still
+restore.
 
 ### Duplicate copies
 
@@ -138,9 +147,16 @@ matched or ignored before upgrading is left exactly as it was.
 ### Working a big collection
 
 Large accounts land thousands of items at once (the review list stays fast
-at that scale — it renders only what's on screen). Three tools keep the work
+at that scale — it renders only what's on screen). Four tools keep the work
 proportional (`FRG-SRC-011`):
 
+- **Select all**: the bulk bar's select-all takes every item the current
+  filter is showing — not just the part scrolled into view — and says how
+  many ("Select all 289"), so you know what the next action will touch.
+  Because it follows the filter, the selection can never quietly reach into
+  another filter's items; switching filter narrows it to what the new one
+  shows, so "N selected" always counts rows you can see. **Clear** empties
+  it again.
 - **Groups**: three or more same-title rows collapse into one expandable
   group with a count — a long run of mislabeled `"TITLE Vol. NNN"` singles
   reads as one line, not hundreds. A pair stays as two plain rows; it isn't
@@ -207,7 +223,7 @@ a comic to file-shape detection. For those, say so directly (`FRG-SRC-016`):
   the bulk bar — so the bundle selector, the group checkbox and shift-range
   all compose with it. Select the bundle, mark it, done.
 - **It is a comic** is the reverse mark, offered on the rows it can apply to:
-  turn on the non-comic toggle to see them, and mark anything that was
+  switch to the **Non-comic** filter to see them, and mark anything that was
   misfiled back.
 
 **Your mark sticks.** foragerr won't second-guess you: once you have
@@ -227,9 +243,12 @@ never deleted, and they simply stop appearing in the comic view. They also
 drop out of duplicate sets — collapsing byte-identical copies is there to save
 you reviewing the same comic twice, and a non-comic item isn't review work, so
 marking one frees any copy that was parked behind it. To find your non-comic
-items, flip the **Non-comic** toggle above the list — it carries the count of
-what it is hiding (or, once on, what it is showing) in whatever filter you are
-looking at, so a marked bundle is never just "gone".
+items, pick the **Non-comic** filter above the list — it sits beside
+All/New/Matched/Ignored/Duplicates and carries its own count, so a marked
+bundle is never just "gone". It is a place you go to rather than a switch that
+mixes non-comic items into whatever you were looking at, which is what keeps a
+select-all from spanning the two kinds; each side offers the one mark that can
+apply to it (**Not a comic** among the comics, **It is a comic** here).
 
 Marking is a review-time decision. An item you have already matched or
 ignored refuses the mark and tells you the way back: restore it first, then

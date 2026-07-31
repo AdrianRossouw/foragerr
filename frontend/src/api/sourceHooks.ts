@@ -79,11 +79,27 @@ export function useEntitlementDetail(
   });
 }
 
-/** Shared invalidation: sweep the whole sources family (list + entitlements). */
-function useInvalidateSources(): () => void {
+/**
+ * Shared invalidation, AWAITABLE: sweep the whole sources family (list +
+ * entitlements) and resolve once the active queries have refetched.
+ *
+ * Returned from a mutation's `onSuccess`, the promise makes the mutation settle
+ * behind the refetch, so the caller's own `onSuccess` — where the screen writes
+ * its result note — runs against a list that already shows the outcome. That
+ * matters for the bulk actions (FRG-UI-029): "12 restored, 18 refused" rendered
+ * beside a list still showing all thirty as parked reads as a half-finished
+ * action.
+ */
+function useSettledInvalidateSources(): () => Promise<void> {
   const queryClient = useQueryClient();
   return () =>
-    void queryClient.invalidateQueries({ queryKey: queryKeys.sources.all() });
+    queryClient.invalidateQueries({ queryKey: queryKeys.sources.all() });
+}
+
+/** The same sweep, fire-and-forget: the single-row actions do not wait on it. */
+function useInvalidateSources(): () => void {
+  const settle = useSettledInvalidateSources();
+  return () => void settle();
 }
 
 export interface ConnectSourceInput {
@@ -444,6 +460,10 @@ export type BulkEntitlementInput =
  * run one action rather than one pick per row. (Per-row `match` stays row-scoped:
  * a single series id cannot be right across heterogeneous rows, but a group is
  * homogeneous by construction, which is exactly what makes it safe here.)
+ *
+ * The invalidation is AWAITED here, unlike the single-row actions': a bulk
+ * outcome is reported as a count ("Restored 12 of 30", plus the refused rows),
+ * and a count is only true beside a list that already reflects it.
  */
 export function useBulkEntitlements(): UseMutationResult<
   BulkEntitlementResult,
@@ -451,7 +471,7 @@ export function useBulkEntitlements(): UseMutationResult<
   BulkEntitlementInput
 > {
   const fetcher = useFetcher();
-  const invalidate = useInvalidateSources();
+  const settle = useSettledInvalidateSources();
   return useMutation({
     mutationFn: (input) => {
       const body: Record<string, unknown> = {
@@ -468,6 +488,6 @@ export function useBulkEntitlements(): UseMutationResult<
         body,
       });
     },
-    onSuccess: invalidate,
+    onSuccess: () => settle(),
   });
 }

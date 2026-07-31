@@ -108,6 +108,12 @@ interface FetcherState {
    * actually applied; defaults to "everything applied, no per-row errors".
    */
   bulkResult?: (body: { action: string; entitlement_ids: number[] }) => unknown;
+  /**
+   * Gate on the entitlements READ: while this is unresolved the list refetch
+   * is held open, which is what distinguishes a bulk outcome reported after
+   * the list settled (FRG-UI-029) from one reported over a stale list.
+   */
+  entitlementsGate?: Promise<void>;
   /** Library series the match-picker / booktype lookups resolve against;
    * defaults to a single "Driftwood" series (booktype null) when omitted. */
   librarySeries?: SeriesResource[];
@@ -331,6 +337,7 @@ function makeFetcher(state: FetcherState): Fetcher {
       return state.details?.[id] ?? { ...ent({ id }), fill_sets: [] };
     }
     if (/\/api\/v1\/sources\/\d+\/entitlements/.test(path)) {
+      if (state.entitlementsGate) await state.entitlementsGate;
       return state.entitlements;
     }
     if (/^\/api\/v1\/command\/\d+$/.test(path)) {
@@ -518,12 +525,111 @@ describe('FRG-UI-029: manage view review', () => {
     expect(screen.queryByTestId('entitlement-row-12')).toBeNull();
   });
 
-  it('FRG-UI-029 — the non-comic toggle reveals "other" items on demand', async () => {
+  it('FRG-UI-029 — Non-comic is a filter scope showing only "other" items', async () => {
     const user = userEvent.setup();
     renderScreen({ sources: [source], entitlements, calls: [] });
+    expect(await screen.findByTestId('entitlement-row-10')).toBeInTheDocument();
     expect(screen.queryByTestId('entitlement-row-13')).toBeNull();
-    await user.click(await screen.findByTestId('toggle-noncomic'));
+
+    // The segment states its own count and shows EXACTLY the non-comic rows —
+    // it is a scope moved into, not a reveal mixed into the comic list.
+    const segment = screen.getByTestId('filter-other');
+    expect(segment).toHaveTextContent('Non-comic 1');
+    await user.click(segment);
+
     expect(screen.getByTestId('entitlement-row-13')).toBeInTheDocument();
+    expect(screen.queryByTestId('entitlement-row-10')).toBeNull();
+    expect(screen.queryByTestId('entitlement-row-11')).toBeNull();
+    expect(screen.queryByTestId('entitlement-row-12')).toBeNull();
+  });
+
+  it('FRG-UI-029 — select-all takes exactly the rows the filter shows, and names its count', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = { sources: [source], entitlements, calls: [] };
+    renderScreen(state);
+
+    // "All" holds the three comics; the non-comic row is in its own scope.
+    const selectAll = await screen.findByTestId('select-all');
+    expect(selectAll).toHaveTextContent('Select all 3');
+    await user.click(selectAll);
+    expect(screen.getByTestId('bulk-bar')).toHaveTextContent('3 selected');
+
+    // Narrowing the scope narrows the selection with it — "N selected" always
+    // counts rows on screen, so a bulk action cannot reach across scopes.
+    await user.click(screen.getByTestId('filter-new'));
+    expect(screen.getByTestId('select-all')).toHaveTextContent('Select all 1');
+    expect(screen.getByTestId('bulk-bar')).toHaveTextContent('1 selected');
+
+    await user.click(screen.getByTestId('bulk-ignore'));
+    await waitFor(() =>
+      expect(state.calls.find((c) => c.path.endsWith('/bulk'))).toBeTruthy(),
+    );
+    const body = state.calls.find((c) => c.path.endsWith('/bulk'))!.init!.body as {
+      entitlement_ids: number[];
+    };
+    expect(body.entitlement_ids).toEqual([11]);
+  });
+
+  it('FRG-UI-029 — a bulk restore reports against a list that already shows the outcome', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [
+        ent({ id: 90, human_name: 'Parked One', review_status: 'ignored' }),
+        ent({ id: 91, human_name: 'Parked Two', review_status: 'ignored' }),
+        ent({ id: 92, human_name: 'Parked Three', review_status: 'ignored' }),
+      ],
+      calls: [],
+      bulkResult: (body) => {
+        // Model the server: two rows come back to review, one is refused.
+        const restored = body.entitlement_ids.filter((id) => id !== 92);
+        state.entitlements = state.entitlements.map((e) =>
+          restored.includes(e.id) ? { ...e, review_status: 'new' as const } : e,
+        );
+        return {
+          applied: restored.length,
+          skipped: 1,
+          errors: { '92': 'entitlement 92 is new, not ignored' },
+        };
+      },
+    };
+    renderScreen(state);
+
+    await user.click(await screen.findByTestId('filter-ignored'));
+    await user.click(screen.getByTestId('select-all'));
+    expect(screen.getByTestId('bulk-bar')).toHaveTextContent('3 selected');
+
+    // Hold the list refetch open across the action, so "reported after the
+    // list settled" is observable rather than a race the mock happens to win.
+    let release = () => {};
+    state.entitlementsGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await user.click(screen.getByTestId('bulk-restore'));
+
+    // While the refetch is held, NOTHING is reported: a count rendered here
+    // would sit beside a list still showing all three parked, which is exactly
+    // how the action read as half-finished.
+    await waitFor(() =>
+      expect(state.calls.find((c) => c.path.endsWith('/bulk'))).toBeTruthy(),
+    );
+    expect(screen.queryByText('Restored 2 of 3.')).toBeNull();
+    expect(screen.getByTestId('entitlement-row-90')).toBeInTheDocument();
+
+    state.entitlementsGate = undefined;
+    await act(async () => release());
+
+    await screen.findByText('Restored 2 of 3.');
+    expect(screen.queryByTestId('entitlement-row-90')).toBeNull();
+    expect(screen.queryByTestId('entitlement-row-91')).toBeNull();
+    expect(screen.getByTestId('entitlement-row-92')).toBeInTheDocument();
+
+    // The refused row is named and stays selected as the remaining to-do.
+    expect(screen.getByTestId('bulk-bar')).toHaveTextContent('1 selected');
+    await user.click(screen.getByTestId('bulk-errors-toggle'));
+    expect(await screen.findByTestId('bulk-error-92')).toHaveTextContent(
+      'Parked Three',
+    );
   });
 
   it('FRG-UI-029 — matching a suggestion posts the proposed series id', async () => {
@@ -1825,9 +1931,11 @@ describe('FRG-UI-029: same-title collapse groups', () => {
     await user.click(screen.getByTestId('select-200'));
     expect(screen.getByTestId('bulk-bar')).toHaveTextContent('2 selected');
 
-    // Filtering to Ignored takes the anchor row out of the list entirely.
+    // Filtering to Ignored takes the anchor row out of the list entirely, and
+    // the selection narrows to the row this scope shows.
     await user.click(screen.getByTestId('filter-ignored'));
     expect(screen.queryByTestId('select-200')).toBeNull();
+    expect(screen.getByTestId('bulk-bar')).toHaveTextContent('1 selected');
 
     // A shift-click with no anchor to span from SELECTS the clicked row and
     // re-anchors there — it must never degrade into a toggle that deselects the
@@ -1835,13 +1943,13 @@ describe('FRG-UI-029: same-title collapse groups', () => {
     await user.keyboard('{Shift>}');
     await user.click(screen.getByTestId('select-202'));
     await user.keyboard('{/Shift}');
-    expect(screen.getByTestId('bulk-bar')).toHaveTextContent('2 selected');
+    expect(screen.getByTestId('bulk-bar')).toHaveTextContent('1 selected');
 
     // …and the re-anchor is real: the NEXT shift-click draws a span from it.
     await user.keyboard('{Shift>}');
     await user.click(screen.getByTestId('select-201'));
     await user.keyboard('{/Shift}');
-    expect(screen.getByTestId('bulk-bar')).toHaveTextContent('3 selected');
+    expect(screen.getByTestId('bulk-bar')).toHaveTextContent('2 selected');
 
     await user.click(screen.getByTestId('bulk-restore'));
     await waitFor(() =>
@@ -1850,9 +1958,7 @@ describe('FRG-UI-029: same-title collapse groups', () => {
     const body = state.calls.find((c) => c.path.endsWith('/bulk'))!.init!.body as {
       entitlement_ids: number[];
     };
-    expect([...body.entitlement_ids].sort((a, b) => a - b)).toEqual([
-      200, 201, 202,
-    ]);
+    expect([...body.entitlement_ids].sort((a, b) => a - b)).toEqual([201, 202]);
   });
 });
 
@@ -2528,29 +2634,7 @@ describe('FRG-SRC-016: the classification marks', () => {
     expect(screen.queryByTestId('entitlement-row-71')).toBeNull();
   });
 
-  it('FRG-SRC-016 — the toggle names the state it is IN, hiding or showing', async () => {
-    const user = userEvent.setup();
-    const state: FetcherState = { sources: [source], entitlements, calls: [] };
-    renderScreen(state);
-
-    const toggle = await screen.findByTestId('toggle-noncomic');
-    await waitFor(() =>
-      expect(toggle).toHaveAttribute(
-        'aria-label',
-        'Show non-comic items (1 hidden)',
-      ),
-    );
-
-    await user.click(toggle);
-
-    expect(toggle).toHaveAttribute(
-      'aria-label',
-      'Hide non-comic items (1 shown)',
-    );
-    expect(screen.getByTestId('noncomic-count')).toHaveTextContent('Non-comic 1');
-  });
-
-  it('FRG-SRC-016 — the non-comic toggle counts the rows it governs, and the count follows a mark', async () => {
+  it('FRG-SRC-016 — the non-comic scope counts its rows, and the count follows a mark', async () => {
     const user = userEvent.setup();
     const state: FetcherState = {
       sources: [source],
@@ -2571,9 +2655,9 @@ describe('FRG-SRC-016: the classification marks', () => {
     };
     renderScreen(state);
 
-    // One non-comic row exists, and the ignored row does not count under "All".
+    // One non-comic row exists, and the mark moves a row into that scope.
     await waitFor(() =>
-      expect(screen.getByTestId('noncomic-count')).toHaveTextContent(
+      expect(screen.getByTestId('filter-other')).toHaveTextContent(
         'Non-comic 1',
       ),
     );
@@ -2582,17 +2666,15 @@ describe('FRG-SRC-016: the classification marks', () => {
     await user.click(screen.getByTestId('bulk-mark-non-comic'));
 
     await waitFor(() =>
-      expect(screen.getByTestId('noncomic-count')).toHaveTextContent(
+      expect(screen.getByTestId('filter-other')).toHaveTextContent(
         'Non-comic 2',
       ),
     );
-    expect(screen.getByTestId('toggle-noncomic')).toHaveAttribute(
-      'aria-label',
-      'Show non-comic items (2 hidden)',
-    );
+    // …and the row it left says so too: three comics became two.
+    expect(screen.getByTestId('filter-all')).toHaveTextContent('All 2');
   });
 
-  it('FRG-SRC-016 — the reverse mark is offered inside the non-comic view, per row and in bulk', async () => {
+  it('FRG-SRC-016 — the reverse mark is offered inside the non-comic scope, per row and in bulk', async () => {
     const user = userEvent.setup();
     const state: FetcherState = { sources: [source], entitlements, calls: [] };
     renderScreen(state);
@@ -2601,9 +2683,12 @@ describe('FRG-SRC-016: the classification marks', () => {
     // nothing on screen it could apply to.
     await user.click(await screen.findByTestId('select-70'));
     expect(screen.queryByTestId('bulk-mark-comic')).toBeNull();
+    expect(screen.getByTestId('bulk-mark-non-comic')).toBeInTheDocument();
 
-    await user.click(screen.getByTestId('toggle-noncomic'));
+    await user.click(screen.getByTestId('filter-other'));
+    await user.click(screen.getByTestId('select-72'));
     expect(screen.getByTestId('bulk-mark-comic')).toBeInTheDocument();
+    expect(screen.queryByTestId('bulk-mark-non-comic')).toBeNull();
 
     // The row's own mark states the only direction that can be true of it.
     const rowMark = screen.getByTestId('classify-72');
@@ -2658,9 +2743,10 @@ describe('FRG-SRC-016: the classification marks', () => {
     };
     renderScreen(state);
 
+    // "All" holds every review bucket, so one select-all there spans them —
+    // the ignored row cannot be marked and reports itself while the rest move.
     await user.click(await screen.findByTestId('select-70'));
-    await user.click(screen.getByTestId('filter-ignored'));
-    await user.click(await screen.findByTestId('select-73'));
+    await user.click(screen.getByTestId('select-73'));
     await user.click(screen.getByTestId('bulk-mark-non-comic'));
 
     const toggle = await screen.findByTestId('bulk-errors-toggle');

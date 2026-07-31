@@ -739,7 +739,12 @@ def _restore_precondition_error(
 
 
 async def restore_entitlement(
-    db, entitlement_id: int, *, cv_client=None, cv_configured: bool = False
+    db,
+    entitlement_id: int,
+    *,
+    cv_client=None,
+    cv_configured: bool = False,
+    recompute: bool = True,
 ) -> SourceEntitlementRow:
     """Return a PARKED item to ``new`` with its proposed match recomputed.
 
@@ -782,6 +787,17 @@ async def restore_entitlement(
     lookups whose answers no surface offers. Its proposal fields are left exactly
     as they were — the mark back to ``comic`` is what puts the row in front of
     the enrichment pass again.
+
+    **``recompute=False`` DEFERS the proposal instead** (FRG-SRC-004). The CV
+    call is spaced by ``comicvine_min_interval_seconds``, so N of them run
+    serially: a bulk restore over a selection would hold the operator for
+    N × the spacing while committing row by row, and any refresh in that window
+    shows a partial result. Deferring writes the same shape the budget wall
+    writes — a NULL proposal on a comic row, un-proposed and retryable — which
+    is what puts the row in front of the enrichment pass. The proposal is
+    NULLED rather than left standing, because a stale one from before the
+    parking would make the row ineligible for enrichment and be rendered as a
+    current catalog verdict.
     """
     from foragerr.library import repo as library_repo
     from foragerr.metadata.errors import ComicVineBudgetExhausted
@@ -795,9 +811,13 @@ async def restore_entitlement(
     refusal = _restore_precondition_error(entitlement_id, row.review_status)
     if refusal is not None:
         raise refusal
+    # ``repropose`` decides whether the proposal COLUMNS are written at all;
+    # ``recompute`` decides whether a catalog answer is computed to write. A
+    # comic row with ``recompute=False`` therefore takes the deferral shape:
+    # columns written, to NULL.
     repropose = row.classification == "comic"
     proposal = None
-    if repropose:
+    if repropose and recompute:
         async with db.read_session() as session:
             series = await library_repo.list_series(session)
         library = [
@@ -967,9 +987,7 @@ async def bulk_ignore(db, entitlement_ids: list[int]) -> BulkResult:
     return await _bulk(db, entitlement_ids, lambda eid: ignore_entitlement(db, eid))
 
 
-async def bulk_restore(
-    db, entitlement_ids: list[int], *, cv_client=None, cv_configured: bool = False
-) -> BulkResult:
+async def bulk_restore(db, entitlement_ids: list[int]) -> BulkResult:
     """Restore each parked row in the selection (per-row errors, FRG-SRC-011).
 
     Parked is ``ignored`` OR ``duplicate`` (FRG-SRC-015), so a "select all" over
@@ -977,13 +995,17 @@ async def bulk_restore(
     spans review buckets — the natural result of "select all" over any filtered
     list — reports the non-parked rows as per-row errors and leaves their state
     untouched, rather than stripping matched rows of their match on the way
-    past."""
+    past.
+
+    **The proposals are deferred, not computed here** (FRG-SRC-004): the bulk
+    form takes no catalog client at all, so the action returns as soon as the
+    rows are back in review and the enrichment pass fills the proposals in.
+    The single-row restore, which the operator watches one row of, still
+    recomputes inline."""
     return await _bulk(
         db,
         entitlement_ids,
-        lambda eid: restore_entitlement(
-            db, eid, cv_client=cv_client, cv_configured=cv_configured
-        ),
+        lambda eid: restore_entitlement(db, eid, recompute=False),
     )
 
 

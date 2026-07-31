@@ -727,6 +727,25 @@ async def test_the_opt_out_survives_an_ignore_and_restore_cycle(db, config_dir):
     assert (await repo.get_entitlement(db, copy_id)).review_status == "new"
 
 
+@pytest.mark.req("FRG-SRC-015")
+async def test_a_bulk_restored_copy_is_opted_out_like_a_single_one(db, config_dir):
+    """Bulk restore defers the PROPOSAL (FRG-SRC-004) and nothing else: the
+    parking decision the flag records is made the same way whether the operator
+    restored one copy or selected the whole Duplicates filter."""
+    source, _result = await _twin_source(db, config_dir)
+    rows = await _by_machine_name(db, source.id)
+    copy_id = rows["second_saga_v1"].id
+
+    result = await review.bulk_restore(db, [copy_id])
+
+    assert result.applied == 1
+    restored = await repo.get_entitlement(db, copy_id)
+    assert restored.review_status == "new"
+    assert restored.duplicate_of is None
+    assert restored.dedupe_opt_out is True
+    assert await link_duplicate_entitlements(db, source.id) == 0
+
+
 @pytest.mark.req("FRG-SRC-004")
 async def test_restoring_an_ignored_row_never_invents_an_opt_out(db, config_dir):
     """The flag records a decision about DUPLICATE parking; an ordinary ignore /
