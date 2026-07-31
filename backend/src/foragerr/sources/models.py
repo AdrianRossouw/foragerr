@@ -50,6 +50,12 @@ MATCHED_VIA_OPERATOR = "operator"
 MATCHED_VIA_AUTO = "auto"
 MATCHED_VIA = (MATCHED_VIA_OPERATOR, MATCHED_VIA_AUTO)
 
+#: Classification-provenance value for :attr:`SourceEntitlementRow.classified_via`
+#: (FRG-SRC-016): the operator stated this row's classification themselves. The
+#: automatic classifier leaves the column NULL, so ``classified_via == "operator"``
+#: is the one predicate every automatic writer has to skip.
+CLASSIFIED_VIA_OPERATOR = "operator"
+
 
 class SourceRow(Base):
     """A connected store source (FRG-SRC-001)."""
@@ -111,6 +117,16 @@ class SourceEntitlementRow(Base):
     bundle_human_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     #: ``comic`` | ``other`` (FRG-SRC-003). Non-comic items are retained.
     classification: Mapped[str] = mapped_column(Text, nullable=False)
+    #: WHO settled :attr:`classification` (FRG-SRC-016, migration
+    #: ``0033_entitlement_classified_via``): :data:`CLASSIFIED_VIA_OPERATOR` when
+    #: a human marked this row non-comic or comic, ``None`` while it is still the
+    #: automatic classifier's (file shape + the library-wide publisher rules,
+    #: FRG-SRC-012). An operator value is only ever set, never cleared
+    #: automatically — the sync write-back and the publisher rules both skip such
+    #: a row, in either direction, and the reverse mark is another operator mark
+    #: rather than a return to automatic. A legacy NULL therefore reads as "the
+    #: classifier's row", which is what it was before the column existed.
+    classified_via: Mapped[str | None] = mapped_column(Text, nullable=True)
     #: ``new`` | ``matched`` | ``ignored`` | ``duplicate`` — the review axis
     #: (design decision 2; :data:`REVIEW_STATUSES`).
     review_status: Mapped[str] = mapped_column(

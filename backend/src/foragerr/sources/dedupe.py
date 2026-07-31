@@ -36,6 +36,14 @@ parked on, so the pass returns it to ``new`` and clears the pointer. It re-links
 on this same pass if it is still genuinely identical to something; otherwise it
 is reviewable again instead of hidden behind a row it does not duplicate.
 
+**Non-comic rows are outside the set entirely** (FRG-SRC-016). Linking exists to
+stop the operator reviewing the same comic twice, and a row classified ``other``
+— by the classifier or by the operator's own mark — is not review work: parking
+it would hide it behind two toggles at once, and letting it be a canonical would
+park still-comic twins behind a row the comic view never shows. A row that
+becomes non-comic therefore LEAVES the set on the next linking pass, unparked
+back to ``new``, by the same machinery that frees a copy whose md5 diverged.
+
 Rows with no stored md5 are never linked — absence of the signal is not evidence
 of identity. Linking is same-source by construction (the scan is source-scoped):
 two stores selling the same bytes are two purchases with two provenances, and
@@ -68,8 +76,9 @@ _DECIDED_STATES = ("matched", "ignored")
 
 
 async def link_duplicate_entitlements(db, source_id: int | None = None) -> int:
-    """Park every unparked, non-opted-out member of a same-md5 set behind its
-    canonical, and unpark every copy whose md5 no longer matches.
+    """Park every unparked, non-opted-out COMIC member of a same-md5 set behind
+    its canonical, and unpark every copy whose md5 no longer matches or whose
+    classification is no longer ``comic``.
 
     ``source_id`` bounds the scan to one source (the sync path); ``None`` runs
     the same scan for each source in turn (the startup backfill) rather than
@@ -105,6 +114,7 @@ async def link_duplicate_entitlements(db, source_id: int | None = None) -> int:
                     .where(
                         SourceEntitlementRow.source_id == source_id,
                         SourceEntitlementRow.md5.is_not(None),
+                        SourceEntitlementRow.classification == "comic",
                     )
                     .order_by(SourceEntitlementRow.id)
                 )
@@ -134,7 +144,12 @@ async def link_duplicate_entitlements(db, source_id: int | None = None) -> int:
             if copy.review_status != "duplicate":
                 continue
             canonical = by_id.get(copy.duplicate_of) if copy.duplicate_of else None
-            if canonical is not None and copy.md5 and copy.md5 == canonical.md5:
+            if (
+                canonical is not None
+                and copy.classification == "comic"
+                and copy.md5
+                and copy.md5 == canonical.md5
+            ):
                 continue
             copy.review_status = "new"
             copy.duplicate_of = None
@@ -142,6 +157,8 @@ async def link_duplicate_entitlements(db, source_id: int | None = None) -> int:
 
         sets: dict[str, list[SourceEntitlementRow]] = defaultdict(list)
         for row in members_by_id:
+            if row.classification != "comic":
+                continue  # left the set above; not a candidate to re-enter it
             if not row.md5:
                 continue  # an empty string is no more a fingerprint than NULL
             sets[row.md5].append(row)

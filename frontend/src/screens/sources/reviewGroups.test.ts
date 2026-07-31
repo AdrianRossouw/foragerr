@@ -34,6 +34,7 @@ function ent(
     // test that wants a containment-merged group sets this explicitly.
     display_group_key: o.display_group_key ?? groupKey,
     classification: 'comic',
+    classified_via: null,
     review_status: 'new',
     download_state: null,
     download_error: null,

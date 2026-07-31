@@ -3,9 +3,11 @@
 The operator's decisions between discovery and download: **match** (link a
 ``new`` comic entitlement to an existing library series — an operator override
 that WINS over the server proposal), **add** (run the normal add-series flow —
-add → refresh → scan — then link the created series), **ignore**, and
+add → refresh → scan — then link the created series), **ignore**,
 **restore** (return an ignored item to ``new`` with its proposed match
-recomputed). Each has a bulk form.
+recomputed), and **classify** (state that a row is not a comic, or is one —
+FRG-SRC-016, the manual counterpart to the automatic publisher rules). Each has
+a bulk form.
 
 Acceptance is the gate on downloading (design decision 6 / FRG-SRC-004): a
 ``match`` or ``add`` on a *grabbable* comic entitlement moves it to
@@ -40,7 +42,11 @@ from foragerr.sources.matching import (
     compute_proposed_match,
     group_key as _group_key,
 )
-from foragerr.sources.models import SourceEntitlementRow
+from foragerr.sources.models import (
+    CLASSIFICATIONS,
+    CLASSIFIED_VIA_OPERATOR,
+    SourceEntitlementRow,
+)
 
 logger = logging.getLogger("foragerr.sources.review")
 
@@ -768,6 +774,14 @@ async def restore_entitlement(
     ``cv_configured=False`` with ``cv_client=None`` is the genuinely
     unconfigured deployment, where the library-only fallback IS the honest
     answer and is persisted as such.
+
+    **A non-comic row is restored without a proposal recompute** (FRG-SRC-016).
+    Matching a row to a library series is comic work; a row classified ``other``
+    has nothing the catalog could propose, and the CV budget is 200/hour per
+    path, so a bulk restore over a non-comic selection would spend it on
+    lookups whose answers no surface offers. Its proposal fields are left exactly
+    as they were — the mark back to ``comic`` is what puts the row in front of
+    the enrichment pass again.
     """
     from foragerr.library import repo as library_repo
     from foragerr.metadata.errors import ComicVineBudgetExhausted
@@ -781,41 +795,44 @@ async def restore_entitlement(
     refusal = _restore_precondition_error(entitlement_id, row.review_status)
     if refusal is not None:
         raise refusal
-    async with db.read_session() as session:
-        series = await library_repo.list_series(session)
-    library = [
-        LibrarySeriesLite(
-            id=s.id,
-            title=s.title,
-            start_year=s.start_year,
-            cv_volume_id=s.cv_volume_id,
-        )
-        for s in series
-    ]
-    try:
-        proposal = await compute_proposed_match(
-            human_name=row.human_name, library=library, cv_client=cv_client
-        )
-    except ComicVineBudgetExhausted as exc:
-        logger.info(
-            "sources.review: ComicVine budget exhausted restoring entitlement "
-            "%s (%s); leaving it un-proposed and retryable",
-            entitlement_id,
-            exc,
-        )
-        proposal = None
-    if (
-        proposal is not None
-        and cv_configured
-        and proposal.universe != UNIVERSE_COMICVINE
-    ):
-        logger.warning(
-            "sources.review: refusing to persist a %s proposal for entitlement "
-            "%s on a ComicVine-configured deployment; leaving it retryable",
-            proposal.universe,
-            entitlement_id,
-        )
-        proposal = None
+    repropose = row.classification == "comic"
+    proposal = None
+    if repropose:
+        async with db.read_session() as session:
+            series = await library_repo.list_series(session)
+        library = [
+            LibrarySeriesLite(
+                id=s.id,
+                title=s.title,
+                start_year=s.start_year,
+                cv_volume_id=s.cv_volume_id,
+            )
+            for s in series
+        ]
+        try:
+            proposal = await compute_proposed_match(
+                human_name=row.human_name, library=library, cv_client=cv_client
+            )
+        except ComicVineBudgetExhausted as exc:
+            logger.info(
+                "sources.review: ComicVine budget exhausted restoring entitlement "
+                "%s (%s); leaving it un-proposed and retryable",
+                entitlement_id,
+                exc,
+            )
+            proposal = None
+        if (
+            proposal is not None
+            and cv_configured
+            and proposal.universe != UNIVERSE_COMICVINE
+        ):
+            logger.warning(
+                "sources.review: refusing to persist a %s proposal for entitlement "
+                "%s on a ComicVine-configured deployment; leaving it retryable",
+                proposal.universe,
+                entitlement_id,
+            )
+            proposal = None
     async with db.write_session() as session:
         fresh = await session.get(SourceEntitlementRow, entitlement_id)
         if fresh is None:
@@ -840,17 +857,110 @@ async def restore_entitlement(
         # The match target is dropped, so its provenance goes with it — a later
         # re-match stamps its own ``matched_via`` (FRG-PP-022 guard 3).
         fresh.matched_via = None
-        fresh.proposed_series_id = (
-            proposal.proposed_series_id if proposal is not None else None
-        )
-        fresh.proposed_match_json = (
-            proposal.to_json() if proposal is not None else None
-        )
+        if repropose:
+            fresh.proposed_series_id = (
+                proposal.proposed_series_id if proposal is not None else None
+            )
+            fresh.proposed_match_json = (
+                proposal.to_json() if proposal is not None else None
+            )
         fresh.updated_at = utcnow()
     return await _reload(db, entitlement_id)
 
 
+def _classify_precondition_error(
+    entitlement_id: int, review_status: str
+) -> EntitlementActionError | None:
+    """The per-row error for classifying a row that is no longer in review.
+
+    ``None`` when the row is markable. Classification is a review-TIME decision
+    (FRG-SRC-016): a matched row was accepted as a comic and a parked one was
+    withdrawn from review, so both refuse with the house re-decision wording —
+    restore first, then classify the row that is back in review. Per-row, so a
+    bulk mark over a selection spanning buckets still marks the rest.
+    """
+    if review_status == "new":
+        return None
+    if review_status == "ignored":
+        return EntitlementActionError(
+            f"entitlement {entitlement_id} is ignored — restore it first",
+            status=409,
+        )
+    if review_status == "duplicate":
+        return _duplicate_refusal(entitlement_id)
+    return EntitlementActionError(
+        f"entitlement {entitlement_id} is already matched — classification "
+        "applies only to items still in review",
+        status=409,
+    )
+
+
+async def classify_entitlement(
+    db, entitlement_id: int, *, classification: str
+) -> SourceEntitlementRow:
+    """Record the OPERATOR's own classification of a reviewable row (FRG-SRC-016).
+
+    ``comic`` or ``other``, stamped with operator provenance in both directions.
+    That provenance is the whole point: the automatic classifier re-derives every
+    ``new`` row's classification on every sync (FRG-SRC-012), so an unstamped
+    correction would survive exactly until the next one — and the case this
+    action exists for (items whose store record names no publisher) is precisely
+    the one no publisher rule can ever reach.
+
+    A mark back to ``comic`` is another operator mark rather than a return to
+    automatic: clearing the provenance would let the next sync re-derive the
+    ``other`` the operator just disagreed with, making the un-mark a gesture.
+    Nothing else on the row moves — the review state, the proposal and the
+    download axis are untouched — so a row marked back to comic is an ordinary
+    ``new`` comic row and the enrichment pass picks it up on its own next run.
+
+    **Marking a row to what it already says writes nothing.** A mark is a
+    DISAGREEMENT with the automatic classifier; agreement is not a claim on the
+    row, and stamping provenance on it would quietly exempt it from every future
+    publisher-rule edit (FRG-SRC-012's "removing a default un-filters" would stop
+    reaching it). That matters most in the bulk form, where a selection at bundle
+    scale is mostly rows the classifier already got right. The action still
+    reports applied — the row carries the classification that was asked for.
+    """
+    if classification not in CLASSIFICATIONS:
+        raise EntitlementActionError(
+            f"unknown classification {classification!r}; "
+            f"expected {'|'.join(CLASSIFICATIONS)}",
+            status=422,
+        )
+    async with db.write_session() as session:
+        row = await session.get(SourceEntitlementRow, entitlement_id)
+        if row is None:
+            raise EntitlementActionError(
+                f"entitlement {entitlement_id} not found", status=404
+            )
+        refusal = _classify_precondition_error(entitlement_id, row.review_status)
+        if refusal is not None:
+            raise refusal
+        if row.classification != classification:
+            row.classification = classification
+            row.classified_via = CLASSIFIED_VIA_OPERATOR
+            row.updated_at = utcnow()
+    return await _reload(db, entitlement_id)
+
+
 # --- bulk -------------------------------------------------------------------
+
+
+async def bulk_classify(
+    db, entitlement_ids: list[int], *, classification: str
+) -> BulkResult:
+    """Mark a whole selection non-comic (or comic) — FRG-SRC-016/011.
+
+    The bundle/group/shift-range selection helpers are what make this the answer
+    to a 73-item non-comic bundle: the selection is built once and marked once.
+    Rows that cannot be marked report per row (the shared :func:`_bulk` idiom)
+    and the rest still move."""
+    return await _bulk(
+        db,
+        entitlement_ids,
+        lambda eid: classify_entitlement(db, eid, classification=classification),
+    )
 
 
 async def bulk_ignore(db, entitlement_ids: list[int]) -> BulkResult:

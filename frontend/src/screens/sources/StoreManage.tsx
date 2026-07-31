@@ -78,6 +78,8 @@ const BULK_VERBS = {
   accept: { note: 'Accepted', past: 'accepted' },
   ignore: { note: 'Ignored', past: 'ignored' },
   restore: { note: 'Restored', past: 'restored' },
+  mark_non_comic: { note: 'Marked non-comic', past: 'marked non-comic' },
+  mark_comic: { note: 'Marked comic', past: 'marked comic' },
 } as const;
 
 /**
@@ -184,6 +186,26 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
         ? scoped.filter((e) => e.review_status !== 'duplicate')
         : scoped.filter((e) => e.review_status === filter),
     [scoped, filter],
+  );
+  /**
+   * How many non-comic rows the toggle GOVERNS in the current status scope
+   * (FRG-UI-029 / FRG-SRC-016): hidden while it is off, revealed while it is on.
+   * Scoped to the active status filter for the same reason the segment counts
+   * are — a number computed over the whole inventory would not describe the list
+   * the operator is looking at. Derived from `all` rather than `scoped`, because
+   * `scoped` is the toggle's own output and would report zero whenever the rows
+   * are hidden — which is exactly when the count has to be told.
+   */
+  const nonComicInScope = useMemo(
+    () =>
+      all.filter(
+        (e) =>
+          e.classification === 'other' &&
+          (filter === 'all'
+            ? e.review_status !== 'duplicate'
+            : e.review_status === filter),
+      ).length,
+    [all, filter],
   );
 
   // Same-title collapse (FRG-UI-029): rows fold into groups by the SERVER's
@@ -354,7 +376,7 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
    * clearing away the rows that did NOT move. So the failures are always named,
    * and only they stay selected.
    */
-  const applyBulk = (action: 'accept' | 'ignore' | 'restore') => {
+  const applyBulk = (action: keyof typeof BULK_VERBS) => {
     if (selectedIds.length === 0 || bulkBusy) return;
     const attempted = selectedIds.length;
     resetBulkFeedback();
@@ -589,13 +611,23 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
             ]}
           />
           <label className={styles.otherToggle}>
+            {/* The switch's accessible name has to describe the state it is
+                IN, not one of the two indiscriminately: "Show non-comic items
+                (2)" read out while the rows are already on screen names a
+                reveal that has happened and a hidden count that is zero. */}
             <Toggle
               checked={showOther}
               onChange={setShowOther}
-              label="Show non-comic items"
+              label={
+                showOther
+                  ? `Hide non-comic items (${nonComicInScope} shown)`
+                  : `Show non-comic items (${nonComicInScope} hidden)`
+              }
               testId="toggle-noncomic"
             />
-            Non-comic
+            <span data-testid="noncomic-count">
+              Non-comic {nonComicInScope}
+            </span>
           </label>
         </div>
       </div>
@@ -664,6 +696,32 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
               >
                 Restore
               </button>
+              {/* The mark the 73-item non-comic bundle needs (FRG-SRC-016):
+                  select the bundle, mark it, and no later sync moves it back.
+                  The reverse mark only appears where its rows are reachable —
+                  inside the non-comic view — so the comic scope offers one
+                  classification action rather than two, only one of which could
+                  ever apply to what is on screen. */}
+              <button
+                type="button"
+                className={styles.mutedBtn}
+                disabled={bulkBusy}
+                onClick={() => applyBulk('mark_non_comic')}
+                data-testid="bulk-mark-non-comic"
+              >
+                Not a comic
+              </button>
+              {showOther && (
+                <button
+                  type="button"
+                  className={styles.mutedBtn}
+                  disabled={bulkBusy}
+                  onClick={() => applyBulk('mark_comic')}
+                  data-testid="bulk-mark-comic"
+                >
+                  It is a comic
+                </button>
+              )}
               <button
                 type="button"
                 className={styles.mutedBtn}

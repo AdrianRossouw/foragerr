@@ -74,7 +74,8 @@ The system SHALL hold each newly discovered comic entitlement in a review state
 (`new`) with a server-proposed match computed against the ComicVine catalog
 (FRG-SRC-010), supporting operator actions: match to an existing
 series/collection, add as new, pick any ComicVine volume via search
-(FRG-UI-039), ignore, and restore, individually and in bulk
+(FRG-UI-039), ignore, restore, and classify (mark non-comic / mark
+comic, FRG-SRC-016), individually and in bulk
 (FRG-SRC-011). The review-state vocabulary is `new`, `matched`,
 `ignored`, and `duplicate` — the last held by copies parked behind a
 byte-identical canonical row (FRG-SRC-015), which count and display like
@@ -400,8 +401,9 @@ filters common non-comic bundle content with no setup; every default entry
 SHALL be operator-removable, and publishers of genuine comics are
 deliberately excluded from the defaults (the recoverable-visibility rule is
 the safety valve for anything over-caught). Rule changes SHALL reclassify
-only rows still in the automatic classifier's hands (review state `new`);
-matched and ignored rows never move. Reclassified items follow the existing
+only rows still in the automatic classifier's hands (review state `new`
+and not operator-classified, FRG-SRC-016); matched, ignored, and
+operator-classified rows never move. Reclassified items follow the existing
 non-comic visibility rules (retained, hidden by default, never dropped).
 An existing per-source rule list SHALL migrate into the library-wide list.
 
@@ -641,3 +643,68 @@ bundle identity) on the review surface (FRG-UI-029).
 - **THEN** that row returns to independent `new` review with its link
   cleared — a row is parked only while it demonstrably duplicates its
   canonical
+
+### Requirement: FRG-SRC-016 — Operator classification override
+
+The system SHALL let the operator classify an entitlement row directly —
+mark as non-comic, or mark as comic — individually and in bulk, recording
+operator provenance on the classification. An operator-classified row
+SHALL never be reclassified by the automatic classifier or by publisher
+rules, in either direction, regardless of review state: the sync
+write-back that re-derives classification for `new` rows skips
+operator-classified rows. The override is available on any reviewable
+row (the selection helpers — bundle, group, shift-range — compose with
+it), takes effect immediately on the review surface, and follows the
+existing non-comic visibility rules (retained, hidden by default under
+the non-comic toggle, never dropped). Marking a matched, ignored, or parked-duplicate row
+is refused the same way other re-decisions are — restore first.
+Confirming a classification the automatic classifier already reached
+SHALL NOT seize the row from the rules: provenance is recorded only when
+the operator's decision differs from what the row already carries
+automatically. A non-comic row SHALL NOT participate in md5 duplicate
+linking (FRG-SRC-015) — dedupe exists to spare double review of comics —
+and a parked copy that becomes non-comic leaves its set.
+
+- **Milestone**: B (mark-non-comic).
+- **Source**: owner dogfood 2026-07-30 — a store bundle of 73 items with
+  no publisher field classified as comics by file shape; publisher rules
+  (FRG-SRC-012) cannot fire without a publisher, and the operator's
+  correction must not be silently reversed by the next sync.
+- **Notes**: Provenance is a nullable `classified_via` column
+  (`operator` vs NULL/automatic — the matched_via pattern), so an
+  operator decision is distinguishable from the classifier's output and
+  the sync gate can honor it. The publisher-rules lever stays the
+  automatic path; this is the manual one.
+
+#### Scenario: Marked non-comic sticks across syncs
+
+- **WHEN** the operator marks a `new` comic-classified row (one with no
+  publisher, say) as non-comic and the next sync runs
+- **THEN** the row is classified `other` with operator provenance, hides
+  under the non-comic toggle like any other non-comic row, and the sync
+  leaves its classification untouched — as does any later publisher-rule
+  change
+
+#### Scenario: Bulk mark over a bundle selection
+
+- **WHEN** the operator selects a whole bundle's rows and bulk-marks
+  them non-comic
+- **THEN** every selected `new` row is reclassified with operator
+  provenance in one request with per-row outcomes, and rows that cannot
+  be marked (matched/ignored) report their reasons per row
+
+#### Scenario: A row marked comic is fully acquirable
+
+- **WHEN** the operator marks a row the shape classifier had called
+  non-comic (a PDF-only item, say) as comic, and accepts it
+- **THEN** the row carries the file identity acquisition needs (its
+  preferred format and checksum), grabs like any comic row, and a later
+  sync neither re-nulls that identity nor reclassifies the row
+
+#### Scenario: The reverse mark is symmetric
+
+- **WHEN** the operator marks an operator-classified non-comic row back
+  as comic
+- **THEN** the row returns to the comic scope with operator provenance
+  (still never auto-reclassified), and its proposal machinery treats it
+  like any comic-classified `new` row

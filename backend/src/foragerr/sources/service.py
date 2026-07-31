@@ -44,7 +44,11 @@ from foragerr.sources.humble import (
     HumbleUnavailable,
     ParsedEntitlement,
 )
-from foragerr.sources.models import SourceEntitlementRow, SourceRow
+from foragerr.sources.models import (
+    CLASSIFIED_VIA_OPERATOR,
+    SourceEntitlementRow,
+    SourceRow,
+)
 from foragerr.sources.repo import (
     create_source,
     load_source_settings,
@@ -247,6 +251,21 @@ async def run_sync(
     return result
 
 
+def _classifier_owns(row: SourceEntitlementRow) -> bool:
+    """Whether the automatic classifier may still write this row's classification.
+
+    Two facts, both of which must hold: the row is still in review (a matched or
+    ignored row was decided under the classification it carries, FRG-SRC-012),
+    and no operator has classified it themselves (FRG-SRC-016). It gates the
+    write-back AND the run counters, from one place, so the counts can never
+    describe a write that did not happen.
+    """
+    return (
+        row.review_status == "new"
+        and row.classified_via != CLASSIFIED_VIA_OPERATOR
+    )
+
+
 async def _persist_order(
     db,
     source_id: int,
@@ -264,12 +283,21 @@ async def _persist_order(
 
     **Classification is re-derived every sync** from the item's CURRENT formats
     and the CURRENT library-wide publisher rules (FRG-SRC-012) — but written back
-    ONLY while the row is still ``review_status = "new"``. That is what makes a
-    rule change take effect in both directions on the next sync (added rule:
-    comic → other; removed rule: other → comic) while leaving every decided row
-    exactly where the operator put it: a matched or ignored row is an operator
-    decision, and a later rule edit must never silently move it between the
-    review buckets it was decided in.
+    ONLY while the row is still ``review_status = "new"`` AND still the automatic
+    classifier's (``classified_via != "operator"``, FRG-SRC-016). That is what
+    makes a rule change take effect in both directions on the next sync (added
+    rule: comic → other; removed rule: other → comic) while leaving every decided
+    row exactly where the operator put it: a matched or ignored row is an
+    operator decision, and a later rule edit must never silently move it between
+    the review buckets it was decided in.
+
+    The operator carve-out is the same principle one step earlier. A row the
+    operator marked non-comic (or back to comic) is still ``new`` — it is awaiting
+    review, not decided — so the review-state gate alone would let the next sync
+    silently re-derive the classification they just corrected, which is exactly
+    the case the mark exists for (a publisher-less bundle the rules can never
+    reach). Provenance, not review state, is what says "this one is not the
+    classifier's".
 
     The bundle display name is a display detail like the title, so it is
     refreshed on every row (backfilling pre-0026 rows on their next sync) — but
@@ -296,11 +324,12 @@ async def _persist_order(
                 )
             ).scalar_one_or_none()
             # The run counters report what the row ACTUALLY carries after this
-            # sync — a decided row keeps its stored classification, so counting
-            # the freshly-derived value there would over-report a rule's effect.
+            # sync — a row the write-back leaves alone keeps its stored
+            # classification, so counting the freshly-derived value there would
+            # over-report a rule's effect.
             effective = (
                 classification
-                if existing is None or existing.review_status == "new"
+                if existing is None or _classifier_owns(existing)
                 else existing.classification
             )
             if effective == "comic":
@@ -346,14 +375,25 @@ async def _persist_order(
                 existing.bundle_human_name = (
                     ent.bundle_human_name or existing.bundle_human_name
                 )
-                if existing.review_status == "new":
-                    # Still the automatic classifier's row → re-derive it from
-                    # the current formats + rules (FRG-SRC-012, both directions).
+                if _classifier_owns(existing):
                     existing.classification = classification
-                existing.preferred_format = preferred.format if preferred else None
-                existing.md5 = preferred.md5 if preferred else None
-                existing.file_size = preferred.file_size if preferred else None
-                existing.filename = preferred.filename if preferred else None
+                # The identity fields name the copy a grab fetches, so a payload
+                # that HAS one always refreshes them. The absent case is not a
+                # refresh but an erasure, and erasing them from a row that is
+                # (or was marked) a comic makes it permanently un-grabbable —
+                # acceptance reads md5/filename — with no operator action that
+                # recovers it. Erase only where the row's own classification
+                # says there is nothing to grab.
+                if preferred is not None:
+                    existing.preferred_format = preferred.format
+                    existing.md5 = preferred.md5
+                    existing.file_size = preferred.file_size
+                    existing.filename = preferred.filename
+                elif effective != "comic":
+                    existing.preferred_format = None
+                    existing.md5 = None
+                    existing.file_size = None
+                    existing.filename = None
                 existing.formats_json = formats_json
                 existing.updated_at = now
                 result.updated_entitlements += 1
