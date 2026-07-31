@@ -16,7 +16,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 /** Poster / Overview / Table (FRG-UI-003). */
 export type LibraryViewMode = 'poster' | 'overview' | 'table';
 /** Sort keys the toolbar's Sort menu offers (FRG-UI-003). */
-export type LibrarySortKey = 'title' | 'publisher' | 'issues' | 'year';
+export type LibrarySortKey = 'title' | 'publisher' | 'issues' | 'year' | 'size' | 'latest';
 /**
  * Status filter the toolbar's Filter menu offers (FRG-UI-003): `all` shows
  * everything, `monitored` only monitored series, `missing` only series with
@@ -76,7 +76,14 @@ interface UiState {
 // let a stale value crash a render. Kept next to the store so the sets stay in
 // sync with the union types above.
 const VIEW_MODES: readonly LibraryViewMode[] = ['poster', 'overview', 'table'];
-const SORT_KEYS: readonly LibrarySortKey[] = ['title', 'publisher', 'issues', 'year'];
+const SORT_KEYS: readonly LibrarySortKey[] = [
+  'title',
+  'publisher',
+  'issues',
+  'year',
+  'size',
+  'latest',
+];
 const STATUS_FILTERS: readonly LibraryStatusFilter[] = [
   'all',
   'monitored',
