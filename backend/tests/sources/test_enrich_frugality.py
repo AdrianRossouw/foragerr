@@ -493,9 +493,11 @@ def test_pre_universe_shape_detection_reads_the_missing_universe_key():
     assert is_recompute_target(stale, include_markers=False) is True
     assert is_recompute_target(marker, include_markers=False) is False
     assert is_recompute_target(marker, include_markers=True) is True
-    # A row with no proposal belongs to the enrichment pass, not to recompute —
-    # targeting it here would spend the same budget twice on one backlog.
-    assert is_recompute_target(unproposed, include_markers=True) is False
+    # A row with no proposal is a target too: enrichment runs only post-sync, so
+    # recompute is the only lever an operator has on an un-proposed row — and
+    # the deferred bulk restore (FRG-SRC-004) makes them in bulk on purpose.
+    assert is_recompute_target(unproposed, include_markers=False) is True
+    assert is_recompute_target(unproposed, include_markers=True) is True
 
 
 @pytest.mark.req("FRG-SRC-013")

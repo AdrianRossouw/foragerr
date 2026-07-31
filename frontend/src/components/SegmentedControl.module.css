@@ -2,8 +2,15 @@
  * Segmented control (FRG-UI-003). Adjacent buttons inside a bordered track; the
  * selected segment uses the accent-selected tint. Colors from tokens only.
  */
+/* The track WRAPS rather than overflowing: a six-segment set (the sources
+ * review filters) is wider than a narrow column, and an inline-flex track that
+ * cannot wrap pushes its last segments outside the page instead. Wrapping
+ * happens between segments only — each segment keeps its label on one line (see
+ * `white-space` below), so a break never lands inside a count. */
 .group {
   display: inline-flex;
+  flex-wrap: wrap;
+  max-width: 100%;
   padding: 2px;
   background: var(--surface-input);
   border: 1px solid var(--surface-border);
@@ -25,6 +32,7 @@
   background: none;
   border: none;
   border-radius: var(--radius-sm);
+  white-space: nowrap;
   color: var(--text-secondary);
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);

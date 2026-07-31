@@ -102,6 +102,26 @@ async def list_entitlements(
         return list(rows)
 
 
+async def entitlement_source_ids(db, entitlement_ids: list[int]) -> list[int]:
+    """The DISTINCT sources the given entitlements belong to, ascending.
+
+    One query for the whole selection: a bulk action that has to follow itself
+    up per SOURCE (the deferred-proposal fill after a bulk restore,
+    FRG-SRC-004) needs the sources, not the rows, and a selection is up to the
+    whole inventory. Unknown ids simply contribute nothing.
+    """
+    if not entitlement_ids:
+        return []
+    stmt = (
+        select(SourceEntitlementRow.source_id)
+        .where(SourceEntitlementRow.id.in_(entitlement_ids))
+        .distinct()
+        .order_by(SourceEntitlementRow.source_id)
+    )
+    async with db.read_session() as session:
+        return [sid for sid in (await session.execute(stmt)).scalars().all()]
+
+
 async def duplicate_copies(
     db, canonical_ids: list[int]
 ) -> dict[int, list[str | None]]:

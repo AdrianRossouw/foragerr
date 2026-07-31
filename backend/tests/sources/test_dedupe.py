@@ -617,9 +617,9 @@ async def _set_classification(db, entitlement_id: int, classification: str) -> N
 async def test_a_non_comic_row_never_links_as_a_copy_or_a_canonical(db, config_dir):
     """Linking exists to stop the operator reviewing the same COMIC twice. A row
     marked non-comic is not review work: parking it would hide it behind the
-    duplicate filter and the non-comic toggle at once, and letting it represent
-    the set would park still-comic twins behind a row the comic view never
-    shows."""
+    Duplicates filter and the non-comic scope at once — two filters, and no
+    screen shows their intersection — and letting it represent the set would
+    park still-comic twins behind a row no comic scope ever shows."""
     # Distinct digests at sync time, so nothing is linked before the mark.
     source, _result = await _twin_source(db, config_dir, second_md5=THIRD_MD5)
     rows = await _by_machine_name(db, source.id)
@@ -725,6 +725,25 @@ async def test_the_opt_out_survives_an_ignore_and_restore_cycle(db, config_dir):
     assert restored.dedupe_opt_out is True
     assert await link_duplicate_entitlements(db, source.id) == 0
     assert (await repo.get_entitlement(db, copy_id)).review_status == "new"
+
+
+@pytest.mark.req("FRG-SRC-015")
+async def test_a_bulk_restored_copy_is_opted_out_like_a_single_one(db, config_dir):
+    """Bulk restore defers the PROPOSAL (FRG-SRC-004) and nothing else: the
+    parking decision the flag records is made the same way whether the operator
+    restored one copy or selected the whole Duplicates filter."""
+    source, _result = await _twin_source(db, config_dir)
+    rows = await _by_machine_name(db, source.id)
+    copy_id = rows["second_saga_v1"].id
+
+    result = await review.bulk_restore(db, [copy_id])
+
+    assert result.applied == 1
+    restored = await repo.get_entitlement(db, copy_id)
+    assert restored.review_status == "new"
+    assert restored.duplicate_of is None
+    assert restored.dedupe_opt_out is True
+    assert await link_duplicate_entitlements(db, source.id) == 0
 
 
 @pytest.mark.req("FRG-SRC-004")
