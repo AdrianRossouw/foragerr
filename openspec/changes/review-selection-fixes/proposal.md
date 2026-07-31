@@ -44,7 +44,9 @@ Three causes, measured:
 
 - `ui`: MODIFIED FRG-UI-029 (select-all, non-comic filter, settled bulk
   outcomes).
-- `sources`: MODIFIED FRG-SRC-004 (bulk restore defers proposals).
+- `sources`: MODIFIED FRG-SRC-004 (bulk restore defers proposals, and
+  the deferral must not strand a row); MODIFIED FRG-SRC-016 (non-comic
+  visibility now names the filter scope, not the retired toggle).
 
 ## Impact
 

@@ -34,9 +34,11 @@ mixed into another scope, so a selection never silently spans
 classifications; a bulk outcome SHALL be reported against a settled
 list, naming what was refused; the bulk bar
 SHALL offer the classification marks (FRG-SRC-016) beside
-accept/ignore/restore, and the non-comic toggle SHALL state how many
-non-comic rows the current view holds back (or reveals, while it is
-on). The review list SHALL render
+accept/ignore/restore, and the bulk bar SHALL state, per action, how many
+of the current selection that action can apply to whenever that differs
+from the selection's size — a selection spanning review states is
+ordinary, and the operator learns what will happen before acting rather
+than from a list of refusals. The review list SHALL render
 virtualized so thousand-row queues stay responsive. Session expiry
 SHALL surface as the global banner plus amber header/footer health treatments, and
 bulk review actions SHALL support the M4 selection pattern including shift-range
@@ -94,10 +96,10 @@ select.
 
 - **WHEN** the operator selects rows (a whole bundle, say) and uses the
   bulk non-comic mark
-- **THEN** the rows leave the comic scope immediately, the non-comic
-  toggle's hidden count rises accordingly, per-row failures surface in
-  the bulk errors panel, and toggling the non-comic view shows the rows
-  with a Mark-comic action available
+- **THEN** the rows leave the comic scopes immediately, the Non-comic
+  scope's count rises accordingly, per-row failures surface in the bulk
+  errors panel, and the Non-comic scope shows the rows with a Mark-comic
+  action available
 
 
 #### Scenario: Select all acts on exactly the filtered rows
