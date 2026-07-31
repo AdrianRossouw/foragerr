@@ -9,6 +9,31 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.21.0] — 2026-07-31
+
+The queue fits on screen, tells the truth, and can be cleaned out.
+
+### Added
+- Select rows in the queue (with select-all) and remove them together,
+  using the same delete-data and blocklist options the single remove
+  has; per-row refusals are reported and those rows stay put.
+  (FRG-UI-006, FRG-DL-008)
+- **Clear failed** removes every failed download in one action — the
+  whole queue, not just the page you are looking at — and is offered
+  whenever failures exist anywhere in the queue. (FRG-UI-006)
+- The queue pages properly instead of stopping at the first twenty rows.
+
+### Fixed
+- The queue table no longer pushes the page sideways: long release names
+  wrap, the table scrolls inside its own frame, and each row's actions
+  stay reachable. (FRG-UI-006)
+- Failed and failing rows drop the meaningless "0%, 0 B of 0 B" progress
+  bar — the status and its reason carry the information; the series and
+  issue columns still identify a row whose release name is an opaque
+  token.
+- Clearing many rows now instructs the download client once per client
+  rather than once per row.
+
 ## [v0.20.0] — 2026-07-30
 
 The calendar becomes a browsable shelf.
