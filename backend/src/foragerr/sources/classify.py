@@ -188,11 +188,16 @@ def classify(
 
 
 def preferred_option(options: list[DownloadOption]) -> DownloadOption | None:
-    """The preferred grabbable comic option, or ``None`` if the item has none.
+    """The preferred grabbable option, or ``None`` if the item has none.
 
-    Follows :data:`PREFERRED_FORMAT_ORDER` over the ``ebook``-platform options.
-    Only meaningful for a ``comic`` item; an ``other`` item returns ``None`` (its
-    prose formats are still retained in the full option list).
+    Follows :data:`PREFERRED_FORMAT_ORDER` over the ``ebook``-platform options,
+    independently of the classification: this names the copy a grab would fetch,
+    and whether a grab is ALLOWED is the classification's question, asked later
+    (FRG-SRC-016 lets the operator overrule the format-shape verdict, so a row
+    whose identity fields were nulled here for being ``other`` could never
+    become grabbable again). ``None`` means the item genuinely offers no
+    comic-eligible format — a prose-only or non-``ebook`` item — and no mark can
+    conjure one.
     """
     ebook_options = [
         opt for opt in options if opt.platform == EBOOK_PLATFORM and opt.format

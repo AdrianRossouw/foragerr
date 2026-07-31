@@ -265,7 +265,13 @@ def _parse_subproduct(
                 )
             )
     classification = classify(options)
-    preferred = preferred_option(options) if classification == "comic" else None
+    # Unconditional, whatever the file shape says: the preferred option is the
+    # row's DOWNLOAD IDENTITY (format/md5/size/filename), and grabbability is
+    # decided from the row's classification at grab time. Deriving it only for a
+    # comic left every ``other`` row with a NULL md5, so an operator marking one
+    # comic (FRG-SRC-016) produced a row the accept path silently refuses
+    # forever — the mark's whole purpose defeated by a parse-time nulling.
+    preferred = preferred_option(options)
     human_name = _clean(sub.human_name) or machine_name
     return ParsedEntitlement(
         gamekey=gamekey,

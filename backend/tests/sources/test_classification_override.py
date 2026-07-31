@@ -20,7 +20,7 @@ from foragerr.sources.models import (
     SourceEntitlementRow,
 )
 from foragerr.sources.registry import TYPE_HUMBLE
-from foragerr.sources.review import EntitlementActionError
+from foragerr.sources.review import EntitlementActionError, _is_grabbable
 from foragerr.sources.service import run_sync
 from foragerr.sources.settings import HumbleSettings
 from sources_support import (  # noqa: F401 — imported fixtures
@@ -45,6 +45,11 @@ COMIC_ROW = "synth_singleissue_01"
 
 #: A fixture row the file-shape classifier calls non-comic (prose formats only).
 NON_COMIC_ROW = "synth_prose_novel_epub_only"
+
+#: A fixture row the file-shape classifier calls non-comic (a PDF shipped with a
+#: prose twin) that DOES carry a grabbable format — the shape an operator marks
+#: comic and then expects to be able to accept.
+NON_COMIC_ROW_WITH_A_GRABBABLE_COPY = "synth_prose_with_pdf_twin"
 
 
 async def _source(db, *, name: str = "Humble Bundle"):
@@ -146,11 +151,13 @@ async def test_the_reverse_mark_is_symmetric_and_sticks(db, config_dir):
 
 @pytest.mark.req("FRG-SRC-012")
 async def test_a_publisher_rule_never_moves_an_operator_marked_row(db, config_dir):
-    """A rule ADDED after the mark: the automatic path would classify the row
-    ``other``, and the operator has said ``comic``. The operator wins."""
+    """A rule the operator has already overruled on one row: the automatic path
+    classifies it ``other``, the operator has said ``comic``, and every later
+    sync leaves it where the operator put it."""
     source = await _source(db)
-    await _sync(db, config_dir, source)
+    await _sync(db, config_dir, source, rules=COMIC_PUBLISHER)
     row = await _row(db, source.id, COMIC_ROW)
+    assert row.classification == "other"
     await review.classify_entitlement(db, row.id, classification="comic")
 
     await _sync(db, config_dir, source, rules=COMIC_PUBLISHER)
@@ -164,15 +171,16 @@ async def test_a_publisher_rule_never_moves_an_operator_marked_row(db, config_di
 
 @pytest.mark.req("FRG-SRC-012")
 async def test_removing_a_rule_never_moves_an_operator_marked_row(db, config_dir):
-    """The other direction: a rule REMOVED under a row the operator marked
-    non-comic. The automatic path would hand it back to file shape (``comic``);
-    the mark holds it."""
+    """The other direction: a rule ADDED and then REMOVED under a row the
+    operator marked non-comic. Removing a rule un-filters the rows it covered —
+    but the marked row was never the rule's to hand back."""
     source = await _source(db)
-    await _sync(db, config_dir, source, rules=COMIC_PUBLISHER)
+    await _sync(db, config_dir, source)
     row = await _row(db, source.id, COMIC_ROW)
-    assert row.classification == "other"
+    assert row.classification == "comic"
     await review.classify_entitlement(db, row.id, classification="other")
 
+    await _sync(db, config_dir, source, rules=COMIC_PUBLISHER)
     await _sync(db, config_dir, source)
 
     assert (await _row(db, source.id, COMIC_ROW)).classification == "other"
@@ -195,6 +203,50 @@ async def test_the_sync_counters_report_the_stored_classification(db, config_dir
     result = await _sync(db, config_dir, source)
 
     assert (result.comic, result.other) == (2, 4)
+
+
+# --- the marked row is a usable row -------------------------------------------
+
+
+@pytest.mark.req("FRG-SRC-016")
+async def test_a_row_marked_comic_is_grabbable(db, config_dir):
+    """A mark the accept path cannot act on is no mark at all. The row's
+    download identity (format/md5/size/filename) is parsed from the payload
+    whatever the file shape said, so marking it comic makes it acceptable —
+    rather than a comic row the grab gate silently refuses forever."""
+    source = await _source(db)
+    await _sync(db, config_dir, source)
+    row = await _row(db, source.id, NON_COMIC_ROW_WITH_A_GRABBABLE_COPY)
+    assert row.classification == "other"
+    assert row.md5 is not None
+
+    marked = await review.classify_entitlement(db, row.id, classification="comic")
+
+    assert _is_grabbable(marked)
+    assert marked.preferred_format == "PDF"
+    assert (marked.md5, marked.filename) == (row.md5, row.filename)
+
+
+@pytest.mark.req("FRG-SRC-016")
+async def test_a_sync_never_re_nulls_a_marked_rows_download_identity(db, config_dir):
+    """The other half: the sync write-back refreshes the identity fields on
+    every row, and deriving them from the FRESH file-shape verdict re-nulled the
+    marked row on every run — so the mark held but the row was permanently
+    un-grabbable."""
+    source = await _source(db)
+    await _sync(db, config_dir, source)
+    row = await _row(db, source.id, NON_COMIC_ROW_WITH_A_GRABBABLE_COPY)
+    marked = await review.classify_entitlement(db, row.id, classification="comic")
+
+    await _sync(db, config_dir, source)
+
+    after = await _row(db, source.id, NON_COMIC_ROW_WITH_A_GRABBABLE_COPY)
+    assert _is_grabbable(after)
+    assert (after.md5, after.filename, after.file_size) == (
+        marked.md5,
+        marked.filename,
+        marked.file_size,
+    )
 
 
 # --- preconditions ------------------------------------------------------------
@@ -345,3 +397,106 @@ async def test_bulk_mark_comic_is_the_symmetric_action(db, config_dir):
             "comic",
             CLASSIFIED_VIA_OPERATOR,
         )
+
+
+# --- agreement is not a claim ---------------------------------------------------
+
+
+@pytest.mark.req("FRG-SRC-012")
+async def test_marking_a_row_to_what_it_already_says_leaves_the_rules_owning_it(
+    db, config_dir
+):
+    """A bulk mark at bundle scale covers rows the classifier already called
+    right. Stamping provenance on those would exempt them from every later
+    publisher-rule edit, so FRG-SRC-012's "removing a default un-filters" would
+    silently stop reaching them. The action reports applied and writes nothing.
+    """
+    source = await _source(db)
+    await _sync(db, config_dir, source, rules=COMIC_PUBLISHER)
+    row = await _row(db, source.id, COMIC_ROW)
+    assert (row.classification, row.classified_via) == ("other", None)
+
+    result = await review.bulk_classify(db, [row.id], classification="other")
+
+    assert (result.applied, result.skipped) == (1, 0)
+    assert (await _row(db, source.id, COMIC_ROW)).classified_via is None
+    # Proof the row is still the rules': removing the rule hands it back.
+    await _sync(db, config_dir, source)
+    assert (await _row(db, source.id, COMIC_ROW)).classification == "comic"
+
+
+@pytest.mark.req("FRG-SRC-016")
+async def test_re_marking_an_operator_marked_row_to_the_same_value_is_a_no_op(
+    db, config_dir
+):
+    source = await _source(db)
+    await _sync(db, config_dir, source)
+    row = await _row(db, source.id, COMIC_ROW)
+    marked = await review.classify_entitlement(db, row.id, classification="other")
+
+    again = await review.classify_entitlement(db, row.id, classification="other")
+
+    assert (again.classification, again.classified_via) == (
+        "other",
+        CLASSIFIED_VIA_OPERATOR,
+    )
+    assert again.updated_at == marked.updated_at
+
+
+# --- the mark travels with the row ----------------------------------------------
+
+
+@pytest.mark.req("FRG-SRC-016")
+async def test_a_parked_marked_row_keeps_its_provenance_through_restore(
+    db, config_dir
+):
+    """Ignoring a marked row and restoring it must not hand it back to the
+    classifier: restore is the way back INTO review, not a reset of what the
+    operator said the row is."""
+    source = await _source(db)
+    await _sync(db, config_dir, source)
+    row = await _row(db, source.id, COMIC_ROW)
+    await review.classify_entitlement(db, row.id, classification="other")
+    await review.ignore_entitlement(db, row.id)
+
+    restored = await review.restore_entitlement(db, row.id)
+
+    assert restored.review_status == "new"
+    assert (restored.classification, restored.classified_via) == (
+        "other",
+        CLASSIFIED_VIA_OPERATOR,
+    )
+    # And it is still the operator's after the next sync re-derives its siblings.
+    await _sync(db, config_dir, source)
+    assert (await _row(db, source.id, COMIC_ROW)).classification == "other"
+
+
+@pytest.mark.req("FRG-SRC-016")
+async def test_restoring_a_non_comic_row_spends_no_comicvine_budget(db, config_dir):
+    """ComicVine is 200 requests/hour per path. A non-comic row has nothing the
+    catalog could propose, so restoring one — or a whole non-comic selection —
+    must not buy a lookup no surface will ever show."""
+
+    class _CountingCV:
+        def __init__(self):
+            self.calls = 0
+
+        async def suggest_series(self, term):
+            self.calls += 1
+            raise AssertionError("a non-comic restore must not reach ComicVine")
+
+    source = await _source(db)
+    await _sync(db, config_dir, source)
+    row = await _row(db, source.id, NON_COMIC_ROW)
+    await review.ignore_entitlement(db, row.id)
+    before = await repo.get_entitlement(db, row.id)
+
+    cv = _CountingCV()
+    restored = await review.restore_entitlement(
+        db, row.id, cv_client=cv, cv_configured=True
+    )
+
+    assert cv.calls == 0
+    assert restored.review_status == "new"
+    assert restored.proposed_match_json == before.proposed_match_json
+    assert restored.proposed_series_id == before.proposed_series_id

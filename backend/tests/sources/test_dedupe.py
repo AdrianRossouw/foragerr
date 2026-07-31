@@ -601,6 +601,78 @@ async def test_a_copy_whose_md5_is_gone_returns_to_review(db, config_dir):
     assert unparked.duplicate_of is None
 
 
+# --- the non-comic axis is outside the set (FRG-SRC-016) ----------------------
+
+
+async def _set_classification(db, entitlement_id: int, classification: str) -> None:
+    """Set the classification WITHOUT the review action, which refuses a parked
+    row (FRG-SRC-016). The linking pass must free such a row on sight rather
+    than trust that no route can produce one."""
+    async with db.write_session() as session:
+        row = await session.get(SourceEntitlementRow, entitlement_id)
+        row.classification = classification
+
+
+@pytest.mark.req("FRG-SRC-016")
+async def test_a_non_comic_row_never_links_as_a_copy_or_a_canonical(db, config_dir):
+    """Linking exists to stop the operator reviewing the same COMIC twice. A row
+    marked non-comic is not review work: parking it would hide it behind the
+    duplicate filter and the non-comic toggle at once, and letting it represent
+    the set would park still-comic twins behind a row the comic view never
+    shows."""
+    # Distinct digests at sync time, so nothing is linked before the mark.
+    source, _result = await _twin_source(db, config_dir, second_md5=THIRD_MD5)
+    rows = await _by_machine_name(db, source.id)
+    copy_id = rows["second_saga_v1"].id
+    await review.classify_entitlement(db, copy_id, classification="other")
+    # The store re-uploaded the file: the two rows are now byte-identical.
+    await _set_md5(db, copy_id, SHARED_MD5)
+
+    assert await link_duplicate_entitlements(db, source.id) == 0
+
+    unlinked = await repo.get_entitlement(db, copy_id)
+    assert unlinked.review_status == "new"
+    assert unlinked.duplicate_of is None
+    assert (await repo.get_entitlement(db, rows["first_saga_v1"].id)).review_status == (
+        "new"
+    )
+
+
+@pytest.mark.req("FRG-SRC-016")
+async def test_a_canonical_marked_non_comic_frees_its_copies(db, config_dir):
+    """The canonical leaving the set is the md5-divergence case by another
+    route: its copies lose the row they were parked behind, so they return to
+    independent review rather than staying hidden behind a non-comic row."""
+    source, _result = await _twin_source(db, config_dir)
+    rows = await _by_machine_name(db, source.id)
+    canonical_id, copy_id = rows["first_saga_v1"].id, rows["second_saga_v1"].id
+    assert (await repo.get_entitlement(db, copy_id)).duplicate_of == canonical_id
+
+    await review.classify_entitlement(db, canonical_id, classification="other")
+    await link_duplicate_entitlements(db, source.id)
+
+    freed = await repo.get_entitlement(db, copy_id)
+    assert freed.review_status == "new"
+    assert freed.duplicate_of is None
+
+
+@pytest.mark.req("FRG-SRC-016")
+async def test_a_parked_copy_that_becomes_non_comic_is_unparked(db, config_dir):
+    """A parked non-comic row is invisible under both the duplicate filter and
+    the comic scope, with no action that reaches it — the mark itself refuses a
+    parked row. Whatever route produced it, the pass returns it to review."""
+    source, _result = await _twin_source(db, config_dir)
+    rows = await _by_machine_name(db, source.id)
+    copy_id = rows["second_saga_v1"].id
+    await _set_classification(db, copy_id, "other")
+
+    await link_duplicate_entitlements(db, source.id)
+
+    unparked = await repo.get_entitlement(db, copy_id)
+    assert unparked.review_status == "new"
+    assert unparked.duplicate_of is None
+
+
 # --- restore is a decision, not a nudge ---------------------------------------
 
 

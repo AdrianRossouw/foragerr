@@ -611,10 +611,18 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
             ]}
           />
           <label className={styles.otherToggle}>
+            {/* The switch's accessible name has to describe the state it is
+                IN, not one of the two indiscriminately: "Show non-comic items
+                (2)" read out while the rows are already on screen names a
+                reveal that has happened and a hidden count that is zero. */}
             <Toggle
               checked={showOther}
               onChange={setShowOther}
-              label={`Show non-comic items (${nonComicInScope})`}
+              label={
+                showOther
+                  ? `Hide non-comic items (${nonComicInScope} shown)`
+                  : `Show non-comic items (${nonComicInScope} hidden)`
+              }
               testId="toggle-noncomic"
             />
             <span data-testid="noncomic-count">

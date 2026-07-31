@@ -2448,6 +2448,44 @@ describe('FRG-SRC-016: the classification marks', () => {
     ent({ id: 73, human_name: 'Vane, Vol. 1', review_status: 'ignored' }),
   ];
 
+  it('FRG-SRC-016 — a bundle selection marks the whole bundle in one request', async () => {
+    const user = userEvent.setup();
+    // The case the mark exists for: a bundle whose every item is a non-comic
+    // the classifier cannot rule out, because the store names no publisher.
+    const BUNDLE = 'Example Bundle: Tabletop Sourcebooks';
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [
+        ent({ id: 80, human_name: 'Sourcebook One', bundle_human_name: BUNDLE }),
+        ent({ id: 81, human_name: 'Sourcebook Two', bundle_human_name: BUNDLE }),
+        ent({
+          id: 82,
+          human_name: 'Vane, Vol. 1',
+          bundle_human_name: 'Example Bundle: Comics',
+        }),
+      ],
+      calls: [],
+    };
+    renderScreen(state);
+
+    await user.click(await screen.findByTestId('select-bundle'));
+    await user.click(screen.getByTestId(`bundle-option-${BUNDLE}`));
+    expect(screen.getByTestId('bulk-bar')).toHaveTextContent('2 selected');
+
+    await user.click(screen.getByTestId('bulk-mark-non-comic'));
+
+    await waitFor(() =>
+      expect(state.calls.find((c) => c.path.endsWith('/bulk'))).toBeTruthy(),
+    );
+    const body = state.calls.find((c) => c.path.endsWith('/bulk'))!.init!.body as {
+      action: string;
+      entitlement_ids: number[];
+    };
+    expect(body.action).toBe('mark_non_comic');
+    // The other bundle's comic is untouched — one request, exactly this bundle.
+    expect([...body.entitlement_ids].sort((a, b) => a - b)).toEqual([80, 81]);
+  });
+
   it('FRG-SRC-016 — a bulk mark posts mark_non_comic and the rows leave the comic scope', async () => {
     const user = userEvent.setup();
     const state: FetcherState = {
@@ -2490,6 +2528,28 @@ describe('FRG-SRC-016: the classification marks', () => {
     expect(screen.queryByTestId('entitlement-row-71')).toBeNull();
   });
 
+  it('FRG-SRC-016 — the toggle names the state it is IN, hiding or showing', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = { sources: [source], entitlements, calls: [] };
+    renderScreen(state);
+
+    const toggle = await screen.findByTestId('toggle-noncomic');
+    await waitFor(() =>
+      expect(toggle).toHaveAttribute(
+        'aria-label',
+        'Show non-comic items (1 hidden)',
+      ),
+    );
+
+    await user.click(toggle);
+
+    expect(toggle).toHaveAttribute(
+      'aria-label',
+      'Hide non-comic items (1 shown)',
+    );
+    expect(screen.getByTestId('noncomic-count')).toHaveTextContent('Non-comic 1');
+  });
+
   it('FRG-SRC-016 — the non-comic toggle counts the rows it governs, and the count follows a mark', async () => {
     const user = userEvent.setup();
     const state: FetcherState = {
@@ -2528,7 +2588,7 @@ describe('FRG-SRC-016: the classification marks', () => {
     );
     expect(screen.getByTestId('toggle-noncomic')).toHaveAttribute(
       'aria-label',
-      'Show non-comic items (2)',
+      'Show non-comic items (2 hidden)',
     );
   });
 
