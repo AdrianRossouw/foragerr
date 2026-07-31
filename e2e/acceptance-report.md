@@ -2,11 +2,10 @@
 
 _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.mjs` — do not edit by hand (FRG-PROC-010)._
 
-- **Verdict:** GREEN (1 flaky)
-- **Scenarios:** 48 (46 pass, 0 fail, 1 skipped, 1 flaky, 0 not run)
-- **Flaky:** 1 scenario(s) failed then passed on retry (rescued, but not clean — see the FLAKY rows below).
-- **Run started:** 2026-07-31T00:54:20.166Z
-- **Duration:** 196.4s
+- **Verdict:** GREEN
+- **Scenarios:** 48 (47 pass, 0 fail, 1 skipped, 0 flaky, 0 not run)
+- **Run started:** 2026-07-31T01:02:15.370Z
+- **Duration:** 166.1s
 
 ## Scenario → requirement coverage
 
@@ -17,7 +16,7 @@ _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.m
 | PASS | FRG-PROC-010 FRG-DEP-013: the seeded DDL pair ships disabled and is enabled as an explicit opt-in | FRG-DEP-013, FRG-PROC-010 |
 | PASS | FRG-PROC-010 FRG-SER-005 FRG-UI-005: add a series from the ComicVine fixture lands issues | FRG-PROC-010, FRG-SER-005, FRG-UI-005 |
 | PASS | FRG-PROC-010 FRG-UI-008: created indexers are visible in settings | FRG-PROC-010, FRG-UI-008 |
-| FLAKY | FRG-PROC-010 FRG-UI-007 FRG-SRCH-001: interactive search renders verbatim rejection reasons | FRG-PROC-010, FRG-SRCH-001, FRG-UI-007 |
+| PASS | FRG-PROC-010 FRG-UI-007 FRG-SRCH-001: interactive search renders verbatim rejection reasons | FRG-PROC-010, FRG-SRCH-001, FRG-UI-007 |
 | PASS | FRG-PROC-010 FRG-DDL-010 FRG-DL-007 FRG-PP-009 FRG-PP-010: grab downloads, imports and renames into the library | FRG-DDL-010, FRG-DL-007, FRG-PP-009, FRG-PP-010, FRG-PROC-010 |
 | PASS | FRG-PROC-010 FRG-UI-003 FRG-SER-009: the library browse shows the series with updated stats | FRG-PROC-010, FRG-SER-009, FRG-UI-003 |
 | PASS | FRG-PROC-010 FRG-CRTR-001 FRG-UI-027: creator credits ingest end-to-end and render on the grid | FRG-CRTR-001, FRG-PROC-010, FRG-UI-027 |
@@ -91,7 +90,7 @@ _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.m
 | FRG-OPDS-019 | PASS |
 | FRG-PP-009 | PASS |
 | FRG-PP-010 | PASS |
-| FRG-PROC-010 | FLAKY |
+| FRG-PROC-010 | PASS |
 | FRG-PROC-019 | PASS |
 | FRG-SCHED-002 | PASS |
 | FRG-SEC-005 | PASS |
@@ -99,11 +98,11 @@ _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.m
 | FRG-SER-009 | PASS |
 | FRG-SER-021 | PASS |
 | FRG-SER-022 | PASS |
-| FRG-SRCH-001 | FLAKY |
+| FRG-SRCH-001 | PASS |
 | FRG-UI-003 | PASS |
 | FRG-UI-005 | PASS |
 | FRG-UI-006 | PASS |
-| FRG-UI-007 | FLAKY |
+| FRG-UI-007 | PASS |
 | FRG-UI-008 | PASS |
 | FRG-UI-015 | PASS |
 | FRG-UI-018 | PASS |
@@ -113,10 +112,6 @@ _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.m
 | FRG-UI-045 | PASS |
 | FRG-UI-047 | PASS |
 | FRG-UI-049 | PASS |
-
-## Flaky scenarios (rescued on retry)
-
-- **FRG-PROC-010 FRG-UI-007 FRG-SRCH-001: interactive search renders verbatim rejection reasons** (spine.spec.ts) — statuses: failed → passed
 
 ---
 
