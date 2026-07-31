@@ -8,7 +8,8 @@ The user-facing queue SHALL be built exclusively from tracked-download state
 (paged API resource with series/issue linkage, size/remaining, status,
 state, status messages, download id, client, output path), and no
 user-facing surface SHALL poll the download client directly. The queue
-SHALL offer a bulk remove: one request naming multiple tracked rows,
+SHALL offer a bulk remove addressed either by explicit ids or by the
+failed scope (every failed row, independent of paging): one request,
 applying the single remove's exact per-row semantics (a row mid-import is
 refused for that row only; the optional blocklist write uses the shared
 multi-field key; client-side removal is best-effort and never blocks
