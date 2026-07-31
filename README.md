@@ -52,6 +52,9 @@ below link each screen to its requirements in the
 [registry](docs/traceability/requirements-registry.md), the governing spec, and
 the manual page that documents it. The demo library shown is public-domain
 golden-age comics (Fiction House and Fawcett titles) from the Internet Archive.
+The calendar screen shows that same library placed in the current release week
+— the shots are captured against a public-domain instance, never a live
+weekly feed.
 
 ### Library
 
@@ -79,6 +82,17 @@ golden-age comics (Fiction House and Fawcett titles) from the Internet Archive.
 [FRG-UI-027](docs/traceability/requirements-registry.md),
 [FRG-CRTR-001](docs/traceability/requirements-registry.md) · spec:
 [ui](openspec/specs/ui/spec.md), [crtr](openspec/specs/crtr/spec.md) · manual:
+[web-ui](docs/manual/user/web-ui.md)*
+
+### Weekly calendar
+
+![The weekly calendar as a browsable shelf: each release a row with cover art, a publisher chip, principal creators and a description teaser, grouped by day, with monitor and search actions](docs/readme-assets/calendar.png)
+
+*Weekly release calendar —
+[FRG-UI-018](docs/traceability/requirements-registry.md),
+[FRG-UI-042](docs/traceability/requirements-registry.md),
+[FRG-PULL-001](docs/traceability/requirements-registry.md) · spec:
+[ui](openspec/specs/ui/spec.md), [pull](openspec/specs/pull/spec.md) · manual:
 [web-ui](docs/manual/user/web-ui.md)*
 
 ### Wanted issues

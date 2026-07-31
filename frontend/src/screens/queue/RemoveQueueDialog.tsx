@@ -1,27 +1,56 @@
 import { useState } from 'react';
 import { Modal } from '../../components/Modal';
-import { useRemoveQueueItem } from '../../api/hooks';
+import { useRemoveQueueItems, type QueueRemoveResult } from '../../api/hooks';
 import type { QueueItem } from '../../api/types';
 import styles from './QueueScreen.module.css';
 
 export interface RemoveQueueDialogProps {
-  item: QueueItem;
+  /** The rows to NAME — one from a row action, many from a selection. */
+  items: QueueItem[];
+  /**
+   * When set, the server removes every row the scope covers rather than the
+   * `items` listed here: `items` is then only the part of the scope this page
+   * happens to hold, and `scopeCount` is its true size.
+   */
+  scope?: 'failed';
+  scopeCount?: number;
   onClose: () => void;
+  /** Handed the per-row outcome so the screen can report what did not remove. */
+  onRemoved?: (result: QueueRemoveResult) => void;
+}
+
+/** Series + issue when the row is mapped, else the raw release name. */
+export function queueItemName(item: QueueItem): string {
+  return item.seriesTitle
+    ? `${item.seriesTitle}${item.issueNumber != null ? ` #${item.issueNumber}` : ''}`
+    : item.title;
 }
 
 /**
  * Sonarr-style remove-queue-item dialog (FRG-UI-006): confirm removal with
- * independent delete-data and blocklist options, mapping straight onto
- * `DELETE /api/v1/queue/{id}?deleteData=&blocklist=`.
+ * independent delete-data and blocklist options. One item or fifty, the options
+ * are the same and are always an explicit choice — a bulk clear never carries a
+ * blocklist default the operator did not tick.
  */
-export function RemoveQueueDialog({ item, onClose }: RemoveQueueDialogProps) {
+export function RemoveQueueDialog({
+  items,
+  scope,
+  scopeCount,
+  onClose,
+  onRemoved,
+}: RemoveQueueDialogProps) {
   const [deleteData, setDeleteData] = useState(false);
   const [blocklist, setBlocklist] = useState(false);
-  const remove = useRemoveQueueItem();
+  const remove = useRemoveQueueItems();
 
-  const displayName = item.seriesTitle
-    ? `${item.seriesTitle}${item.issueNumber != null ? ` #${item.issueNumber}` : ''}`
-    : item.title;
+  // What the confirmation promises must be what the request does: under a scope
+  // the count is the backlog's, not the loaded page's.
+  const targetCount = scope ? (scopeCount ?? items.length) : items.length;
+  const single = !scope && items.length === 1 ? items[0] : null;
+  const displayName = single
+    ? queueItemName(single)
+    : `${targetCount} ${scope === 'failed' ? 'failed ' : ''}queue items`;
+  const unlisted = targetCount - items.length;
 
   return (
     <Modal
@@ -36,11 +65,18 @@ export function RemoveQueueDialog({ item, onClose }: RemoveQueueDialogProps) {
           <button
             type="button"
             className={styles.btnDanger}
-            disabled={remove.isPending}
+            disabled={remove.isPending || targetCount === 0}
             onClick={() =>
               remove.mutate(
-                { id: item.id, deleteData, blocklist },
-                { onSuccess: onClose },
+                scope
+                  ? { scope, deleteData, blocklist }
+                  : { ids: items.map((item) => item.id), deleteData, blocklist },
+                {
+                  onSuccess: (result) => {
+                    onRemoved?.(result);
+                    onClose();
+                  },
+                },
               )
             }
           >
@@ -52,6 +88,18 @@ export function RemoveQueueDialog({ item, onClose }: RemoveQueueDialogProps) {
       <p className={styles.dialogIntro}>
         Remove <strong>{displayName}</strong> from the queue?
       </p>
+      {!single && (
+        <ul className={styles.dialogTargets}>
+          {items.map((item) => (
+            <li key={item.id}>{queueItemName(item)}</li>
+          ))}
+          {unlisted > 0 && (
+            // The scope reaches rows this page never loaded; naming only the
+            // visible ones would understate what Remove is about to do.
+            <li>…and {unlisted} more on other pages</li>
+          )}
+        </ul>
+      )}
       <label className={styles.dialogOption}>
         <input
           type="checkbox"

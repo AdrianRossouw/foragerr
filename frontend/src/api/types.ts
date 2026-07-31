@@ -102,7 +102,18 @@ export interface QueuePageResponse {
   sortKey: string;
   sortDirection: string;
   totalRecords: number;
+  /** Terminally-failed rows across ALL pages, not just `records`. */
+  failedRecords: number;
   records: QueueResourceRaw[];
+}
+
+/**
+ * A queue page with its records normalized. Carries `failedRecords` because
+ * Clear failed reaches the whole backlog: a count derived from the loaded page
+ * would disable the action while off-page failures remain.
+ */
+export interface QueuePage extends ApiPage<QueueItem> {
+  failedRecords: number;
 }
 
 /**

@@ -19,7 +19,7 @@ describe('FRG-UI-006: remove-queue dialog display name', () => {
       }),
     );
 
-    renderWithProviders(<RemoveQueueDialog item={item} onClose={() => {}} />);
+    renderWithProviders(<RemoveQueueDialog items={[item]} onClose={() => {}} />);
 
     // The <strong> in the confirmation body is exactly the display name.
     expect(screen.getByText('Saga #0')).toBeInTheDocument();
