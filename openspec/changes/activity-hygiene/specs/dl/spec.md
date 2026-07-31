@@ -8,12 +8,14 @@ The user-facing queue SHALL be built exclusively from tracked-download state
 (paged API resource with series/issue linkage, size/remaining, status,
 state, status messages, download id, client, output path), and no
 user-facing surface SHALL poll the download client directly. The queue
-SHALL offer a bulk remove addressed either by explicit ids or by the
-failed scope (every failed row, independent of paging): one request,
+SHALL offer a bulk remove addressed by EXACTLY ONE target form —
+explicit ids (bounded) or the failed scope (every failed row,
+independent of paging; a request naming both, or neither, is refused):
+one request,
 applying the single remove's exact per-row semantics (a row mid-import is
 refused for that row only; the optional blocklist write uses the shared
 multi-field key; client-side removal is best-effort and never blocks
-de-tracking) and returning a per-row applied/errors report.
+de-tracking) and returning a per-row applied/errors report. The queue resource SHALL carry the count of failed rows alongside its total, so a client can offer the failed sweep without having loaded the pages those rows sit on.
 
 - **Milestone**: M1; bulk remove added in activity-hygiene.
 - **Source**: sonarr-arch §4.4 (QueueService), §7.3 (QueueResource)
