@@ -9,6 +9,15 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.22.0] — 2026-07-31
+
+### Added
+- The library's Sort menu gains **Size on disk** (largest series first)
+  and **Latest issue** (most recently released first, series with no
+  known dates last). Both persist like the existing choices and use
+  statistics the screen already holds — no extra requests.
+  (FRG-UI-003)
+
 ## [v0.21.0] — 2026-07-31
 
 The queue fits on screen, tells the truth, and can be cleaned out.
