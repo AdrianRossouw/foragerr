@@ -29,8 +29,9 @@ copies SHALL appear dimmed with Restore under the Duplicates filter, and
 selection helpers SHALL cover a whole bundle and a whole
 collapse group alongside the M4 shift-range pattern; the bulk bar
 SHALL offer the classification marks (FRG-SRC-016) beside
-accept/ignore/restore, and the non-comic toggle SHALL show how many
-rows it is hiding. The review list SHALL render
+accept/ignore/restore, and the non-comic toggle SHALL state how many
+non-comic rows the current view holds back (or reveals, while it is
+on). The review list SHALL render
 virtualized so thousand-row queues stay responsive. Session expiry
 SHALL surface as the global banner plus amber header/footer health treatments, and
 bulk review actions SHALL support the M4 selection pattern including shift-range

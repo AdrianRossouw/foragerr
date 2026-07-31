@@ -14,8 +14,14 @@ operator-classified rows. The override is available on any reviewable
 row (the selection helpers — bundle, group, shift-range — compose with
 it), takes effect immediately on the review surface, and follows the
 existing non-comic visibility rules (retained, hidden by default under
-the non-comic toggle, never dropped). Marking a matched or ignored row
+the non-comic toggle, never dropped). Marking a matched, ignored, or parked-duplicate row
 is refused the same way other re-decisions are — restore first.
+Confirming a classification the automatic classifier already reached
+SHALL NOT seize the row from the rules: provenance is recorded only when
+the operator's decision differs from what the row already carries
+automatically. A non-comic row SHALL NOT participate in md5 duplicate
+linking (FRG-SRC-015) — dedupe exists to spare double review of comics —
+and a parked copy that becomes non-comic leaves its set.
 
 - **Milestone**: B (mark-non-comic).
 - **Source**: owner dogfood 2026-07-30 — a store bundle of 73 items with
@@ -44,6 +50,14 @@ is refused the same way other re-decisions are — restore first.
 - **THEN** every selected `new` row is reclassified with operator
   provenance in one request with per-row outcomes, and rows that cannot
   be marked (matched/ignored) report their reasons per row
+
+#### Scenario: A row marked comic is fully acquirable
+
+- **WHEN** the operator marks a row the shape classifier had called
+  non-comic (a PDF-only item, say) as comic, and accepts it
+- **THEN** the row carries the file identity acquisition needs (its
+  preferred format and checksum), grabs like any comic row, and a later
+  sync neither re-nulls that identity nor reclassifies the row
 
 #### Scenario: The reverse mark is symmetric
 
