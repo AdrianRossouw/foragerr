@@ -49,6 +49,7 @@ from foragerr.sources.models import SourceEntitlementRow
 from foragerr.sources.repo import (
     delete_source,
     duplicate_copies,
+    entitlement_source_ids,
     get_entitlement,
     get_source,
     list_entitlements,
@@ -790,10 +791,12 @@ async def bulk_entitlements_endpoint(
     if body.action == "ignore":
         result = await bulk_ignore(db, body.entitlement_ids)
     elif body.action == "restore":
-        # No catalog client: a bulk restore defers its proposals to the
-        # enrichment pass (FRG-SRC-004), so the request never waits on the
-        # rate-limited per-row lookup the single-row endpoint makes.
+        # No catalog client: a bulk restore defers its proposals (FRG-SRC-004),
+        # so the request never waits on the rate-limited per-row lookup the
+        # single-row endpoint makes. The deferral is then ASKED for, not waited
+        # on — see below.
         result = await bulk_restore(db, body.entitlement_ids)
+        await _fill_deferred_proposals(request, body.entitlement_ids, result)
     elif body.action == "match":
         if body.series_id is None:
             raise ApiError(422, "match requires series_id", field="series_id")
@@ -847,6 +850,42 @@ async def bulk_entitlements_endpoint(
             field="action",
         )
     return {"applied": result.applied, "skipped": result.skipped, "errors": result.errors}
+
+
+async def _fill_deferred_proposals(
+    request: Request, entitlement_ids: list[int], result
+) -> None:
+    """Queue the proposal fill a bulk restore deferred (FRG-SRC-004/013).
+
+    A restored row is back in review with a NULL proposal, and a NULL proposal
+    is nothing to accept: without this, "select all → Restore → select all →
+    Accept" refuses every row until the next scheduled sync happens to run the
+    enrichment pass. So the deferral that keeps the request fast is paid off
+    immediately by the existing recompute command — the same one the operator's
+    own "Recompute proposals" enqueues, in the same ``source-sync`` exclusivity
+    group, budget-aware and resumable. Enqueue dedup (FRG-SCHED-003) collapses a
+    run of restores onto one command.
+
+    Per SOURCE, not per row: the command's unit of work is a source's review
+    queue. Skipped entirely without a ComicVine key, because the command's own
+    runner refuses that case — enqueueing it would only add a no-op to the
+    command surface (the row still re-enters the ordinary enrichment pass, which
+    is where a keyless deployment's proposals have always come from).
+    """
+    from foragerr.sources.enrich import comicvine_configured
+
+    commands = getattr(request.app.state, "commands", None)
+    if commands is None or result.applied == 0:
+        return
+    if not comicvine_configured(request.app.state.settings):
+        return
+    restored = [eid for eid in entitlement_ids if eid not in result.errors]
+    for source_id in await entitlement_source_ids(request.app.state.db, restored):
+        await commands.enqueue(
+            SOURCE_RECOMPUTE_TASK,
+            {"source_id": source_id, "include_markers": False},
+            triggered_by="manual",
+        )
 
 
 @asynccontextmanager

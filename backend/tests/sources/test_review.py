@@ -311,6 +311,65 @@ async def test_bulk_restore_defers_proposals_and_single_restore_does_not(
 
 
 @pytest.mark.req("FRG-SRC-004")
+async def test_a_deferred_restore_clears_the_attempt_it_discarded(db, config_dir):
+    """The deferral throws the stored answer away, so the attempt that produced
+    it is no longer a fact about this row: it must sort into the never-attempted
+    HEAD of the proposal work order, not behind every row that has been tried.
+
+    On a corpus-sized queue that ordering is the whole difference between the
+    restored selection being proposed next and being proposed last — and a
+    surviving ``proposal_attempt_error`` would additionally hold the row out of
+    the enrichment pass's retry spacing for a failure that predates the restore.
+    """
+    import datetime as dt
+
+    from foragerr.db.base import utcnow
+    from foragerr.sources.models import SourceEntitlementRow
+
+    source = await _synced_source(db, config_dir)
+    comics = await repo.list_entitlements(db, source.id, classification="comic")
+    restored, older = comics[0].id, comics[1].id
+    long_ago = utcnow() - dt.timedelta(days=7)
+    async with db.write_session() as session:
+        for eid, when, errored in ((restored, long_ago, True), (older, long_ago, False)):
+            row = await session.get(SourceEntitlementRow, eid)
+            row.proposal_attempted_at = when
+            row.proposal_attempt_error = errored
+    await review.ignore_entitlement(db, restored)
+
+    await review.bulk_restore(db, [restored])
+
+    row = await repo.get_entitlement(db, restored)
+    assert row.proposal_attempted_at is None
+    assert row.proposal_attempt_error is None
+    order = [
+        e.id
+        for e in await repo.list_entitlements(db, source.id, order_by_attempt=True)
+    ]
+    assert order.index(restored) < order.index(older)
+
+
+@pytest.mark.req("FRG-SRC-013")
+async def test_an_un_proposed_row_is_a_recompute_target(db, config_dir):
+    """The operator's lever on exactly the state a bulk restore creates.
+
+    Enrichment runs post-sync only, so before this an un-proposed row could not
+    be reached from the screen at all: "Recompute proposals" skipped it and the
+    only other filler was the next scheduled sync."""
+    from foragerr.sources.enrich import is_recompute_target
+
+    source = await _synced_source(db, config_dir)
+    comics = await repo.list_entitlements(db, source.id, classification="comic")
+    await review.ignore_entitlement(db, comics[0].id)
+    await review.bulk_restore(db, [comics[0].id])
+
+    row = await repo.get_entitlement(db, comics[0].id)
+    assert row.review_status == "new"
+    assert row.proposed_match_json is None
+    assert is_recompute_target(row, include_markers=False) is True
+
+
+@pytest.mark.req("FRG-SRC-004")
 async def test_bulk_restore_of_a_non_comic_row_leaves_its_proposal_alone(
     db, config_dir
 ):

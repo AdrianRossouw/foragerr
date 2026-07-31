@@ -463,9 +463,18 @@ async def _auto_accept(
 def is_recompute_target(row, *, include_markers: bool) -> bool:
     """Whether the bulk recompute should refresh this row's stored proposal.
 
-    A row with NO stored proposal is never a target: the enrichment pass already
-    owns those, and duplicating them here would spend budget twice on the same
-    backlog. What recompute exists for is the proposal that is STORED and stale:
+    A row with NO stored proposal is a target — the same rows the enrichment
+    pass owns. Enrichment only runs POST-SYNC, so on a daily-sync deployment
+    "un-proposed" is a state an operator can otherwise only leave by waiting;
+    and the deferred bulk restore (FRG-SRC-004) creates that state deliberately,
+    in bulk, at the moment the operator is looking at the queue. Recompute is
+    the lever that fills it. The double-spend this exclusion once guarded
+    against does not arise: the two passes take the same work order and
+    ``record_proposal_attempts`` stamps every attempt, so whichever runs second
+    finds the prefix already proposed.
+
+    The rest of what recompute exists for is the proposal that is STORED and
+    stale:
 
     * one written before the ComicVine-first universe (no ``universe`` key —
       library-ranked whatever it looks like), the v0.11.0 upgrade gap;
@@ -483,7 +492,7 @@ def is_recompute_target(row, *, include_markers: bool) -> bool:
     """
     raw = row.proposed_match_json
     if raw is None:
-        return False
+        return True
     if predates_cv_universe(raw) or is_library_fallback(raw):
         return True
     return include_markers and is_marker(raw)
@@ -492,12 +501,13 @@ def is_recompute_target(row, *, include_markers: bool) -> bool:
 async def recompute_proposals(
     db, settings, source, *, include_markers: bool = False, cv_client=None
 ) -> str:
-    """Refresh stale stored proposals for one source, resumably (FRG-SRC-013).
+    """Propose for one source's un-proposed and stale ``new`` rows, resumably
+    (FRG-SRC-013).
 
     The operator-triggered half of the frugality work (design D6). It walks
     ``new`` rows only — a matched or ignored row is a DECISION and is never
-    recomputed (FRG-SRC-008/012 stickiness) — in the D5 attempt order, refreshing
-    each target's stored proposal and stamping the attempt. The stamp is what
+    recomputed (FRG-SRC-008/012 stickiness) — in the D5 attempt order, writing
+    each target's proposal and stamping the attempt. The stamp is what
     makes it resumable: a refreshed row sorts to the back, so a re-run after a
     budget window picks up where this one stopped, with no cursor to persist.
 

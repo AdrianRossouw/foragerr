@@ -617,9 +617,9 @@ async def _set_classification(db, entitlement_id: int, classification: str) -> N
 async def test_a_non_comic_row_never_links_as_a_copy_or_a_canonical(db, config_dir):
     """Linking exists to stop the operator reviewing the same COMIC twice. A row
     marked non-comic is not review work: parking it would hide it behind the
-    duplicate filter and the non-comic toggle at once, and letting it represent
-    the set would park still-comic twins behind a row the comic view never
-    shows."""
+    Duplicates filter and the non-comic scope at once — two filters, and no
+    screen shows their intersection — and letting it represent the set would
+    park still-comic twins behind a row no comic scope ever shows."""
     # Distinct digests at sync time, so nothing is linked before the mark.
     source, _result = await _twin_source(db, config_dir, second_md5=THIRD_MD5)
     rows = await _by_machine_name(db, source.id)

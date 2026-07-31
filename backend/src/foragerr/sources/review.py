@@ -798,6 +798,11 @@ async def restore_entitlement(
     NULLED rather than left standing, because a stale one from before the
     parking would make the row ineligible for enrichment and be rendered as a
     current catalog verdict.
+
+    The attempt bookkeeping is cleared with it — see the write below — and the
+    caller is expected to ASK for the fill rather than wait for the next sync
+    (:func:`bulk_restore`'s callers enqueue the recompute command), because a
+    row with no proposal has nothing to accept.
     """
     from foragerr.library import repo as library_repo
     from foragerr.metadata.errors import ComicVineBudgetExhausted
@@ -884,6 +889,19 @@ async def restore_entitlement(
             fresh.proposed_match_json = (
                 proposal.to_json() if proposal is not None else None
             )
+            if not recompute:
+                # The deferral DISCARDED the stored answer, so the row has no
+                # current attempt to record: it is un-proposed for the same
+                # reason a never-attempted row is. Keeping the old stamp would
+                # sort it behind every row that HAS been tried
+                # (``list_entitlements(order_by_attempt=True)``), which on a
+                # corpus-sized queue is the difference between the restored
+                # selection being proposed next and being proposed last; a
+                # stale ``proposal_attempt_error`` would also hold it out of
+                # the enrichment pass's retry spacing for a failure that
+                # happened before the restore.
+                fresh.proposal_attempted_at = None
+                fresh.proposal_attempt_error = None
         fresh.updated_at = utcnow()
     return await _reload(db, entitlement_id)
 

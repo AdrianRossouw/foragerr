@@ -664,6 +664,98 @@ async def test_bulk_rejects_an_unknown_action_by_name(app_client):
         assert action in message
 
 
+# --- the deferred proposals a bulk restore leaves behind (FRG-SRC-004) -------
+
+
+@pytest.fixture
+async def keyed_app_client(tmp_path: Path):
+    """The same app, on a deployment that HAS a ComicVine key."""
+    cfg = tmp_path / "cfg"
+    cfg.mkdir()
+    async with running_app(
+        make_settings(cfg, comicvine_api_key="CV-SECRET-KEY-abc123")
+    ) as (_app, client):
+        yield client
+
+
+@pytest.mark.req("FRG-SRC-004")
+async def test_bulk_restore_asks_for_the_proposals_it_deferred(keyed_app_client):
+    """Deferring the proposals must not mean waiting a day for them.
+
+    The rows come back to review un-proposed, and an un-proposed row refuses
+    every accept — so "Select all → Restore" followed by "Select all → Accept"
+    was a screen of refusals until the next scheduled sync ran the enrichment
+    pass. The endpoint therefore enqueues the recompute command for the source
+    it just restored into: once per source however many rows moved, and once
+    however many restores the operator runs while it is still queued.
+    """
+    app = keyed_app_client.app
+    source_id = await _populate(app)
+    comics = await repo.list_entitlements(
+        app.state.db, source_id, classification="comic", review_status="new"
+    )
+    ids = [c.id for c in comics]
+    for eid in ids:
+        await keyed_app_client.post(f"/api/v1/sources/entitlements/{eid}/ignore")
+    app.state.commands = _FakeCommands(app.state.commands)
+
+    resp = await keyed_app_client.post(
+        "/api/v1/sources/entitlements/bulk",
+        json={"action": "restore", "entitlement_ids": ids},
+    )
+
+    assert resp.json()["applied"] == len(ids)
+    assert app.state.commands.enqueued == [
+        (
+            "source-recompute-proposals",
+            {"source_id": source_id, "include_markers": False},
+            "manual",
+        )
+    ]
+
+
+@pytest.mark.req("FRG-SRC-004")
+async def test_a_wholly_refused_bulk_restore_asks_for_nothing(keyed_app_client):
+    """No row moved, so no proposal was deferred and there is nothing to fill —
+    an enqueue here would put a command on the operator's queue for an action
+    that changed nothing."""
+    app = keyed_app_client.app
+    source_id = await _populate(app)
+    eid = await _first_comic_id(app, source_id)  # still ``new``: unrestorable
+    app.state.commands = _FakeCommands(app.state.commands)
+
+    resp = await keyed_app_client.post(
+        "/api/v1/sources/entitlements/bulk",
+        json={"action": "restore", "entitlement_ids": [eid]},
+    )
+
+    assert resp.json()["applied"] == 0
+    assert app.state.commands.enqueued == []
+
+
+@pytest.mark.req("FRG-SRC-004")
+async def test_a_keyless_bulk_restore_enqueues_no_recompute(app_client):
+    """The recompute command refuses to run without a ComicVine key, so
+    enqueueing it here would only add a guaranteed no-op to the command surface.
+    The restore itself still happens — those rows re-enter the ordinary
+    enrichment pass, which is where a keyless deployment's proposals come from.
+    """
+    app = app_client.app
+    source_id = await _populate(app)
+    eid = await _first_comic_id(app, source_id)
+    await app_client.post(f"/api/v1/sources/entitlements/{eid}/ignore")
+    app.state.commands = _FakeCommands(app.state.commands)
+
+    resp = await app_client.post(
+        "/api/v1/sources/entitlements/bulk",
+        json={"action": "restore", "entitlement_ids": [eid]},
+    )
+
+    assert resp.json()["applied"] == 1
+    assert app.state.commands.enqueued == []
+    assert (await repo.get_entitlement(app.state.db, eid)).review_status == "new"
+
+
 # --- operator classification (FRG-SRC-016) -----------------------------------
 
 
