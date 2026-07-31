@@ -16,8 +16,10 @@ information). The screen SHALL page (the shared paging controls) rather than
 cap at one page, and SHALL offer row selection with select-all (scoped to the
 displayed page), a bulk
 Remove using the same delete-data/blocklist options, and a one-click
-**Clear failed** that removes every failed row in the queue — not merely
-those on the displayed page — after the same confirmation dialog. Bulk outcomes report per-row: rows that could not be removed stay
+**Clear failed** that removes every failed row in the queue in one
+request regardless of paging — not merely those on the displayed page,
+and offered whenever the queue holds a failed row even if the current
+page shows none — after the same confirmation dialog. Bulk outcomes report per-row: rows that could not be removed stay
 listed with their reasons.
 
 - **Milestone**: M1; contained layout, honest failed rows, paging and
