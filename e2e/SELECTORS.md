@@ -33,8 +33,8 @@ These already exist in the frontend and are treated as a contract by the suite:
   failed row, which renders no progress); an `import_blocked` row's button
   "Manual import \<title\>"; `queue-table-wrap`; per-row checkbox
   "Select \<title\>", header checkbox "Select all queue items",
-  `queue-selection-count` and button "Remove selected"; toolbar button
-  "Clear failed".
+  `queue-selection-count` and button "Remove selected"; per-row button
+  "Remove \<title\>"; toolbar button "Clear failed".
 - **Manual-import overlay** (`ManualImportOverlay.tsx`): `manual-row-<name>`;
   per-row checkbox "Select \<name\>", comboboxes "Series/Issue/Format for
   \<name\>"; the rejection chip (opens the popover carrying
