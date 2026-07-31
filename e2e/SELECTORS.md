@@ -29,8 +29,12 @@ These already exist in the frontend and are treated as a contract by the suite:
   `command-status`.
 - **Interactive search overlay**: `release-row-<guid>`; button "Grab \<title\>";
   the rejection chip (opens the popover carrying `ft-rejections-<guid>`).
-- **Queue** (`/queue`): `queue-row-<id>`; `queue-progress-<id>`; an
-  `import_blocked` row's button "Manual import \<title\>".
+- **Queue** (`/queue`): `queue-row-<id>`; `queue-progress-<id>` (absent on a
+  failed row, which renders no progress); an `import_blocked` row's button
+  "Manual import \<title\>"; `queue-table-wrap`; per-row checkbox
+  "Select \<title\>", header checkbox "Select all queue items",
+  `queue-selection-count` and button "Remove selected"; toolbar button
+  "Clear failed".
 - **Manual-import overlay** (`ManualImportOverlay.tsx`): `manual-row-<name>`;
   per-row checkbox "Select \<name\>", comboboxes "Series/Issue/Format for
   \<name\>"; the rejection chip (opens the popover carrying

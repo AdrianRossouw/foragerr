@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '../api/queryKeys';
-import type { QueueItem } from '../api/types';
+import type { ApiPage, QueueItem } from '../api/types';
 import { useConnectionStore } from './connectionStore';
 import {
   defaultSocketFactory,
@@ -82,18 +82,25 @@ export function WebSocketBridge({
         const { id, page, progress, sizeLeft, status } = msg.resource;
         // Patch in place — setQueryData never issues a network request. Absent
         // fields fall back to the row's existing values (a status-only tick must
-        // not blank out progress/sizeLeft into "undefined%").
-        queryClient.setQueryData<QueueItem[]>(queryKeys.queue.page(page), (prev) =>
-          prev?.map((item) =>
-            item.id === id
-              ? {
-                  ...item,
-                  progress: progress ?? item.progress,
-                  sizeLeft: sizeLeft ?? item.sizeLeft,
-                  status: status ?? item.status,
-                }
-              : item,
-          ),
+        // not blank out progress/sizeLeft into "undefined%"). The cached entry
+        // is the paging envelope, so only its records are rewritten: the page's
+        // totalRecords/pageSize are the server's and a tick does not change them.
+        queryClient.setQueryData<ApiPage<QueueItem>>(
+          queryKeys.queue.page(page),
+          (prev) =>
+            prev && {
+              ...prev,
+              records: prev.records.map((item) =>
+                item.id === id
+                  ? {
+                      ...item,
+                      progress: progress ?? item.progress,
+                      sizeLeft: sizeLeft ?? item.sizeLeft,
+                      status: status ?? item.status,
+                    }
+                  : item,
+              ),
+            },
         );
         return;
       }

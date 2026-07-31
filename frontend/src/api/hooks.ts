@@ -816,17 +816,41 @@ export function useQueueCount(): UseQueryResult<number> {
   });
 }
 
-export function useQueuePage(page: number): UseQueryResult<QueueItem[]> {
+/**
+ * GET /api/v1/queue?page= (FRG-UI-006).
+ *
+ * The cached value is the paging envelope carrying NORMALIZED records
+ * (`ApiPage<QueueItem>`): the WebSocketBridge queue-progress patch maps over
+ * `records` in place, and the page controls read `totalRecords`/`pageSize` off
+ * the same entry rather than costing a second request. `onClampPage` mirrors
+ * `usePagedQuery`: clearing the last rows of the final page would otherwise
+ * leave the screen on a page past the end.
+ */
+export function useQueuePage(
+  page: number,
+  onClampPage?: (page: number) => void,
+): UseQueryResult<ApiPage<QueueItem>> {
   const fetcher = useFetcher();
-  return useQuery({
+  const query = useQuery({
     queryKey: queryKeys.queue.page(page),
-    // The cached value is the NORMALIZED QueueItem[] (not the paging envelope):
-    // the WebSocketBridge queue-progress patch maps over this exact shape.
     queryFn: async () => {
       const body = await fetcher<QueuePageResponse>(`/api/v1/queue?page=${page}`);
-      return body.records.map(toQueueItem);
+      return { ...body, records: body.records.map(toQueueItem) };
     },
+    placeholderData: keepPreviousData,
   });
+
+  const data = query.data;
+  const isPlaceholder = query.isPlaceholderData;
+  useEffect(() => {
+    if (!onClampPage || !data || isPlaceholder) return;
+    if (data.page !== page) return;
+    if (data.records.length > 0 || page <= 1 || data.totalRecords <= 0) return;
+    const lastPage = Math.max(1, Math.ceil(data.totalRecords / data.pageSize));
+    if (lastPage < page) onClampPage(lastPage);
+  }, [data, isPlaceholder, page, onClampPage]);
+
+  return query;
 }
 
 /** The outcome vocabulary, verbatim from the release resource. */
@@ -886,28 +910,53 @@ export function useReleases(issueId: number): UseQueryResult<ReleaseSearchResult
   });
 }
 
-export interface RemoveQueueItemInput {
-  id: number;
+export interface RemoveQueueItemsInput {
+  /** The queue rows to remove; one id takes the single-item DELETE. */
+  ids: number[];
   /** Also instruct the download client to delete the downloaded data. */
   deleteData: boolean;
-  /** Also blocklist the release so it is never grabbed again. */
+  /** Also blocklist the releases so they are never grabbed again. */
   blocklist: boolean;
 }
 
-/** DELETE /api/v1/queue/{id}?blocklist=&deleteData= (FRG-UI-006). */
-export function useRemoveQueueItem(): UseMutationResult<
-  unknown,
+export interface QueueRemoveResult {
+  applied: number;
+  /** Per-row refusals; JSON object keys are strings, so the id is a string. */
+  errors: Record<string, string>;
+}
+
+/**
+ * Remove queue rows (FRG-UI-006, FRG-DL-008).
+ *
+ * One id goes to `DELETE /api/v1/queue/{id}` — the canonical single-item
+ * action, whose 4xx (409 while importing, 404) throws and surfaces on the
+ * dialog. Several ids go to `POST /api/v1/queue/remove`, which applies the
+ * same per-row semantics server-side and answers 200 with an `errors` map so
+ * one refused row cannot fail the batch. Both shapes are returned as
+ * `QueueRemoveResult` so callers never branch on which transport ran.
+ */
+export function useRemoveQueueItems(): UseMutationResult<
+  QueueRemoveResult,
   Error,
-  RemoveQueueItemInput
+  RemoveQueueItemsInput
 > {
   const fetcher = useFetcher();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, blocklist, deleteData }: RemoveQueueItemInput) =>
-      fetcher(
-        `/api/v1/queue/${id}?blocklist=${blocklist}&deleteData=${deleteData}`,
-        { method: 'DELETE' },
-      ),
+    mutationFn: async ({ ids, blocklist, deleteData }: RemoveQueueItemsInput) => {
+      if (ids.length === 1) {
+        await fetcher(
+          `/api/v1/queue/${ids[0]}?blocklist=${blocklist}&deleteData=${deleteData}`,
+          { method: 'DELETE' },
+        );
+        return { applied: 1, errors: {} };
+      }
+      const body = await fetcher<QueueRemoveResult>('/api/v1/queue/remove', {
+        method: 'POST',
+        body: { ids, blocklist, deleteData },
+      });
+      return { applied: body.applied ?? 0, errors: body.errors ?? {} };
+    },
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: queryKeys.queue.all() }),
   });

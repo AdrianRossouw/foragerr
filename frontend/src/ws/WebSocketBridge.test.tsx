@@ -12,7 +12,7 @@ import {
   useQueuePage,
 } from '../api/hooks';
 import { queryKeys } from '../api/queryKeys';
-import type { QueueItem } from '../api/types';
+import type { ApiPage, QueueItem } from '../api/types';
 import { WebSocketBridge } from './WebSocketBridge';
 import { useConnectionStore } from './connectionStore';
 import { makeFakeSocketFactory } from '../test/fakeSocket';
@@ -87,11 +87,13 @@ describe('FRG-UI-001: WebSocketBridge maps messages to cache operations', () => 
       }),
     );
 
-    const patched = client.getQueryData<QueueItem[]>(queryKeys.queue.page(1));
-    expect(patched?.find((i) => i.id === 900)?.progress).toBe(80);
-    expect(patched?.find((i) => i.id === 900)?.sizeLeft).toBe(20);
-    // Untouched row is unchanged.
-    expect(patched?.find((i) => i.id === 901)?.progress).toBe(25);
+    const patched = client.getQueryData<ApiPage<QueueItem>>(queryKeys.queue.page(1));
+    const rows = patched?.records;
+    expect(rows?.find((i) => i.id === 900)?.progress).toBe(80);
+    expect(rows?.find((i) => i.id === 900)?.sizeLeft).toBe(20);
+    // Untouched row is unchanged, and so is the envelope around them.
+    expect(rows?.find((i) => i.id === 901)?.progress).toBe(25);
+    expect(patched?.totalRecords).toBe(2);
     // No refetch was triggered by the patch.
     expect(spy).toHaveBeenCalledTimes(1);
   });
@@ -126,8 +128,8 @@ describe('FRG-UI-001: WebSocketBridge maps messages to cache operations', () => 
         resource: { id: 900, page: 1 },
       }),
     );
-    const patched = client.getQueryData<QueueItem[]>(queryKeys.queue.page(1));
-    const row = patched?.find((i) => i.id === 900);
+    const patched = client.getQueryData<ApiPage<QueueItem>>(queryKeys.queue.page(1));
+    const row = patched?.records.find((i) => i.id === 900);
     expect(row?.progress).toBe(10); // preserved, not undefined
     expect(row?.sizeLeft).toBe(90); // preserved, not undefined
     expect(spy).toHaveBeenCalledTimes(1); // still a patch, no refetch

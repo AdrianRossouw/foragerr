@@ -305,11 +305,32 @@ awaiting import, importing, imported, failed), a human-readable status message, 
 download that has finished in the client but has not been imported yet stays
 visible with an **Awaiting import** label until the next import pass picks it up,
 so a fast grab never shows an empty Queue mid-pipeline.
+Failed rows show no progress bar or byte counts — they are not moving, so their
+status and its reason carry the story instead. A row whose release name is an
+opaque download token is still identified by its series and issue columns.
+
 Items can be removed from here; an item that is actively importing refuses removal
 until the import finishes, so files are never yanked out from under the importer.
 Import-blocked rows carry a **Manual import** action that opens the resolution
 overlay (`import.md`), and the toolbar's path picker runs the same overlay over
 any folder.
+
+### Cleaning up the queue
+
+Tick the checkbox on any row — or the one in the header to take the whole page —
+and a bar appears with **Remove selected**. It opens the same removal dialog a
+single row does, with the same independent **delete data** and **blocklist**
+options, and removes everything selected in one go.
+
+**Clear failed** in the toolbar is the shortcut for the common case: it selects
+every failed row on the page and opens that same dialog, so blocklisting is still
+your explicit choice. The button is disabled while nothing has failed.
+
+Removal reports per row. Anything that could not be removed — an item that
+started importing between your click and the request, say — stays in the table,
+stays selected, and is listed by name with the reason above the table; everything
+else is removed regardless. Page controls under the table walk the rest of the
+queue when it runs past one page.
 
 ## History
 

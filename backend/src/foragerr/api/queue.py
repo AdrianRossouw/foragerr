@@ -1,4 +1,4 @@
-"""The queue HTTP surface: ``GET``/``DELETE /api/v1/queue`` (FRG-DL-008, FRG-API-007).
+"""The queue HTTP surface: ``GET``/``DELETE``/``POST`` (FRG-DL-008, FRG-API-007).
 
 The user-facing queue is assembled EXCLUSIVELY from ``tracked_downloads`` joined
 to the library — no user-facing request ever polls a download client directly
@@ -10,7 +10,8 @@ when the client reports completed.
 ``DELETE /queue/{id}`` is the one queue ACTION (not a read): it removes the item
 from tracking, instructs the download client to remove it (and its data when
 asked), and writes a blocklist row when ``blocklist=true`` — the manual-remove
-counterpart of the automatic failure loop.
+counterpart of the automatic failure loop. ``POST /queue/remove`` is that same
+action over many ids, reporting per-row rather than failing the batch.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from __future__ import annotations
 import datetime as dt
 
 from fastapi import APIRouter, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from foragerr.api.errors import ApiError
@@ -235,6 +236,71 @@ async def delete_queue_item(
     await _instruct_client_remove(db, settings, client_id, download_id, deleteData)
 
     return {"id": queue_id, "removed": True, "blocklisted": blocklist}
+
+
+#: Upper bound on one bulk remove. A queue page is 20 rows and the cap is far
+#: above any select-all, so it never truncates real work — it bounds the
+#: best-effort client calls one request can fan out into.
+_MAX_BULK_REMOVE = 500
+
+
+class QueueRemoveRequest(BaseModel):
+    """Body of ``POST /queue/remove`` (FRG-DL-008)."""
+
+    ids: list[int] = Field(min_length=1, max_length=_MAX_BULK_REMOVE)
+    blocklist: bool = False
+    deleteData: bool = False
+
+
+@router.post("/remove", status_code=200)
+async def remove_queue_items(
+    body: QueueRemoveRequest, request: Request
+) -> dict[str, object]:
+    """Remove many queue items in one request (FRG-DL-008, FRG-DL-010).
+
+    Each id gets the single ``DELETE``'s exact semantics — an ``importing`` row
+    is refused, ``blocklist`` writes the shared multi-field key, client removal
+    is best-effort — but a refusal lands in ``errors`` under that id instead of
+    failing the batch: one stuck row must never veto a queue cleanup.
+
+    De-tracking runs in ONE write transaction, so the ``importing`` guard is
+    read inside the transaction that deletes (a drain cannot claim a row in a
+    read-then-write window). Client removals run only AFTER that transaction
+    commits: once a row is de-tracked no drain can pick it up, so deleting its
+    data cannot race an in-flight import. A client removal that fails is logged
+    and left out of ``errors`` — the row IS de-tracked, which is what the
+    caller asked about.
+    """
+    db = request.app.state.db
+    settings = request.app.state.settings
+    now = utcnow()
+    importing = TrackedDownloadState.IMPORTING.value
+
+    errors: dict[int, str] = {}
+    removed: list[tuple[int | None, str]] = []
+    async with db.write_session() as session:
+        # dict.fromkeys: a repeated id is one removal, not a second 404.
+        for queue_id in dict.fromkeys(body.ids):
+            row = await session.get(TrackedDownloadRow, queue_id)
+            if row is None:
+                errors[queue_id] = f"queue item {queue_id} not found"
+                continue
+            if row.state == importing:
+                errors[queue_id] = (
+                    "import in progress for this item; try again once it completes"
+                )
+                continue
+            if body.blocklist:
+                await _write_manual_blocklist(session, row, now)
+            removed.append((row.client_id, row.download_id))
+            await session.delete(row)
+
+    for client_id, download_id in removed:
+        await _instruct_client_remove(
+            db, settings, client_id, download_id, body.deleteData
+        )
+
+    return {"applied": len(removed), "errors": errors}
 
 
 async def _instruct_client_remove(
