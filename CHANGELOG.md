@@ -9,6 +9,31 @@ history. Each release is also published as a GitHub Release carrying the same
 notes. There is no published container image and no support expectation — see
 README `License & contributions`.
 
+## [v0.23.0] — 2026-07-31
+
+You can tell foragerr what is and isn't a comic, and it will not argue.
+
+### Added
+- **Mark items non-comic (or comic) yourself**, one row at a time or over
+  a whole selection — including a whole bundle. Your decision sticks:
+  no sync and no publisher-rule change ever moves an item you classified,
+  in either direction. This is the answer for bundle items that carry no
+  publisher at all, which publisher rules can never catch. (FRG-SRC-016)
+- The non-comic toggle now says how many items it is holding back (or
+  showing), so nothing hides silently.
+
+### Changed
+- Agreeing with foragerr's own guess does not take the item away from
+  publisher rules — only a real disagreement is recorded as yours.
+- Items you mark non-comic leave duplicate sets: duplicate detection
+  exists to spare you double-reviewing comics. (FRG-SRC-015)
+- An item marked comic now carries everything acquisition needs, so it
+  downloads like any other comic — and a later sync does not undo that.
+
+### Upgrade notes
+- Migration 0033 adds the classification-provenance column; existing
+  items read as automatically classified, exactly as before.
+
 ## [v0.22.0] — 2026-07-31
 
 ### Added
