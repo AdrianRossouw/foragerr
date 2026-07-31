@@ -3,7 +3,8 @@
 Once the repository is public, README.md is the labelling a reader trusts and
 LICENSE is the grant they rely on. These tests pin the three license statements
 (LICENSE file, pyproject declaration, README labelling) to each other so an
-edit cannot let them drift apart, and hold the README to the labelling rules of
+edit cannot let them drift apart, pin the lockfile's recorded project version to
+the declared one (FRG-PROC-013), and hold the README to the labelling rules of
 FRG-PROC-014: resolvable traceability links, tour captions that cite the right
 spec area for each requirement, shipped-only feature claims outside the
 Roadmap, and no stale private-tool self-description anywhere in the controlled
@@ -55,6 +56,28 @@ def test_pyproject_declares_gpl3():
     assert project["license"] == "GPL-3.0-or-later", (
         "pyproject.toml [project].license must carry the SPDX expression "
         "matching the LICENSE file"
+    )
+
+
+@pytest.mark.req("FRG-PROC-013")
+def test_lockfile_records_the_declared_release_version():
+    """``uv.lock`` pins the project's OWN version alongside its dependencies',
+    and the release bump touches only ``pyproject.toml`` — so the lock drifts
+    silently, and the image built from it (the Dockerfile copies the lock)
+    carries a version the release never was.
+
+    The lock is refreshed by re-running ``uv lock`` after the bump; this test is
+    what makes forgetting it a red gate instead of a discovery three releases
+    later.
+    """
+    with open(REPO_ROOT / "backend" / "pyproject.toml", "rb") as f:
+        declared = tomllib.load(f)["project"]["version"]
+    with open(REPO_ROOT / "backend" / "uv.lock", "rb") as f:
+        locked = [p for p in tomllib.load(f)["package"] if p["name"] == "foragerr"]
+    assert len(locked) == 1, "uv.lock must record the project itself exactly once"
+    assert locked[0]["version"] == declared, (
+        f"uv.lock records foragerr {locked[0]['version']} but pyproject.toml "
+        f"declares {declared} — re-run `uv lock` after the version bump"
     )
 
 
