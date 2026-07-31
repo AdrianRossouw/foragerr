@@ -399,6 +399,72 @@ async def test_auto_accept_skips_a_row_decided_while_the_run_was_working(
     assert {c[1]["entitlement_id"] for c in commands.grabs()} == {keep}
 
 
+@pytest.mark.req("FRG-SRC-016")
+async def test_auto_accept_skips_a_row_marked_non_comic_while_the_run_was_working(
+    db, config_dir, root_folder_id, format_profile_id
+):
+    """The classification mark races the same window as an ignore, and the
+    review-state check alone cannot see it: a marked row is still ``new``. A
+    match landing on top of it would be worse than a lost mark — classification
+    is review-time only, so the row would refuse every further mark with
+    "already matched", stranding the correction the operator just made.
+    """
+    from foragerr.sources import review
+    from foragerr.sources.enrich import _auto_accept
+    from foragerr.sources.matching import MatchCandidate, ProposedMatch
+
+    source = await _source(db, auto_sync=True)
+    await _series(
+        db,
+        root_folder_id,
+        format_profile_id,
+        cvid=912,
+        title="Synthetic Hero",
+        path="/tmp/comics/sh912",
+    )
+    async with db.read_session() as session:
+        from sqlalchemy import select
+
+        from foragerr.library.models import SeriesRow
+
+        series_id = (
+            await session.execute(
+                select(SeriesRow.id).where(SeriesRow.cv_volume_id == 912)
+            )
+        ).scalar_one()
+    keep = await _new_comic(db, source.id, "Synthetic Hero #1", machine_name="keep")
+    marked = await _new_comic(
+        db, source.id, "Synthetic Sourcebook", machine_name="marked"
+    )
+
+    confident = ProposedMatch(
+        best=MatchCandidate(
+            kind="library",
+            series_id=series_id,
+            cv_volume_id=912,
+            title="Synthetic Hero",
+            year=2018,
+            confidence=1.0,
+        )
+    )
+    await review.classify_entitlement(db, marked, classification="other")
+
+    commands = FakeCommands()
+    accepted = await _auto_accept(
+        db,
+        make_settings(config_dir),
+        {keep: confident, marked: confident},
+        commands=commands,
+        cv_configured=True,
+    )
+
+    assert accepted == 1
+    after = await repo.get_entitlement(db, marked)
+    assert after.review_status == "new"
+    assert after.matched_series_id is None
+    assert {c[1]["entitlement_id"] for c in commands.grabs()} == {keep}
+
+
 @pytest.mark.req("FRG-SRC-011")
 async def test_auto_accept_write_transaction_recheck_wins_the_toctou(
     db, config_dir, root_folder_id, format_profile_id, monkeypatch

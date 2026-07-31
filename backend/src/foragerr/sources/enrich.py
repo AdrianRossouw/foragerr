@@ -389,10 +389,14 @@ async def _auto_accept(
     snapshot taken before the (potentially long) persist + accept run, and the
     operator is looking at the same queue: a row ignored or matched by hand
     while the loop is working is a decision, and auto-sync must not walk over it
-    with a proposal computed before that decision existed. ``accept_entitlement``
-    is not the seam here — auto-sync calls match/add directly — so the check
-    lives here; the authoritative in-transaction guard remains ``_queue_grab``'s
-    ``matched`` re-read.
+    with a proposal computed before that decision existed. The CLASSIFICATION is
+    re-read on the same terms (FRG-SRC-016): a row marked non-comic mid-run is
+    still ``new``, so the review-state check alone would let auto-sync match it
+    — and a matched row refuses the mark, leaving the operator's correction
+    un-editable behind an "already matched" it never asked for.
+    ``accept_entitlement`` is not the seam here — auto-sync calls match/add
+    directly — so the check lives here; the authoritative in-transaction guard
+    remains ``_queue_grab``'s ``matched`` re-read.
     """
     accepted = 0
     for eid, proposal in proposals.items():
@@ -401,6 +405,8 @@ async def _auto_accept(
         current = await repo.get_entitlement(db, eid)
         if current is None or current.review_status != "new":
             continue  # decided by the operator mid-run — never overwrite it
+        if current.classification != "comic":
+            continue  # marked non-comic mid-run (FRG-SRC-016) — not a comic
         if cv_configured and proposal.universe != UNIVERSE_COMICVINE:
             logger.warning(
                 "auto-sync: refusing entitlement %s — %s proposal on a "
