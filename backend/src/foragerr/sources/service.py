@@ -377,10 +377,23 @@ async def _persist_order(
                 )
                 if _classifier_owns(existing):
                     existing.classification = classification
-                existing.preferred_format = preferred.format if preferred else None
-                existing.md5 = preferred.md5 if preferred else None
-                existing.file_size = preferred.file_size if preferred else None
-                existing.filename = preferred.filename if preferred else None
+                # The identity fields name the copy a grab fetches, so a payload
+                # that HAS one always refreshes them. The absent case is not a
+                # refresh but an erasure, and erasing them from a row that is
+                # (or was marked) a comic makes it permanently un-grabbable —
+                # acceptance reads md5/filename — with no operator action that
+                # recovers it. Erase only where the row's own classification
+                # says there is nothing to grab.
+                if preferred is not None:
+                    existing.preferred_format = preferred.format
+                    existing.md5 = preferred.md5
+                    existing.file_size = preferred.file_size
+                    existing.filename = preferred.filename
+                elif effective != "comic":
+                    existing.preferred_format = None
+                    existing.md5 = None
+                    existing.file_size = None
+                    existing.filename = None
                 existing.formats_json = formats_json
                 existing.updated_at = now
                 result.updated_entitlements += 1
