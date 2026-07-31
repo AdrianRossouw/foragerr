@@ -27,8 +27,8 @@
  *   BASE_URL  base URL of the running app        (default: the loopback URL below)
  *   OUT_DIR   output directory for the PNGs      (default ../docs/readme-assets)
  *   SHOTS     comma-separated subset of shot ids (default: all)
- *             ids: comics-grid, series-detail, creators-grid, wanted,
- *                  manual-import, settings, sources
+ *             ids: comics-grid, series-detail, creators-grid, calendar,
+ *                  wanted, manual-import, settings, sources
  *   SERIES    preferred series title for the detail shot (default "Planet")
  */
 import { chromium, type Page } from '@playwright/test';
@@ -179,6 +179,23 @@ const shots: Shot[] = [
       });
       await settle(page);
       await shoot(page, 'creators-grid');
+    },
+  },
+  {
+    id: 'calendar',
+    run: async (page) => {
+      // The current week's shelf (FRG-UI-018 / FRG-UI-042). The capture
+      // instance's week is seeded from its own library by
+      // tools/seed_readme_calendar.py — without that the week is empty, and
+      // an empty agenda would silently overwrite the committed asset, so wait
+      // for actual shelf ROWS (the wide-viewport presentation) rather than for
+      // the agenda container, which renders either way.
+      await page.goto(`${BASE_URL}/calendar`, { waitUntil: 'domcontentloaded' });
+      await page.waitForSelector('[data-testid^="calendar-card-"][data-mode="row"]', {
+        timeout: 30_000,
+      });
+      await settle(page);
+      await shoot(page, 'calendar');
     },
   },
   {
