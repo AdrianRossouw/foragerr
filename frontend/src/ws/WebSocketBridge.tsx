@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '../api/queryKeys';
-import type { ApiPage, QueueItem } from '../api/types';
+import type { QueuePage } from '../api/types';
 import { useConnectionStore } from './connectionStore';
 import {
   defaultSocketFactory,
@@ -85,7 +85,7 @@ export function WebSocketBridge({
         // not blank out progress/sizeLeft into "undefined%"). The cached entry
         // is the paging envelope, so only its records are rewritten: the page's
         // totalRecords/pageSize are the server's and a tick does not change them.
-        queryClient.setQueryData<ApiPage<QueueItem>>(
+        queryClient.setQueryData<QueuePage>(
           queryKeys.queue.page(page),
           (prev) =>
             prev && {

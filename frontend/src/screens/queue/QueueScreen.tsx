@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Toolbar } from '../../components/Toolbar';
 import { PageControls } from '../../components/PageControls';
@@ -25,20 +25,56 @@ import styles from './QueueScreen.module.css';
 const HIDDEN: ReadonlySet<QueueItem['status']> = new Set(['imported', 'ignored']);
 
 /**
- * A row that has stopped moving. Its size/remaining are whatever the client
+ * Rows that have stopped moving. Their size/remaining are whatever the client
  * last reported, so a progress bar over them reads as live progress that is not
  * happening — the status chip and its reason carry the state instead.
+ * `failed_pending` belongs here too: it is a real visible state whose bytes are
+ * as stale as a terminal failure's.
  */
-function isFailed(item: QueueItem): boolean {
+const STALLED: ReadonlySet<QueueItem['status']> = new Set(['failed', 'failed_pending']);
+
+function hasStaleProgress(item: QueueItem): boolean {
+  return STALLED.has(item.status);
+}
+
+/**
+ * Clear failed's reach, deliberately NARROWER than the stalled set: a
+ * `failed_pending` row is mid-transition through the failure loop, and sweeping
+ * it would de-track a row the loop is still deciding about.
+ */
+function isTerminallyFailed(item: QueueItem): boolean {
   return item.status === 'failed';
+}
+
+/** What the remove dialog was opened for: named rows, or a server-side scope. */
+interface RemoveTarget {
+  items: QueueItem[];
+  scope?: 'failed';
+  scopeCount?: number;
+}
+
+/** A refusal, keyed by the row it names — two rows can refuse identically. */
+interface Notice {
+  id: number;
+  text: string;
 }
 
 export function QueueScreen() {
   const [page, setPage] = useState(1);
-  const { data, isLoading, isError } = useQueuePage(page, setPage);
   const [selected, setSelected] = useState<ReadonlySet<number>>(new Set());
-  const [removeTargets, setRemoveTargets] = useState<QueueItem[] | null>(null);
-  const [notices, setNotices] = useState<string[]>([]);
+  const [removeTarget, setRemoveTarget] = useState<RemoveTarget | null>(null);
+  const [notices, setNotices] = useState<Notice[]>([]);
+  /**
+   * Selection, the bulk bar's count and the refusal notices are all about the
+   * rows on screen, so leaving the page retires all three: ticks the operator
+   * can no longer see would otherwise ride into the next bulk remove.
+   */
+  const goToPage = useCallback((next: number) => {
+    setPage(next);
+    setSelected(new Set());
+    setNotices([]);
+  }, []);
+  const { data, isLoading, isError } = useQueuePage(page, goToPage);
   // The manual-import overlay's single source: a blocked download (from a row
   // action) OR a managed folder path (from the toolbar path picker).
   const [manualSource, setManualSource] = useState<ManualImportSource | null>(null);
@@ -47,7 +83,10 @@ export function QueueScreen() {
 
   const items = (data?.records ?? []).filter((item) => !HIDDEN.has(item.status));
   const selectedItems = items.filter((item) => selected.has(item.id));
-  const failedItems = items.filter(isFailed);
+  const failedOnPage = items.filter(isTerminallyFailed);
+  // The whole backlog, from the envelope — Clear failed removes every failed
+  // row, so a page-derived count would both mis-state and mis-disable it.
+  const failedTotal = data?.failedRecords ?? 0;
   const allSelected = items.length > 0 && selectedItems.length === items.length;
 
   const toggleSelected = (id: number) => {
@@ -61,23 +100,37 @@ export function QueueScreen() {
     setSelected(allSelected ? new Set() : new Set(items.map((item) => item.id)));
   };
 
+  /** Open the remove dialog; a stale refusal from the last attempt retires. */
+  const openRemove = (target: RemoveTarget) => {
+    setNotices([]);
+    setRemoveTarget(target);
+  };
+
   const clearFailed = () => {
-    // Selection sugar: the same dialog, the same removal — Clear failed only
-    // decides WHICH rows are named, never how they are removed.
-    setSelected(new Set(failedItems.map((item) => item.id)));
-    setRemoveTargets(failedItems);
+    // The same dialog and the same removal as any other — Clear failed only
+    // decides WHICH rows are named. It names them by SCOPE rather than by id
+    // because the backlog it clears is the queue's, not this page's.
+    openRemove({ items: failedOnPage, scope: 'failed', scopeCount: failedTotal });
   };
 
   /** Report what did NOT remove, and leave exactly those rows selected. */
-  const reportOutcome = (targets: QueueItem[], result: QueueRemoveResult) => {
-    const nameById = new Map(targets.map((item) => [item.id, queueItemName(item)]));
+  const reportOutcome = (target: RemoveTarget, result: QueueRemoveResult) => {
+    const nameById = new Map(
+      [...target.items, ...items].map((item) => [item.id, queueItemName(item)]),
+    );
     const failures = Object.entries(result.errors);
     setNotices(
-      failures.map(
-        ([id, reason]) => `${nameById.get(Number(id)) ?? `Item ${id}`}: ${reason}`,
-      ),
+      failures.map(([id, reason]) => ({
+        id: Number(id),
+        text: `${nameById.get(Number(id)) ?? `Item ${id}`}: ${reason}`,
+      })),
     );
-    setSelected(new Set(failures.map(([id]) => Number(id))));
+    // Only rows on THIS page can be selected (the bulk bar counts this page),
+    // so a scope refusal from another page is reported without being ticked.
+    const onPage = new Set(items.map((item) => item.id));
+    setSelected(
+      new Set(failures.map(([id]) => Number(id)).filter((id) => onPage.has(id))),
+    );
   };
 
   const openManualForDownload = (item: QueueItem) => {
@@ -103,7 +156,7 @@ export function QueueScreen() {
             <button
               type="button"
               className={styles.btn}
-              disabled={failedItems.length === 0}
+              disabled={failedTotal === 0}
               onClick={clearFailed}
             >
               Clear failed
@@ -126,7 +179,7 @@ export function QueueScreen() {
             Some items could not be removed:
             <ul className={styles.noticeList}>
               {notices.map((notice) => (
-                <li key={notice}>{notice}</li>
+                <li key={notice.id}>{notice.text}</li>
               ))}
             </ul>
           </div>
@@ -139,7 +192,7 @@ export function QueueScreen() {
             <button
               type="button"
               className={styles.btn}
-              onClick={() => setRemoveTargets(selectedItems)}
+              onClick={() => openRemove({ items: selectedItems })}
             >
               Remove selected
             </button>
@@ -181,7 +234,7 @@ export function QueueScreen() {
                     item={item}
                     selected={selected.has(item.id)}
                     onToggleSelected={() => toggleSelected(item.id)}
-                    onRemove={() => setRemoveTargets([item])}
+                    onRemove={() => openRemove({ items: [item] })}
                     onManualImport={() => openManualForDownload(item)}
                   />
                 ))}
@@ -194,15 +247,17 @@ export function QueueScreen() {
             page={data.page}
             totalRecords={data.totalRecords}
             pageSize={data.pageSize}
-            onPageChange={setPage}
+            onPageChange={goToPage}
           />
         )}
       </div>
-      {removeTargets && (
+      {removeTarget && (
         <RemoveQueueDialog
-          items={removeTargets}
-          onClose={() => setRemoveTargets(null)}
-          onRemoved={(result) => reportOutcome(removeTargets, result)}
+          items={removeTarget.items}
+          scope={removeTarget.scope}
+          scopeCount={removeTarget.scopeCount}
+          onClose={() => setRemoveTarget(null)}
+          onRemoved={(result) => reportOutcome(removeTarget, result)}
         />
       )}
       {manualSource && (
@@ -262,7 +317,7 @@ function QueueRow({
   onRemove: () => void;
   onManualImport: () => void;
 }) {
-  const failed = isFailed(item);
+  const stalled = hasStaleProgress(item);
   return (
     <tr data-testid={`queue-row-${item.id}`}>
       <td className={styles.selectCol}>
@@ -287,7 +342,7 @@ function QueueRow({
       </td>
       <td className={styles.muted}>{item.indexer ?? '—'}</td>
       <td className={styles.progressCell}>
-        {failed ? (
+        {stalled ? (
           <span className={styles.muted}>—</span>
         ) : (
           <>
@@ -317,7 +372,7 @@ function QueueRow({
         )}
       </td>
       <td className={styles.numeric}>
-        {failed ? '—' : formatEta(item.estimatedCompletion)}
+        {stalled ? '—' : formatEta(item.estimatedCompletion)}
       </td>
       <td className={styles.actionsCell}>
         <span className={styles.actionsGroup}>

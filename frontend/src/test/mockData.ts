@@ -90,6 +90,7 @@ export function mockQueueEnvelope(records: QueueResourceRaw[]): QueuePageRespons
     sortKey: 'added_at',
     sortDirection: 'desc',
     totalRecords: records.length,
+    failedRecords: records.filter((r) => r.state === 'failed').length,
     records,
   };
 }

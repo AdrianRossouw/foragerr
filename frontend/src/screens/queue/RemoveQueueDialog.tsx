@@ -5,8 +5,15 @@ import type { QueueItem } from '../../api/types';
 import styles from './QueueScreen.module.css';
 
 export interface RemoveQueueDialogProps {
-  /** The rows to remove — one from a row action, many from a selection. */
+  /** The rows to NAME — one from a row action, many from a selection. */
   items: QueueItem[];
+  /**
+   * When set, the server removes every row the scope covers rather than the
+   * `items` listed here: `items` is then only the part of the scope this page
+   * happens to hold, and `scopeCount` is its true size.
+   */
+  scope?: 'failed';
+  scopeCount?: number;
   onClose: () => void;
   /** Handed the per-row outcome so the screen can report what did not remove. */
   onRemoved?: (result: QueueRemoveResult) => void;
@@ -27,6 +34,8 @@ export function queueItemName(item: QueueItem): string {
  */
 export function RemoveQueueDialog({
   items,
+  scope,
+  scopeCount,
   onClose,
   onRemoved,
 }: RemoveQueueDialogProps) {
@@ -34,8 +43,14 @@ export function RemoveQueueDialog({
   const [blocklist, setBlocklist] = useState(false);
   const remove = useRemoveQueueItems();
 
-  const single = items.length === 1 ? items[0] : null;
-  const displayName = single ? queueItemName(single) : `${items.length} queue items`;
+  // What the confirmation promises must be what the request does: under a scope
+  // the count is the backlog's, not the loaded page's.
+  const targetCount = scope ? (scopeCount ?? items.length) : items.length;
+  const single = !scope && items.length === 1 ? items[0] : null;
+  const displayName = single
+    ? queueItemName(single)
+    : `${targetCount} ${scope === 'failed' ? 'failed ' : ''}queue items`;
+  const unlisted = targetCount - items.length;
 
   return (
     <Modal
@@ -50,10 +65,12 @@ export function RemoveQueueDialog({
           <button
             type="button"
             className={styles.btnDanger}
-            disabled={remove.isPending || items.length === 0}
+            disabled={remove.isPending || targetCount === 0}
             onClick={() =>
               remove.mutate(
-                { ids: items.map((item) => item.id), deleteData, blocklist },
+                scope
+                  ? { scope, deleteData, blocklist }
+                  : { ids: items.map((item) => item.id), deleteData, blocklist },
                 {
                   onSuccess: (result) => {
                     onRemoved?.(result);
@@ -76,6 +93,11 @@ export function RemoveQueueDialog({
           {items.map((item) => (
             <li key={item.id}>{queueItemName(item)}</li>
           ))}
+          {unlisted > 0 && (
+            // The scope reaches rows this page never loaded; naming only the
+            // visible ones would understate what Remove is about to do.
+            <li>…and {unlisted} more on other pages</li>
+          )}
         </ul>
       )}
       <label className={styles.dialogOption}>
