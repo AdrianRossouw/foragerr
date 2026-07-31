@@ -3,12 +3,14 @@
 # refresh-readme-shots.sh (FRG-PROC-017) — one command to regenerate the README
 # tour's screenshots from the running app against the public-domain demo library.
 #
-# Pipeline: run -> populate -> capture -> optimize -> verify.
+# Pipeline: run -> populate -> seed -> capture -> optimize -> verify.
 #   1. run      start the backend serving the built SPA against /comics
 #   2. populate register /comics and library-import it when the library is empty
-#   3. capture  drive the app with e2e/scripts/capture-readme-shots.ts
-#   4. optimize quantize every PNG down to the in-repo asset budget (<=300 KB)
-#   5. verify   fail (non-zero) if any expected shot is missing or over budget
+#   3. seed     fill the current pull week from the imported library, so the
+#               Calendar's shelf has rows (tools/seed_readme_calendar.py)
+#   4. capture  drive the app with e2e/scripts/capture-readme-shots.ts
+#   5. optimize quantize every PNG down to the in-repo asset budget (<=300 KB)
+#   6. verify   fail (non-zero) if any expected shot is missing or over budget
 #
 # A change that alters the shipped UI's appearance re-runs this and commits the
 # refreshed docs/readme-assets/*.png so the public labelling never lags the
@@ -245,6 +247,21 @@ except Exception: print(0)')"
   [ "${BUSY}" = "0" ] && break
   sleep 2
 done
+
+# --- Seed the current pull week so the Calendar has a shelf to show ---------
+# The Calendar renders the CURRENT release week from stored pull entries
+# (enrichment lives only there, FRG-PULL-011), and a demo library store-dated
+# in the 1940s puts nothing in it. Seed the week from the instance's own
+# imported library rather than the live feed — the shots are public and must
+# stay public-domain, and no third party's uptime may gate a refresh. Only for
+# an instance this script started: against a reused operator instance the week
+# is real data and must be left alone (the seeder refuses a populated week
+# anyway, so the reuse path simply captures whatever is genuinely there).
+if [ "${REUSING:-}" != "1" ]; then
+  log "seeding the current pull week for the calendar shot…"
+  ( cd "${REPO}/backend" && exec uv run python "${REPO}/tools/seed_readme_calendar.py" ) \
+    || fail "seeding the calendar week failed"
+fi
 
 # --- Optional: connect the Humble source so the Sources shot shows the real
 # connected/entitlement view instead of the empty connect card ----------------

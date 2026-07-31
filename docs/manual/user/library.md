@@ -35,8 +35,11 @@ Clicking a card, row, or table row opens that series' detail page.
 ### Sort menu
 
 Orders the list by **Title** (default), **Publisher**, **Issues owned** (most
-owned first), or **Year** (newest start year first); ties under every non-title
-sort fall back to title order. The active choice carries a check mark.
+owned first), **Year** (newest start year first), **Size on disk** (largest
+aggregate file size first), or **Latest issue** (most recent known release
+date first, series with no known release date last); ties under every
+non-title sort fall back to title order. The active choice carries a check
+mark.
 
 ### Filter menu
 

@@ -84,7 +84,10 @@ and Year columns. Above the content a count line SHALL read
 missing counts in their semantic colors. The toolbar SHALL carry the view
 switcher and three dropdown menus in the design's raised-menu style —
 **Options** (poster-size segmented control, group-volumes toggle), **Sort**
-(Title, Publisher, Issues owned, Year; check mark on the active choice;
+(Title, Publisher, Issues owned, Year, Size on disk, Latest issue; check
+mark on the active choice; Size on disk orders by the series' aggregate
+file bytes descending, Latest issue by the most recent known release date
+descending with undated series last, both tiebreaking on title;
 sorting applies to the flat views, so the menu is disabled while grouping is
 on), and **Filter** (All, Monitored, Missing issues, Continuing; each option
 showing its count; plus an EDITIONS section carrying the FRG-UI-022
@@ -131,6 +134,16 @@ persist across sessions.
 
 - **WHEN** the user clicks a series card, overview row, or table row
 - **THEN** the series-detail screen opens for that series
+
+
+#### Scenario: Size and recency sorts order by the stored statistics
+
+- **WHEN** the user picks Size on disk, then Latest issue
+- **THEN** the flat views order by the series statistics' size-on-disk
+  (largest first), then by the most recent known release date (newest
+  first, undated series after all dated ones), each choice shows its
+  check mark and persists across a reload, and no additional requests
+  are made (the statistics already ride the index payload)
 
 ### Requirement: FRG-UI-004 — Series detail screen
 

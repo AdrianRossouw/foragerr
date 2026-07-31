@@ -102,6 +102,24 @@ function sortSeries(
           (b.start_year ?? -Infinity) - (a.start_year ?? -Infinity) || byTitle(a, b),
       );
       break;
+    case 'size':
+      // Largest aggregate file size first; a missing/zero size sorts last.
+      sorted.sort(
+        (a, b) =>
+          (b.statistics.size_on_disk || 0) - (a.statistics.size_on_disk || 0) ||
+          byTitle(a, b),
+      );
+      break;
+    case 'latest':
+      // Most recent known release date first; undated series sort last. ISO
+      // date strings compare correctly lexicographically, so no Date parsing.
+      sorted.sort(
+        (a, b) =>
+          (b.statistics.last_release_date ?? '').localeCompare(
+            a.statistics.last_release_date ?? '',
+          ) || byTitle(a, b),
+      );
+      break;
     default:
       sorted.sort(byTitle);
   }
@@ -1083,6 +1101,18 @@ export function LibraryIndex() {
                   active={sortKey === 'year'}
                   onClick={() => setSortKey('year')}
                   testId="sort-year"
+                />
+                <CheckRow
+                  label="Size on disk"
+                  active={sortKey === 'size'}
+                  onClick={() => setSortKey('size')}
+                  testId="sort-size"
+                />
+                <CheckRow
+                  label="Latest issue"
+                  active={sortKey === 'latest'}
+                  onClick={() => setSortKey('latest')}
+                  testId="sort-latest"
                 />
               </Menu>
 

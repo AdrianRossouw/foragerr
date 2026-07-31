@@ -248,6 +248,50 @@ describe('FRG-UI-003: library index', () => {
     expect(posterTitles()).toEqual(['Saga']);
   });
 
+  it('FRG-UI-003 — Size on disk and Latest issue sort by the stored statistics, ties fall back to title', async () => {
+    const records = [
+      makeSeriesResource({
+        id: 1,
+        title: 'Zeta',
+        sort_title: 'zeta',
+        statistics: makeStats({ size_on_disk: 100, last_release_date: '2020-01-01' }),
+      }),
+      makeSeriesResource({
+        id: 2,
+        title: 'Alpha',
+        sort_title: 'alpha',
+        statistics: makeStats({ size_on_disk: 500, last_release_date: null }),
+      }),
+      makeSeriesResource({
+        id: 3,
+        title: 'Mid',
+        sort_title: 'mid',
+        statistics: makeStats({ size_on_disk: 500, last_release_date: '2024-06-01' }),
+      }),
+      makeSeriesResource({
+        id: 4,
+        title: 'Beta',
+        sort_title: 'beta',
+        statistics: makeStats({ size_on_disk: 0, last_release_date: null }),
+      }),
+    ];
+    renderLibrary(records);
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getAllByTestId('series-card')).toHaveLength(4));
+
+    // Size on disk: largest first; the 500-byte tie (Alpha/Mid) breaks on title.
+    await pickSort(user, 'sort-size');
+    expect(posterTitles()).toEqual(['Alpha', 'Mid', 'Zeta', 'Beta']);
+    expect(screen.getByTestId('sort-size').getAttribute('data-active')).toBe('true');
+
+    // Latest issue: most recent date first; undated series (Alpha/Beta) sort
+    // last and break their tie on title too.
+    await pickSort(user, 'sort-latest');
+    expect(posterTitles()).toEqual(['Mid', 'Zeta', 'Alpha', 'Beta']);
+    expect(screen.getByTestId('sort-latest').getAttribute('data-active')).toBe('true');
+    expect(screen.getByTestId('sort-size').getAttribute('data-active')).toBe('false');
+  });
+
   it('FRG-UI-003 — the count line reports total, monitored (accent) and with-missing counts', async () => {
     const records = [
       makeSeriesResource({ id: 1, monitored: true, statistics: makeStats({ missing_count: 3 }) }),
@@ -325,7 +369,7 @@ describe('FRG-UI-003: library index', () => {
     const s = useUiStore.getState();
     s.setLibraryViewMode('table');
     s.setLibraryPosterSize('l');
-    s.setLibrarySortKey('year');
+    s.setLibrarySortKey('size');
     s.setLibraryStatusFilter('monitored');
     s.setLibraryCollectedFilter('collected');
 
@@ -333,10 +377,16 @@ describe('FRG-UI-003: library index', () => {
     expect(persisted.state).toEqual({
       libraryViewMode: 'table',
       libraryPosterSize: 'l',
-      librarySortKey: 'year',
+      librarySortKey: 'size',
       libraryStatusFilter: 'monitored',
       libraryCollectedFilter: 'collected',
     });
+
+    // 'latest' round-trips too — both new keys are valid, not just 'size'.
+    s.setLibrarySortKey('latest');
+    expect(
+      JSON.parse(localStorage.getItem('foragerr-library-view')!).state.librarySortKey,
+    ).toBe('latest');
 
     // A stale session (an old 'added' sort, a bogus mode/size) sanitizes back to
     // defaults on rehydration rather than crashing a render.
