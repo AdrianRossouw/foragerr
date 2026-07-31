@@ -5,6 +5,7 @@ import { renderWithProviders } from '../../test/renderWithProviders';
 import { createQueryClient } from '../../queryClient';
 import { makeCommand, makeSeriesResource } from '../../test/mockData';
 import { SUGGEST_DEBOUNCE_MS } from '../../api/hooks';
+import { SETTLE_TIMEOUT_MS } from '../../api/sourceHooks';
 import { ApiRequestError, type Fetcher, type FetcherInit } from '../../api/fetcher';
 import type {
   EntitlementResource,
@@ -554,8 +555,8 @@ describe('FRG-UI-029: manage view review', () => {
     await user.click(selectAll);
     expect(screen.getByTestId('bulk-bar')).toHaveTextContent('3 selected');
 
-    // Narrowing the scope narrows the selection with it — "N selected" always
-    // counts rows on screen, so a bulk action cannot reach across scopes.
+    // Changing scope reads the selection through the new one — "N selected"
+    // always counts rows on screen, so a bulk action cannot reach across scopes.
     await user.click(screen.getByTestId('filter-new'));
     expect(screen.getByTestId('select-all')).toHaveTextContent('Select all 1');
     expect(screen.getByTestId('bulk-bar')).toHaveTextContent('1 selected');
@@ -568,6 +569,86 @@ describe('FRG-UI-029: manage view review', () => {
       entitlement_ids: number[];
     };
     expect(body.entitlement_ids).toEqual([11]);
+  });
+
+  it('FRG-UI-029 — arrowing across the filter segments does not destroy a select-all', async () => {
+    const user = userEvent.setup();
+    const state: FetcherState = { sources: [source], entitlements, calls: [] };
+    renderScreen(state);
+
+    await user.click(await screen.findByTestId('select-all'));
+    expect(screen.getByTestId('bulk-bar')).toHaveTextContent('3 selected');
+
+    // The segments are a radiogroup, so an arrow key MOVES SCOPE. A selection
+    // trimmed to each scope on the way through would be destroyed by passing
+    // over one — and there is no undo for a select-all of 289.
+    await user.click(screen.getByTestId('filter-all'));
+    await user.keyboard('{ArrowLeft}'); // wraps to the last segment: Non-comic
+    expect(screen.getByTestId('entitlement-row-13')).toBeInTheDocument();
+    expect(screen.getByTestId('bulk-bar')).toHaveTextContent('0 selected');
+
+    await user.keyboard('{ArrowRight}'); // …and straight back
+    expect(screen.getByTestId('bulk-bar')).toHaveTextContent('3 selected');
+
+    // Held whole, read scoped: the request still carries only in-scope ids.
+    await user.click(screen.getByTestId('filter-ignored'));
+    expect(screen.getByTestId('bulk-bar')).toHaveTextContent('1 selected');
+    await user.click(screen.getByTestId('bulk-restore'));
+    await waitFor(() =>
+      expect(state.calls.find((c) => c.path.endsWith('/bulk'))).toBeTruthy(),
+    );
+    const body = state.calls.find((c) => c.path.endsWith('/bulk'))!.init!.body as {
+      entitlement_ids: number[];
+    };
+    expect(body.entitlement_ids).toEqual([12]);
+  });
+
+  it('FRG-UI-029 — each bulk action states how much of the selection it can apply to', async () => {
+    const user = userEvent.setup();
+    // The reported shape: one scope, three review statuses. Non-comic is not
+    // sub-divided by status (the scope model is one-dimensional), so a select-all
+    // here legitimately spans rows most actions refuse.
+    const state: FetcherState = {
+      sources: [source],
+      entitlements: [
+        ent({ id: 80, classification: 'other', review_status: 'new' }),
+        ent({ id: 81, classification: 'other', review_status: 'ignored' }),
+        ent({
+          id: 82,
+          classification: 'other',
+          review_status: 'matched',
+          matched_series_id: 1,
+        }),
+      ],
+      calls: [],
+    };
+    renderScreen(state);
+
+    await user.click(await screen.findByTestId('filter-other'));
+    await user.click(screen.getByTestId('select-all'));
+    expect(screen.getByTestId('bulk-bar')).toHaveTextContent('3 selected');
+
+    // Restore takes the parked row only; the marks and accept take the row
+    // still in review. Ignore takes anything, so it stays a plain verb.
+    expect(screen.getByTestId('bulk-restore')).toHaveTextContent(
+      'Restore (1 of 3)',
+    );
+    expect(screen.getByTestId('bulk-mark-comic')).toHaveTextContent(
+      'It is a comic (1 of 3)',
+    );
+    expect(screen.getByTestId('bulk-accept')).toHaveTextContent(
+      'Accept matches (1 of 3)',
+    );
+    expect(screen.getByTestId('bulk-ignore')).toHaveTextContent('Ignore');
+    expect(screen.getByTestId('bulk-ignore')).not.toBeDisabled();
+
+    // A selection nothing in it can be restored from refuses the click rather
+    // than spending a round trip to come back as three refusals.
+    await user.click(screen.getByTestId('select-80'));
+    await user.click(screen.getByTestId('select-81'));
+    expect(screen.getByTestId('bulk-bar')).toHaveTextContent('1 selected');
+    expect(screen.getByTestId('bulk-restore')).toBeDisabled();
+    expect(screen.getByTestId('bulk-mark-comic')).toBeDisabled();
   });
 
   it('FRG-UI-029 — a bulk restore reports against a list that already shows the outcome', async () => {
@@ -615,6 +696,11 @@ describe('FRG-UI-029: manage view review', () => {
     );
     expect(screen.queryByText('Restored 2 of 3.')).toBeNull();
     expect(screen.getByTestId('entitlement-row-90')).toBeInTheDocument();
+    // The wait is not silent: the action that is running says so, and the bar
+    // is disabled for the duration.
+    expect(screen.getByTestId('bulk-restore')).toHaveTextContent('Restoring…');
+    expect(screen.getByTestId('bulk-restore')).toBeDisabled();
+    expect(screen.getByTestId('bulk-ignore')).toBeDisabled();
 
     state.entitlementsGate = undefined;
     await act(async () => release());
@@ -631,6 +717,42 @@ describe('FRG-UI-029: manage view review', () => {
       'Parked Three',
     );
   });
+
+  it(
+    'FRG-UI-029 — a refetch that never settles still reports the outcome',
+    async () => {
+      // The bar is disabled for as long as the mutation is pending, and the
+      // mutation is pending for as long as the awaited refetch is: an unbounded
+      // wait turns one stalled response into a screen with every action greyed
+      // out and no note saying why. The wait is raced against
+      // SETTLE_TIMEOUT_MS, after which the outcome renders and the list catches
+      // up whenever it can. Real timers: faking them here would have to survive
+      // react-query's own scheduling, and a leaked fake clock takes every test
+      // after this one with it.
+      const user = userEvent.setup();
+      const state: FetcherState = {
+        sources: [source],
+        entitlements: [
+          ent({ id: 95, human_name: 'Parked One', review_status: 'ignored' }),
+        ],
+        calls: [],
+      };
+      renderScreen(state);
+
+      await user.click(await screen.findByTestId('filter-ignored'));
+      await user.click(screen.getByTestId('select-all'));
+      // Never released: the refetch this action awaits does not come back.
+      state.entitlementsGate = new Promise<void>(() => {});
+      await user.click(screen.getByTestId('bulk-restore'));
+
+      await waitFor(
+        () => expect(screen.getByText('Restored 1 of 1.')).toBeInTheDocument(),
+        { timeout: SETTLE_TIMEOUT_MS + 4000 },
+      );
+      expect(screen.getByTestId('select-all')).not.toBeDisabled();
+    },
+    SETTLE_TIMEOUT_MS + 10000,
+  );
 
   it('FRG-UI-029 — matching a suggestion posts the proposed series id', async () => {
     const user = userEvent.setup();

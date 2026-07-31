@@ -6,6 +6,7 @@ import tokensCss from './tokens.css?raw';
 import calendarCss from '../screens/calendar/CalendarScreen.module.css?raw';
 import shellCss from '../components/AppShell.module.css?raw';
 import segmentedCss from '../components/SegmentedControl.module.css?raw';
+import sourcesCss from '../screens/sources/sources.module.css?raw';
 import {
   COMPACT_CROSSOVER_PX,
   COMPACT_MEDIA_QUERY,
@@ -13,10 +14,11 @@ import {
 } from './layout';
 
 /**
- * FRG-UI-018 / FRG-UI-047 / FRG-UI-049 — the layout invariants a rendered DOM
- * cannot show: that the compact crossover exists exactly once so the Calendar and
- * the shell cannot disagree, that the entry titles carry no clamp or ellipsis,
- * and that real controls declare the WCAG 2.5.8 target floor. jsdom resolves no
+ * FRG-UI-018 / FRG-UI-029 / FRG-UI-047 / FRG-UI-049 — the layout invariants a
+ * rendered DOM cannot show: that the compact crossover exists exactly once so the
+ * Calendar and the shell cannot disagree, that the entry titles carry no clamp or
+ * ellipsis, that the six-segment filter row wraps rather than overflowing its
+ * column, and that real controls declare the WCAG 2.5.8 target floor. jsdom resolves no
  * custom properties and lays nothing out, so these are asserted against the
  * stylesheets themselves rather than against computed geometry (the rendered
  * bounding boxes are measured in the browser-driven tier).
@@ -254,5 +256,32 @@ describe('FRG-UI-047: real controls declare the target floor', () => {
     expect(quieted![1]).not.toMatch(/opacity/);
     expect(quieted![1]).toMatch(/color:\s*var\(--text-muted\)/);
     expect(ruleBody(calendarCss, '.iconBtn.iconBtnBusy')).not.toMatch(/opacity/);
+  });
+});
+
+describe('FRG-UI-029: the filter row gives rather than overflows', () => {
+  it('FRG-UI-029 — the segmented track wraps and is bounded by its column', () => {
+    // Six scopes (All/New/Matched/Ignored/Duplicates/Non-comic), each carrying
+    // a count, exceed a narrow column's width. An inline-flex track that can
+    // neither wrap nor shrink resolves that by rendering its last segments off
+    // the page — and Non-comic, the scope the whole non-comic model depends on
+    // being reachable, is the last one. No width media query is involved (the
+    // crossover above is the only breakpoint): wrapping is width-driven.
+    const body = ruleBody(segmentedCss, '.group');
+    expect(body).not.toBeNull();
+    expect(body).toMatch(/flex-wrap:\s*wrap/);
+    expect(body).toMatch(/max-width:\s*100%/);
+    // Wrapping is BETWEEN segments: a label that broke across two lines inside
+    // one segment would split a count off its scope name.
+    expect(ruleBody(segmentedCss, '.segment')).toMatch(/white-space:\s*nowrap/);
+  });
+
+  it('FRG-UI-029 — the sources filter row lets the track wrap inside it', () => {
+    const body = ruleBody(sourcesCss, '.filters');
+    expect(body).not.toBeNull();
+    expect(body).toMatch(/flex-wrap:\s*wrap/);
+    // A flex item's default `min-width: auto` floors it at its content width,
+    // so the track could not shrink to the row no matter what it allows.
+    expect(body).toMatch(/min-width:\s*0/);
   });
 });

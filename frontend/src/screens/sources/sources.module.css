@@ -379,10 +379,15 @@
   color: var(--color-warning-text);
 }
 
+/* Six scope segments live in here, so the row is allowed to give and the track
+ * inside it is allowed to wrap — a filter row that overflows takes the last
+ * scopes off the page, and the Non-comic scope is the last one. */
 .filters {
   display: flex;
   align-items: center;
   gap: var(--spacing-md);
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
 /* --- Bulk bar --- */

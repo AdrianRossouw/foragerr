@@ -34,6 +34,20 @@ import styles from './sources.module.css';
  */
 type Filter = 'all' | 'new' | 'matched' | 'ignored' | 'duplicate' | 'other';
 
+/**
+ * Every scope, in the order the filter row offers them. Named once so the
+ * counts are derived by MAPPING over it rather than by a second traversal that
+ * could disagree with `rowsInScope`.
+ */
+const FILTERS: readonly Filter[] = [
+  'all',
+  'new',
+  'matched',
+  'ignored',
+  'duplicate',
+  'other',
+];
+
 /** One row's failure inside a bulk accept, named for the operator. */
 interface BulkFailure {
   id: number;
@@ -90,6 +104,13 @@ const GROUP_HEADER_ESTIMATE_PX = 62;
  * exactly comic rows — `all` additionally excluding `duplicate` (FRG-SRC-015:
  * a parked copy was already reviewed once as its canonical row, so the
  * Duplicates filter is its only home).
+ *
+ * The scope model is ONE-DIMENSIONAL on purpose: `other` is not sub-divided by
+ * review status, so Ignored and Duplicates are comic-only BY CONSTRUCTION and a
+ * parked non-comic row is reachable only under Non-comic — which is where it
+ * appears. A status sub-axis inside the non-comic scope would buy a cleaner
+ * bulk selection at the cost of two axes to reason about; the bulk bar states
+ * its applicable count instead (see `applicable` below).
  */
 function rowsInScope(
   rows: readonly EntitlementResource[],
@@ -104,14 +125,50 @@ function rowsInScope(
     : comics.filter((e) => e.review_status === filter);
 }
 
-/** How each bulk action names itself in its result note and failure panel. */
+/**
+ * How each bulk action names itself: in its button while the request is in
+ * flight, in its result note, and in the failure panel.
+ */
 const BULK_VERBS = {
-  accept: { note: 'Accepted', past: 'accepted' },
-  ignore: { note: 'Ignored', past: 'ignored' },
-  restore: { note: 'Restored', past: 'restored' },
-  mark_non_comic: { note: 'Marked non-comic', past: 'marked non-comic' },
-  mark_comic: { note: 'Marked comic', past: 'marked comic' },
+  accept: { note: 'Accepted', past: 'accepted', pending: 'Accepting…' },
+  ignore: { note: 'Ignored', past: 'ignored', pending: 'Ignoring…' },
+  restore: { note: 'Restored', past: 'restored', pending: 'Restoring…' },
+  mark_non_comic: {
+    note: 'Marked non-comic',
+    past: 'marked non-comic',
+    pending: 'Marking…',
+  },
+  mark_comic: {
+    note: 'Marked comic',
+    past: 'marked comic',
+    pending: 'Marking…',
+  },
 } as const;
+
+type BulkAction = keyof typeof BULK_VERBS;
+
+/**
+ * Whether one row satisfies an action's server-side per-row precondition —
+ * the client-side mirror of the refusals `review.py` raises.
+ *
+ * It exists so the bulk bar can say how much of a selection an action can
+ * actually apply to BEFORE the click (see `applicable`). A scope holds one
+ * classification but any mix of review statuses, so "select all 73 → Restore"
+ * legitimately reaches rows restore refuses; the count is what turns that from
+ * an action that half-worked into a stated one. It is not a gate: the request
+ * still carries the whole in-scope selection and the server's per-row errors
+ * remain the authority (a row can change under us between render and click).
+ */
+const BULK_APPLIES: Record<BulkAction, (row: EntitlementResource) => boolean> = {
+  accept: (row) => row.review_status === 'new',
+  // Ignore takes any row in any state and is idempotent — there is no state it
+  // refuses, so its count can never differ from the selection size.
+  ignore: () => true,
+  restore: (row) =>
+    row.review_status === 'ignored' || row.review_status === 'duplicate',
+  mark_non_comic: (row) => row.review_status === 'new',
+  mark_comic: (row) => row.review_status === 'new',
+};
 
 /**
  * Connected-store manage view (FRG-UI-029): account bar (auto-sync toggle, Sync
@@ -191,34 +248,19 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
 
   const all = entitlementsQuery.data ?? NO_ENTITLEMENTS;
   /**
-   * One count per filter segment, each EQUAL to the length of the list that
-   * segment shows — which is what lets the select-all name its count and what
-   * makes "Restored 12 of 30" checkable against the screen.
-   *
-   * "All" excludes `duplicate` (FRG-SRC-015): a parked copy was already
-   * reviewed once as its canonical row, so the Duplicates filter is its only
-   * home. Every status count is comic-only, because non-comic rows have their
-   * own scope now.
+   * One count per filter segment, each the LENGTH of the list that segment
+   * shows — derived from `rowsInScope` itself rather than re-tallied, so a
+   * segment's count and its select-all can never come apart. (They did: a
+   * hand-written tally is a second scoping rule, and the one that governs what
+   * select-all takes is `rowsInScope`.)
    */
-  const counts = useMemo(() => {
-    const tally = {
-      all: 0,
-      new: 0,
-      matched: 0,
-      ignored: 0,
-      duplicate: 0,
-      other: 0,
-    };
-    for (const e of all) {
-      if (e.classification === 'other') {
-        tally.other += 1;
-        continue;
-      }
-      tally[e.review_status] += 1;
-      if (e.review_status !== 'duplicate') tally.all += 1;
-    }
-    return tally;
-  }, [all]);
+  const counts = useMemo(
+    () =>
+      Object.fromEntries(
+        FILTERS.map((f) => [f, rowsInScope(all, f).length]),
+      ) as Record<Filter, number>,
+    [all],
+  );
   /**
    * The rows the ACTIVE FILTER shows — the single list the counts, the
    * select-all and every bulk action agree on. Memoized because it feeds the
@@ -227,6 +269,49 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
    * entire inventory.
    */
   const visible = useMemo(() => rowsInScope(all, filter), [all, filter]);
+
+  /**
+   * The rows an action would ACT ON: the master selection intersected with the
+   * active scope, derived at render rather than enforced by editing `selected`.
+   *
+   * Everything the operator sees is this list — "N selected" counts it, every
+   * bulk request carries exactly its ids — so the invariant that an action can
+   * only touch rows the current scope shows is unchanged. What changes is that
+   * the selection SURVIVES a scope change instead of being trimmed by it: the
+   * filter segments are a radiogroup, so ArrowLeft/ArrowRight walk the scopes,
+   * and a destructive narrowing meant arrowing one segment past the one you
+   * wanted silently destroyed a select-all of 289. Scope changes are now
+   * reversible.
+   */
+  const inScope = useMemo(
+    () => visible.filter((e) => selected.has(e.id)),
+    [visible, selected],
+  );
+
+  /**
+   * How many of the current selection each action can actually apply to, by the
+   * same per-row preconditions the server enforces (`BULK_APPLIES`).
+   *
+   * This is the answer to the owner's report that "select all 73 → Restore"
+   * only restored some of them: a scope holds one classification but any mix of
+   * review statuses, so the truthful number was only discoverable by clicking.
+   * Stated on the button, it is discoverable before.
+   */
+  const applicable = useMemo(() => {
+    const tally: Record<BulkAction, number> = {
+      accept: 0,
+      ignore: 0,
+      restore: 0,
+      mark_non_comic: 0,
+      mark_comic: 0,
+    };
+    for (const row of inScope) {
+      for (const action of Object.keys(tally) as BulkAction[]) {
+        if (BULK_APPLIES[action](row)) tally[action] += 1;
+      }
+    }
+    return tally;
+  }, [inScope]);
 
   // Same-title collapse (FRG-UI-029): rows fold into groups by the SERVER's
   // group_key and the list becomes ONE flat array of headers and rows. Every
@@ -277,32 +362,30 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
    * list, not the virtual window and not only the groups currently expanded:
    * the screen holds the source's inventory client-side, so "all 289" is
    * exactly that, with no round trip and nothing left behind a scroll position
-   * or a fold. The scope is what makes it safe: the selection cannot span
-   * classifications, so the action that follows is not mostly refusals.
+   * or a fold.
+   *
+   * It ADDS to the master selection rather than replacing it, so selecting all
+   * of one scope does not silently discard a selection made in another. That is
+   * safe precisely because `inScope` is what every action reads: a selection
+   * held outside the active scope can never be acted on from it.
    */
   const selectAll = () => {
-    setSelected(new Set(visible.map((e) => e.id)));
+    setSelected((prev) => new Set([...prev, ...visible.map((e) => e.id)]));
     setAnchorKey(null);
   };
 
   /**
-   * Changing scope NARROWS the selection to the rows the new scope shows
-   * (FRG-UI-029), rather than carrying it across whole or dropping it.
+   * Changing scope changes the SCOPE, and nothing else (FRG-UI-029).
    *
-   * The invariant this buys is that "N selected" always counts rows the
-   * operator can see: a selection can never accumulate across scopes into an
-   * action aimed mostly at rows that were never on screen — which is how a
-   * restore of thirty came back as a handful applied and the rest refused.
-   * Narrowing rather than clearing keeps the work done inside the scope being
-   * entered, and the anchor is deliberately left where it was: if it fell
-   * outside, the next shift-click re-anchors on the row it lands on (a range
-   * gesture must never deselect).
+   * The selection is held whole and read through the active scope (`inScope`),
+   * so moving between segments is non-destructive and reversible — which it has
+   * to be, because the segments are a radiogroup and ArrowLeft/ArrowRight move
+   * between them: under the old narrowing, arrowing one segment too far shredded
+   * a select-all with no way back. The anchor is deliberately left where it was:
+   * if it falls outside the new scope, the next shift-click re-anchors on the
+   * row it lands on (a range gesture must never deselect).
    */
-  const changeFilter = (next: Filter) => {
-    setFilter(next);
-    const inScope = new Set(rowsInScope(all, next).map((e) => e.id));
-    setSelected((prev) => new Set([...prev].filter((id) => inScope.has(id))));
-  };
+  const changeFilter = (next: Filter) => setFilter(next);
 
   // Anchor-based selection (FRG-UI-025) over the flat item array: a plain click
   // toggles one item and becomes the anchor; a shift-click selects the span to
@@ -405,8 +488,28 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
     });
   };
 
-  const selectedIds = [...selected];
+  /** Exactly the ids a bulk request carries: the selection, scoped. */
+  const selectedIds = inScope.map((e) => e.id);
   const bulkBusy = bulk.isPending;
+  /** The bulk-bar action currently in flight, so its own button can say so. */
+  const busyAction: BulkAction | null =
+    bulkBusy && bulk.variables && bulk.variables.action !== 'apply_to_group'
+      ? bulk.variables.action
+      : null;
+
+  /**
+   * A bulk button's label: the plain verb when the action applies to the whole
+   * selection, and the applicable count when it does not.
+   *
+   * Stating "30 of 73" only when the two differ keeps the ordinary case quiet;
+   * the number appears exactly when it is news.
+   */
+  const bulkLabel = (action: BulkAction, verb: string) =>
+    busyAction === action
+      ? BULK_VERBS[action].pending
+      : applicable[action] === selectedIds.length
+        ? verb
+        : `${verb} (${applicable[action]} of ${selectedIds.length})`;
 
   const resetBulkFeedback = () => {
     setBulkNote(null);
@@ -429,24 +532,36 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
    * and only they stay selected.
    *
    * The report is written against a SETTLED list: the hook awaits its own
-   * invalidation, so this callback runs only once the entitlements have
-   * refetched and "Restored 12 of 30" cannot render beside a list still showing
-   * all thirty parked.
+   * invalidation (bounded — see `useSettledInvalidateSources`), so this callback
+   * runs only once the entitlements have refetched and "Restored 12 of 30"
+   * cannot render beside a list still showing all thirty parked.
    */
-  const applyBulk = (action: keyof typeof BULK_VERBS) => {
+  const applyBulk = (action: BulkAction) => {
     if (selectedIds.length === 0 || bulkBusy) return;
     const attempted = selectedIds.length;
+    const attemptedIds = selectedIds;
     resetBulkFeedback();
     bulk.mutate(
-      { action, entitlementIds: selectedIds },
+      { action, entitlementIds: attemptedIds },
       {
         onSuccess: (result) => {
           const entries = Object.entries(result.errors ?? {});
           setBulkNote(
             `${BULK_VERBS[action].note} ${result.applied} of ${attempted}.`,
           );
+          // Only the ATTEMPTED ids are released, never the whole master set: a
+          // selection standing in another scope was not part of this action and
+          // must survive it, exactly as it survives a scope change.
+          const release = (keep: readonly number[]) =>
+            setSelected((prev) => {
+              const next = new Set(prev);
+              for (const id of attemptedIds) next.delete(id);
+              for (const id of keep) next.add(id);
+              return next;
+            });
           if (entries.length === 0) {
-            clearSelection();
+            release([]);
+            setAnchorKey(null);
             return;
           }
           const failed = entries.map(([id, message]) => {
@@ -462,7 +577,7 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
           // Keep ONLY the failures selected: the succeeded rows have moved on
           // (and refetch out of `new`), the failures are what still needs a
           // decision, so the selection becomes the to-do list.
-          setSelected(new Set(failed.map((f) => f.id)));
+          release(failed.map((f) => f.id));
           setAnchorKey(null);
           setFailures(failed);
           setFailureVerb(BULK_VERBS[action].past);
@@ -725,32 +840,39 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
           </Menu>
           {selectedIds.length > 0 && (
             <>
+              {/* Each action states how much of the SELECTION it can apply to
+                  whenever that is not all of it, and refuses to be clicked when
+                  it is none of it (FRG-UI-029). A scope holds one
+                  classification but any mix of review statuses, so "select all
+                  73 → Restore" legitimately reaches rows restore refuses — the
+                  count is what makes that visible before the click rather than
+                  as a panel of refusals after it. */}
               <button
                 type="button"
                 className={styles.linkBtn}
-                disabled={bulkBusy}
+                disabled={bulkBusy || applicable.accept === 0}
                 onClick={() => applyBulk('accept')}
                 data-testid="bulk-accept"
               >
-                {bulkBusy ? 'Accepting…' : 'Accept matches'}
+                {bulkLabel('accept', 'Accept matches')}
               </button>
               <button
                 type="button"
                 className={styles.linkBtn}
-                disabled={bulkBusy}
+                disabled={bulkBusy || applicable.ignore === 0}
                 onClick={() => applyBulk('ignore')}
                 data-testid="bulk-ignore"
               >
-                Ignore
+                {bulkLabel('ignore', 'Ignore')}
               </button>
               <button
                 type="button"
                 className={styles.mutedBtn}
-                disabled={bulkBusy}
+                disabled={bulkBusy || applicable.restore === 0}
                 onClick={() => applyBulk('restore')}
                 data-testid="bulk-restore"
               >
-                Restore
+                {bulkLabel('restore', 'Restore')}
               </button>
               {/* The mark the 73-item non-comic bundle needs (FRG-SRC-016):
                   select the bundle, mark it, and no later sync moves it back.
@@ -761,21 +883,21 @@ export function StoreManage({ source }: { source: StoreSourceResource }) {
                 <button
                   type="button"
                   className={styles.mutedBtn}
-                  disabled={bulkBusy}
+                  disabled={bulkBusy || applicable.mark_comic === 0}
                   onClick={() => applyBulk('mark_comic')}
                   data-testid="bulk-mark-comic"
                 >
-                  It is a comic
+                  {bulkLabel('mark_comic', 'It is a comic')}
                 </button>
               ) : (
                 <button
                   type="button"
                   className={styles.mutedBtn}
-                  disabled={bulkBusy}
+                  disabled={bulkBusy || applicable.mark_non_comic === 0}
                   onClick={() => applyBulk('mark_non_comic')}
                   data-testid="bulk-mark-non-comic"
                 >
-                  Not a comic
+                  {bulkLabel('mark_non_comic', 'Not a comic')}
                 </button>
               )}
               <button
