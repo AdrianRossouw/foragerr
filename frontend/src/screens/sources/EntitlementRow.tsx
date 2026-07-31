@@ -367,8 +367,8 @@ export function EntitlementRow({
             (FRG-SRC-016). Its direction is the row's own classification, so
             one button says the only thing that can be true of THIS row — and
             the reverse mark is reachable wherever the row is (a non-comic row
-            renders under the non-comic toggle). Marking is review-time only,
-            which is why it lives in the `new` branch alone. */}
+            renders in the Non-comic scope). Marking is review-time only, which
+            is why it lives in the `new` branch alone. */}
         <button
           type="button"
           className={styles.mutedBtn}

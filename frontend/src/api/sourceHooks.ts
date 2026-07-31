@@ -43,9 +43,9 @@ export function useHasExpiredSource(): boolean {
 
 /**
  * All of one source's entitlements (FRG-SRC-004). The whole list is fetched
- * once and the manage view filters client-side (segments + non-comic toggle),
- * so the segment counts stay live off a single cache entry. `enabled` gates the
- * fetch until a connected source id is known.
+ * once and the manage view scopes it client-side (the filter segments, one of
+ * which is the non-comic scope), so every segment count stays live off a single
+ * cache entry. `enabled` gates the fetch until a connected source id is known.
  */
 export function useEntitlements(
   sourceId: number | null,
@@ -80,6 +80,13 @@ export function useEntitlementDetail(
 }
 
 /**
+ * How long a settled invalidation waits for the refetch before reporting
+ * anyway. Long enough that the ordinary refetch always wins the race, short
+ * enough that a stalled one is not mistaken for a hung screen.
+ */
+export const SETTLE_TIMEOUT_MS = 4000;
+
+/**
  * Shared invalidation, AWAITABLE: sweep the whole sources family (list +
  * entitlements) and resolve once the active queries have refetched.
  *
@@ -89,11 +96,33 @@ export function useEntitlementDetail(
  * matters for the bulk actions (FRG-UI-029): "12 restored, 18 refused" rendered
  * beside a list still showing all thirty as parked reads as a half-finished
  * action.
+ *
+ * The wait is BOUNDED. The mutation stays pending for its whole duration, and
+ * every bulk button is disabled while it is pending — so a refetch that never
+ * comes back (a slow or dropped response) would leave the bar inert with no
+ * note explaining why. Racing a timeout means the outcome always renders; the
+ * list catches up when the refetch does.
+ *
+ * "Settled" is best-effort by construction in any case: a concurrent
+ * invalidation cancels this one's in-flight refetch (react-query's
+ * `cancelRefetch` default), which resolves this promise against a query that is
+ * fetching again.
  */
 function useSettledInvalidateSources(): () => Promise<void> {
   const queryClient = useQueryClient();
-  return () =>
-    queryClient.invalidateQueries({ queryKey: queryKeys.sources.all() });
+  return async () => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        queryClient.invalidateQueries({ queryKey: queryKeys.sources.all() }),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, SETTLE_TIMEOUT_MS);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
 }
 
 /** The same sweep, fire-and-forget: the single-row actions do not wait on it. */
