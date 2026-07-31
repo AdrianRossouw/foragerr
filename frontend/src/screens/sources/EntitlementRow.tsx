@@ -8,6 +8,7 @@ import {
 import { proposalState } from './proposal';
 import {
   useAddEntitlement,
+  useClassifyEntitlement,
   useEntitlementDetail,
   useIgnoreEntitlement,
   useMatchEntitlement,
@@ -161,7 +162,8 @@ function FillSetView({ fillSet }: { fillSet: FillSet }) {
  * One reviewable entitlement row (FRG-UI-029): cover spine, title + a chip
  * (a matched row's linked library series booktype when it has one, else the
  * source file's format), status tag, per-status actions (New → accept the
- * proposal / Search ComicVine / Ignore, Matched → Change (the same search) /
+ * proposal / Search ComicVine / the classification mark (FRG-SRC-016) / Ignore,
+ * Matched → Change (the same search) /
  * Ignore, Ignored → Restore), a selection checkbox for bulk review, an
  * expandable ComicVine search panel (FRG-UI-039 — present on every reviewable
  * row, so a row with no proposal is still resolvable), and an expandable
@@ -199,14 +201,17 @@ export function EntitlementRow({
   const ignore = useIgnoreEntitlement();
   const restore = useRestoreEntitlement();
   const retry = useRetryDownload();
+  const classify = useClassifyEntitlement();
   const busy =
     match.isPending ||
     add.isPending ||
     ignore.isPending ||
     restore.isPending ||
-    retry.isPending;
+    retry.isPending ||
+    classify.isPending;
 
   const status = entitlement.review_status;
+  const isNonComic = entitlement.classification === 'other';
   // Three wire shapes, three different sentences (FRG-SRC-010): a candidate, a
   // stored "we looked and nothing fit" verdict, and a not-yet-computed row. Only
   // the first is an acceptable proposal; none of them is a dead end.
@@ -358,6 +363,26 @@ export function EntitlementRow({
         >
           Search ComicVine…
         </button>
+        {/* The row-level half of the operator classification override
+            (FRG-SRC-016). Its direction is the row's own classification, so
+            one button says the only thing that can be true of THIS row — and
+            the reverse mark is reachable wherever the row is (a non-comic row
+            renders under the non-comic toggle). Marking is review-time only,
+            which is why it lives in the `new` branch alone. */}
+        <button
+          type="button"
+          className={styles.mutedBtn}
+          disabled={busy}
+          onClick={() =>
+            classify.mutate({
+              entitlementId: entitlement.id,
+              classification: isNonComic ? 'comic' : 'other',
+            })
+          }
+          data-testid={`classify-${entitlement.id}`}
+        >
+          {isNonComic ? 'It is a comic' : 'Not a comic'}
+        </button>
         <button
           type="button"
           className={styles.mutedBtn}
@@ -440,7 +465,7 @@ export function EntitlementRow({
           <div className={styles.rowSub}>
             {[
               entitlement.publisher,
-              entitlement.classification === 'other' ? 'Non-comic' : null,
+              isNonComic ? 'Non-comic' : null,
             ]
               .filter(Boolean)
               .join(' · ') || 'Humble purchase'}

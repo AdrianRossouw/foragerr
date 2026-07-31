@@ -8,6 +8,7 @@ import {
 import { queryKeys } from './queryKeys';
 import { useFetcher } from './fetcher';
 import type {
+  EntitlementClassification,
   EntitlementDetailResource,
   EntitlementResource,
   SourceConnectResponse,
@@ -349,6 +350,31 @@ export function useRestoreEntitlement(): UseMutationResult<
 }
 
 /**
+ * POST /sources/entitlements/{id}/classify — the operator's own classification
+ * of one reviewable row (FRG-SRC-016). Both directions stamp operator
+ * provenance, so the marked row is never re-classified by a later sync or
+ * publisher-rule edit; a matched or parked row rejects with a 409. The usual
+ * sources-family invalidation re-derives the list, so a row marked non-comic
+ * leaves the comic scope immediately.
+ */
+export function useClassifyEntitlement(): UseMutationResult<
+  EntitlementResource,
+  Error,
+  { entitlementId: number; classification: EntitlementClassification }
+> {
+  const fetcher = useFetcher();
+  const invalidate = useInvalidateSources();
+  return useMutation({
+    mutationFn: ({ entitlementId, classification }) =>
+      fetcher<EntitlementResource>(
+        `/api/v1/sources/entitlements/${entitlementId}/classify`,
+        { method: 'POST', body: { classification } },
+      ),
+    onSuccess: invalidate,
+  });
+}
+
+/**
  * POST /sources/entitlements/{id}/retry-download — re-queue a FAILED download
  * (FRG-SRC-009). Failed-only on the server: a row in any other download state
  * rejects with a 409 `ApiRequestError` and nothing changes. Success clears the
@@ -384,8 +410,10 @@ export interface BulkEntitlementResult {
 }
 
 /**
- * The bulk request shapes (FRG-SRC-011 / FRG-UI-043). `ignore` / `restore` /
- * `accept` are id-only; `apply_to_group` (the group-header search/match,
+ * The bulk request shapes (FRG-SRC-011 / FRG-UI-043 / FRG-SRC-016). `ignore` /
+ * `restore` / `accept` / `mark_non_comic` / `mark_comic` are id-only — the two
+ * marks carry their classification in the action name, so a selection cannot be
+ * marked with a value the bulk bar never offered; `apply_to_group` (the group-header search/match,
  * FRG-UI-043) carries EXACTLY ONE resolved target for the whole id list — a
  * `seriesId` for a candidate already in the library (match every member) or a
  * `cvVolumeId` for a candidate not yet added (the server adds it once and
@@ -393,7 +421,15 @@ export interface BulkEntitlementResult {
  * discriminated union so a caller cannot send both targets or neither.
  */
 export type BulkEntitlementInput =
-  | { action: 'ignore' | 'restore' | 'accept'; entitlementIds: number[] }
+  | {
+      action:
+        | 'ignore'
+        | 'restore'
+        | 'accept'
+        | 'mark_non_comic'
+        | 'mark_comic';
+      entitlementIds: number[];
+    }
   | { action: 'apply_to_group'; entitlementIds: number[]; seriesId: number }
   | { action: 'apply_to_group'; entitlementIds: number[]; cvVolumeId: number };
 

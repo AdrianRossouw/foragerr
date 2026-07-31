@@ -1259,6 +1259,14 @@ export interface EntitlementResource {
    */
   display_group_key: string;
   classification: EntitlementClassification;
+  /**
+   * Who settled `classification` (FRG-SRC-016): `"operator"` when the operator
+   * marked this row themselves, null while the automatic classifier still owns
+   * it. An operator mark is never reversed by a sync or by a publisher-rule
+   * edit, in either direction — which is what makes the reverse mark, not a
+   * clear, the way back.
+   */
+  classified_via: 'operator' | null;
   review_status: EntitlementReviewStatus;
   download_state: string | null;
   download_error: string | null;

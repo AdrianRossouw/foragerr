@@ -98,7 +98,8 @@ asserted fact (ComicVine doesn't record a book type), and it never changes
 which results appear or their order.
 
 By default nothing downloads and nothing in your library changes until you
-act: **match**, **add**, **search-and-pick**, or **ignore** — each on a
+act: **match**, **add**, **search-and-pick**, **ignore**, or **mark it
+non-comic** (see "Marking items non-comic yourself" below) — each on a
 single item or a bulk selection. An ignored item drops out of the pending
 count and the default view but stays visible under the Ignored filter, and
 **restore** returns it to New with its proposed match recomputed
@@ -194,6 +195,36 @@ every connected source: **Settings → General**, beside the ComicVine
 publisher ignore list (`FRG-SRC-012`) — not here on the Sources screen. See
 `../admin/configuration.md` for the setting, its shipped defaults, and how
 it behaves.
+
+### Marking items non-comic yourself
+
+Publisher rules can only fire when the store records a publisher, and plenty
+of bundles record none at all — a mega-bundle of rulebook PDFs can arrive with
+73 items, every one of them publisher-less and every one of them looking like
+a comic to file-shape detection. For those, say so directly (`FRG-SRC-016`):
+
+- **Not a comic** on any row still in review, and on a whole selection from
+  the bulk bar — so the bundle selector, the group checkbox and shift-range
+  all compose with it. Select the bundle, mark it, done.
+- **It is a comic** is the reverse mark, offered on the rows it can apply to:
+  turn on the non-comic toggle to see them, and mark anything that was
+  misfiled back.
+
+**Your mark sticks.** foragerr won't second-guess you: once you have
+classified an item, no later sync and no later change to the publisher rules
+moves it again, in either direction. That is the whole point — the automatic
+classifier re-checks every item awaiting review on every sync, so without this
+your correction would last until the next one.
+
+Marked items follow the same rules as anything else non-comic: they are kept,
+never deleted, and they simply stop appearing in the comic view. To find them,
+flip the **Non-comic** toggle above the list — it carries a count of how many
+items it is holding back in whatever filter you are looking at, so a marked
+bundle is never just "gone".
+
+Marking is a review-time decision. An item you have already matched or
+ignored refuses the mark and tells you the way back: restore it first, then
+classify the row that is once again in review.
 
 Proposals stay honest as your library changes underneath them (`FRG-SRC-008`).
 Humble bundles routinely contain many items from the same series, all

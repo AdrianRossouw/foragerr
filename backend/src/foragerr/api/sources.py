@@ -62,9 +62,11 @@ from foragerr.sources.review import (
     add_entitlement,
     bulk_accept,
     bulk_apply_to_group,
+    bulk_classify,
     bulk_ignore,
     bulk_match,
     bulk_restore,
+    classify_entitlement,
     ignore_entitlement,
     match_entitlement,
     restore_entitlement,
@@ -445,6 +447,12 @@ class EntitlementResource(BaseModel):
     #: The parser's DISPLAY issue number ("3", "1.5"), not a numeric value.
     issue_number: str | None
     classification: str
+    #: WHO settled :attr:`classification` (FRG-SRC-016): ``operator`` when the
+    #: operator marked this row themselves, ``None`` while the automatic
+    #: classifier still owns it. The review surface reads it to know that a row
+    #: is markable BACK (the reverse mark inside the non-comic view) and that no
+    #: sync will move it.
+    classified_via: str | None
     review_status: str
     #: The canonical row this one is a byte-identical copy of (FRG-SRC-015);
     #: set only while :attr:`review_status` is ``duplicate``.
@@ -519,6 +527,7 @@ class EntitlementResource(BaseModel):
             volume_ordinal=volume_ordinal,
             issue_number=issue_number,
             classification=row.classification,
+            classified_via=row.classified_via,
             review_status=row.review_status,
             duplicate_of=row.duplicate_of,
             duplicate_count=len(copies),
@@ -549,11 +558,23 @@ class AddBody(BaseModel):
     root_folder_id: int | None = None
 
 
+class ClassifyBody(BaseModel):
+    """The operator's own classification of a row (FRG-SRC-016).
+
+    ``comic`` or ``other``; the action stamps operator provenance either way, so
+    the value is the whole request — there is no "back to automatic"."""
+
+    classification: str
+
+
 class BulkBody(BaseModel):
-    """A bulk review action over an id list (FRG-SRC-004/011/014).
+    """A bulk review action over an id list (FRG-SRC-004/011/014/016).
 
     ``action`` is ``ignore`` | ``restore`` | ``match`` | ``accept`` |
-    ``apply_to_group``. ``match`` carries a ``series_id`` (one shared target, the
+    ``apply_to_group`` | ``mark_non_comic`` | ``mark_comic``. The two marks are
+    id-only, like ignore/restore: the classification is in the action name
+    rather than a payload field, so a selection cannot be marked with a value
+    the bulk bar never offered. ``match`` carries a ``series_id`` (one shared target, the
     operator's explicit choice); ``accept`` deliberately carries none — each row
     applies its OWN stored proposal, which is what makes a heterogeneous
     selection (some matches, some adds) resolvable in one request.
@@ -715,6 +736,25 @@ async def restore_entitlement_endpoint(
 
 
 @router.post(
+    "/entitlements/{entitlement_id}/classify", response_model=EntitlementResource
+)
+async def classify_entitlement_endpoint(
+    entitlement_id: int, body: ClassifyBody, request: Request
+) -> EntitlementResource:
+    """Mark a reviewable entitlement non-comic, or comic (FRG-SRC-016).
+
+    Operator provenance is stamped in both directions, so no later sync and no
+    later publisher-rule edit moves the row again. Reviewable-only: a matched or
+    parked row is a 409 that names the restore-first way back."""
+    return await _run_action(
+        request,
+        lambda db, commands: classify_entitlement(
+            db, entitlement_id, classification=body.classification
+        ),
+    )
+
+
+@router.post(
     "/entitlements/{entitlement_id}/retry-download",
     response_model=EntitlementResource,
 )
@@ -775,6 +815,12 @@ async def bulk_entitlements_endpoint(
             commands=commands,
             matched_via=MATCHED_VIA_OPERATOR,
         )
+    elif body.action in ("mark_non_comic", "mark_comic"):
+        result = await bulk_classify(
+            db,
+            body.entitlement_ids,
+            classification="other" if body.action == "mark_non_comic" else "comic",
+        )
     elif body.action == "apply_to_group":
         if (body.series_id is None) == (body.cv_volume_id is None):
             raise ApiError(
@@ -799,7 +845,8 @@ async def bulk_entitlements_endpoint(
         raise ApiError(
             400,
             f"unknown bulk action {body.action!r}; "
-            "expected ignore|restore|match|accept|apply_to_group",
+            "expected ignore|restore|match|accept|apply_to_group|"
+            "mark_non_comic|mark_comic",
             field="action",
         )
     return {"applied": result.applied, "skipped": result.skipped, "errors": result.errors}

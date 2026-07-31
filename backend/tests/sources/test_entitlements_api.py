@@ -650,3 +650,127 @@ async def test_bulk_rejects_an_unknown_action_by_name(app_client):
     )
     assert resp.status_code == 400
     assert "accept" in resp.json()["errors"][0]["message"]
+
+
+# --- operator classification (FRG-SRC-016) -----------------------------------
+
+
+@pytest.mark.req("FRG-SRC-016")
+async def test_classify_endpoint_marks_a_row_and_exposes_its_provenance(app_client):
+    """The single-row mark through the surface: the response carries the new
+    classification AND the operator provenance the review screen reads to know
+    the row will not move again."""
+    app = app_client.app
+    source_id = await _populate(app)
+    eid = await _first_comic_id(app, source_id)
+
+    resp = await app_client.post(
+        f"/api/v1/sources/entitlements/{eid}/classify",
+        json={"classification": "other"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["classification"] == "other"
+    assert resp.json()["classified_via"] == "operator"
+    listed = (
+        await app_client.get(
+            f"/api/v1/sources/{source_id}/entitlements?classification=other"
+        )
+    ).json()
+    assert eid in [row["id"] for row in listed]
+
+
+@pytest.mark.req("FRG-SRC-016")
+async def test_classify_endpoint_rejects_an_unknown_classification(app_client):
+    app = app_client.app
+    source_id = await _populate(app)
+    eid = await _first_comic_id(app, source_id)
+
+    resp = await app_client.post(
+        f"/api/v1/sources/entitlements/{eid}/classify",
+        json={"classification": "sourcebook"},
+    )
+
+    assert resp.status_code == 422
+    after = await repo.get_entitlement(app.state.db, eid)
+    assert (after.classification, after.classified_via) == ("comic", None)
+
+
+@pytest.mark.req("FRG-SRC-016")
+async def test_classify_endpoint_refuses_an_ignored_row(app_client):
+    app = app_client.app
+    source_id = await _populate(app)
+    eid = await _first_comic_id(app, source_id)
+    await app_client.post(f"/api/v1/sources/entitlements/{eid}/ignore")
+
+    resp = await app_client.post(
+        f"/api/v1/sources/entitlements/{eid}/classify",
+        json={"classification": "other"},
+    )
+
+    assert resp.status_code == 409
+    assert "restore it first" in resp.json()["message"]
+    after = await repo.get_entitlement(app.state.db, eid)
+    assert (after.classification, after.classified_via) == ("comic", None)
+
+
+@pytest.mark.req("FRG-SRC-016")
+async def test_bulk_marks_by_action_name_in_both_directions(app_client):
+    """The bulk vocabulary carries the classification in the ACTION, so a
+    selection can only be marked with a value the bar offers."""
+    app = app_client.app
+    source_id = await _populate(app)
+    comics = await repo.list_entitlements(
+        app.state.db, source_id, classification="comic", review_status="new"
+    )
+    ids = [c.id for c in comics]
+
+    marked = await app_client.post(
+        "/api/v1/sources/entitlements/bulk",
+        json={"action": "mark_non_comic", "entitlement_ids": ids},
+    )
+    assert marked.status_code == 200
+    assert marked.json()["applied"] == len(ids)
+    assert (
+        await app_client.get(
+            f"/api/v1/sources/{source_id}"
+            "/entitlements?review_status=new&classification=comic"
+        )
+    ).json() == []
+
+    back = await app_client.post(
+        "/api/v1/sources/entitlements/bulk",
+        json={"action": "mark_comic", "entitlement_ids": ids},
+    )
+    assert back.json()["applied"] == len(ids)
+    restored = (
+        await app_client.get(
+            f"/api/v1/sources/{source_id}"
+            "/entitlements?review_status=new&classification=comic"
+        )
+    ).json()
+    assert {row["id"] for row in restored} == set(ids)
+    assert all(row["classified_via"] == "operator" for row in restored)
+
+
+@pytest.mark.req("FRG-SRC-016")
+async def test_bulk_mark_reports_the_unmarkable_rows_per_row(app_client):
+    """A selection that spans review buckets marks what it can and names the
+    rest — the batch is never vetoed by one decided row."""
+    app = app_client.app
+    source_id = await _populate(app)
+    comics = await repo.list_entitlements(
+        app.state.db, source_id, classification="comic", review_status="new"
+    )
+    markable, ignored = comics[0].id, comics[1].id
+    await app_client.post(f"/api/v1/sources/entitlements/{ignored}/ignore")
+
+    resp = await app_client.post(
+        "/api/v1/sources/entitlements/bulk",
+        json={"action": "mark_non_comic", "entitlement_ids": [markable, ignored]},
+    )
+
+    body = resp.json()
+    assert (body["applied"], body["skipped"]) == (1, 1)
+    assert "restore it first" in body["errors"][str(ignored)]
+    assert (await repo.get_entitlement(app.state.db, markable)).classification == "other"
