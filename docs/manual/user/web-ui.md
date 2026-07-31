@@ -305,11 +305,38 @@ awaiting import, importing, imported, failed), a human-readable status message, 
 download that has finished in the client but has not been imported yet stays
 visible with an **Awaiting import** label until the next import pass picks it up,
 so a fast grab never shows an empty Queue mid-pipeline.
+Rows that have stopped moving — **Failed**, and **Failing** while the failure
+loop decides — show no progress bar or byte counts; their status and its reason
+carry the story instead. A row whose release name is an opaque download token is
+still identified by its series and issue columns.
+
 Items can be removed from here; an item that is actively importing refuses removal
 until the import finishes, so files are never yanked out from under the importer.
 Import-blocked rows carry a **Manual import** action that opens the resolution
 overlay (`import.md`), and the toolbar's path picker runs the same overlay over
 any folder.
+
+### Cleaning up the queue
+
+Tick the checkbox on any row — or the one in the header to take the whole page —
+and a bar appears with **Remove selected**. It opens the same removal dialog a
+single row does, with the same independent **delete data** and **blocklist**
+options, and removes everything selected in one go.
+
+**Clear failed** in the toolbar is the shortcut for the common case. It clears
+the *whole* failure backlog — every failed row in the queue, not just the ones on
+the page you are looking at — after the same dialog, so blocklisting is still
+your explicit choice. The dialog names the rows it can see and tells you how many
+more are on other pages, and the button is disabled while nothing has failed. A
+row still working through the failure loop (**Failing**) is left alone: only rows
+that have finished failing are swept.
+
+Removal reports per row. Anything that could not be removed — an item that
+started importing between your click and the request, say — stays in the table
+and is listed by name with the reason above the table; everything else is removed
+regardless. Page controls under the table walk the rest of the queue when it runs
+past one page; turning the page clears your selection and any report, since both
+describe the rows you were just looking at.
 
 ## History
 

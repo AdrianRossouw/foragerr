@@ -2,10 +2,11 @@
 
 _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.mjs` — do not edit by hand (FRG-PROC-010)._
 
-- **Verdict:** GREEN
-- **Scenarios:** 47 (46 pass, 0 fail, 1 skipped, 0 flaky, 0 not run)
-- **Run started:** 2026-07-30T22:32:07.417Z
-- **Duration:** 163.8s
+- **Verdict:** GREEN (1 flaky)
+- **Scenarios:** 48 (46 pass, 0 fail, 1 skipped, 1 flaky, 0 not run)
+- **Flaky:** 1 scenario(s) failed then passed on retry (rescued, but not clean — see the FLAKY rows below).
+- **Run started:** 2026-07-31T00:54:20.166Z
+- **Duration:** 196.4s
 
 ## Scenario → requirement coverage
 
@@ -16,7 +17,7 @@ _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.m
 | PASS | FRG-PROC-010 FRG-DEP-013: the seeded DDL pair ships disabled and is enabled as an explicit opt-in | FRG-DEP-013, FRG-PROC-010 |
 | PASS | FRG-PROC-010 FRG-SER-005 FRG-UI-005: add a series from the ComicVine fixture lands issues | FRG-PROC-010, FRG-SER-005, FRG-UI-005 |
 | PASS | FRG-PROC-010 FRG-UI-008: created indexers are visible in settings | FRG-PROC-010, FRG-UI-008 |
-| PASS | FRG-PROC-010 FRG-UI-007 FRG-SRCH-001: interactive search renders verbatim rejection reasons | FRG-PROC-010, FRG-SRCH-001, FRG-UI-007 |
+| FLAKY | FRG-PROC-010 FRG-UI-007 FRG-SRCH-001: interactive search renders verbatim rejection reasons | FRG-PROC-010, FRG-SRCH-001, FRG-UI-007 |
 | PASS | FRG-PROC-010 FRG-DDL-010 FRG-DL-007 FRG-PP-009 FRG-PP-010: grab downloads, imports and renames into the library | FRG-DDL-010, FRG-DL-007, FRG-PP-009, FRG-PP-010, FRG-PROC-010 |
 | PASS | FRG-PROC-010 FRG-UI-003 FRG-SER-009: the library browse shows the series with updated stats | FRG-PROC-010, FRG-SER-009, FRG-UI-003 |
 | PASS | FRG-PROC-010 FRG-CRTR-001 FRG-UI-027: creator credits ingest end-to-end and render on the grid | FRG-CRTR-001, FRG-PROC-010, FRG-UI-027 |
@@ -27,6 +28,7 @@ _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.m
 | PASS | FRG-UI-018: an agenda row keeps ~30 characters of title measure at the crossover width | FRG-UI-018 |
 | PASS | FRG-UI-018: a dense day holds every entry inside the per-entry vertical bound | FRG-UI-018 |
 | PASS | FRG-UI-049: the open nav drawer contains Tab and Shift+Tab | FRG-UI-049 |
+| PASS | FRG-UI-006: an unbreakable release name never pushes the row actions out of reach | FRG-UI-006 |
 | PASS | FRG-PROC-019 FRG-UI-038 FRG-UI-049: core screens carry zero serious/critical axe WCAG 2.1 A/AA violations at both viewports | FRG-PROC-019, FRG-UI-038, FRG-UI-049 |
 | PASS | FRG-PROC-010 FRG-UI-015 FRG-IMP-022 FRG-IMP-023: library import scans a root, reviews matches and imports existing files in place without a download | FRG-IMP-022, FRG-IMP-023, FRG-PROC-010, FRG-UI-015 |
 | PASS | FRG-PROC-010 FRG-SER-021 FRG-UI-045: a readable-but-unwritable root registers read-only while an ordinary registration of it is refused | FRG-PROC-010, FRG-SER-021, FRG-UI-045 |
@@ -89,7 +91,7 @@ _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.m
 | FRG-OPDS-019 | PASS |
 | FRG-PP-009 | PASS |
 | FRG-PP-010 | PASS |
-| FRG-PROC-010 | PASS |
+| FRG-PROC-010 | FLAKY |
 | FRG-PROC-019 | PASS |
 | FRG-SCHED-002 | PASS |
 | FRG-SEC-005 | PASS |
@@ -97,10 +99,11 @@ _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.m
 | FRG-SER-009 | PASS |
 | FRG-SER-021 | PASS |
 | FRG-SER-022 | PASS |
-| FRG-SRCH-001 | PASS |
+| FRG-SRCH-001 | FLAKY |
 | FRG-UI-003 | PASS |
 | FRG-UI-005 | PASS |
-| FRG-UI-007 | PASS |
+| FRG-UI-006 | PASS |
+| FRG-UI-007 | FLAKY |
 | FRG-UI-008 | PASS |
 | FRG-UI-015 | PASS |
 | FRG-UI-018 | PASS |
@@ -110,6 +113,10 @@ _Generated from the Playwright JSON reporter by `e2e/scripts/acceptance-report.m
 | FRG-UI-045 | PASS |
 | FRG-UI-047 | PASS |
 | FRG-UI-049 | PASS |
+
+## Flaky scenarios (rescued on retry)
+
+- **FRG-PROC-010 FRG-UI-007 FRG-SRCH-001: interactive search renders verbatim rejection reasons** (spine.spec.ts) — statuses: failed → passed
 
 ---
 
