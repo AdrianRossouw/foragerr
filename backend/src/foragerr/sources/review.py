@@ -774,6 +774,14 @@ async def restore_entitlement(
     ``cv_configured=False`` with ``cv_client=None`` is the genuinely
     unconfigured deployment, where the library-only fallback IS the honest
     answer and is persisted as such.
+
+    **A non-comic row is restored without a proposal recompute** (FRG-SRC-016).
+    Matching a row to a library series is comic work; a row classified ``other``
+    has nothing the catalog could propose, and the CV budget is 200/hour per
+    path, so a bulk restore over a non-comic selection would spend it on
+    lookups whose answers no surface offers. Its proposal fields are left exactly
+    as they were — the mark back to ``comic`` is what puts the row in front of
+    the enrichment pass again.
     """
     from foragerr.library import repo as library_repo
     from foragerr.metadata.errors import ComicVineBudgetExhausted
@@ -787,41 +795,44 @@ async def restore_entitlement(
     refusal = _restore_precondition_error(entitlement_id, row.review_status)
     if refusal is not None:
         raise refusal
-    async with db.read_session() as session:
-        series = await library_repo.list_series(session)
-    library = [
-        LibrarySeriesLite(
-            id=s.id,
-            title=s.title,
-            start_year=s.start_year,
-            cv_volume_id=s.cv_volume_id,
-        )
-        for s in series
-    ]
-    try:
-        proposal = await compute_proposed_match(
-            human_name=row.human_name, library=library, cv_client=cv_client
-        )
-    except ComicVineBudgetExhausted as exc:
-        logger.info(
-            "sources.review: ComicVine budget exhausted restoring entitlement "
-            "%s (%s); leaving it un-proposed and retryable",
-            entitlement_id,
-            exc,
-        )
-        proposal = None
-    if (
-        proposal is not None
-        and cv_configured
-        and proposal.universe != UNIVERSE_COMICVINE
-    ):
-        logger.warning(
-            "sources.review: refusing to persist a %s proposal for entitlement "
-            "%s on a ComicVine-configured deployment; leaving it retryable",
-            proposal.universe,
-            entitlement_id,
-        )
-        proposal = None
+    repropose = row.classification == "comic"
+    proposal = None
+    if repropose:
+        async with db.read_session() as session:
+            series = await library_repo.list_series(session)
+        library = [
+            LibrarySeriesLite(
+                id=s.id,
+                title=s.title,
+                start_year=s.start_year,
+                cv_volume_id=s.cv_volume_id,
+            )
+            for s in series
+        ]
+        try:
+            proposal = await compute_proposed_match(
+                human_name=row.human_name, library=library, cv_client=cv_client
+            )
+        except ComicVineBudgetExhausted as exc:
+            logger.info(
+                "sources.review: ComicVine budget exhausted restoring entitlement "
+                "%s (%s); leaving it un-proposed and retryable",
+                entitlement_id,
+                exc,
+            )
+            proposal = None
+        if (
+            proposal is not None
+            and cv_configured
+            and proposal.universe != UNIVERSE_COMICVINE
+        ):
+            logger.warning(
+                "sources.review: refusing to persist a %s proposal for entitlement "
+                "%s on a ComicVine-configured deployment; leaving it retryable",
+                proposal.universe,
+                entitlement_id,
+            )
+            proposal = None
     async with db.write_session() as session:
         fresh = await session.get(SourceEntitlementRow, entitlement_id)
         if fresh is None:
@@ -846,12 +857,13 @@ async def restore_entitlement(
         # The match target is dropped, so its provenance goes with it — a later
         # re-match stamps its own ``matched_via`` (FRG-PP-022 guard 3).
         fresh.matched_via = None
-        fresh.proposed_series_id = (
-            proposal.proposed_series_id if proposal is not None else None
-        )
-        fresh.proposed_match_json = (
-            proposal.to_json() if proposal is not None else None
-        )
+        if repropose:
+            fresh.proposed_series_id = (
+                proposal.proposed_series_id if proposal is not None else None
+            )
+            fresh.proposed_match_json = (
+                proposal.to_json() if proposal is not None else None
+            )
         fresh.updated_at = utcnow()
     return await _reload(db, entitlement_id)
 
@@ -901,6 +913,14 @@ async def classify_entitlement(
     Nothing else on the row moves — the review state, the proposal and the
     download axis are untouched — so a row marked back to comic is an ordinary
     ``new`` comic row and the enrichment pass picks it up on its own next run.
+
+    **Marking a row to what it already says writes nothing.** A mark is a
+    DISAGREEMENT with the automatic classifier; agreement is not a claim on the
+    row, and stamping provenance on it would quietly exempt it from every future
+    publisher-rule edit (FRG-SRC-012's "removing a default un-filters" would stop
+    reaching it). That matters most in the bulk form, where a selection at bundle
+    scale is mostly rows the classifier already got right. The action still
+    reports applied — the row carries the classification that was asked for.
     """
     if classification not in CLASSIFICATIONS:
         raise EntitlementActionError(
@@ -917,9 +937,10 @@ async def classify_entitlement(
         refusal = _classify_precondition_error(entitlement_id, row.review_status)
         if refusal is not None:
             raise refusal
-        row.classification = classification
-        row.classified_via = CLASSIFIED_VIA_OPERATOR
-        row.updated_at = utcnow()
+        if row.classification != classification:
+            row.classification = classification
+            row.classified_via = CLASSIFIED_VIA_OPERATOR
+            row.updated_at = utcnow()
     return await _reload(db, entitlement_id)
 
 

@@ -151,11 +151,13 @@ async def test_the_reverse_mark_is_symmetric_and_sticks(db, config_dir):
 
 @pytest.mark.req("FRG-SRC-012")
 async def test_a_publisher_rule_never_moves_an_operator_marked_row(db, config_dir):
-    """A rule ADDED after the mark: the automatic path would classify the row
-    ``other``, and the operator has said ``comic``. The operator wins."""
+    """A rule the operator has already overruled on one row: the automatic path
+    classifies it ``other``, the operator has said ``comic``, and every later
+    sync leaves it where the operator put it."""
     source = await _source(db)
-    await _sync(db, config_dir, source)
+    await _sync(db, config_dir, source, rules=COMIC_PUBLISHER)
     row = await _row(db, source.id, COMIC_ROW)
+    assert row.classification == "other"
     await review.classify_entitlement(db, row.id, classification="comic")
 
     await _sync(db, config_dir, source, rules=COMIC_PUBLISHER)
@@ -169,15 +171,16 @@ async def test_a_publisher_rule_never_moves_an_operator_marked_row(db, config_di
 
 @pytest.mark.req("FRG-SRC-012")
 async def test_removing_a_rule_never_moves_an_operator_marked_row(db, config_dir):
-    """The other direction: a rule REMOVED under a row the operator marked
-    non-comic. The automatic path would hand it back to file shape (``comic``);
-    the mark holds it."""
+    """The other direction: a rule ADDED and then REMOVED under a row the
+    operator marked non-comic. Removing a rule un-filters the rows it covered —
+    but the marked row was never the rule's to hand back."""
     source = await _source(db)
-    await _sync(db, config_dir, source, rules=COMIC_PUBLISHER)
+    await _sync(db, config_dir, source)
     row = await _row(db, source.id, COMIC_ROW)
-    assert row.classification == "other"
+    assert row.classification == "comic"
     await review.classify_entitlement(db, row.id, classification="other")
 
+    await _sync(db, config_dir, source, rules=COMIC_PUBLISHER)
     await _sync(db, config_dir, source)
 
     assert (await _row(db, source.id, COMIC_ROW)).classification == "other"
@@ -394,3 +397,106 @@ async def test_bulk_mark_comic_is_the_symmetric_action(db, config_dir):
             "comic",
             CLASSIFIED_VIA_OPERATOR,
         )
+
+
+# --- agreement is not a claim ---------------------------------------------------
+
+
+@pytest.mark.req("FRG-SRC-012")
+async def test_marking_a_row_to_what_it_already_says_leaves_the_rules_owning_it(
+    db, config_dir
+):
+    """A bulk mark at bundle scale covers rows the classifier already called
+    right. Stamping provenance on those would exempt them from every later
+    publisher-rule edit, so FRG-SRC-012's "removing a default un-filters" would
+    silently stop reaching them. The action reports applied and writes nothing.
+    """
+    source = await _source(db)
+    await _sync(db, config_dir, source, rules=COMIC_PUBLISHER)
+    row = await _row(db, source.id, COMIC_ROW)
+    assert (row.classification, row.classified_via) == ("other", None)
+
+    result = await review.bulk_classify(db, [row.id], classification="other")
+
+    assert (result.applied, result.skipped) == (1, 0)
+    assert (await _row(db, source.id, COMIC_ROW)).classified_via is None
+    # Proof the row is still the rules': removing the rule hands it back.
+    await _sync(db, config_dir, source)
+    assert (await _row(db, source.id, COMIC_ROW)).classification == "comic"
+
+
+@pytest.mark.req("FRG-SRC-016")
+async def test_re_marking_an_operator_marked_row_to_the_same_value_is_a_no_op(
+    db, config_dir
+):
+    source = await _source(db)
+    await _sync(db, config_dir, source)
+    row = await _row(db, source.id, COMIC_ROW)
+    marked = await review.classify_entitlement(db, row.id, classification="other")
+
+    again = await review.classify_entitlement(db, row.id, classification="other")
+
+    assert (again.classification, again.classified_via) == (
+        "other",
+        CLASSIFIED_VIA_OPERATOR,
+    )
+    assert again.updated_at == marked.updated_at
+
+
+# --- the mark travels with the row ----------------------------------------------
+
+
+@pytest.mark.req("FRG-SRC-016")
+async def test_a_parked_marked_row_keeps_its_provenance_through_restore(
+    db, config_dir
+):
+    """Ignoring a marked row and restoring it must not hand it back to the
+    classifier: restore is the way back INTO review, not a reset of what the
+    operator said the row is."""
+    source = await _source(db)
+    await _sync(db, config_dir, source)
+    row = await _row(db, source.id, COMIC_ROW)
+    await review.classify_entitlement(db, row.id, classification="other")
+    await review.ignore_entitlement(db, row.id)
+
+    restored = await review.restore_entitlement(db, row.id)
+
+    assert restored.review_status == "new"
+    assert (restored.classification, restored.classified_via) == (
+        "other",
+        CLASSIFIED_VIA_OPERATOR,
+    )
+    # And it is still the operator's after the next sync re-derives its siblings.
+    await _sync(db, config_dir, source)
+    assert (await _row(db, source.id, COMIC_ROW)).classification == "other"
+
+
+@pytest.mark.req("FRG-SRC-016")
+async def test_restoring_a_non_comic_row_spends_no_comicvine_budget(db, config_dir):
+    """ComicVine is 200 requests/hour per path. A non-comic row has nothing the
+    catalog could propose, so restoring one — or a whole non-comic selection —
+    must not buy a lookup no surface will ever show."""
+
+    class _CountingCV:
+        def __init__(self):
+            self.calls = 0
+
+        async def suggest_series(self, term):
+            self.calls += 1
+            raise AssertionError("a non-comic restore must not reach ComicVine")
+
+    source = await _source(db)
+    await _sync(db, config_dir, source)
+    row = await _row(db, source.id, NON_COMIC_ROW)
+    await review.ignore_entitlement(db, row.id)
+    before = await repo.get_entitlement(db, row.id)
+
+    cv = _CountingCV()
+    restored = await review.restore_entitlement(
+        db, row.id, cv_client=cv, cv_configured=True
+    )
+
+    assert cv.calls == 0
+    assert restored.review_status == "new"
+    assert restored.proposed_match_json == before.proposed_match_json
+    assert restored.proposed_series_id == before.proposed_series_id
